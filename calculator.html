@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>電卓</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #1a1a2e;
+      font-family: 'Segoe UI', sans-serif;
+    }
+
+    .calculator {
+      background: #16213e;
+      border-radius: 20px;
+      padding: 24px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      width: 320px;
+    }
+
+    .display {
+      background: #0f3460;
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 20px;
+      text-align: right;
+      min-height: 90px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+    }
+
+    .display .expression {
+      color: #a0aec0;
+      font-size: 14px;
+      min-height: 20px;
+      margin-bottom: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .display .result {
+      color: #e2e8f0;
+      font-size: 36px;
+      font-weight: 300;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .buttons {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    button {
+      border: none;
+      border-radius: 12px;
+      font-size: 18px;
+      font-weight: 500;
+      height: 64px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      outline: none;
+    }
+
+    button:active {
+      transform: scale(0.94);
+    }
+
+    .btn-number {
+      background: #1e2d4a;
+      color: #e2e8f0;
+    }
+
+    .btn-number:hover {
+      background: #263a5e;
+    }
+
+    .btn-operator {
+      background: #0f3460;
+      color: #63b3ed;
+    }
+
+    .btn-operator:hover {
+      background: #1a4a8a;
+    }
+
+    .btn-equals {
+      background: #e94560;
+      color: #fff;
+    }
+
+    .btn-equals:hover {
+      background: #f05574;
+    }
+
+    .btn-clear {
+      background: #2d3748;
+      color: #fc8181;
+    }
+
+    .btn-clear:hover {
+      background: #3d4a5c;
+    }
+
+    .btn-zero {
+      grid-column: span 2;
+    }
+  </style>
+</head>
+<body>
+  <div class="calculator">
+    <div class="display">
+      <div class="expression" id="expression"></div>
+      <div class="result" id="result">0</div>
+    </div>
+    <div class="buttons">
+      <button class="btn-clear" onclick="clearAll()">AC</button>
+      <button class="btn-clear" onclick="deleteLast()">⌫</button>
+      <button class="btn-operator" onclick="inputOperator('%')">%</button>
+      <button class="btn-operator" onclick="inputOperator('÷')">÷</button>
+
+      <button class="btn-number" onclick="inputNumber('7')">7</button>
+      <button class="btn-number" onclick="inputNumber('8')">8</button>
+      <button class="btn-number" onclick="inputNumber('9')">9</button>
+      <button class="btn-operator" onclick="inputOperator('×')">×</button>
+
+      <button class="btn-number" onclick="inputNumber('4')">4</button>
+      <button class="btn-number" onclick="inputNumber('5')">5</button>
+      <button class="btn-number" onclick="inputNumber('6')">6</button>
+      <button class="btn-operator" onclick="inputOperator('−')">−</button>
+
+      <button class="btn-number" onclick="inputNumber('1')">1</button>
+      <button class="btn-number" onclick="inputNumber('2')">2</button>
+      <button class="btn-number" onclick="inputNumber('3')">3</button>
+      <button class="btn-operator" onclick="inputOperator('+')">+</button>
+
+      <button class="btn-number btn-zero" onclick="inputNumber('0')">0</button>
+      <button class="btn-number" onclick="inputDot()">.</button>
+      <button class="btn-equals" onclick="calculate()">=</button>
+    </div>
+  </div>
+
+  <script>
+    let current = '0';
+    let expression = '';
+    let justCalculated = false;
+
+    function updateDisplay() {
+      document.getElementById('result').textContent = current;
+      document.getElementById('expression').textContent = expression;
+    }
+
+    function inputNumber(n) {
+      if (justCalculated) {
+        current = n;
+        expression = '';
+        justCalculated = false;
+      } else {
+        current = current === '0' ? n : current + n;
+      }
+      updateDisplay();
+    }
+
+    function inputDot() {
+      if (justCalculated) {
+        current = '0.';
+        expression = '';
+        justCalculated = false;
+      } else if (!current.includes('.')) {
+        current += '.';
+      }
+      updateDisplay();
+    }
+
+    function inputOperator(op) {
+      justCalculated = false;
+      expression = current + ' ' + op;
+      current = '0';
+      updateDisplay();
+    }
+
+    function calculate() {
+      if (!expression) return;
+
+      const parts = expression.trim().split(' ');
+      const a = parseFloat(parts[0]);
+      const op = parts[1];
+      const b = parseFloat(current);
+
+      let result;
+      switch (op) {
+        case '+': result = a + b; break;
+        case '−': result = a - b; break;
+        case '×': result = a * b; break;
+        case '÷': result = b !== 0 ? a / b : 'エラー'; break;
+        case '%': result = a % b; break;
+        default: return;
+      }
+
+      expression = parts[0] + ' ' + op + ' ' + current + ' =';
+      current = typeof result === 'number'
+        ? parseFloat(result.toPrecision(12)).toString()
+        : result;
+      justCalculated = true;
+      updateDisplay();
+    }
+
+    function clearAll() {
+      current = '0';
+      expression = '';
+      justCalculated = false;
+      updateDisplay();
+    }
+
+    function deleteLast() {
+      if (justCalculated) return;
+      current = current.length > 1 ? current.slice(0, -1) : '0';
+      updateDisplay();
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key >= '0' && e.key <= '9') inputNumber(e.key);
+      else if (e.key === '.') inputDot();
+      else if (e.key === '+') inputOperator('+');
+      else if (e.key === '-') inputOperator('−');
+      else if (e.key === '*') inputOperator('×');
+      else if (e.key === '/') { e.preventDefault(); inputOperator('÷'); }
+      else if (e.key === '%') inputOperator('%');
+      else if (e.key === 'Enter' || e.key === '=') calculate();
+      else if (e.key === 'Backspace') deleteLast();
+      else if (e.key === 'Escape') clearAll();
+    });
+  </script>
+</body>
+</html>
