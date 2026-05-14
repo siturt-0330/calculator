@@ -45,8 +45,8 @@ export default function RootLayout() {
   const segments = useSegments();
 
   useEffect(() => {
-    hydrateAuth();
-    hydrateSettings();
+    void hydrateAuth();
+    void hydrateSettings();
   }, [hydrateAuth, hydrateSettings]);
 
   const ready = fontsLoaded && authHydrated && settingsHydrated;
@@ -56,16 +56,17 @@ export default function RootLayout() {
   }, [ready]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || segments.length < 1) return;
     const inAuth = segments[0] === '(auth)';
     const inOnboarding = segments[0] === 'onboarding';
+    const inTabs = segments[0] === '(tabs)';
 
-    if (!user && !inAuth) {
-      router.replace('/(auth)/login');
-    } else if (user && !user.onboarded && !inOnboarding) {
-      router.replace('/onboarding');
-    } else if (user && user.onboarded && (inAuth || inOnboarding)) {
-      router.replace('/(tabs)/feed');
+    if (!user) {
+      if (!inAuth) router.replace('/(auth)/login');
+    } else if (!user.onboarded) {
+      if (!inOnboarding) router.replace('/onboarding');
+    } else {
+      if (inAuth || inOnboarding) router.replace('/(tabs)/feed');
     }
   }, [user, ready, segments, router]);
 

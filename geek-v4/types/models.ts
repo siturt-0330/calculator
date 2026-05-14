@@ -15,6 +15,7 @@ export type Comment = {
   id: string;
   post_id: string;
   content: string;
+  avatar_color: string;
   created_at: string;
 };
 

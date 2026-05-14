@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlashList } from '@shopify/flash-list';
 import { fetchPostById } from '@/lib/api/posts';
-import { fetchReplies, createReply } from '@/lib/api/bbs';
+import { fetchComments, createComment } from '@/lib/api/bbs';
 import { C, SP, R } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -15,8 +15,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { TagPill } from '@/components/tag/TagPill';
 import { Spinner } from '@/components/ui/Spinner';
 import { formatRelative } from '@/lib/utils/date';
-import { randomAvatarColor } from '@/lib/utils/color';
-import type { BBSReply } from '@/types/models';
+import type { Comment } from '@/types/models';
 import { Icon } from '@/constants/icons';
 import * as Haptics from 'expo-haptics';
 
@@ -37,12 +36,12 @@ export default function PostDetailScreen() {
 
   const { data: replies = [], isLoading: repliesLoading, refetch, isRefetching } = useQuery({
     queryKey: ['post-comments', id],
-    queryFn: () => fetchReplies(id),
+    queryFn: () => fetchComments(id),
     enabled: !!id,
   });
 
   const { mutateAsync: submitReply, isPending } = useMutation({
-    mutationFn: (content: string) => createReply(id, content),
+    mutationFn: (content: string) => createComment(id, content),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['post-comments', id] });
       setText('');
@@ -77,9 +76,9 @@ export default function PostDetailScreen() {
     );
   }
 
-  const renderReply = ({ item, index }: { item: BBSReply; index: number }) => (
+  const renderReply = ({ item, index }: { item: Comment; index: number }) => (
     <View style={{ flexDirection: 'row', gap: SP['3'], paddingHorizontal: SP['4'], paddingVertical: SP['3'] }}>
-      <Avatar size={32} color={randomAvatarColor(item.id)} name={String(index + 1)} />
+      <Avatar size={32} color={item.avatar_color} name={String(index + 1)} />
       <View style={{ flex: 1 }}>
         <Text style={[T.small, { color: C.text2, marginBottom: SP['1'] }]}>{formatRelative(item.created_at)}</Text>
         <Text style={[T.body, { color: C.text }]}>{item.content}</Text>

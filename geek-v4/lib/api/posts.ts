@@ -71,7 +71,7 @@ export async function createPost({
     media_blurhashes: [],
     tag_names: tagNames,
     is_anonymous: isAnonymous,
-    user_id: user.id,
+    author_id: user.id,
   });
   if (error) throw error;
 }

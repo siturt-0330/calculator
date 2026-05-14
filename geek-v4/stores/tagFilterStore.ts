@@ -1,49 +1,57 @@
 import { create } from 'zustand';
-import { MMKV } from 'react-native-mmkv';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const storage = new MMKV({ id: 'tagFilter' });
+const KEY_LIKED = 'geek:liked_tags';
+const KEY_BLOCKED = 'geek:blocked_tags';
 
 type TagFilterState = {
   likedTags: string[];
   blockedTags: string[];
+  hydrated: boolean;
   addLiked: (tag: string) => void;
   removeLiked: (tag: string) => void;
   addBlocked: (tag: string) => void;
   removeBlocked: (tag: string) => void;
-  hydrate: () => void;
+  hydrate: () => Promise<void>;
 };
-
-function save(liked: string[], blocked: string[]) {
-  storage.set('liked', JSON.stringify(liked));
-  storage.set('blocked', JSON.stringify(blocked));
-}
 
 export const useTagFilterStore = create<TagFilterState>((set, get) => ({
   likedTags: [],
   blockedTags: [],
-  hydrate: () => {
-    const liked = JSON.parse(storage.getString('liked') ?? '[]') as string[];
-    const blocked = JSON.parse(storage.getString('blocked') ?? '[]') as string[];
-    set({ likedTags: liked, blockedTags: blocked });
+  hydrated: false,
+  hydrate: async () => {
+    try {
+      const [liked, blocked] = await Promise.all([
+        AsyncStorage.getItem(KEY_LIKED),
+        AsyncStorage.getItem(KEY_BLOCKED),
+      ]);
+      set({
+        likedTags: liked ? (JSON.parse(liked) as string[]) : [],
+        blockedTags: blocked ? (JSON.parse(blocked) as string[]) : [],
+        hydrated: true,
+      });
+    } catch {
+      set({ hydrated: true });
+    }
   },
   addLiked: (tag) => {
-    const liked = [...get().likedTags, tag].filter((v, i, a) => a.indexOf(v) === i);
+    const liked = [...new Set([...get().likedTags, tag])];
     set({ likedTags: liked });
-    save(liked, get().blockedTags);
+    AsyncStorage.setItem(KEY_LIKED, JSON.stringify(liked)).catch(() => {});
   },
   removeLiked: (tag) => {
     const liked = get().likedTags.filter((t) => t !== tag);
     set({ likedTags: liked });
-    save(liked, get().blockedTags);
+    AsyncStorage.setItem(KEY_LIKED, JSON.stringify(liked)).catch(() => {});
   },
   addBlocked: (tag) => {
-    const blocked = [...get().blockedTags, tag].filter((v, i, a) => a.indexOf(v) === i);
+    const blocked = [...new Set([...get().blockedTags, tag])];
     set({ blockedTags: blocked });
-    save(get().likedTags, blocked);
+    AsyncStorage.setItem(KEY_BLOCKED, JSON.stringify(blocked)).catch(() => {});
   },
   removeBlocked: (tag) => {
     const blocked = get().blockedTags.filter((t) => t !== tag);
     set({ blockedTags: blocked });
-    save(get().likedTags, blocked);
+    AsyncStorage.setItem(KEY_BLOCKED, JSON.stringify(blocked)).catch(() => {});
   },
 }));
