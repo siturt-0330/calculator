@@ -1,0 +1,22 @@
+-- Seed tags (Japanese hobby categories)
+insert into public.tags (name, parent_id) values
+  ('アニメ', null),
+  ('マンガ', null),
+  ('ゲーム', null),
+  ('音楽', null),
+  ('映画', null),
+  ('読書', null),
+  ('料理', null),
+  ('旅行', null),
+  ('スポーツ', null),
+  ('テクノロジー', null),
+  ('アート', null),
+  ('写真', null),
+  ('ファッション', null),
+  ('DIY', null),
+  ('ペット', null),
+  ('フィットネス', null),
+  ('コスプレ', null),
+  ('声優', null),
+  ('鉄道', null),
+  ('カメラ', null);
