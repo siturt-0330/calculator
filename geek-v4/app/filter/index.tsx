@@ -221,6 +221,26 @@ export default function FilterScreen() {
 
         <SectionHeader title="ブロックするタグ" />
         <View style={{ paddingHorizontal: SP['4'], gap: SP['3'] }}>
+          {/* 安全のため事前にブロック中のタグの案内 */}
+          <View style={{
+            padding: SP['3'],
+            backgroundColor: 'rgba(226,75,74,0.08)',
+            borderRadius: R.md,
+            borderWidth: 1,
+            borderColor: 'rgba(226,75,74,0.3)',
+            gap: SP['1'],
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={{ fontSize: 14 }}>🛡️</Text>
+              <Text style={[T.smallM, { color: '#E24B4A', fontWeight: '700' }]}>
+                安全のため、暴力・詐欺・マルチ・わいせつ等を自動ブロック中
+              </Text>
+            </View>
+            <Text style={[T.caption, { color: C.text2, lineHeight: 16 }]}>
+              下のリストでタップすると解除できます。
+            </Text>
+          </View>
+
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: SP['2'] }}>
             <View style={{ flex: 1 }}>
               <Input
