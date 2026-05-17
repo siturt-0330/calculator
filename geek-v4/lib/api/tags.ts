@@ -50,6 +50,23 @@ export async function fetchPostAddedTags(postId: string): Promise<PostAddedTag[]
   return (data ?? []) as PostAddedTag[];
 }
 
+// 複数 post の added tags を一括取得 (フィード用)
+export async function fetchAddedTagsForPosts(postIds: string[]): Promise<Record<string, string[]>> {
+  if (postIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('post_added_tags')
+    .select('post_id, tag_name, created_at')
+    .in('post_id', postIds)
+    .order('created_at', { ascending: true });
+  if (error) return {};
+  const map: Record<string, string[]> = {};
+  for (const r of (data ?? []) as Array<{ post_id: string; tag_name: string }>) {
+    const arr = map[r.post_id] ?? (map[r.post_id] = []);
+    if (!arr.includes(r.tag_name)) arr.push(r.tag_name);
+  }
+  return map;
+}
+
 export async function addPostTag(postId: string, tagName: string): Promise<void> {
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;

@@ -12,8 +12,10 @@ import { useSave, useSaves } from '@/hooks/useSave';
 import { useShare } from '@/hooks/useShare';
 import { useReport } from '@/hooks/useReport';
 import { useReactions, useReactionToggle } from '@/hooks/useReactions';
+import { useAddedTags, useAddTag } from '@/hooks/useAddedTags';
 import { useNotifications } from '@/hooks/useNotifications';
 import { NotificationBadge } from '@/components/ui/NotificationBadge';
+import { useToastStore } from '@/stores/toastStore';
 import { useFeedStore } from '@/stores/feedStore';
 import { AnonPostCard } from '@/components/feed/AnonPostCard';
 import { ScopeToggle } from '@/components/feed/ScopeToggle';
@@ -62,6 +64,20 @@ export default function FeedScreen() {
   const { data: myConcerns = {} } = useConcerns(postIds);
   const { data: mySaves = {} } = useSaves(postIds);
   const { data: reactionsByPost } = useReactions(postIds);
+  const { data: addedTagsByPost } = useAddedTags(postIds);
+  const { addTag } = useAddTag();
+  const { show: showToast } = useToastStore();
+
+  const handleAddTag = useCallback(async (postId: string, tag: string) => {
+    try {
+      await addTag(postId, tag);
+      showToast(`#${tag} を追加しました`, 'success');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '';
+      if (msg.includes('duplicate')) showToast('そのタグは既に追加されています', 'warn');
+      else showToast('追加に失敗しました', 'error');
+    }
+  }, [addTag, showToast]);
 
   const renderItem = useCallback(
     ({ item }: { item: Post }) => (
@@ -71,6 +87,7 @@ export default function FeedScreen() {
         concerned={!!myConcerns[item.id]}
         saved={!!mySaves[item.id]}
         reactions={reactionsByPost[item.id] ?? []}
+        addedTags={addedTagsByPost[item.id] ?? []}
         onLike={() => toggleLike(item.id)}
         onConcern={() => toggleConcern(item.id, !!myConcerns[item.id])}
         onComment={() => router.push(`/post/${item.id}` as never)}
@@ -79,9 +96,10 @@ export default function FeedScreen() {
         onTagPress={(name) => router.push(`/tag/${encodeURIComponent(name)}` as never)}
         onMore={() => setReportPostId(item.id)}
         onReact={(meme) => toggleReact(item.id, meme)}
+        onAddTag={(tag) => handleAddTag(item.id, tag)}
       />
     ),
-    [router, toggleLike, toggleConcern, toggleSave, toggleReact, share, myLikes, myConcerns, mySaves, reactionsByPost],
+    [router, toggleLike, toggleConcern, toggleSave, toggleReact, share, myLikes, myConcerns, mySaves, reactionsByPost, addedTagsByPost, handleAddTag],
   );
 
   const Bell = Icon.bell;

@@ -12,6 +12,7 @@ import { PressableScale } from '@/components/ui/PressableScale';
 import { ProgressiveImage } from '@/components/ui/ProgressiveImage';
 import { DoubleTapHeart } from '@/components/ui/DoubleTapHeart';
 import { TagPill } from '@/components/tag/TagPill';
+import { AddTagInline } from '@/components/tag/AddTagInline';
 import { Avatar } from '@/components/ui/Avatar';
 import { PostKindBadge } from './PostKindBadge';
 import { TrustBadge } from '@/components/ui/TrustBadge';
@@ -33,6 +34,7 @@ export function AnonPostCard({
   concerned = false,
   saved = false,
   reactions = [],
+  addedTags = [],
   onLike,
   onConcern,
   onComment,
@@ -41,12 +43,14 @@ export function AnonPostCard({
   onTagPress,
   onMore,
   onReact,
+  onAddTag,
 }: {
   post: Post;
   liked?: boolean;
   concerned?: boolean;
   saved?: boolean;
   reactions?: ReactionAgg[];
+  addedTags?: string[];
   onLike: () => void;
   onConcern: () => void;
   onComment: () => void;
@@ -55,6 +59,7 @@ export function AnonPostCard({
   onTagPress: (name: string) => void;
   onMore: () => void;
   onReact: (meme: string) => void;
+  onAddTag?: (tag: string) => Promise<void> | void;
 }) {
   const { width } = useWindowDimensions();
   const cardWidth = Math.min(width, 720);
@@ -261,20 +266,25 @@ export function AnonPostCard({
         </PressableScale>
       )}
 
-      {/* タグ群（2つ目以降） */}
-      {tagNames.length > 1 && (
-        <View style={{
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          paddingHorizontal: SP['4'],
-          paddingTop: SP['2'],
-          gap: SP['2'],
-        }}>
-          {tagNames.slice(1).map((tag) => (
-            <TagPill key={tag} name={tag} state="normal" onPress={() => onTagPress(tag)} />
-          ))}
-        </View>
-      )}
+      {/* タグ群（2つ目以降 + 他人が追加したタグ + 追加ボタン） */}
+      <View style={{
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        paddingHorizontal: SP['4'],
+        paddingTop: SP['2'],
+        gap: SP['2'],
+        alignItems: 'center',
+      }}>
+        {tagNames.slice(1).map((tag) => (
+          <TagPill key={tag} name={tag} state="normal" onPress={() => onTagPress(tag)} />
+        ))}
+        {addedTags.filter((t) => !tagNames.includes(t)).map((tag) => (
+          <TagPill key={`added-${tag}`} name={tag} state="added" onPress={() => onTagPress(tag)} />
+        ))}
+        {onAddTag && (
+          <AddTagInline onSubmit={async (tag) => { await onAddTag(tag); }} />
+        )}
+      </View>
 
       {/* アクション行 */}
       <View style={{

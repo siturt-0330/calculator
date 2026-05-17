@@ -11,6 +11,7 @@ import { useConcern, useConcerns } from '@/hooks/useConcern';
 import { useSave } from '@/hooks/useSave';
 import { useShare } from '@/hooks/useShare';
 import { useReactions, useReactionToggle } from '@/hooks/useReactions';
+import { useAddedTags, useAddTag } from '@/hooks/useAddedTags';
 import { useTagFilterStore } from '@/stores/tagFilterStore';
 import { useToastStore } from '@/stores/toastStore';
 import { C, R, SP } from '@/design/tokens';
@@ -74,6 +75,19 @@ export default function TagDetailScreen() {
   const { data: myLikes = {} } = useLikes(postIds);
   const { data: myConcerns = {} } = useConcerns(postIds);
   const { data: reactionsByPost } = useReactions(postIds);
+  const { data: addedTagsByPost } = useAddedTags(postIds);
+  const { addTag } = useAddTag();
+
+  const handleAddTag = async (postId: string, tag: string) => {
+    try {
+      await addTag(postId, tag);
+      show(`#${tag} を追加しました`, 'success');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '';
+      if (msg.includes('duplicate')) show('そのタグは既に追加されています', 'warn');
+      else show('追加に失敗しました', 'error');
+    }
+  };
 
   const handleBlockTag = () => {
     impact(Haptics.ImpactFeedbackStyle.Medium);
@@ -92,6 +106,7 @@ export default function TagDetailScreen() {
       liked={!!myLikes[item.id]}
       concerned={!!myConcerns[item.id]}
       reactions={reactionsByPost[item.id] ?? []}
+      addedTags={addedTagsByPost[item.id] ?? []}
       onLike={() => like(item.id)}
       onConcern={() => concern(item.id, !!myConcerns[item.id])}
       onComment={() => router.push(`/post/${item.id}` as never)}
@@ -100,6 +115,7 @@ export default function TagDetailScreen() {
       onTagPress={(t) => router.push(`/tag/${encodeURIComponent(t)}` as never)}
       onMore={() => {}}
       onReact={(meme) => react(item.id, meme)}
+      onAddTag={(tag) => handleAddTag(item.id, tag)}
     />
   );
 
