@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import { View, Text } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
@@ -67,15 +66,6 @@ export function ActivitySummary() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // 「報われ度」: もらった反応 vs 自分の投稿
-  const rewardRatio = useMemo(() => {
-    if (!activity) return 0;
-    const acts = activity.post_count_7d + activity.comment_count_7d + activity.bbs_reply_count_7d;
-    if (acts === 0) return 0;
-    const got = activity.likes_received_7d + activity.reactions_received_7d;
-    return Math.round((got / acts) * 10) / 10;
-  }, [activity]);
-
   if (!userId) return null;
 
   return (
@@ -104,20 +94,6 @@ export function ActivitySummary() {
         <Stat label="もらったいいね" value={activity?.likes_received_7d ?? 0} emoji="💛" />
         <Stat label="もらったリアクション" value={activity?.reactions_received_7d ?? 0} emoji="🪶" />
       </View>
-      {activity && (activity.post_count_7d + activity.comment_count_7d) > 0 && (
-        <View style={{
-          padding: SP['2'],
-          backgroundColor: rewardRatio >= 2 ? 'rgba(34,211,164,0.13)' : C.bg3,
-          borderRadius: R.md,
-          borderWidth: 1,
-          borderColor: rewardRatio >= 2 ? 'rgba(34,211,164,0.4)' : C.border,
-        }}>
-          <Text style={[T.caption, { color: rewardRatio >= 2 ? '#22D3A4' : C.text2 }]}>
-            ✨ 報われ度 <Text style={{ fontWeight: '700' }}>{rewardRatio}</Text> 反応/活動
-            {rewardRatio >= 2 ? ' — 共感が多く返ってきています！' : ''}
-          </Text>
-        </View>
-      )}
     </View>
   );
 }

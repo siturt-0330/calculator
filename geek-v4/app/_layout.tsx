@@ -18,6 +18,7 @@ import { ToastHost } from '@/components/ui/ToastHost';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { IntroAnimation, markIntroShown } from '@/components/ui/IntroAnimation';
 import { OfflineBanner } from '@/components/ui/OfflineBanner';
+import { FeedbackFAB } from '@/components/feedback/FeedbackFAB';
 import { initAnalytics } from '@/lib/analytics';
 import { initSentry } from '@/lib/sentry';
 import { C } from '@/design/tokens';
@@ -163,6 +164,7 @@ export default function RootLayout() {
                   <Stack.Screen name="settings/license" />
                 </Stack>
                 <ToastHost />
+                <FeedbackFAB />
                 {!introDone && (
                   <IntroAnimation onComplete={() => { markIntroShown(); setIntroDone(true); }} />
                 )}
