@@ -260,8 +260,14 @@ export default function MypageScreen() {
             color={C.green}
           />
           <MenuTile
+            icon={Icon.hash}
+            label="ブロックタグ"
+            onPress={() => router.push('/settings/blocked-tags' as never)}
+            color="#E24B4A"
+          />
+          <MenuTile
             icon={Icon.block}
-            label="ブロック"
+            label="ブロックユーザー"
             onPress={() => router.push('/settings/blocked-users' as never)}
             color={C.block}
           />
