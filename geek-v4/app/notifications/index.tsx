@@ -92,9 +92,44 @@ export default function NotificationsScreen() {
     );
   }
 
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
+  // type → emoji
+  const typeEmoji = (type: string): string => {
+    switch (type) {
+      case 'like': return '💛';
+      case 'comment': return '💬';
+      case 'follow': return '👤';
+      case 'reply': return '↩';
+      case 'event': return '📅';
+      default: return '🔔';
+    }
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <TopBar title="通知" left={<BackButton />} />
+      <TopBar
+        title="通知"
+        left={<BackButton />}
+        right={
+          unreadCount > 0 ? (
+            <PressableScale
+              onPress={() => void markAllRead()}
+              haptic="confirm"
+              style={{
+                paddingHorizontal: SP['3'],
+                paddingVertical: 6,
+                backgroundColor: C.accent,
+                borderRadius: R.full,
+              }}
+            >
+              <Text style={[T.caption, { color: '#fff', fontWeight: '700' }]}>
+                すべて既読
+              </Text>
+            </PressableScale>
+          ) : null
+        }
+      />
       <FlatList
         data={notifications}
         keyExtractor={(n) => n.id}
@@ -106,17 +141,40 @@ export default function NotificationsScreen() {
           <View
             style={{
               padding: SP['4'],
-              gap: SP['1'],
               backgroundColor: item.read ? C.bg : C.accentBg,
+              flexDirection: 'row',
+              alignItems: 'flex-start',
+              gap: SP['3'],
             }}
           >
-            <Text style={[T.bodyM, { color: C.text }]}>{item.message}</Text>
-            {item.tag_name && (
-              <Text style={[T.small, { color: C.accent }]}>#{item.tag_name}</Text>
+            {/* 未読インジケータ */}
+            {!item.read && (
+              <View style={{
+                position: 'absolute', left: 4, top: '50%',
+                marginTop: -3,
+                width: 6, height: 6, borderRadius: 3,
+                backgroundColor: C.accent,
+              }} />
             )}
-            <Text style={[T.caption, { color: C.text3 }]}>
-              {formatRelative(item.created_at)}
-            </Text>
+            {/* type ごとの絵文字 */}
+            <View style={{
+              width: 36, height: 36, borderRadius: 18,
+              backgroundColor: item.read ? C.bg3 : C.accent + '33',
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Text style={{ fontSize: 18 }}>{typeEmoji(item.type)}</Text>
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={[T.bodyM, { color: C.text, lineHeight: 20 }]}>
+                {item.message}
+              </Text>
+              {item.tag_name && (
+                <Text style={[T.small, { color: C.accent }]}>#{item.tag_name}</Text>
+              )}
+              <Text style={[T.caption, { color: C.text3 }]}>
+                {formatRelative(item.created_at)}
+              </Text>
+            </View>
           </View>
         )}
       />

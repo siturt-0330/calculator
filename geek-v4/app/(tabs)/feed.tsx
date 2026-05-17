@@ -21,6 +21,7 @@ import { AnonPostCard } from '@/components/feed/AnonPostCard';
 import { ScopeToggle } from '@/components/feed/ScopeToggle';
 import { BlockedTagBanner } from '@/components/feed/BlockedTagBanner';
 import { PostCardSkeleton } from '@/components/feed/PostCardSkeleton';
+import { TrendingRow } from '@/components/feed/TrendingRow';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -168,9 +169,12 @@ export default function FeedScreen() {
         keyExtractor={(item) => item.id}
         estimatedItemSize={300}
         ListHeaderComponent={
-          blockedCount > 0 ? (
-            <BlockedTagBanner count={blockedCount} onPress={() => router.push('/filter' as never)} />
-          ) : null
+          <View>
+            <TrendingRow />
+            {blockedCount > 0 ? (
+              <BlockedTagBanner count={blockedCount} onPress={() => router.push('/filter' as never)} />
+            ) : null}
+          </View>
         }
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.accent} />
