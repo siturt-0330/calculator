@@ -60,7 +60,7 @@ export default function BlockedTagsScreen() {
             </Text>
           </View>
           <Text style={[T.caption, { color: C.text2, lineHeight: 16 }]}>
-            暴力・性的・詐欺・マルチ商法・情報商材・いじめ等のタグは初期状態でブロックされています。不要なら下の一覧から個別にタップして解除できます。
+            詐欺・マルチ・暴力・自殺・虐待・わいせつ・誹謗中傷・薬物・カルト・誤情報等を含むタグは初期状態でブロックされています。不要なら下の一覧から個別にタップして解除できます。
           </Text>
         </View>
 

@@ -233,11 +233,11 @@ export default function FilterScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Text style={{ fontSize: 14 }}>🛡️</Text>
               <Text style={[T.smallM, { color: '#E24B4A', fontWeight: '700' }]}>
-                安全のため、暴力・詐欺・マルチ・わいせつ等を自動ブロック中
+                安全のため、有害カテゴリを自動ブロック中
               </Text>
             </View>
             <Text style={[T.caption, { color: C.text2, lineHeight: 16 }]}>
-              下のリストでタップすると解除できます。
+              詐欺・マルチ・暴力・自殺・虐待・わいせつ・誹謗中傷・薬物・カルト等を含む投稿は非表示。下のタグをタップで個別解除できます。
             </Text>
           </View>
 
