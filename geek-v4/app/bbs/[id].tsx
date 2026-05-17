@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   View, Text, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, useWindowDimensions,
 } from 'react-native';
@@ -6,6 +6,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 import { useBBSThread } from '@/hooks/useBBSThread';
+import { useBBSReplyReactions, useBBSReplyReactionToggle } from '@/hooks/useBBSReplyReactions';
+import { MemeReactionPicker } from '@/components/feed/MemeReactionPicker';
 import { C, SP, R } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -15,6 +17,7 @@ import { TrustBadge } from '@/components/ui/TrustBadge';
 import { formatRelative } from '@/lib/utils/date';
 import { randomAvatarColor } from '@/lib/utils/color';
 import type { BBSReply } from '@/types/models';
+import type { ReactionAgg } from '@/lib/api/bbsReplyReactions';
 import { Icon } from '@/constants/icons';
 import { notify, Haptics } from '@/lib/haptics';
 
@@ -38,6 +41,14 @@ export default function BBSThreadScreen() {
   const BackIcon = Icon.arrowL;
 
   const { thread, replies, loading, refreshing, refresh, reply, error } = useBBSThread(id);
+
+  // テキストスタンプ (リアクション)
+  const replyIds = useMemo(() => replies.map((r) => r.id), [replies]);
+  const { data: reactionsByReply } = useBBSReplyReactions(replyIds);
+  const { toggle: toggleReaction } = useBBSReplyReactionToggle();
+  const [pickerForReplyId, setPickerForReplyId] = useState<string | null>(null);
+  const pickerReactions = pickerForReplyId ? (reactionsByReply[pickerForReplyId] ?? []) : [];
+  const pickerMine = pickerReactions.filter((r) => r.mine).map((r) => r.meme);
 
   const handleSend = async () => {
     if (!text.trim() || sending) return;
@@ -99,42 +110,98 @@ export default function BBSThreadScreen() {
 
   const catColor = thread.category ? (CATEGORY_COLORS[thread.category] ?? C.accent) : C.accent;
 
-  const renderReply = ({ item, index }: { item: BBSReply; index: number }) => (
-    <View style={{ width: '100%', alignItems: 'center' }}>
-      <View style={{
-        width: '100%', maxWidth: MAX_W,
-        paddingHorizontal: SP['4'], paddingVertical: SP['2'],
-      }}>
+  const renderReply = ({ item, index }: { item: BBSReply; index: number }) => {
+    const reactions: ReactionAgg[] = reactionsByReply[item.id] ?? [];
+    return (
+      <View style={{ width: '100%', alignItems: 'center' }}>
         <View style={{
-          flexDirection: 'row', gap: SP['3'],
-          padding: SP['3'],
-          backgroundColor: C.bg2,
-          borderRadius: R.lg,
-          borderWidth: 1, borderColor: C.border,
+          width: '100%', maxWidth: MAX_W,
+          paddingHorizontal: SP['4'], paddingVertical: SP['2'],
         }}>
-          {/* 左: アバター + 番号 */}
-          <View style={{ alignItems: 'center', gap: 2, width: 36 }}>
-            <Avatar size={32} color={randomAvatarColor(item.id)} />
-            <View style={{
-              paddingHorizontal: 4, paddingVertical: 1,
-              backgroundColor: C.bg3, borderRadius: R.sm,
-              minWidth: 24, alignItems: 'center',
-            }}>
-              <Text style={{ fontSize: 9, color: C.text3, fontWeight: '700' }}>#{index + 1}</Text>
+          <View style={{
+            padding: SP['3'],
+            backgroundColor: C.bg2,
+            borderRadius: R.lg,
+            borderWidth: 1, borderColor: C.border,
+            gap: SP['2'],
+          }}>
+            <View style={{ flexDirection: 'row', gap: SP['3'] }}>
+              {/* 左: アバター + 番号 */}
+              <View style={{ alignItems: 'center', gap: 2, width: 36 }}>
+                <Avatar size={32} color={randomAvatarColor(item.id)} />
+                <View style={{
+                  paddingHorizontal: 4, paddingVertical: 1,
+                  backgroundColor: C.bg3, borderRadius: R.sm,
+                  minWidth: 24, alignItems: 'center',
+                }}>
+                  <Text style={{ fontSize: 9, color: C.text3, fontWeight: '700' }}>#{index + 1}</Text>
+                </View>
+              </View>
+              {/* 右: 内容 */}
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], marginBottom: 4 }}>
+                  <TrustBadge score={item.trust_score} />
+                  <Text style={[T.caption, { color: C.text3 }]}>{formatRelative(item.created_at)}</Text>
+                  <View style={{ flex: 1 }} />
+                  <PressableScale
+                    onPress={() => setPickerForReplyId(item.id)}
+                    haptic="tap"
+                    style={{ padding: 4 }}
+                  >
+                    <Text style={{ fontSize: 16 }}>🪶</Text>
+                  </PressableScale>
+                </View>
+                <Text style={[T.body, { color: C.text, lineHeight: 22 }]}>{item.content}</Text>
+              </View>
             </View>
-          </View>
-          {/* 右: 内容 */}
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], marginBottom: 4 }}>
-              <TrustBadge score={item.trust_score} />
-              <Text style={[T.caption, { color: C.text3 }]}>{formatRelative(item.created_at)}</Text>
-            </View>
-            <Text style={[T.body, { color: C.text, lineHeight: 22 }]}>{item.content}</Text>
+
+            {/* リアクション表示行 */}
+            {reactions.length > 0 && (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, paddingLeft: 44 }}>
+                {reactions.slice(0, 6).map((r) => (
+                  <PressableScale
+                    key={r.meme}
+                    onPress={() => toggleReaction(item.id, r.meme)}
+                    haptic="tap"
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 4,
+                      paddingHorizontal: SP['2'], paddingVertical: 3,
+                      backgroundColor: r.mine ? C.accentBg : C.bg3,
+                      borderRadius: R.full,
+                      borderWidth: 1, borderColor: r.mine ? C.accent : C.border,
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, color: r.mine ? C.accentLight : C.text2, fontWeight: '700' }}>
+                      {r.meme}
+                    </Text>
+                    <Text style={{ fontSize: 10, color: r.mine ? C.accentLight : C.text3, fontWeight: '700' }}>
+                      {r.count}
+                    </Text>
+                  </PressableScale>
+                ))}
+                {reactions.length > 6 && (
+                  <PressableScale
+                    onPress={() => setPickerForReplyId(item.id)}
+                    haptic="tap"
+                    style={{
+                      paddingHorizontal: SP['2'], paddingVertical: 3,
+                      backgroundColor: C.bg3,
+                      borderRadius: R.full,
+                      borderWidth: 1, borderColor: C.border,
+                    }}
+                  >
+                    <Text style={{ fontSize: 10, color: C.text3, fontWeight: '700' }}>
+                      +{reactions.length - 6}
+                    </Text>
+                  </PressableScale>
+                )}
+              </View>
+            )}
           </View>
         </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <KeyboardAvoidingView
@@ -281,6 +348,15 @@ export default function BBSThreadScreen() {
           </PressableScale>
         </View>
       </View>
+
+      <MemeReactionPicker
+        visible={!!pickerForReplyId}
+        onClose={() => setPickerForReplyId(null)}
+        onPick={(meme) => {
+          if (pickerForReplyId) toggleReaction(pickerForReplyId, meme);
+        }}
+        picked={pickerMine}
+      />
     </KeyboardAvoidingView>
   );
 }
