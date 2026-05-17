@@ -1,5 +1,5 @@
 import { View, Text, ScrollView } from 'react-native';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, R, SP } from '@/design/tokens';
@@ -10,14 +10,28 @@ import { Input } from '@/components/ui/Input';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { TagInputSuggestions } from '@/components/tag/TagInputSuggestions';
 import { useTagFilterStore } from '@/stores/tagFilterStore';
+import { useTagGraphStore } from '@/stores/tagGraphStore';
+import { buildTagSuggestions, REASON_LABEL } from '@/lib/utils/tagSuggest';
+import { useToastStore } from '@/stores/toastStore';
 import { Icon } from '@/constants/icons';
 
 export default function BlockedTagsScreen() {
   const [input, setInput] = useState('');
-  const { blockedTags, addBlocked, removeBlocked } = useTagFilterStore();
+  const { likedTags, blockedTags, addBlocked, removeBlocked } = useTagFilterStore();
+  const { nodes, rootIds, hydrate: hydrateGraph } = useTagGraphStore();
+  const { show } = useToastStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const Hash = Icon.hash;
+
+  useEffect(() => { void hydrateGraph(); }, [hydrateGraph]);
+
+  const blockSuggestions = useMemo(() => {
+    const raw = buildTagSuggestions(blockedTags, nodes, rootIds, 24);
+    return raw.filter(
+      (s) => !likedTags.includes(s.tag) && !blockedTags.includes(s.tag),
+    );
+  }, [blockedTags, likedTags, nodes, rootIds]);
 
   const add = (tag: string) => {
     const t = tag.trim().replace(/^#/, '');
@@ -111,6 +125,59 @@ export default function BlockedTagsScreen() {
               {blockedTags.map((t) => (
                 <TagPill key={t} name={t} state="blocked" onPress={() => removeBlocked(t)} />
               ))}
+            </View>
+          </View>
+        )}
+
+        {/* 関連タグの提案 (タグ連携をベース) */}
+        {blockSuggestions.length > 0 && (
+          <View style={{
+            padding: SP['3'],
+            backgroundColor: C.bg2,
+            borderRadius: R.md,
+            borderWidth: 1,
+            borderColor: C.border,
+            gap: SP['2'],
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={{ fontSize: 14 }}>🛡️</Text>
+              <Text style={[T.smallM, { color: C.text, fontWeight: '700', flex: 1 }]}>
+                これもブロックしますか？
+              </Text>
+            </View>
+            <Text style={[T.caption, { color: C.text3 }]}>
+              ブロック中のタグから検索エンジンが関連を提案 ({blockSuggestions.length}件)
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              {blockSuggestions.map((s) => {
+                const meta = REASON_LABEL[s.reason];
+                return (
+                  <PressableScale
+                    key={s.tag}
+                    onPress={() => {
+                      addBlocked(s.tag);
+                      show(`「${s.tag}」をブロックに追加`, 'success');
+                    }}
+                    haptic="confirm"
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      paddingHorizontal: SP['3'],
+                      paddingVertical: 6,
+                      backgroundColor: 'rgba(226,75,74,0.13)',
+                      borderRadius: R.full,
+                      borderWidth: 1,
+                      borderColor: 'rgba(226,75,74,0.4)',
+                    }}
+                  >
+                    <Text style={{ fontSize: 11 }}>{meta.icon}</Text>
+                    <Text style={[T.smallM, { color: '#E24B4A', fontWeight: '700' }]}>
+                      {s.tag}
+                    </Text>
+                  </PressableScale>
+                );
+              })}
             </View>
           </View>
         )}

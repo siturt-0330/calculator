@@ -30,11 +30,20 @@ export default function FilterScreen() {
 
   useEffect(() => { void hydrateGraph(); }, [hydrateGraph]);
 
-  // タグツリーをベースにサジェスト
+  // タグツリーをベースに「好き」用サジェスト
   const suggestions = useMemo(
     () => buildTagSuggestions(likedTags, nodes, rootIds, 20),
     [likedTags, nodes, rootIds],
   );
+
+  // 「ブロック」用サジェスト: 既にブロックしてるタグから関連を提案
+  // 既に liked/blocked にあるタグは除外
+  const blockSuggestions = useMemo(() => {
+    const raw = buildTagSuggestions(blockedTags, nodes, rootIds, 30);
+    return raw.filter(
+      (s) => !likedTags.includes(s.tag) && !blockedTags.includes(s.tag),
+    );
+  }, [blockedTags, likedTags, nodes, rootIds]);
 
   const handleAddLiked = () => {
     const t = likedInput.trim().replace(/^#/, '');
@@ -287,6 +296,104 @@ export default function FilterScreen() {
             ))}
             {blockedTags.length === 0 && (
               <Text style={[T.small, { color: C.text3 }]}>まだ追加されていません</Text>
+            )}
+          </View>
+
+          {/* タグ連携からの関連ブロック候補 */}
+          <View style={{
+            marginTop: SP['3'],
+            padding: SP['3'],
+            backgroundColor: C.bg2,
+            borderRadius: R.md,
+            borderWidth: 1,
+            borderColor: C.border,
+            gap: SP['2'],
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={{ fontSize: 14 }}>🛡️</Text>
+              <Text style={[T.smallM, { color: C.text, fontWeight: '700', flex: 1 }]}>
+                これもブロックしますか？
+              </Text>
+              <PressableScale onPress={() => router.push('/oshi/tag-graph' as never)} haptic="tap">
+                <Text style={[T.caption, { color: C.accent }]}>連携を編集</Text>
+              </PressableScale>
+            </View>
+
+            {blockSuggestions.length === 0 ? (
+              <Text style={[T.small, { color: C.text2 }]}>
+                {blockedTags.length === 0
+                  ? 'ブロック中のタグから自動的に関連タグを提案します。まずは1つブロックしてみてください。'
+                  : '今のブロックタグに関連する候補はありません。'}
+              </Text>
+            ) : (
+              <>
+                <Text style={[T.caption, { color: C.text3 }]}>
+                  ブロック中のタグから検索エンジンが関連を分析・提案 ({blockSuggestions.length}件)
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {blockSuggestions.map((s) => {
+                    const meta = REASON_LABEL[s.reason];
+                    return (
+                      <PressableScale
+                        key={s.tag}
+                        onPress={() => {
+                          addBlocked(s.tag);
+                          show(`「${s.tag}」をブロックに追加`, 'success');
+                        }}
+                        haptic="confirm"
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          paddingHorizontal: SP['3'],
+                          paddingVertical: 6,
+                          backgroundColor: 'rgba(226,75,74,0.13)',
+                          borderRadius: R.full,
+                          borderWidth: 1,
+                          borderColor: 'rgba(226,75,74,0.4)',
+                        }}
+                      >
+                        <Text style={{ fontSize: 11 }}>{meta.icon}</Text>
+                        <Text style={[T.smallM, { color: '#E24B4A', fontWeight: '700' }]}>
+                          {s.tag}
+                        </Text>
+                        <Text style={{ fontSize: 9, color: C.text3, marginLeft: 2 }}>
+                          {meta.label}
+                        </Text>
+                      </PressableScale>
+                    );
+                  })}
+                </View>
+                {blockSuggestions.length > 0 && (
+                  <PressableScale
+                    onPress={() => {
+                      let count = 0;
+                      for (const s of blockSuggestions) {
+                        if (!blockedTags.includes(s.tag) && !likedTags.includes(s.tag)) {
+                          addBlocked(s.tag);
+                          count++;
+                        }
+                      }
+                      if (count > 0) show(`${count}件のタグを一括ブロック`, 'success');
+                    }}
+                    haptic="confirm"
+                    style={{
+                      alignSelf: 'flex-start',
+                      marginTop: SP['1'],
+                      paddingHorizontal: SP['3'],
+                      paddingVertical: SP['1'],
+                      backgroundColor: 'rgba(226,75,74,0.20)',
+                      borderRadius: R.full,
+                      borderWidth: 1,
+                      borderColor: 'rgba(226,75,74,0.5)',
+                    }}
+                  >
+                    <Text style={[T.caption, { color: '#E24B4A', fontWeight: '700' }]}>
+                      🛡️ 上記をまとめてブロック
+                    </Text>
+                  </PressableScale>
+                )}
+              </>
             )}
           </View>
         </View>
