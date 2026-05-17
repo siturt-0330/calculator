@@ -2,7 +2,7 @@ import { View, Text, ScrollView } from 'react-native';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useTagFilterStore } from '@/stores/tagFilterStore';
+import { useTagFilterStore, DEFAULT_BLOCKED_TAGS } from '@/stores/tagFilterStore';
 import { useTagGraphStore } from '@/stores/tagGraphStore';
 import { useToastStore } from '@/stores/toastStore';
 import { TopBar } from '@/components/nav/TopBar';
@@ -290,13 +290,62 @@ export default function FilterScreen() {
             variant="blocked"
           />
 
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-            {blockedTags.map((t) => (
-              <TagPill key={t} name={t} state="blocked" onPress={() => removeBlocked(t)} />
-            ))}
-            {blockedTags.length === 0 && (
-              <Text style={[T.small, { color: C.text3 }]}>まだ追加されていません</Text>
-            )}
+          {/* ユーザーが追加したカスタムブロック */}
+          {(() => {
+            const defaultSet = new Set(DEFAULT_BLOCKED_TAGS);
+            const customBlocked = blockedTags.filter((t) => !defaultSet.has(t));
+            return customBlocked.length > 0 ? (
+              <View style={{ gap: SP['2'] }}>
+                <Text style={[T.caption, { color: C.text2, fontWeight: '700' }]}>
+                  あなたが追加 ({customBlocked.length})
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
+                  {customBlocked.map((t) => (
+                    <TagPill key={t} name={t} state="blocked" onPress={() => removeBlocked(t)} />
+                  ))}
+                </View>
+              </View>
+            ) : null;
+          })()}
+
+          {/* デフォルト安全タグ (全71個常時表示、トグル可能) */}
+          <View style={{ gap: SP['2'], marginTop: SP['2'] }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={{ fontSize: 12 }}>🛡️</Text>
+              <Text style={[T.caption, { color: C.text2, fontWeight: '700', flex: 1 }]}>
+                安全のためデフォルトでブロック ({blockedTags.filter((t) => DEFAULT_BLOCKED_TAGS.includes(t)).length}/{DEFAULT_BLOCKED_TAGS.length})
+              </Text>
+            </View>
+            <Text style={[T.caption, { color: C.text3 }]}>
+              赤=ブロック中 / グレー=解除済み。タップで切り替え
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
+              {DEFAULT_BLOCKED_TAGS.map((t) => {
+                const active = blockedTags.includes(t);
+                return active ? (
+                  <TagPill key={t} name={t} state="blocked" onPress={() => removeBlocked(t)} />
+                ) : (
+                  <PressableScale
+                    key={t}
+                    onPress={() => addBlocked(t)}
+                    haptic="select"
+                    style={{
+                      paddingHorizontal: SP['3'],
+                      paddingVertical: 4,
+                      borderRadius: R.full,
+                      backgroundColor: 'transparent',
+                      borderWidth: 1,
+                      borderColor: C.border,
+                      opacity: 0.5,
+                    }}
+                  >
+                    <Text style={[T.small, { color: C.text3 }]}>
+                      #{t}
+                    </Text>
+                  </PressableScale>
+                );
+              })}
+            </View>
           </View>
 
           {/* タグ連携からの関連ブロック候補 */}

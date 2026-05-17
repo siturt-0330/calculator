@@ -14,6 +14,7 @@ import { useAppFonts } from '@/hooks/useAppFonts';
 import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useLanguageStore } from '@/stores/languageStore';
+import { useTagFilterStore } from '@/stores/tagFilterStore';
 import { ToastHost } from '@/components/ui/ToastHost';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { IntroAnimation, markIntroShown } from '@/components/ui/IntroAnimation';
@@ -58,11 +59,13 @@ export default function RootLayout() {
   const [introDone, setIntroDone] = useState<boolean>(() => !shouldShowIntro());
 
   const hydrateLang = useLanguageStore((s) => s.hydrate);
+  const hydrateTagFilter = useTagFilterStore((s) => s.hydrate);
   useEffect(() => {
     void hydrateAuth();
     void hydrateSettings();
     void hydrateLang();
-  }, [hydrateAuth, hydrateSettings, hydrateLang]);
+    void hydrateTagFilter();
+  }, [hydrateAuth, hydrateSettings, hydrateLang, hydrateTagFilter]);
 
   // ★ Safety: hydration / font 読み込みが何らかの理由で詰まっても、
   //   2.5 秒で強制的にレンダー開始 (黒画面のまま止まるのを絶対に防ぐ)
