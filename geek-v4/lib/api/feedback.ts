@@ -52,3 +52,68 @@ export async function fetchMyFeedback(): Promise<FeedbackRow[]> {
   if (error) return [];
   return (data ?? []) as FeedbackRow[];
 }
+
+// 管理者用: 全件 + ユーザー情報まで取得
+export type AdminFeedbackRow = FeedbackRow & {
+  user_id: string | null;
+  user_agent: string | null;
+  screen_w: number | null;
+  screen_h: number | null;
+  nickname: string | null;
+};
+
+export async function fetchAllFeedback(
+  filter?: { status?: FeedbackRow['status'] | 'all'; kind?: FeedbackKind | 'all' },
+): Promise<AdminFeedbackRow[]> {
+  let q = supabase
+    .from('app_feedback')
+    .select('id, user_id, kind, message, route, status, admin_notes, user_agent, screen_w, screen_h, created_at, updated_at, profiles(nickname)')
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (filter?.status && filter.status !== 'all') q = q.eq('status', filter.status);
+  if (filter?.kind && filter.kind !== 'all') q = q.eq('kind', filter.kind);
+  const { data, error } = await q;
+  if (error) return [];
+  return (data ?? []).map((r: Record<string, unknown>) => {
+    const p = r.profiles as { nickname?: string } | { nickname?: string }[] | null;
+    const nickname = Array.isArray(p) ? p[0]?.nickname : p?.nickname;
+    return {
+      id: r.id as string,
+      user_id: (r.user_id as string) ?? null,
+      kind: r.kind as FeedbackKind,
+      message: r.message as string,
+      route: (r.route as string) ?? null,
+      status: r.status as FeedbackRow['status'],
+      admin_notes: (r.admin_notes as string) ?? null,
+      user_agent: (r.user_agent as string) ?? null,
+      screen_w: (r.screen_w as number) ?? null,
+      screen_h: (r.screen_h as number) ?? null,
+      created_at: r.created_at as string,
+      updated_at: r.updated_at as string,
+      nickname: nickname ?? null,
+    };
+  });
+}
+
+export async function updateFeedback(
+  id: string,
+  updates: { status?: FeedbackRow['status']; admin_notes?: string },
+): Promise<void> {
+  const { error } = await supabase
+    .from('app_feedback')
+    .update(updates)
+    .eq('id', id);
+  if (error) throw error;
+}
+
+// 自分が管理者か判定
+export async function fetchIsAdmin(): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+  const { data } = await supabase
+    .from('profiles')
+    .select('is_admin')
+    .eq('id', user.id)
+    .maybeSingle();
+  return !!(data as { is_admin?: boolean } | null)?.is_admin;
+}

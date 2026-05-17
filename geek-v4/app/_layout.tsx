@@ -145,6 +145,7 @@ export default function RootLayout() {
                   <Stack.Screen name="settings/notifications" />
                   <Stack.Screen name="settings/blocked-users" />
                   <Stack.Screen name="settings/blocked-tags" />
+                  <Stack.Screen name="settings/feedback-admin" />
                   <Stack.Screen name="settings/privacy" />
                   <Stack.Screen name="settings/about" />
                   <Stack.Screen name="corners/calendar" />

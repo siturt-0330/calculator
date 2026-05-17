@@ -3,6 +3,7 @@ import { View, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/stores/authStore';
+import { useIsAdmin } from '@/hooks/useAdmin';
 import { TopBar } from '@/components/nav/TopBar';
 import { BackButton } from '@/components/nav/BackButton';
 import { ListItem } from '@/components/ui/ListItem';
@@ -17,6 +18,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { signOut } = useAuthStore();
+  const isAdmin = useIsAdmin();
   const [logoutOpen, setLogoutOpen] = useState(false);
 
   return (
@@ -42,6 +44,13 @@ export default function SettingsScreen() {
         <ListItem icon={Icon.block} label="ブロックしたユーザー" onPress={() => router.push('/settings/blocked-users' as never)} />
         <Divider />
         <ListItem icon={Icon.lock} label="プライバシー" onPress={() => router.push('/settings/privacy' as never)} />
+
+        {isAdmin && (
+          <>
+            <SectionHeader title="管理" />
+            <ListItem icon={Icon.shield} label="📊 フィードバック管理" onPress={() => router.push('/settings/feedback-admin' as never)} />
+          </>
+        )}
 
         <SectionHeader title="その他" />
         <ListItem icon={Icon.info} label="このアプリについて" onPress={() => router.push('/settings/about' as never)} />
