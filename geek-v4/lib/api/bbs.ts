@@ -1,6 +1,16 @@
 import { supabase } from '@/lib/supabase';
 import type { BBSThread, BBSReply, Comment } from '@/types/models';
 
+export async function fetchThread(id: string): Promise<BBSThread | null> {
+  const { data, error } = await supabase
+    .from('bbs_threads')
+    .select('id, title, category, replies_count, last_reply_at, created_at')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) return null;
+  return data as BBSThread | null;
+}
+
 export async function fetchThreads(): Promise<BBSThread[]> {
   const { data, error } = await supabase
     .from('bbs_threads')
@@ -27,11 +37,22 @@ export async function createThread(title: string, category: string): Promise<BBS
 export async function fetchReplies(threadId: string): Promise<BBSReply[]> {
   const { data, error } = await supabase
     .from('bbs_replies')
-    .select('id, thread_id, content, color, created_at')
+    .select('id, thread_id, content, color, created_at, author:profiles(trust_score)')
     .eq('thread_id', threadId)
     .order('created_at', { ascending: true });
   if (error) throw error;
-  return (data ?? []) as BBSReply[];
+  // author.trust_score を平坦化
+  return (data ?? []).map((r: { id: string; thread_id: string; content: string; color: string; created_at: string; author?: { trust_score?: number } | { trust_score?: number }[] | null }) => {
+    const a = Array.isArray(r.author) ? r.author[0] : r.author;
+    return {
+      id: r.id,
+      thread_id: r.thread_id,
+      content: r.content,
+      color: r.color,
+      created_at: r.created_at,
+      trust_score: a?.trust_score ?? null,
+    } as BBSReply;
+  });
 }
 
 export async function createReply(threadId: string, content: string): Promise<void> {
@@ -48,11 +69,21 @@ export async function createReply(threadId: string, content: string): Promise<vo
 export async function fetchComments(postId: string): Promise<Comment[]> {
   const { data, error } = await supabase
     .from('comments')
-    .select('id, post_id, content, avatar_color, created_at')
+    .select('id, post_id, content, avatar_color, created_at, author:profiles(trust_score)')
     .eq('post_id', postId)
     .order('created_at', { ascending: true });
   if (error) throw error;
-  return (data ?? []) as Comment[];
+  return (data ?? []).map((c: { id: string; post_id: string; content: string; avatar_color: string; created_at: string; author?: { trust_score?: number } | { trust_score?: number }[] | null }) => {
+    const a = Array.isArray(c.author) ? c.author[0] : c.author;
+    return {
+      id: c.id,
+      post_id: c.post_id,
+      content: c.content,
+      avatar_color: c.avatar_color,
+      created_at: c.created_at,
+      trust_score: a?.trust_score ?? null,
+    } as Comment;
+  });
 }
 
 export async function createComment(postId: string, content: string): Promise<void> {

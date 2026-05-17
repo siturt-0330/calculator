@@ -28,10 +28,13 @@ export function TopBar({
   border = true,
 }: Props) {
   const insets = useSafeAreaInsets();
+  // large モードのときは、スクロール時に上部タイトルがフェードイン
+  // それまでは上部タイトルは非表示
   const aTitle = useAnimatedStyle(() => {
-    if (!scrollY) return { opacity: 1 };
+    if (!large) return { opacity: 1 };
+    if (!scrollY) return { opacity: 0 };
     return {
-      opacity: interpolate(scrollY.value, [0, 60], [large ? 0 : 1, 1], 'clamp'),
+      opacity: interpolate(scrollY.value, [0, 60], [0, 1], 'clamp'),
     };
   });
 
@@ -61,7 +64,7 @@ export function TopBar({
           numberOfLines={1}
           style={[T.h3, { color: C.text, flex: 1 }, aTitle]}
         >
-          {title ?? ''}
+          {large ? '' : (title ?? '')}
         </Animated.Text>
         {right}
       </View>

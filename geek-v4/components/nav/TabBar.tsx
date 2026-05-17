@@ -7,27 +7,28 @@ import { T } from '@/design/typography';
 import { TABBAR } from '@/design/tabbar';
 import { TabIcon, type TabKey } from './TabIcon';
 import { HapticTab } from './HapticTab';
-import { FAB } from './FAB';
+import { useNotifications } from '@/hooks/useNotifications';
+import { NotificationBadge } from '@/components/ui/NotificationBadge';
 
 const ROUTE_TO_TAB: Record<string, TabKey> = {
   feed: 'home',
-  corners: 'corners',
-  post: 'post',
   bbs: 'bbs',
+  oshi: 'oshi',
   mypage: 'mypage',
 };
 
 const LABELS: Record<TabKey, string> = {
   home: 'ホーム',
-  corners: 'コーナー',
-  post: '',
   bbs: '掲示板',
+  game: 'ゲーム',
+  oshi: '推し活',
   mypage: 'マイ',
 };
 
 export function TabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, 8);
+  const { unreadCount } = useNotifications();
 
   return (
     <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
@@ -59,20 +60,17 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
               }
             };
 
-            if (tab === 'post') {
-              return (
-                <View key={route.key} style={{ flex: 1, alignItems: 'center' }}>
-                  <FAB onPress={onPress} />
-                </View>
-              );
-            }
-
             return (
               <HapticTab key={route.key} focused={focused} onPress={onPress}>
                 <View
                   style={{ alignItems: 'center', gap: TABBAR.labelGap, marginTop: 6 }}
                 >
-                  <TabIcon tab={tab} focused={focused} />
+                  <View>
+                    <TabIcon tab={tab} focused={focused} />
+                    {tab === 'mypage' && (
+                      <NotificationBadge count={unreadCount} top={-3} right={-6} />
+                    )}
+                  </View>
                   <Text style={[T.caption, { color: focused ? C.accent : C.text3 }]}>
                     {LABELS[tab]}
                   </Text>

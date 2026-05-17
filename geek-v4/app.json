@@ -18,13 +18,17 @@
       "bundleIdentifier": "app.geek.v4",
       "buildNumber": "1",
       "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"],
+        "UIBackgroundModes": [
+          "remote-notification"
+        ],
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryUsageDescription": "投稿に写真を添付するため、写真ライブラリへのアクセス許可が必要です。",
         "NSCameraUsageDescription": "投稿に写真を撮影するため、カメラへのアクセス許可が必要です。",
         "NSLocationWhenInUseUsageDescription": "投稿に位置情報を付けるため、位置情報へのアクセス許可が必要です。"
       },
-      "associatedDomains": ["applinks:geek.app"]
+      "associatedDomains": [
+        "applinks:geek.app"
+      ]
     },
     "android": {
       "adaptiveIcon": {
@@ -37,7 +41,9 @@
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.VIBRATE"
+        "android.permission.VIBRATE",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
@@ -46,10 +52,33 @@
       "expo-secure-store",
       "expo-location",
       "expo-image-picker",
-      ["expo-splash-screen", { "backgroundColor": "#0a0a0a", "image": "./assets/images/splash-icon.png", "imageWidth": 200 }],
-      ["expo-notifications", { "color": "#7C6AF7" }]
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0a0a0a",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 200
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#7C6AF7"
+        }
+      ],
+      "@sentry/react-native"
     ],
-    "experiments": { "typedRoutes": true },
-    "extra": { "eas": { "projectId": "YOUR_PROJECT_ID" } }
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "fad08e38-f665-4550-b49b-7e84e47fdf5e"
+      }
+    },
+    "owner": "kittido"
   }
 }

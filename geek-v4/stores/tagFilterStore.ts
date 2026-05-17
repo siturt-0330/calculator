@@ -3,6 +3,17 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const KEY_LIKED = 'geek:liked_tags';
 const KEY_BLOCKED = 'geek:blocked_tags';
+const KEY_BLOCKED_INIT = 'geek:blocked_tags_init_v1';
+
+// 初回のみ自動で適用されるデフォルトのブロックタグ
+// 削除可能 (ユーザーは自由に解除できる)
+export const DEFAULT_BLOCKED_TAGS = [
+  '詐欺', '詐欺かも', '情報商材',
+  '暴力', '性暴力', '反社',
+  'キャバクラ', 'キャバ嬢', 'ホスト', '風俗', 'クラブ', '夜職',
+  'ニューハーフ',
+  'いじめ', '嘘',
+];
 
 type TagFilterState = {
   likedTags: string[];
@@ -21,13 +32,24 @@ export const useTagFilterStore = create<TagFilterState>((set, get) => ({
   hydrated: false,
   hydrate: async () => {
     try {
-      const [liked, blocked] = await Promise.all([
+      const [liked, blocked, initApplied] = await Promise.all([
         AsyncStorage.getItem(KEY_LIKED),
         AsyncStorage.getItem(KEY_BLOCKED),
+        AsyncStorage.getItem(KEY_BLOCKED_INIT),
       ]);
+      const likedArr = liked ? (JSON.parse(liked) as string[]) : [];
+      let blockedArr = blocked ? (JSON.parse(blocked) as string[]) : [];
+      // 初回のみデフォルトのブロックタグを適用
+      if (!initApplied) {
+        const merged = new Set(blockedArr);
+        for (const t of DEFAULT_BLOCKED_TAGS) merged.add(t);
+        blockedArr = [...merged];
+        await AsyncStorage.setItem(KEY_BLOCKED, JSON.stringify(blockedArr)).catch(() => {});
+        await AsyncStorage.setItem(KEY_BLOCKED_INIT, '1').catch(() => {});
+      }
       set({
-        likedTags: liked ? (JSON.parse(liked) as string[]) : [],
-        blockedTags: blocked ? (JSON.parse(blocked) as string[]) : [],
+        likedTags: likedArr,
+        blockedTags: blockedArr,
         hydrated: true,
       });
     } catch {
@@ -35,9 +57,13 @@ export const useTagFilterStore = create<TagFilterState>((set, get) => ({
     }
   },
   addLiked: (tag) => {
-    const liked = [...new Set([...get().likedTags, tag])];
-    set({ likedTags: liked });
+    const { likedTags, blockedTags } = get();
+    // ブロックリストに同じタグがあれば外す（重複禁止）
+    const blocked = blockedTags.filter((t) => t !== tag);
+    const liked = [...new Set([...likedTags, tag])];
+    set({ likedTags: liked, blockedTags: blocked });
     AsyncStorage.setItem(KEY_LIKED, JSON.stringify(liked)).catch(() => {});
+    AsyncStorage.setItem(KEY_BLOCKED, JSON.stringify(blocked)).catch(() => {});
   },
   removeLiked: (tag) => {
     const liked = get().likedTags.filter((t) => t !== tag);
@@ -45,8 +71,12 @@ export const useTagFilterStore = create<TagFilterState>((set, get) => ({
     AsyncStorage.setItem(KEY_LIKED, JSON.stringify(liked)).catch(() => {});
   },
   addBlocked: (tag) => {
-    const blocked = [...new Set([...get().blockedTags, tag])];
-    set({ blockedTags: blocked });
+    const { likedTags, blockedTags } = get();
+    // 好きリストに同じタグがあれば外す（重複禁止）
+    const liked = likedTags.filter((t) => t !== tag);
+    const blocked = [...new Set([...blockedTags, tag])];
+    set({ likedTags: liked, blockedTags: blocked });
+    AsyncStorage.setItem(KEY_LIKED, JSON.stringify(liked)).catch(() => {});
     AsyncStorage.setItem(KEY_BLOCKED, JSON.stringify(blocked)).catch(() => {});
   },
   removeBlocked: (tag) => {

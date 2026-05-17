@@ -1,36 +1,93 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { toggleLike } from '@/lib/api/posts';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
+
+async function getMyLikes(postIds: string[]): Promise<Record<string, boolean>> {
+  if (postIds.length === 0) return {};
+  const { data: session } = await supabase.auth.getSession();
+  const userId = session.session?.user.id;
+  if (!userId) return {};
+  const { data } = await supabase
+    .from('likes')
+    .select('post_id')
+    .eq('user_id', userId)
+    .in('post_id', postIds);
+  const map: Record<string, boolean> = {};
+  for (const row of (data ?? []) as Array<{ post_id: string }>) {
+    map[row.post_id] = true;
+  }
+  return map;
+}
+
+async function toggle(postId: string): Promise<void> {
+  const { data: session } = await supabase.auth.getSession();
+  const userId = session.session?.user.id;
+  if (!userId) throw new Error('Not authenticated');
+  const { data: existing } = await supabase
+    .from('likes')
+    .select('post_id')
+    .eq('user_id', userId)
+    .eq('post_id', postId)
+    .maybeSingle();
+  if (existing) {
+    await supabase.from('likes').delete().eq('user_id', userId).eq('post_id', postId);
+  } else {
+    await supabase.from('likes').insert({ user_id: userId, post_id: postId });
+  }
+}
+
+export function useLikes(postIds: string[]) {
+  return useQuery({
+    queryKey: ['my-likes', postIds.slice().sort().join(',')],
+    queryFn: () => getMyLikes(postIds),
+    enabled: postIds.length > 0,
+    staleTime: 30_000,
+  });
+}
 
 export function useLike() {
   const qc = useQueryClient();
 
-  const { mutate } = useMutation({
-    mutationFn: toggleLike,
-    onMutate: async (postId) => {
-      // 楽観的更新: likes_count +1
+  const { mutateAsync } = useMutation({
+    mutationFn: toggle,
+    onMutate: async (postId: string) => {
+      await qc.cancelQueries({ queryKey: ['my-likes'] });
+      const prevLikes = qc.getQueriesData({ queryKey: ['my-likes'] });
+      const wasLiked = !!(prevLikes[0]?.[1] as Record<string, boolean> | undefined)?.[postId];
+
+      qc.setQueriesData({ queryKey: ['my-likes'] }, (old: Record<string, boolean> | undefined) => {
+        const next = { ...(old ?? {}) };
+        if (next[postId]) delete next[postId];
+        else next[postId] = true;
+        return next;
+      });
+
       await qc.cancelQueries({ queryKey: ['feed'] });
-      const prev = qc.getQueriesData({ queryKey: ['feed'] });
-      qc.setQueriesData({ queryKey: ['feed'] }, (old: unknown) => {
-        if (!old || typeof old !== 'object') return old;
-        const pages = (old as { pages: Array<{ posts: Array<{ id: string; likes_count: number }> }> }).pages;
+      qc.setQueriesData({ queryKey: ['feed'] }, (data: unknown) => {
+        if (!data || typeof data !== 'object') return data;
+        const old = data as { pages?: Array<{ posts: Array<{ id: string; likes_count: number }> }> };
+        if (!old.pages) return data;
         return {
-          ...(old as object),
-          pages: pages.map((page) => ({
-            ...page,
-            posts: page.posts.map((p) =>
-              p.id === postId ? { ...p, likes_count: p.likes_count + 1 } : p,
+          ...old,
+          pages: old.pages.map((p) => ({
+            ...p,
+            posts: p.posts.map((post) =>
+              post.id === postId
+                ? { ...post, likes_count: Math.max(0, post.likes_count + (wasLiked ? -1 : 1)) }
+                : post,
             ),
           })),
         };
       });
-      return { prev };
+
+      return { prevLikes };
     },
-    onError: (_err, _postId, ctx) => {
-      if (ctx?.prev) {
-        ctx.prev.forEach(([queryKey, data]) => qc.setQueryData(queryKey, data));
-      }
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prevLikes) ctx.prevLikes.forEach(([k, d]) => qc.setQueryData(k, d));
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['my-likes'] });
     },
   });
 
-  return { toggle: (postId: string) => mutate(postId) };
+  return { toggle: (postId: string) => mutateAsync(postId).catch(() => {}) };
 }

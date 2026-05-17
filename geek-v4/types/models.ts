@@ -1,3 +1,7 @@
+export type PostKind = 'fact' | 'opinion' | 'joke' | 'wip';
+export type AccountState = 'healthy' | 'caution' | 'restricted' | 'warned' | 'suspended';
+export type ConcernReason = 'misinfo' | 'unverified' | 'spam' | 'rude' | 'scam' | 'other';
+
 export type Post = {
   id: string;
   content: string;
@@ -6,6 +10,12 @@ export type Post = {
   tag_names: string[];
   likes_count: number;
   comments_count: number;
+  score: number;
+  hot_score: number;
+  concern_count: number;
+  kind: PostKind;
+  source_url: string | null;
+  is_public: boolean;
   trust_score_at_post: number;
   is_anonymous: boolean;
   created_at: string;
@@ -17,6 +27,7 @@ export type Comment = {
   content: string;
   avatar_color: string;
   created_at: string;
+  trust_score?: number | null;  // 著者の現在の信頼スコア
 };
 
 export type Tag = {
@@ -40,6 +51,7 @@ export type BBSReply = {
   content: string;
   color: string;
   created_at: string;
+  trust_score?: number | null;  // 著者の現在の信頼スコア
 };
 
 export type Notification = {

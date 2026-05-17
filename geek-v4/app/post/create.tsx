@@ -9,18 +9,20 @@ import { TextArea } from '@/components/ui/TextArea';
 import { Button } from '@/components/ui/Button';
 import { Toggle } from '@/components/ui/Toggle';
 import { TagPill } from '@/components/tag/TagPill';
+import { TagInputSuggestions } from '@/components/tag/TagInputSuggestions';
 import { Input } from '@/components/ui/Input';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { KeyboardAware } from '@/components/ui/KeyboardAware';
 import { BackButton } from '@/components/nav/BackButton';
 import { TopBar } from '@/components/nav/TopBar';
-import { TrustBar } from '@/components/ui/TrustBar';
 import { useToastStore } from '@/stores/toastStore';
 import { hap } from '@/design/haptics';
 import { createPost } from '@/lib/api/posts';
 import { checkContent } from '@/lib/ai/checkContent';
-import { C, SP } from '@/design/tokens';
+import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
+import { POST_KIND_META } from '@/components/feed/PostKindBadge';
+import type { PostKind } from '@/types/models';
 
 export default function CreatePost() {
   const router = useRouter();
@@ -32,6 +34,9 @@ export default function CreatePost() {
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [anonymous, setAnonymous] = useState(true);
+  const [kind, setKind] = useState<PostKind>('opinion');
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [isPublic, setIsPublic] = useState(true);
   const [posting, setPosting] = useState(false);
 
   const pickImage = async () => {
@@ -66,7 +71,15 @@ export default function CreatePost() {
       return;
     }
     if (tags.length === 0) {
-      show('タグを 1 つ以上追加してください。', 'warn');
+      show('タグを1つ以上追加してください。', 'warn');
+      return;
+    }
+    if (kind === 'fact' && !sourceUrl.trim()) {
+      show('「事実」として投稿するには出典URLが必要です。', 'warn');
+      return;
+    }
+    if (sourceUrl && !/^https?:\/\//.test(sourceUrl.trim())) {
+      show('出典URLは http:// または https:// で始めてください。', 'warn');
       return;
     }
 
@@ -75,28 +88,44 @@ export default function CreatePost() {
       const check = await checkContent({ content, tags });
       if (!check.ok) {
         hap.error();
-        Alert.alert(
-          '投稿できません',
-          check.reason ?? 'コンテンツポリシーに反する可能性があります',
-        );
+        Alert.alert('投稿できません', check.reason ?? 'コンテンツポリシーに反する可能性があります');
         return;
       }
-      await createPost({ content, mediaUris: images, tagNames: tags, isAnonymous: anonymous });
+      await createPost({
+        content,
+        mediaUris: images,
+        tagNames: tags,
+        isAnonymous: anonymous,
+        kind,
+        sourceUrl: sourceUrl.trim() || null,
+        isPublic,
+      });
       hap.success();
-      show('投稿しました。', 'success');
+      show('投稿しました', 'success');
       router.back();
-    } catch {
+    } catch (e: unknown) {
       hap.error();
-      show('投稿に失敗しました。', 'error');
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('post create failed:', msg);
+      // よくあるエラーを日本語化
+      let userMsg = '投稿に失敗しました。再度お試しください。';
+      if (msg.includes('row-level security') || msg.includes('RLS')) {
+        userMsg = '権限エラー。ログインし直してください。';
+      } else if (msg.includes('Network') || msg.includes('Failed to fetch')) {
+        userMsg = '通信エラー。電波を確認してください。';
+      } else if (msg.includes('check') || msg.includes('constraint')) {
+        userMsg = '入力内容を確認してください。';
+      }
+      show(userMsg, 'error');
     } finally {
       setPosting(false);
     }
   };
 
   const X = Icon.close;
-  const Sparkles = Icon.sparkles;
   const Cam = Icon.image;
   const Hash = Icon.hash;
+  const Lock = Icon.lock;
 
   return (
     <KeyboardAware>
@@ -122,9 +151,49 @@ export default function CreatePost() {
             gap: SP['4'],
             paddingBottom: insets.bottom + SP['10'],
           }}
+          keyboardShouldPersistTaps="handled"
         >
-          {/* 信頼スコア */}
-          <TrustBar score={50} />
+          {/* 投稿カテゴリ */}
+          <View style={{ gap: SP['2'] }}>
+            <Text style={[T.smallM, { color: C.text2 }]}>この投稿は…</Text>
+            <View style={{ flexDirection: 'row', gap: SP['2'], flexWrap: 'wrap' }}>
+              {(Object.keys(POST_KIND_META) as PostKind[]).map((k) => {
+                const m = POST_KIND_META[k];
+                const active = kind === k;
+                return (
+                  <PressableScale
+                    key={k}
+                    onPress={() => setKind(k)}
+                    haptic="select"
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      paddingHorizontal: SP['3'],
+                      paddingVertical: SP['2'],
+                      borderRadius: R.full,
+                      backgroundColor: active ? m.bg : C.bg3,
+                      borderWidth: 1.5,
+                      borderColor: active ? m.fg : C.border,
+                    }}
+                  >
+                    <Text style={{ fontSize: 14 }}>{m.emoji}</Text>
+                    <Text style={[T.smallM, { color: active ? m.fg : C.text2 }]}>{m.label}</Text>
+                  </PressableScale>
+                );
+              })}
+            </View>
+            {kind === 'fact' && (
+              <Text style={[T.caption, { color: C.text3 }]}>
+                ⚠ 「事実」を選んだ場合は出典URLが必須です
+              </Text>
+            )}
+            {kind === 'wip' && (
+              <Text style={[T.caption, { color: C.green }]}>
+                💡 未完成の作品は拡散リミット推奨。安心して試せます
+              </Text>
+            )}
+          </View>
 
           {/* 画像 */}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
@@ -135,16 +204,11 @@ export default function CreatePost() {
                   onPress={() => setImages(images.filter((u) => u !== uri))}
                   style={{
                     position: 'absolute',
-                    top: -6,
-                    right: -6,
-                    width: 24,
-                    height: 24,
-                    borderRadius: 12,
+                    top: -6, right: -6,
+                    width: 24, height: 24, borderRadius: 12,
                     backgroundColor: C.bg,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderWidth: 1,
-                    borderColor: C.border,
+                    alignItems: 'center', justifyContent: 'center',
+                    borderWidth: 1, borderColor: C.border,
                   }}
                 >
                   <X size={14} color={C.text} strokeWidth={2.4} />
@@ -155,14 +219,10 @@ export default function CreatePost() {
               <PressableScale
                 onPress={pickImage}
                 style={{
-                  width: 80,
-                  height: 80,
-                  borderRadius: 12,
+                  width: 80, height: 80, borderRadius: 12,
                   backgroundColor: C.bg3,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderWidth: 1,
-                  borderColor: C.border,
+                  alignItems: 'center', justifyContent: 'center',
+                  borderWidth: 1, borderColor: C.border,
                 }}
               >
                 <Cam size={22} color={C.text3} strokeWidth={2.2} />
@@ -170,7 +230,7 @@ export default function CreatePost() {
             )}
           </View>
 
-          {/* キャプション */}
+          {/* 本文 */}
           <TextArea
             placeholder="このタグについて、語ろう"
             value={content}
@@ -178,14 +238,20 @@ export default function CreatePost() {
             maxLength={2000}
           />
 
-          {/* AI 提案ボタン */}
-          <Button
-            label="AI でキャプションを提案"
-            onPress={() => show('Supabase Edge Function の設定が必要です。', 'info')}
-            variant="ghost"
-            icon={Sparkles}
-            disabled={images.length === 0}
-          />
+          {/* 出典URL */}
+          <View style={{ gap: SP['2'] }}>
+            <Text style={[T.smallM, { color: C.text2 }]}>
+              出典URL {kind === 'fact' ? '（必須）' : '（任意・あると信頼度UP）'}
+            </Text>
+            <Input
+              placeholder="https://..."
+              value={sourceUrl}
+              onChangeText={setSourceUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+          </View>
 
           {/* タグ */}
           <View style={{ gap: SP['2'] }}>
@@ -198,10 +264,71 @@ export default function CreatePost() {
               returnKeyType="done"
               icon={Hash}
             />
+            {/* 入力中のリアルタイム類似タグ提案 */}
+            {tags.length < 5 && (
+              <TagInputSuggestions
+                input={tagInput}
+                excludeTags={tags}
+                onPick={(t) => {
+                  if (tags.includes(t) || tags.length >= 5) return;
+                  setTags([...tags, t]);
+                  setTagInput('');
+                  hap.select();
+                }}
+                variant="liked"
+                limit={8}
+              />
+            )}
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
               {tags.map((t) => (
                 <TagPill key={t} name={t} state="liked" onPress={() => removeTag(t)} />
               ))}
+            </View>
+          </View>
+
+          {/* 公開範囲 */}
+          <View style={{ gap: SP['2'] }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+              <Lock size={14} color={C.text2} strokeWidth={2.2} />
+              <Text style={[T.smallM, { color: C.text2 }]}>公開範囲</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: SP['2'] }}>
+              <PressableScale
+                onPress={() => setIsPublic(true)}
+                haptic="select"
+                style={{
+                  flex: 1,
+                  paddingHorizontal: SP['3'], paddingVertical: SP['3'],
+                  borderRadius: R.md,
+                  backgroundColor: isPublic ? C.accentBg : C.bg3,
+                  borderWidth: 1.5,
+                  borderColor: isPublic ? C.accent : C.border,
+                  alignItems: 'center', gap: 2,
+                }}
+              >
+                <Text style={[T.smallM, { color: isPublic ? C.accentLight : C.text }]}>
+                  🌐 誰でも閲覧可能
+                </Text>
+                <Text style={[T.caption, { color: C.text3 }]}>フィードに表示される</Text>
+              </PressableScale>
+              <PressableScale
+                onPress={() => setIsPublic(false)}
+                haptic="select"
+                style={{
+                  flex: 1,
+                  paddingHorizontal: SP['3'], paddingVertical: SP['3'],
+                  borderRadius: R.md,
+                  backgroundColor: !isPublic ? C.accentBg : C.bg3,
+                  borderWidth: 1.5,
+                  borderColor: !isPublic ? C.accent : C.border,
+                  alignItems: 'center', gap: 2,
+                }}
+              >
+                <Text style={[T.smallM, { color: !isPublic ? C.accentLight : C.text }]}>
+                  🔒 自分だけ
+                </Text>
+                <Text style={[T.caption, { color: C.text3 }]}>下書き・メモ用</Text>
+              </PressableScale>
             </View>
           </View>
 

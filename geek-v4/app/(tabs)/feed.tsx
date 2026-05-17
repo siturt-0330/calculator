@@ -1,21 +1,30 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, RefreshControl } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFeed } from '@/hooks/useFeed';
 import { useTagFilter } from '@/hooks/useTagFilter';
-import { useLike } from '@/hooks/useLike';
-import { useSave } from '@/hooks/useSave';
+import { useTagFilterStore } from '@/stores/tagFilterStore';
+import { useLike, useLikes } from '@/hooks/useLike';
+import { useConcern, useConcerns } from '@/hooks/useConcern';
+import { useSave, useSaves } from '@/hooks/useSave';
+import { useShare } from '@/hooks/useShare';
+import { useReport } from '@/hooks/useReport';
+import { useReactions, useReactionToggle } from '@/hooks/useReactions';
+import { useNotifications } from '@/hooks/useNotifications';
+import { NotificationBadge } from '@/components/ui/NotificationBadge';
+import { useFeedStore } from '@/stores/feedStore';
 import { AnonPostCard } from '@/components/feed/AnonPostCard';
-import { FeedHeader } from '@/components/feed/FeedHeader';
+import { ScopeToggle } from '@/components/feed/ScopeToggle';
 import { BlockedTagBanner } from '@/components/feed/BlockedTagBanner';
+import { PostCardSkeleton } from '@/components/feed/PostCardSkeleton';
 import { PressableScale } from '@/components/ui/PressableScale';
-import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Icon } from '@/constants/icons';
 import { C, SP } from '@/design/tokens';
-import { FONT, T } from '@/design/typography';
+import { FONT } from '@/design/typography';
 import { TABBAR } from '@/design/tabbar';
 import type { Post } from '@/types/models';
 
@@ -23,69 +32,115 @@ export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { posts, loading, refreshing, refresh, loadMore } = useFeed();
-  const { likedTags, blockedCount } = useTagFilter();
+  const { blockedCount } = useTagFilter();
+  const likedTags = useTagFilterStore((s) => s.likedTags);
+  const scope = useFeedStore((s) => s.scope);
+  const setScope = useFeedStore((s) => s.setScope);
+  const hydrateFeed = useFeedStore((s) => s.hydrate);
+  const hasLikedTags = likedTags.length > 0;
+
+  // 好きなタグが無いときに closed scope に居たら open へ強制
+  useEffect(() => {
+    if (!hasLikedTags && scope === 'closed') setScope('open');
+  }, [hasLikedTags, scope, setScope]);
   const { toggle: toggleLike } = useLike();
+  const { toggle: toggleConcern } = useConcern();
   const { toggle: toggleSave } = useSave();
+  const { toggle: toggleReact } = useReactionToggle();
+  const { unreadCount } = useNotifications();
+  const { share } = useShare();
+  const { report } = useReport();
   const listRef = useRef<FlashList<Post>>(null);
+  const [reportPostId, setReportPostId] = useState<string | null>(null);
+
+  useEffect(() => {
+    void hydrateFeed();
+  }, [hydrateFeed]);
+
+  const postIds = posts.map((p) => p.id);
+  const { data: myLikes = {} } = useLikes(postIds);
+  const { data: myConcerns = {} } = useConcerns(postIds);
+  const { data: mySaves = {} } = useSaves(postIds);
+  const { data: reactionsByPost } = useReactions(postIds);
 
   const renderItem = useCallback(
     ({ item }: { item: Post }) => (
       <AnonPostCard
         post={item}
+        liked={!!myLikes[item.id]}
+        concerned={!!myConcerns[item.id]}
+        saved={!!mySaves[item.id]}
+        reactions={reactionsByPost[item.id] ?? []}
         onLike={() => toggleLike(item.id)}
+        onConcern={() => toggleConcern(item.id, !!myConcerns[item.id])}
         onComment={() => router.push(`/post/${item.id}` as never)}
         onSave={() => toggleSave(item.id)}
-        onShare={() => {}}
+        onShare={() => share(`Geek の投稿 #${item.tag_names[0] ?? '雑談'}`, `/post/${item.id}`)}
         onTagPress={(name) => router.push(`/tag/${encodeURIComponent(name)}` as never)}
-        onMore={() => {}}
+        onMore={() => setReportPostId(item.id)}
+        onReact={(meme) => toggleReact(item.id, meme)}
       />
     ),
-    [router, toggleLike, toggleSave],
+    [router, toggleLike, toggleConcern, toggleSave, toggleReact, share, myLikes, myConcerns, mySaves, reactionsByPost],
   );
 
   const Bell = Icon.bell;
-  const Filter = Icon.filter;
+  const Search = Icon.search;
+  const Plus = Icon.plus;
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* ヘッダーバー */}
-      <View
-        style={{
+      <View style={{ alignItems: 'center', backgroundColor: C.bg }}>
+        <View style={{
+          width: '100%', maxWidth: 720,
           paddingTop: insets.top + SP['2'],
           paddingHorizontal: SP['4'],
-          paddingBottom: SP['3'],
+          paddingBottom: SP['2'],
           flexDirection: 'row',
           alignItems: 'center',
-          borderBottomWidth: 1,
-          borderBottomColor: C.border,
-          backgroundColor: C.bg,
-        }}
-      >
-        <Text
-          style={[
-            {
-              flex: 1,
-              fontFamily: FONT.display,
-              fontSize: 28,
-              color: C.text,
-              letterSpacing: -0.5,
-            },
-          ]}
-        >
-          Geek
-        </Text>
-        <PressableScale
-          onPress={() => router.push('/filter' as never)}
-          style={{ padding: SP['2'] }}
-        >
-          <Filter size={22} color={C.text} strokeWidth={2.2} />
-        </PressableScale>
-        <PressableScale
-          onPress={() => router.push('/notifications' as never)}
-          style={{ padding: SP['2'] }}
-        >
-          <Bell size={22} color={C.text} strokeWidth={2.2} />
-        </PressableScale>
+        }}>
+          <PressableScale
+            onPress={() => router.push('/post/create' as never)}
+            haptic="confirm"
+            style={{
+              width: 36, height: 36, borderRadius: 18,
+              backgroundColor: C.accent,
+              alignItems: 'center', justifyContent: 'center',
+              marginRight: SP['3'],
+            }}
+          >
+            <Plus size={20} color="#fff" strokeWidth={2.6} />
+          </PressableScale>
+          <Text style={{
+            flex: 1,
+            fontFamily: FONT.display,
+            fontSize: 28,
+            color: C.text,
+            letterSpacing: -0.5,
+          }}>
+            Geek
+          </Text>
+          <PressableScale onPress={() => router.push('/search' as never)} style={{ padding: SP['2'] }}>
+            <Search size={22} color={C.text} strokeWidth={2.2} />
+          </PressableScale>
+          <PressableScale onPress={() => router.push('/notifications' as never)} style={{ padding: SP['2'] }}>
+            <View>
+              <Bell size={22} color={C.text} strokeWidth={2.2} />
+              <NotificationBadge count={unreadCount} top={-4} right={-6} />
+            </View>
+          </PressableScale>
+        </View>
+      </View>
+
+      <View style={{ alignItems: 'center' }}>
+        <View style={{ width: '100%', maxWidth: 720, paddingHorizontal: SP['4'], paddingBottom: SP['3'] }}>
+        <ScopeToggle
+          value={scope}
+          onChange={setScope}
+          disabledClosed={!hasLikedTags}
+          onClosedWhenEmpty={() => router.push('/filter' as never)}
+        />
+        </View>
       </View>
 
       <FlashList
@@ -93,32 +148,19 @@ export default function FeedScreen() {
         data={posts}
         renderItem={renderItem}
         keyExtractor={(item) => item.id}
-        estimatedItemSize={600}
+        estimatedItemSize={300}
         ListHeaderComponent={
-          <>
-            <FeedHeader
-              tags={likedTags.map((n) => ({ name: n }))}
-              onTagPress={(name) => router.push(`/tag/${encodeURIComponent(name)}` as never)}
-              onAddPress={() => router.push('/filter' as never)}
-            />
-            {blockedCount > 0 && (
-              <BlockedTagBanner
-                count={blockedCount}
-                onPress={() => router.push('/filter' as never)}
-              />
-            )}
-          </>
+          blockedCount > 0 ? (
+            <BlockedTagBanner count={blockedCount} onPress={() => router.push('/filter' as never)} />
+          ) : null
         }
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={refresh}
-            tintColor={C.accent}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.accent} />
         }
         onEndReached={loadMore}
         onEndReachedThreshold={0.6}
         contentContainerStyle={{
+          paddingTop: SP['2'],
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
         }}
         ListEmptyComponent={
@@ -127,13 +169,28 @@ export default function FeedScreen() {
           ) : (
             <EmptyState
               icon={Icon.sparkles}
-              title="まだ投稿がありません"
-              message="フィルター設定を確認するか、最初の投稿をしてみよう"
+              title={scope === 'closed' ? '好きなタグの投稿がまだありません' : 'まだ投稿がありません'}
+              message={scope === 'closed' ? '「All」に切り替えるか、好きなタグを増やしてみよう' : 'フィルター設定を確認するか、最初の投稿をしてみよう'}
               actionLabel="投稿する"
               onAction={() => router.push('/post/create' as never)}
+              tone="accent"
             />
           )
         }
+      />
+
+      <ConfirmDialog
+        visible={!!reportPostId}
+        title="この投稿を通報しますか？"
+        message="運営に通報されます。誤った情報・スパム・誹謗中傷などが対象です。"
+        confirmLabel="通報する"
+        cancelLabel="キャンセル"
+        destructive
+        onCancel={() => setReportPostId(null)}
+        onConfirm={() => {
+          if (reportPostId) report({ postId: reportPostId, reason: 'other' });
+          setReportPostId(null);
+        }}
       />
     </View>
   );
@@ -143,11 +200,7 @@ function FeedSkeleton() {
   return (
     <View>
       {Array.from({ length: 3 }).map((_, i) => (
-        <View key={i} style={{ padding: SP['4'], gap: SP['3'] }}>
-          <Skeleton width={120} height={20} />
-          <Skeleton width="100%" height={360} />
-          <Skeleton width={200} height={16} />
-        </View>
+        <PostCardSkeleton key={i} />
       ))}
     </View>
   );

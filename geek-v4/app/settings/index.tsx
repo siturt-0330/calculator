@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { View, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,6 +8,7 @@ import { BackButton } from '@/components/nav/BackButton';
 import { ListItem } from '@/components/ui/ListItem';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { Divider } from '@/components/ui/Divider';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Icon } from '@/constants/icons';
 import { C, SP } from '@/design/tokens';
 import { TABBAR } from '@/design/tabbar';
@@ -15,6 +17,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { signOut } = useAuthStore();
+  const [logoutOpen, setLogoutOpen] = useState(false);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -41,8 +44,22 @@ export default function SettingsScreen() {
         <SectionHeader title="その他" />
         <ListItem icon={Icon.info} label="このアプリについて" onPress={() => router.push('/settings/about' as never)} />
         <Divider />
-        <ListItem icon={Icon.logout} label="ログアウト" onPress={signOut} destructive />
+        <ListItem icon={Icon.logout} label="ログアウト" onPress={() => setLogoutOpen(true)} destructive />
       </ScrollView>
+
+      <ConfirmDialog
+        visible={logoutOpen}
+        title="ログアウトしますか？"
+        message="再度ログインするにはメールアドレスとパスワードが必要です。"
+        confirmLabel="ログアウト"
+        cancelLabel="キャンセル"
+        destructive
+        onCancel={() => setLogoutOpen(false)}
+        onConfirm={() => {
+          setLogoutOpen(false);
+          void signOut();
+        }}
+      />
     </View>
   );
 }

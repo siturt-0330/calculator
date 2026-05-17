@@ -1,5 +1,5 @@
 import { View, Text, KeyboardAvoidingView, Platform } from 'react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, SP } from '@/design/tokens';
@@ -7,15 +7,28 @@ import { T } from '@/design/typography';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Icon } from '@/constants/icons';
+import { useAuthStore } from '@/stores/authStore';
+import { supabase } from '@/lib/supabase';
 
 export default function NicknameScreen() {
   const [nickname, setNickname] = useState('');
+  const [saving, setSaving] = useState(false);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const UserIcon = Icon.mypage;
+  const { user } = useAuthStore();
 
-  const next = () => {
+  useEffect(() => {
+    if (user?.nickname) setNickname(user.nickname);
+  }, [user?.nickname]);
+
+  const next = async () => {
     if (nickname.trim().length < 2) return;
+    if (user) {
+      setSaving(true);
+      await supabase.from('profiles').upsert({ id: user.id, nickname: nickname.trim() }).select();
+      setSaving(false);
+    }
     router.push('/onboarding/liked-tags');
   };
 
@@ -52,6 +65,7 @@ export default function NicknameScreen() {
         <Button
           label="次へ"
           onPress={next}
+          loading={saving}
           disabled={nickname.trim().length < 2}
         />
       </View>

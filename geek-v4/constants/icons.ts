@@ -11,7 +11,7 @@ import {
   Settings, LogOut, HelpCircle, Info,
   ArrowLeft, ArrowRight, ArrowUp, ArrowDown,
   Eye, EyeOff, Edit3, Trash2, Copy,
-  Send, Smile, Hash, AtSign,
+  Send, Smile, Hash, AtSign, Phone, Gamepad2, Swords, Clock,
 } from 'lucide-react-native';
 
 export const Icon = {
@@ -27,7 +27,8 @@ export const Icon = {
   settings: Settings, logout: LogOut, help: HelpCircle, info: Info,
   arrowL: ArrowLeft, arrowR: ArrowRight, arrowU: ArrowUp, arrowD: ArrowDown,
   eye: Eye, eyeOff: EyeOff, edit: Edit3, trash: Trash2, copy: Copy,
-  send: Send, emoji: Smile, hash: Hash, at: AtSign,
+  send: Send, emoji: Smile, hash: Hash, at: AtSign, phone: Phone,
+  game: Gamepad2, swords: Swords, clock: Clock,
 } as const;
 
 export type IconName = keyof typeof Icon;

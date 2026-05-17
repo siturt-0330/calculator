@@ -8,12 +8,14 @@ export function Avatar({
   uri,
   name,
   color,
+  emoji,
   anonymous,
 }: {
   size?: number;
   uri?: string | null;
   name?: string;
   color?: string;
+  emoji?: string | null;
   anonymous?: boolean;
 }) {
   if (anonymous) {
@@ -31,6 +33,22 @@ export function Avatar({
         }}
       >
         <Text style={[T.smallM, { color: C.text3, fontSize: size * 0.3 }]}>匿</Text>
+      </View>
+    );
+  }
+  if (emoji) {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: R.full,
+          backgroundColor: color ?? C.bg3,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Text style={{ fontSize: size * 0.55 }}>{emoji}</Text>
       </View>
     );
   }

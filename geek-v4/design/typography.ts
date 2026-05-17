@@ -21,6 +21,7 @@ export const T: Record<string, TextStyle> = {
   h4:     { fontFamily: FONT.jpB,      fontSize: 16, lineHeight: 22 },
   body:   { fontFamily: FONT.jp,       fontSize: 15, lineHeight: 22 },
   bodyM:  { fontFamily: FONT.jpM,      fontSize: 15, lineHeight: 22 },
+  bodyMd: { fontFamily: FONT.jpM,      fontSize: 15, lineHeight: 22 },
   bodyB:  { fontFamily: FONT.jpB,      fontSize: 15, lineHeight: 22 },
   small:  { fontFamily: FONT.jp,       fontSize: 13, lineHeight: 18 },
   smallM: { fontFamily: FONT.jpM,      fontSize: 13, lineHeight: 18 },

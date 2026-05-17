@@ -1,5 +1,5 @@
-import { useEffect, useCallback } from 'react';
-import { View } from 'react-native';
+import { useEffect, useCallback, useState } from 'react';
+import { View, Platform } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -13,8 +13,10 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { useAppFonts } from '@/hooks/useAppFonts';
 import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useLanguageStore } from '@/stores/languageStore';
 import { ToastHost } from '@/components/ui/ToastHost';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { IntroAnimation, markIntroShown } from '@/components/ui/IntroAnimation';
 import { initAnalytics } from '@/lib/analytics';
 import { initSentry } from '@/lib/sentry';
 import { C } from '@/design/tokens';
@@ -37,19 +39,38 @@ const qc = new QueryClient({
 
 const persister = createAsyncStoragePersister({ storage: AsyncStorage });
 
+function shouldShowIntro(): boolean {
+  // 毎回ページがロードされる時に必ずイントロを再生
+  // ただし SSR 時は再生しない
+  if (Platform.OS !== 'web') return true;
+  if (typeof window === 'undefined') return false;
+  return true;
+}
+
 export default function RootLayout() {
   const fontsLoaded = useAppFonts();
   const { hydrate: hydrateAuth, hydrated: authHydrated, user } = useAuthStore();
   const { hydrate: hydrateSettings, hydrated: settingsHydrated } = useSettingsStore();
   const router = useRouter();
   const segments = useSegments();
+  const [introDone, setIntroDone] = useState<boolean>(() => !shouldShowIntro());
 
+  const hydrateLang = useLanguageStore((s) => s.hydrate);
   useEffect(() => {
     void hydrateAuth();
     void hydrateSettings();
-  }, [hydrateAuth, hydrateSettings]);
+    void hydrateLang();
+  }, [hydrateAuth, hydrateSettings, hydrateLang]);
 
-  const ready = fontsLoaded && authHydrated && settingsHydrated;
+  // ★ Safety: hydration / font 読み込みが何らかの理由で詰まっても、
+  //   2.5 秒で強制的にレンダー開始 (黒画面のまま止まるのを絶対に防ぐ)
+  const [forceReady, setForceReady] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setForceReady(true), 2500);
+    return () => clearTimeout(t);
+  }, []);
+
+  const ready = (fontsLoaded && authHydrated && settingsHydrated) || forceReady;
 
   const onLayoutRootView = useCallback(async () => {
     if (ready) await SplashScreen.hideAsync();
@@ -59,7 +80,6 @@ export default function RootLayout() {
     if (!ready || segments.length < 1) return;
     const inAuth = segments[0] === '(auth)';
     const inOnboarding = segments[0] === 'onboarding';
-    const inTabs = segments[0] === '(tabs)';
 
     if (!user) {
       if (!inAuth) router.replace('/(auth)/login');
@@ -97,6 +117,7 @@ export default function RootLayout() {
                   <Stack.Screen name="(tabs)" />
                   <Stack.Screen name="(auth)" />
                   <Stack.Screen name="onboarding" />
+                  <Stack.Screen name="onboarding/language" />
                   <Stack.Screen
                     name="post/create"
                     options={{
@@ -115,8 +136,33 @@ export default function RootLayout() {
                   />
                   <Stack.Screen name="notifications/index" />
                   <Stack.Screen name="settings/index" />
+                  <Stack.Screen name="settings/profile-edit" />
+                  <Stack.Screen name="settings/trust-score" />
+                  <Stack.Screen name="settings/plan" />
+                  <Stack.Screen name="settings/notifications" />
+                  <Stack.Screen name="settings/blocked-users" />
+                  <Stack.Screen name="settings/privacy" />
+                  <Stack.Screen name="settings/about" />
+                  <Stack.Screen name="corners/calendar" />
+                  <Stack.Screen name="corners/map" />
+                  <Stack.Screen name="corners/goods" />
+                  <Stack.Screen name="corners/friends" />
+                  <Stack.Screen name="bbs/[id]" />
+                  <Stack.Screen name="bbs/create" />
+                  <Stack.Screen name="search" />
+                  <Stack.Screen name="mypage/saved" />
+                  <Stack.Screen name="mypage/liked" />
+                  <Stack.Screen name="mypage/posts" />
+                  <Stack.Screen name="oshi/tag-graph" />
+                  <Stack.Screen name="settings/terms" />
+                  <Stack.Screen name="settings/privacy-policy" />
+                  <Stack.Screen name="settings/help" />
+                  <Stack.Screen name="settings/license" />
                 </Stack>
                 <ToastHost />
+                {!introDone && (
+                  <IntroAnimation onComplete={() => { markIntroShown(); setIntroDone(true); }} />
+                )}
               </View>
             </BottomSheetModalProvider>
           </PersistQueryClientProvider>

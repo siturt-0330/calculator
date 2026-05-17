@@ -4,8 +4,17 @@ import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { Icon } from '@/constants/icons';
 
-type State = 'normal' | 'liked' | 'blocked';
+type State = 'normal' | 'liked' | 'blocked' | 'added' | 'alias' | 'group';
 type PillSize = 'sm' | 'md';
+
+const STATE_STYLE: Record<State, { bg: string; border: string; color: string }> = {
+  normal:  { bg: C.bg3,         border: C.border,         color: C.text },
+  liked:   { bg: C.likedBg,     border: C.liked,          color: C.accentLight },
+  blocked: { bg: C.blockBg,     border: C.blockBorder,    color: C.block },
+  added:   { bg: C.sameGenreBg, border: C.sameGenreBorder, color: C.sameGenre },
+  alias:   { bg: C.sameGroupBg, border: C.sameGroupBorder, color: C.sameGroup },
+  group:   { bg: C.relatedBg,   border: C.relatedBorder,   color: C.related },
+};
 
 export function TagPill({
   name,
@@ -22,9 +31,9 @@ export function TagPill({
 }) {
   const Heart = Icon.heart;
   const Ban = Icon.block;
-  const bg = state === 'liked' ? C.likedBg : state === 'blocked' ? C.blockBg : C.bg3;
-  const border = state === 'liked' ? C.liked : state === 'blocked' ? C.blockBorder : C.border;
-  const color = state === 'liked' ? C.accentLight : state === 'blocked' ? C.block : C.text;
+  const Plus = Icon.plus;
+  const Link = Icon.shield;
+  const { bg, border, color } = STATE_STYLE[state];
 
   return (
     <PressableScale
@@ -43,8 +52,10 @@ export function TagPill({
         borderColor: border,
       }}
     >
-      {state === 'liked' && <Heart size={12} color={color} fill={color} strokeWidth={2.2} />}
-      {state === 'blocked' && <Ban size={12} color={color} strokeWidth={2.2} />}
+      {state === 'liked'   && <Heart size={12} color={color} fill={color} strokeWidth={2.2} />}
+      {state === 'blocked' && <Ban   size={12} color={color} strokeWidth={2.2} />}
+      {state === 'added'   && <Plus  size={12} color={color} strokeWidth={2.6} />}
+      {state === 'alias'   && <Link  size={12} color={color} strokeWidth={2.2} />}
       <Text style={[size === 'sm' ? T.small : T.bodyM, { color }]}>#{name}</Text>
     </PressableScale>
   );

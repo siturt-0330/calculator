@@ -1,4 +1,4 @@
-import { Pressable, type PressableProps } from 'react-native';
+import { Platform, Pressable, type PressableProps } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { PRESS_SCALE } from '@/design/motion';
@@ -19,6 +19,7 @@ export function PressableScale({ haptic, scaleValue = PRESS_SCALE, children, onP
   const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
   function triggerHaptic(type: HapticType) {
+    if (Platform.OS === 'web') return;
     try {
       switch (type) {
         case 'tap': Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); break;

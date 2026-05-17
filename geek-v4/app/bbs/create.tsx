@@ -9,7 +9,7 @@ import { T } from '@/design/typography';
 import { Button } from '@/components/ui/Button';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { Icon } from '@/constants/icons';
-import * as Haptics from 'expo-haptics';
+import { notify, Haptics } from '@/lib/haptics';
 
 export default function BBSCreateScreen() {
   const router = useRouter();
@@ -24,11 +24,11 @@ export default function BBSCreateScreen() {
     mutationFn: () => createThread(title.trim(), category.trim() || '雑談'),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bbs-threads'] });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      notify(Haptics.NotificationFeedbackType.Success);
       router.back();
     },
     onError: () => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      notify(Haptics.NotificationFeedbackType.Error);
       setError('スレッドの作成に失敗しました。');
     },
   });
@@ -36,7 +36,7 @@ export default function BBSCreateScreen() {
   const handleSubmit = async () => {
     setError('');
     if (!title.trim()) {
-      setError('タイトルを入力してください。');
+      setError('スレッドのタイトルを入力してください。');
       return;
     }
     if (title.trim().length > 50) {
@@ -128,6 +128,29 @@ export default function BBSCreateScreen() {
               },
             ]}
           />
+          {/* カテゴリプリセット */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+            {['雑談', 'アニメ', 'ゲーム', 'マンガ', '音楽', 'アイドル', 'Vtuber', '推し活', 'グルメ', 'コスプレ', 'ニュース'].map((c) => {
+              const active = category === c;
+              return (
+                <PressableScale
+                  key={c}
+                  onPress={() => setCategory(c)}
+                  haptic="select"
+                  style={{
+                    paddingHorizontal: SP['3'], paddingVertical: 6,
+                    backgroundColor: active ? C.accent : C.bg3,
+                    borderRadius: R.full,
+                    borderWidth: 1, borderColor: active ? C.accent : C.border,
+                  }}
+                >
+                  <Text style={{ fontSize: 12, color: active ? '#fff' : C.text2, fontWeight: '600' }}>
+                    {c}
+                  </Text>
+                </PressableScale>
+              );
+            })}
+          </View>
         </View>
 
         {error ? (

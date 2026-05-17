@@ -1,10 +1,11 @@
-import { View, Text, FlatList } from 'react-native';
+import { useEffect } from 'react';
+import { View, Text, FlatList, ScrollView } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
-import { fetchNotifications } from '@/lib/api/notifications';
+import { useNotifications } from '@/hooks/useNotifications';
 import { TopBar } from '@/components/nav/TopBar';
 import { BackButton } from '@/components/nav/BackButton';
-import { EmptyState } from '@/components/ui/EmptyState';
+import { PressableScale } from '@/components/ui/PressableScale';
 import { Divider } from '@/components/ui/Divider';
 import { Icon } from '@/constants/icons';
 import { C, R, SP } from '@/design/tokens';
@@ -14,10 +15,82 @@ import { TABBAR } from '@/design/tabbar';
 
 export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
-  const { data: notifications = [], isLoading } = useQuery({
-    queryKey: ['notifications'],
-    queryFn: fetchNotifications,
-  });
+  const router = useRouter();
+  const { notifications, loading: isLoading, markAllRead } = useNotifications();
+
+  // 通知画面を開いたタイミングで既読化
+  useEffect(() => {
+    void markAllRead();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!isLoading && notifications.length === 0) {
+    return (
+      <View style={{ flex: 1, backgroundColor: C.bg }}>
+        <TopBar title="通知" left={<BackButton />} />
+        <ScrollView contentContainerStyle={{ padding: SP['4'], gap: SP['4'] }}>
+          {/* ヒーロー */}
+          <View style={{ alignItems: 'center', padding: SP['6'], gap: SP['3'] }}>
+            <View style={{
+              width: 96, height: 96, borderRadius: 48,
+              backgroundColor: C.accentBg, alignItems: 'center', justifyContent: 'center',
+              borderWidth: 1, borderColor: C.accentSoft,
+            }}>
+              <Icon.bell size={44} color={C.accent} strokeWidth={1.8} />
+            </View>
+            <Text style={[T.h2, { color: C.text, textAlign: 'center' }]}>まだ通知はありません</Text>
+            <Text style={[T.body, { color: C.text2, textAlign: 'center', maxWidth: 320 }]}>
+              好きなタグの新着投稿、自分の投稿への反応などが届きます
+            </Text>
+          </View>
+
+          {/* 通知を増やすヒント */}
+          <Text style={[T.smallM, { color: C.text3, marginTop: SP['2'] }]}>通知が届くタイミング</Text>
+          <View style={{ gap: SP['2'] }}>
+            <Hint
+              emoji="💜"
+              title="好きなタグに新着があったとき"
+              cta="タグを追加"
+              onAction={() => router.push('/filter' as never)}
+              tone={C.accent}
+            />
+            <Hint
+              emoji="💬"
+              title="あなたの投稿にコメントが付いたとき"
+              cta="投稿する"
+              onAction={() => router.push('/post/create' as never)}
+              tone={C.green}
+            />
+            <Hint
+              emoji="🎉"
+              title="推しのイベント情報"
+              cta="カレンダー"
+              onAction={() => router.push('/corners/calendar' as never)}
+              tone={C.amber}
+            />
+          </View>
+
+          <PressableScale
+            onPress={() => router.push('/settings/notifications' as never)}
+            haptic="tap"
+            style={{
+              marginTop: SP['4'],
+              padding: SP['4'],
+              backgroundColor: C.bg2,
+              borderRadius: R.lg,
+              borderWidth: 1,
+              borderColor: C.border,
+              flexDirection: 'row', alignItems: 'center', gap: SP['3'],
+            }}
+          >
+            <Icon.settings size={20} color={C.text2} strokeWidth={2.2} />
+            <Text style={[T.bodyM, { color: C.text, flex: 1 }]}>通知の種類を設定する</Text>
+            <Icon.chevronR size={18} color={C.text3} strokeWidth={2.2} />
+          </PressableScale>
+        </ScrollView>
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -46,16 +119,30 @@ export default function NotificationsScreen() {
             </Text>
           </View>
         )}
-        ListEmptyComponent={
-          !isLoading ? (
-            <EmptyState
-              icon={Icon.bell}
-              title="通知はありません"
-              message="好きなタグに投稿があると通知が届きます"
-            />
-          ) : null
-        }
       />
+    </View>
+  );
+}
+
+function Hint({
+  emoji, title, cta, onAction, tone,
+}: { emoji: string; title: string; cta: string; onAction: () => void; tone: string }) {
+  return (
+    <View style={{
+      flexDirection: 'row', alignItems: 'center',
+      padding: SP['3'], backgroundColor: C.bg2,
+      borderRadius: R.lg, borderWidth: 1, borderColor: C.border,
+      gap: SP['3'],
+    }}>
+      <Text style={{ fontSize: 28 }}>{emoji}</Text>
+      <Text style={[T.smallM, { color: C.text, flex: 1 }]}>{title}</Text>
+      <PressableScale onPress={onAction} haptic="tap" style={{
+        paddingHorizontal: SP['3'], paddingVertical: SP['1'],
+        backgroundColor: tone + '22', borderRadius: R.full,
+        borderWidth: 1, borderColor: tone + '44',
+      }}>
+        <Text style={[T.caption, { color: tone, fontWeight: '600' }]}>{cta}</Text>
+      </PressableScale>
     </View>
   );
 }

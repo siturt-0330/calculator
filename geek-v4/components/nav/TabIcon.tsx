@@ -4,13 +4,13 @@ import { C } from '@/design/tokens';
 import { TABBAR } from '@/design/tabbar';
 import { Icon, type IconName } from '@/constants/icons';
 
-export type TabKey = 'home' | 'corners' | 'post' | 'bbs' | 'mypage';
+export type TabKey = 'home' | 'bbs' | 'game' | 'oshi' | 'mypage';
 
 const TAB_TO_ICON: Record<TabKey, IconName> = {
   home: 'home',
-  corners: 'corners',
-  post: 'post',
   bbs: 'bbs',
+  game: 'game',
+  oshi: 'heart',
   mypage: 'mypage',
 };
 

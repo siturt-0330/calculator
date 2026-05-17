@@ -2,7 +2,7 @@ import { View, Text, KeyboardAvoidingView, Platform, ScrollView } from 'react-na
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, SP, R } from '@/design/tokens';
+import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -16,6 +16,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
+  const [credErrorBanner, setCredErrorBanner] = useState(false);
   const { signIn } = useAuthStore();
   const { show } = useToastStore();
   const router = useRouter();
@@ -29,11 +30,43 @@ export default function LoginScreen() {
       return;
     }
     setLoading(true);
-    const { error } = await signIn(email, password);
-    setLoading(false);
-    if (error) {
-      show('ログインに失敗しました。入力内容を確認してください。', 'error');
+    setCredErrorBanner(false);
+    // 最終安全タイマー: 15秒経っても応答が無ければ loading 解除
+    const safety = setTimeout(() => {
+      setLoading(false);
+      show('応答がありません。もう一度お試しください。', 'error');
+    }, 15000);
+    let result;
+    try {
+      result = await signIn(email.trim(), password);
+    } finally {
+      clearTimeout(safety);
+      setLoading(false);
     }
+    if (result.error) {
+      if (result.error.includes('Invalid login credentials')) {
+        // 未登録 or パスワード違い → 専用バナー表示
+        setCredErrorBanner(true);
+        show('アカウントが見つかりません。新規登録してください。', 'warn');
+      } else if (result.error.includes('Email not confirmed')) {
+        show('確認メールのリンクをクリックしてからログインしてください。', 'error');
+      } else if (result.error.includes('network') || result.error.includes('Network')) {
+        show('ネットワークエラー。接続を確認してください。', 'error');
+      } else {
+        show('ログインに失敗しました: ' + result.error, 'error');
+      }
+      return;
+    }
+    if (result.next === 'onboarding') {
+      router.replace('/onboarding');
+    } else {
+      router.replace('/(tabs)/feed');
+    }
+  };
+
+  const goToSignup = () => {
+    // 入力内容を保持したまま signup へ
+    router.push({ pathname: '/(auth)/signup', params: { email: email.trim() } } as never);
   };
 
   return (
@@ -51,10 +84,36 @@ export default function LoginScreen() {
         }}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={{ marginBottom: SP['10'] }}>
+        <View style={{ marginBottom: SP['6'] }}>
           <Text style={[T.display, { color: C.text, marginBottom: SP['2'] }]}>Geek</Text>
-          <Text style={[T.body, { color: C.text2 }]}>好きを、匿名で、安心して続ける</Text>
+          <Text style={[T.body, { color: C.text2 }]}>好きを、匿名で、安心して続ける。</Text>
         </View>
+
+        {/* 未登録時バナー */}
+        {credErrorBanner && (
+          <View style={{
+            padding: SP['4'],
+            backgroundColor: C.amberBg,
+            borderRadius: R.lg,
+            borderWidth: 1,
+            borderColor: C.amber + '88',
+            marginBottom: SP['4'],
+            gap: SP['3'],
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+              <Text style={{ fontSize: 24 }}>👋</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[T.bodyMd, { color: C.amber, fontWeight: '700' }]}>
+                  アカウントが見つかりません
+                </Text>
+                <Text style={[T.small, { color: C.text2, marginTop: 2 }]}>
+                  メール/パスワードが間違っているか、まだ登録していません。
+                </Text>
+              </View>
+            </View>
+            <Button label="🆕 新規登録に進む" onPress={goToSignup} haptic="confirm" />
+          </View>
+        )}
 
         <View style={{ gap: SP['4'], marginBottom: SP['6'] }}>
           <Input

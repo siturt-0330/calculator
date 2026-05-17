@@ -1,38 +1,51 @@
 import { View, Text, RefreshControl } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { FlashList } from '@shopify/flash-list';
+import { LinearGradient } from 'expo-linear-gradient';
 import { fetchPosts } from '@/lib/api/posts';
-import { useLike } from '@/hooks/useLike';
+import { getTagCommunity } from '@/lib/api/subscriptions';
+import { useLike, useLikes } from '@/hooks/useLike';
+import { useConcern, useConcerns } from '@/hooks/useConcern';
 import { useSave } from '@/hooks/useSave';
 import { useShare } from '@/hooks/useShare';
+import { useReactions, useReactionToggle } from '@/hooks/useReactions';
 import { useTagFilterStore } from '@/stores/tagFilterStore';
 import { useToastStore } from '@/stores/toastStore';
-import { C, SP } from '@/design/tokens';
+import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { Spinner } from '@/components/ui/Spinner';
 import { AnonPostCard } from '@/components/feed/AnonPostCard';
+import { TagRelations } from '@/components/tag/TagRelations';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/constants/icons';
 import type { Post } from '@/types/models';
-import * as Haptics from 'expo-haptics';
+import { impact, Haptics } from '@/lib/haptics';
 
 export default function TagDetailScreen() {
   const { name } = useLocalSearchParams<{ name: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { likedTags, blockedTags, addLiked, removeLiked, addBlocked, removeBlocked } = useTagFilterStore();
+  const { blockedTags, addBlocked, removeBlocked } = useTagFilterStore();
   const { show } = useToastStore();
   const { toggle: like } = useLike();
+  const { toggle: concern } = useConcern();
   const { toggle: save } = useSave();
+  const { toggle: react } = useReactionToggle();
   const { share } = useShare();
   const BackIcon = Icon.arrowL;
-  const HeartIcon = Icon.heart;
   const BlockIcon = Icon.block;
+  const Users = Icon.friends;
 
-  const isLiked = likedTags.includes(name);
   const isBlocked = blockedTags.includes(name);
+
+  const { data: community } = useQuery({
+    queryKey: ['tag-community', name],
+    queryFn: () => getTagCommunity(name),
+    staleTime: 60_000,
+  });
 
   const {
     data,
@@ -43,105 +56,115 @@ export default function TagDetailScreen() {
     refetch,
   } = useInfiniteQuery({
     queryKey: ['tag-feed', name],
-    queryFn: ({ pageParam }) => fetchPosts({ cursor: pageParam as string | undefined, likedTags: [], blockedTags: [], filterTags: [name] }),
+    queryFn: ({ pageParam }) =>
+      fetchPosts({
+        cursor: pageParam as string | undefined,
+        likedTags: [],
+        blockedTags: [],
+        filterTags: [name],
+        sort: 'hot',
+      }),
     initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => last.nextCursor,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 30_000,
   });
 
-  const posts = data?.pages.flatMap((p) => p.posts) ?? [];
-
-  const handleLikeTag = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (isLiked) {
-      removeLiked(name);
-      show(`「${name}」のお気に入りを解除しました`, 'success');
-    } else {
-      addLiked(name);
-      show(`「${name}」をお気に入りに追加しました`, 'success');
-    }
-  };
+  const posts: Post[] = data?.pages.flatMap((p) => p.posts) ?? [];
+  const postIds = posts.map((p) => p.id);
+  const { data: myLikes = {} } = useLikes(postIds);
+  const { data: myConcerns = {} } = useConcerns(postIds);
+  const { data: reactionsByPost } = useReactions(postIds);
 
   const handleBlockTag = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    impact(Haptics.ImpactFeedbackStyle.Medium);
     if (isBlocked) {
       removeBlocked(name);
       show(`「${name}」のブロックを解除しました`, 'success');
     } else {
       addBlocked(name);
-      show(`「${name}」をブロックしました`, 'success', { undoLabel: 'undo', onUndo: () => removeBlocked(name) });
+      show(`「${name}」をブロックしました`, 'success', { undoLabel: '元に戻す', onUndo: () => removeBlocked(name) });
     }
   };
 
   const renderPost = ({ item }: { item: Post }) => (
     <AnonPostCard
       post={item}
+      liked={!!myLikes[item.id]}
+      concerned={!!myConcerns[item.id]}
+      reactions={reactionsByPost[item.id] ?? []}
       onLike={() => like(item.id)}
-      onComment={() => router.push(`/post/${item.id}`)}
+      onConcern={() => concern(item.id, !!myConcerns[item.id])}
+      onComment={() => router.push(`/post/${item.id}` as never)}
       onSave={() => save(item.id)}
-      onShare={() => share(`Geek - ${name}`, `geek://post/${item.id}`)}
-      onTagPress={(t) => router.push(`/tag/${t}`)}
+      onShare={() => share(`Geek の投稿 #${name}`, `/post/${item.id}`)}
+      onTagPress={(t) => router.push(`/tag/${encodeURIComponent(t)}` as never)}
       onMore={() => {}}
+      onReact={(meme) => react(item.id, meme)}
     />
   );
 
+  const bannerColor = community?.banner_color ?? C.accent;
+
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* ヘッダー */}
-      <View
+      {/* コミュニティバナー */}
+      <LinearGradient
+        colors={[bannerColor + 'CC', C.bg]}
         style={{
           paddingTop: insets.top + SP['2'],
-          paddingBottom: SP['3'],
           paddingHorizontal: SP['4'],
-          borderBottomWidth: 1,
-          borderBottomColor: C.border,
+          paddingBottom: SP['4'],
         }}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: SP['3'] }}>
           <PressableScale onPress={() => router.back()} haptic="tap" style={{ padding: SP['2'] }}>
-            <BackIcon size={24} color={C.text} strokeWidth={2.2} />
+            <BackIcon size={24} color="#fff" strokeWidth={2.2} />
           </PressableScale>
-          <Text style={[T.h3, { color: C.text, marginLeft: SP['3'], flex: 1 }]}>#{name}</Text>
-        </View>
-        <View style={{ flexDirection: 'row', gap: SP['3'] }}>
-          <PressableScale
-            onPress={handleLikeTag}
-            haptic="select"
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: SP['2'],
-              paddingHorizontal: SP['4'],
-              paddingVertical: SP['2'],
-              borderRadius: 999,
-              backgroundColor: isLiked ? C.accentSoft : C.bg3,
-            }}
-          >
-            <HeartIcon size={16} color={isLiked ? C.accent : C.text3} strokeWidth={2.2} />
-            <Text style={[T.smallM, { color: isLiked ? C.accent : C.text3 }]}>
-              {isLiked ? 'お気に入り済み' : 'お気に入り'}
-            </Text>
-          </PressableScale>
-          <PressableScale
-            onPress={handleBlockTag}
-            haptic="select"
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: SP['2'],
-              paddingHorizontal: SP['4'],
-              paddingVertical: SP['2'],
-              borderRadius: 999,
-              backgroundColor: isBlocked ? C.blockBg : C.bg3,
-            }}
-          >
-            <BlockIcon size={16} color={isBlocked ? C.block : C.text3} strokeWidth={2.2} />
-            <Text style={[T.smallM, { color: isBlocked ? C.block : C.text3 }]}>
+          <View style={{ flex: 1 }} />
+          <PressableScale onPress={handleBlockTag} haptic="select" style={{
+            flexDirection: 'row', alignItems: 'center', gap: 4,
+            paddingHorizontal: SP['3'], paddingVertical: SP['1'],
+            borderRadius: R.full,
+            backgroundColor: isBlocked ? 'rgba(255,107,122,0.18)' : 'rgba(0,0,0,0.25)',
+            borderWidth: 1, borderColor: isBlocked ? '#FF6B7A' : 'rgba(255,255,255,0.2)',
+          }}>
+            <BlockIcon size={14} color={isBlocked ? '#FF6B7A' : '#ffffffcc'} strokeWidth={2.2} />
+            <Text style={{ fontSize: 11, color: isBlocked ? '#FF6B7A' : '#ffffffcc', fontWeight: '700' }}>
               {isBlocked ? 'ブロック中' : 'ブロック'}
             </Text>
           </PressableScale>
         </View>
-      </View>
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['3'] }}>
+          <View style={{
+            width: 64,
+            height: 64,
+            borderRadius: 32,
+            backgroundColor: bannerColor,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderWidth: 3,
+            borderColor: C.bg,
+          }}>
+            <Text style={{ fontSize: 28, color: '#fff', fontWeight: '700' }}>#</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[T.h1, { color: C.text }]}>{name}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], marginTop: 2 }}>
+              <Users size={14} color={C.text2} strokeWidth={2.2} />
+              <Text style={[T.small, { color: C.text2 }]}>
+                {(community?.post_count ?? 0).toLocaleString()} 投稿
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {community?.description && (
+          <Text style={[T.small, { color: C.text2, marginTop: SP['3'] }]}>
+            {community.description}
+          </Text>
+        )}
+      </LinearGradient>
 
       {isLoading ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
@@ -152,16 +175,28 @@ export default function TagDetailScreen() {
           data={posts}
           keyExtractor={(item) => item.id}
           renderItem={renderPost}
-          estimatedItemSize={600}
+          estimatedItemSize={300}
           onEndReached={() => hasNextPage && fetchNextPage()}
           onEndReachedThreshold={0.5}
           refreshControl={
             <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={C.accent} />
           }
-          ListEmptyComponent={
-            <View style={{ padding: SP['12'], alignItems: 'center' }}>
-              <Text style={[T.body, { color: C.text3 }]}>まだ投稿がありません</Text>
+          ListHeaderComponent={
+            <View style={{ padding: SP['3'] }}>
+              <TagRelations
+                tagName={name}
+                onTagPress={(t) => router.push(`/tag/${encodeURIComponent(t)}` as never)}
+              />
             </View>
+          }
+          ListEmptyComponent={
+            <EmptyState
+              icon={Icon.sparkles}
+              title="まだ投稿がありません"
+              message={`#${name} に最初の投稿をしてみよう`}
+              actionLabel="投稿する"
+              onAction={() => router.push('/post/create' as never)}
+            />
           }
         />
       )}
