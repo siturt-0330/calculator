@@ -2,12 +2,19 @@ import { supabase } from '@/lib/supabase';
 import type { BBSThread, BBSReply, Comment } from '@/types/models';
 
 export async function fetchThread(id: string): Promise<BBSThread | null> {
+  if (!id) return null;
+  // UUID 形式チェック (古い URL や壊れた ID への対策)
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRe.test(id)) return null;
   const { data, error } = await supabase
     .from('bbs_threads')
     .select('id, title, category, replies_count, last_reply_at, created_at')
     .eq('id', id)
     .maybeSingle();
-  if (error) return null;
+  if (error) {
+    console.warn('[fetchThread] error:', error.message);
+    throw error;
+  }
   return data as BBSThread | null;
 }
 

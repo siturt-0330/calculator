@@ -6,10 +6,11 @@ import { supabase } from '@/lib/supabase';
 export function useBBS() {
   const qc = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isRefetching, refetch } = useQuery({
     queryKey: ['bbs-threads'],
     queryFn: fetchThreads,
-    staleTime: 60_000,
+    staleTime: 30_000,
+    refetchOnMount: 'always',  // タブを開き直すたびに最新を取得
   });
 
   const { mutateAsync: create } = useMutation({
@@ -41,6 +42,8 @@ export function useBBS() {
   return {
     threads: data ?? [],
     loading: isLoading,
+    refreshing: isRefetching,
+    refresh: refetch,
     create,
   };
 }

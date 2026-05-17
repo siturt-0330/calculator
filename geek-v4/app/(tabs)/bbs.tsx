@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { View, Text, FlatList, ScrollView, TextInput, useWindowDimensions } from 'react-native';
+import { View, Text, FlatList, ScrollView, TextInput, useWindowDimensions, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBBS } from '@/hooks/useBBS';
@@ -31,7 +31,7 @@ export default function BBSScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const { threads, loading } = useBBS();
+  const { threads, loading, refreshing, refresh } = useBBS();
 
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -225,6 +225,9 @@ export default function BBSScreen() {
       <FlatList
         data={filtered}
         keyExtractor={({ item }) => item.id}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.accent} />
+        }
         contentContainerStyle={{
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
           alignItems: 'center',

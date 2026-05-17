@@ -76,17 +76,26 @@ export default function BBSThreadScreen() {
   }
 
   if (error || !thread) {
+    const isNotFound = !error && !thread;
+    const errMsg = error instanceof Error ? error.message : String(error ?? '');
     return (
       <View style={{ flex: 1, backgroundColor: C.bg }}>
         <Header insets={insets} router={router} BackIcon={BackIcon} />
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: SP['6'], gap: SP['4'] }}>
-          <Text style={{ fontSize: 56 }}>📭</Text>
+          <Text style={{ fontSize: 56 }}>{isNotFound ? '🔍' : '📭'}</Text>
           <Text style={[T.h3, { color: C.text, textAlign: 'center' }]}>
-            スレッドを読み込めませんでした
+            {isNotFound ? 'このスレッドは削除されました' : 'スレッドを読み込めませんでした'}
           </Text>
           <Text style={[T.body, { color: C.text2, textAlign: 'center' }]}>
-            通信エラーまたはスレッドが削除されている可能性があります。
+            {isNotFound
+              ? '掲示板一覧から最新のスレッドを開いてください'
+              : '通信エラーまたはアクセス権限の問題かもしれません'}
           </Text>
+          {errMsg && !isNotFound && (
+            <Text style={[T.caption, { color: C.text3, textAlign: 'center', maxWidth: 320 }]}>
+              {errMsg}
+            </Text>
+          )}
           <View style={{ flexDirection: 'row', gap: SP['3'] }}>
             <PressableScale
               onPress={() => refresh()}
@@ -96,11 +105,11 @@ export default function BBSThreadScreen() {
               <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>再試行</Text>
             </PressableScale>
             <PressableScale
-              onPress={() => router.back()}
+              onPress={() => router.replace('/(tabs)/bbs' as never)}
               haptic="tap"
               style={{ paddingHorizontal: SP['5'], paddingVertical: SP['3'], backgroundColor: C.bg3, borderRadius: R.full, borderWidth: 1, borderColor: C.border }}
             >
-              <Text style={[T.smallM, { color: C.text }]}>戻る</Text>
+              <Text style={[T.smallM, { color: C.text }]}>掲示板に戻る</Text>
             </PressableScale>
           </View>
         </View>

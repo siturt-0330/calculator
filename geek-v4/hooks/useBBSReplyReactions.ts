@@ -25,7 +25,8 @@ export function useBBSReplyReactions(replyIds: string[]) {
   });
 
   useEffect(() => {
-    if (replyIds.length === 0) return;
+    if (!sortedKey) return;
+    const idSet = new Set(sortedKey.split(','));
     const channel = supabase
       .channel(`bbs-reply-reactions:${sortedKey.slice(0, 64)}`)
       .on(
@@ -33,14 +34,14 @@ export function useBBSReplyReactions(replyIds: string[]) {
         { event: '*', schema: 'public', table: 'bbs_reply_reactions' },
         (payload) => {
           const row = (payload.new ?? payload.old) as { reply_id?: string } | null;
-          if (row?.reply_id && replyIds.includes(row.reply_id)) {
+          if (row?.reply_id && idSet.has(row.reply_id)) {
             qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
           }
         },
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [sortedKey, replyIds, qc]);
+  }, [sortedKey, qc]);
 
   return { data: (q.data ?? {}) as ReactionsByReply, isLoading: q.isLoading };
 }
