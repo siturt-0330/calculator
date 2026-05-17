@@ -159,7 +159,7 @@ export default function BlockedTagsSettingsScreen() {
           </View>
         )}
 
-        {/* デフォルトタグ */}
+        {/* デフォルトタグ (常に全71個表示、active/inactive をトグル可能) */}
         <View style={{ gap: SP['2'] }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Text style={{ fontSize: 12 }}>🛡️</Text>
@@ -169,26 +169,45 @@ export default function BlockedTagsSettingsScreen() {
             {defaultBlocked.length < DEFAULT_BLOCKED_TAGS.length && (
               <PressableScale onPress={restoreDefaults} haptic="confirm">
                 <Text style={[T.caption, { color: C.accent, fontWeight: '700' }]}>
-                  デフォルトに戻す
+                  全部ブロックに戻す
                 </Text>
               </PressableScale>
             )}
           </View>
           <Text style={[T.caption, { color: C.text3 }]}>
-            タップで個別に解除できます
+            赤=ブロック中 / グレー=解除済み。タップで切り替えられます
           </Text>
-          {defaultBlocked.length === 0 ? (
-            <Text style={[T.small, { color: C.text3 }]}>すべて解除済みです</Text>
-          ) : (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-              {defaultBlocked.map((t) => (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
+            {DEFAULT_BLOCKED_TAGS.map((t) => {
+              const active = blockedTags.includes(t);
+              return active ? (
                 <TagPill key={t} name={t} state="blocked" onPress={() => {
                   removeBlocked(t);
                   show(`「${t}」のブロックを解除`, 'info', { undoLabel: '元に戻す', onUndo: () => addBlocked(t) });
                 }} />
-              ))}
-            </View>
-          )}
+              ) : (
+                <PressableScale
+                  key={t}
+                  onPress={() => {
+                    addBlocked(t);
+                    show(`「${t}」をブロック`, 'success');
+                  }}
+                  haptic="select"
+                  style={{
+                    paddingHorizontal: SP['3'],
+                    paddingVertical: 4,
+                    borderRadius: R.full,
+                    backgroundColor: 'transparent',
+                    borderWidth: 1,
+                    borderColor: C.border,
+                    opacity: 0.5,
+                  }}
+                >
+                  <Text style={[T.small, { color: C.text3 }]}>#{t}</Text>
+                </PressableScale>
+              );
+            })}
+          </View>
         </View>
 
         {/* 関連ブロック候補 */}
