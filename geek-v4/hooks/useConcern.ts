@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addConcern, getMyConcerns, removeConcern } from '@/lib/api/concerns';
 import { useToastStore } from '@/stores/toastStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 
 export function useConcerns(postIds: string[]) {
   return useQuery({
@@ -14,11 +15,12 @@ export function useConcerns(postIds: string[]) {
 export function useConcern() {
   const qc = useQueryClient();
   const { show } = useToastStore();
+  const concernsPrivate = useSettingsStore((s) => s.concernsPrivate);
 
   const { mutateAsync } = useMutation({
     mutationFn: async ({ postId, current }: { postId: string; current: boolean }) => {
       if (current) await removeConcern(postId);
-      else await addConcern(postId, 'other');
+      else await addConcern(postId, 'other', concernsPrivate);
     },
     onMutate: async ({ postId, current }) => {
       await qc.cancelQueries({ queryKey: ['my-concerns'] });
@@ -47,7 +49,16 @@ export function useConcern() {
       });
     },
     onSuccess: (_d, { current }) => {
-      show(current ? '「気になる」を取り消しました' : 'マークしました。多くの人が気になると評価が下がります', 'info');
+      if (current) {
+        show('「気になる」を取り消しました', 'info');
+      } else {
+        show(
+          concernsPrivate
+            ? 'こっそりマーク済み (投稿主には届きません)'
+            : 'マーク済み。多くの人が気になると評価に影響します',
+          'info',
+        );
+      }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['my-concerns'] });

@@ -17,6 +17,7 @@ import { useLanguageStore } from '@/stores/languageStore';
 import { ToastHost } from '@/components/ui/ToastHost';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { IntroAnimation, markIntroShown } from '@/components/ui/IntroAnimation';
+import { OfflineBanner } from '@/components/ui/OfflineBanner';
 import { initAnalytics } from '@/lib/analytics';
 import { initSentry } from '@/lib/sentry';
 import { C } from '@/design/tokens';
@@ -106,6 +107,7 @@ export default function RootLayout() {
             <BottomSheetModalProvider>
               <View style={{ flex: 1, backgroundColor: C.bg }}>
                 <StatusBar style="light" />
+                <OfflineBanner />
                 <Stack
                   screenOptions={{
                     headerShown: false,

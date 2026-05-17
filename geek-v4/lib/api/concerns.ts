@@ -18,13 +18,17 @@ export async function getMyConcerns(postIds: string[]): Promise<Record<string, b
   return map;
 }
 
-export async function addConcern(postId: string, reason: ConcernReason = 'other'): Promise<void> {
+export async function addConcern(
+  postId: string,
+  reason: ConcernReason = 'other',
+  isPrivate = true,
+): Promise<void> {
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) throw new Error('Not authenticated');
   await supabase
     .from('concerns')
-    .insert({ user_id: userId, post_id: postId, reason })
+    .insert({ user_id: userId, post_id: postId, reason, is_private: isPrivate })
     .select();
 }
 

@@ -8,6 +8,7 @@ type Settings = {
   notifyFollow: boolean;
   notifyEvent: boolean;
   reduceMotion: boolean;
+  concernsPrivate: boolean;  // true: 気になるをこっそり付ける (投稿主に届かない)
 };
 
 const DEFAULTS: Settings = {
@@ -17,6 +18,7 @@ const DEFAULTS: Settings = {
   notifyFollow: true,
   notifyEvent: true,
   reduceMotion: false,
+  concernsPrivate: true,
 };
 
 const KEY = 'geek:settings';
@@ -51,6 +53,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       notifyFollow: state.notifyFollow,
       notifyEvent: state.notifyEvent,
       reduceMotion: state.reduceMotion,
+      concernsPrivate: state.concernsPrivate,
     };
     AsyncStorage.setItem(KEY, JSON.stringify(toSave)).catch(() => {});
   },

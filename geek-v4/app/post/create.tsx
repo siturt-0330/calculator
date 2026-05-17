@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -38,6 +39,51 @@ export default function CreatePost() {
   const [sourceUrl, setSourceUrl] = useState('');
   const [isPublic, setIsPublic] = useState(true);
   const [posting, setPosting] = useState(false);
+
+  // 下書き自動保存
+  const DRAFT_KEY = 'geek:post_draft_v1';
+  const draftRestored = useRef(false);
+  useEffect(() => {
+    if (draftRestored.current) return;
+    draftRestored.current = true;
+    void AsyncStorage.getItem(DRAFT_KEY).then((raw) => {
+      if (!raw) return;
+      try {
+        const d = JSON.parse(raw) as {
+          content?: string; tags?: string[]; sourceUrl?: string;
+          kind?: PostKind; anonymous?: boolean; isPublic?: boolean;
+        };
+        const hasContent = (d.content && d.content.trim().length > 0) || (d.tags && d.tags.length > 0) || (d.sourceUrl && d.sourceUrl.length > 0);
+        if (!hasContent) return;
+        setContent(d.content ?? '');
+        setTags(d.tags ?? []);
+        setSourceUrl(d.sourceUrl ?? '');
+        setKind((d.kind ?? 'opinion') as PostKind);
+        setAnonymous(d.anonymous ?? true);
+        setIsPublic(d.isPublic ?? true);
+        show('下書きを復元しました', 'info', { undoLabel: '破棄', onUndo: () => {
+          setContent(''); setTags([]); setSourceUrl('');
+          setKind('opinion'); setAnonymous(true); setIsPublic(true);
+          void AsyncStorage.removeItem(DRAFT_KEY);
+        }});
+      } catch {}
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // 変更があるたびに draft を保存 (debounce 500ms)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const hasContent = content.trim() || tags.length > 0 || sourceUrl.trim();
+      if (!hasContent) {
+        void AsyncStorage.removeItem(DRAFT_KEY);
+        return;
+      }
+      void AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({
+        content, tags, sourceUrl, kind, anonymous, isPublic,
+      }));
+    }, 500);
+    return () => clearTimeout(t);
+  }, [content, tags, sourceUrl, kind, anonymous, isPublic]);
 
   const pickImage = async () => {
     const r = await ImagePicker.launchImageLibraryAsync({
@@ -102,6 +148,8 @@ export default function CreatePost() {
       });
       hap.success();
       show('投稿しました', 'success');
+      // 成功 → draft 削除
+      void AsyncStorage.removeItem(DRAFT_KEY);
       router.back();
     } catch (e: unknown) {
       hap.error();

@@ -12,6 +12,8 @@ import { Avatar } from '@/components/ui/Avatar';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { NotificationBadge } from '@/components/ui/NotificationBadge';
+import { ActivitySummary } from '@/components/mypage/ActivitySummary';
+import { useFeatureFlag } from '@/hooks/useFeatureFlag';
 import { Icon } from '@/constants/icons';
 import { C, GRAD, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
@@ -23,6 +25,7 @@ export default function MypageScreen() {
   const { user, signOut } = useAuthStore();
   const { likedTags } = useTagFilter();
   const { unreadCount } = useNotifications();
+  const showActivity = useFeatureFlag('profile_summary');
   const [logoutOpen, setLogoutOpen] = useState(false);
 
   const { data: stats } = useQuery({
@@ -157,6 +160,9 @@ export default function MypageScreen() {
           <StatDivider />
           <StatItem value={trustScore} label="信頼" color={trustScore >= 70 ? C.green : trustScore >= 40 ? C.amber : C.red} />
         </View>
+
+        {/* 今週の活動サマリー */}
+        {showActivity && <ActivitySummary />}
 
 
         {/* 好きタグ（コミュニティ） */}

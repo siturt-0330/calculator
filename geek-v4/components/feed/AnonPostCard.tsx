@@ -13,6 +13,9 @@ import { ProgressiveImage } from '@/components/ui/ProgressiveImage';
 import { DoubleTapHeart } from '@/components/ui/DoubleTapHeart';
 import { TagPill } from '@/components/tag/TagPill';
 import { AddTagInline } from '@/components/tag/AddTagInline';
+import { MarkdownText } from '@/components/ui/MarkdownText';
+import { LinkPreviewCard } from './LinkPreviewCard';
+import { useFeatureFlag } from '@/hooks/useFeatureFlag';
 import { Avatar } from '@/components/ui/Avatar';
 import { PostKindBadge } from './PostKindBadge';
 import { TrustBadge } from '@/components/ui/TrustBadge';
@@ -74,6 +77,11 @@ export function AnonPostCard({
   const [memePickerOpen, setMemePickerOpen] = useState(false);
   const reactionsList = reactions;
   const myReactionsForPost = reactions.filter((r) => r.mine).map((r) => r.meme);
+
+  // Feature flags
+  const useMarkdown = useFeatureFlag('markdown_render');
+  const useOgPreview = useFeatureFlag('og_preview');
+  const useQuickReaction = useFeatureFlag('quick_reaction');
 
   // 翻訳
   const { lang, autoTranslate } = useLanguageStore();
@@ -181,11 +189,23 @@ export function AnonPostCard({
       {/* 本文 */}
       {post.content ? (
         <View>
-          <PressableScale onPress={onComment} haptic="tap">
+          <PressableScale
+            onPress={onComment}
+            onLongPress={useQuickReaction ? () => setMemePickerOpen(true) : undefined}
+            haptic="tap"
+          >
             <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'], paddingBottom: SP['1'] }}>
-              <Text style={[T.body, { color: C.text, lineHeight: 22 }]} numberOfLines={hasMedia ? 3 : 8}>
-                {displayContent}
-              </Text>
+              {useMarkdown ? (
+                <MarkdownText
+                  text={displayContent}
+                  style={[T.body, { color: C.text, lineHeight: 22 }]}
+                  numberOfLines={hasMedia ? 3 : 8}
+                />
+              ) : (
+                <Text style={[T.body, { color: C.text, lineHeight: 22 }]} numberOfLines={hasMedia ? 3 : 8}>
+                  {displayContent}
+                </Text>
+              )}
               {isShowingTranslation && (
                 <View style={{
                   marginTop: SP['1'],
@@ -250,20 +270,24 @@ export function AnonPostCard({
         </View>
       ) : null}
 
-      {/* 出典 */}
+      {/* 出典 — OG preview flag が ON なら LinkPreviewCard、OFF なら従来 */}
       {post.source_url && (
-        <PressableScale onPress={openSource} haptic="tap" style={{
-          marginHorizontal: SP['4'], marginTop: SP['2'],
-          paddingHorizontal: SP['3'], paddingVertical: SP['2'],
-          backgroundColor: C.bg3, borderRadius: R.md,
-          borderWidth: 1, borderColor: C.border,
-          flexDirection: 'row', alignItems: 'center', gap: SP['2'],
-        }}>
-          <Text style={{ fontSize: 14 }}>🔗</Text>
-          <Text style={[T.caption, { color: C.text2, flex: 1 }]} numberOfLines={1}>
-            出典: {shortHost(post.source_url)}
-          </Text>
-        </PressableScale>
+        useOgPreview ? (
+          <LinkPreviewCard url={post.source_url} />
+        ) : (
+          <PressableScale onPress={openSource} haptic="tap" style={{
+            marginHorizontal: SP['4'], marginTop: SP['2'],
+            paddingHorizontal: SP['3'], paddingVertical: SP['2'],
+            backgroundColor: C.bg3, borderRadius: R.md,
+            borderWidth: 1, borderColor: C.border,
+            flexDirection: 'row', alignItems: 'center', gap: SP['2'],
+          }}>
+            <Text style={{ fontSize: 14 }}>🔗</Text>
+            <Text style={[T.caption, { color: C.text2, flex: 1 }]} numberOfLines={1}>
+              出典: {shortHost(post.source_url)}
+            </Text>
+          </PressableScale>
+        )
       )}
 
       {/* タグ群（2つ目以降 + 他人が追加したタグ + 追加ボタン） */}
