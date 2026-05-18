@@ -18,6 +18,7 @@ import { useTagFilterStore } from '@/stores/tagFilterStore';
 import { ToastHost } from '@/components/ui/ToastHost';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { IntroAnimation, markIntroShown } from '@/components/ui/IntroAnimation';
+import { useIntroStore } from '@/stores/introStore';
 import { OfflineBanner } from '@/components/ui/OfflineBanner';
 import { FeedbackFAB } from '@/components/feedback/FeedbackFAB';
 import { useOfflineQueueProcessor } from '@/hooks/useOfflineQueueProcessor';
@@ -60,6 +61,25 @@ export default function RootLayout() {
   const router = useRouter();
   const segments = useSegments();
   const [introDone, setIntroDone] = useState<boolean>(() => !shouldShowIntro());
+  // 設定 → イントロを再生 から呼ばれる。replayKey が増えるたびに IntroAnimation を再マウント。
+  const introReplayKey = useIntroStore((s) => s.replayKey);
+  const introReplaying = useIntroStore((s) => s.playing);
+  const finishIntroReplay = useIntroStore((s) => s.finish);
+  const playIntro = useIntroStore((s) => s.play);
+
+  // Web のみ: "I" キー押下でイントロ再生 (ログイン前でも何度でも見られるショートカット)
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const onKey = (e: KeyboardEvent) => {
+      // 入力中の textarea/input には反応させない
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return;
+      if (e.key === 'i' || e.key === 'I') playIntro();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [playIntro]);
 
   const hydrateLang = useLanguageStore((s) => s.hydrate);
   const hydrateTagFilter = useTagFilterStore((s) => s.hydrate);
@@ -172,8 +192,16 @@ export default function RootLayout() {
                 </Stack>
                 <ToastHost />
                 <FeedbackFAB />
-                {!introDone && (
+                {/* 初回起動時のイントロ */}
+                {!introDone && !introReplaying && (
                   <IntroAnimation onComplete={() => { markIntroShown(); setIntroDone(true); }} />
+                )}
+                {/* 設定からの「再生」リクエスト — key を変えて強制リマウント */}
+                {introReplaying && (
+                  <IntroAnimation
+                    key={introReplayKey}
+                    onComplete={finishIntroReplay}
+                  />
                 )}
               </View>
             </BottomSheetModalProvider>
