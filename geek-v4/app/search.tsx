@@ -28,6 +28,9 @@ import { useLanguageStore } from '@/stores/languageStore';
 import { useSavedSearches, useCreateSavedSearch, useDeleteSavedSearch } from '@/hooks/useSavedSearches';
 import { searchTags as searchTagsV2 } from '@/lib/search/tagSearchV2';
 import { useTagSearchV3 } from '@/hooks/useTagSearchV3';
+import { useSearchClickStore } from '@/stores/searchClickStore';
+import { generateRelatedQueries } from '@/lib/search/relatedSearches';
+import { classifyIntent, intentEmoji, intentLabel } from '@/lib/search/queryIntent';
 import { expandWithTagGraph } from '@/lib/utils/searchAlgo';
 
 type BBSResult = { id: string; title: string; category: string; replies_count: number; created_at: string };
@@ -289,8 +292,28 @@ export default function SearchScreen() {
     return findClosest(kw, allTagsQ.data, 0.55);
   }, [rankedTags, debounced, parsedQuery, allTagsQ.data]);
 
-  // オートコンプリート: V3 エンジン (N-gram + PMI + 適応的ウェイト + トレンドブースト)
-  const { search: tagSearchV3, predict: predictV3 } = useTagSearchV3();
+  // オートコンプリート: V3 エンジン
+  const { ctx: v3Ctx, search: tagSearchV3, predict: predictV3 } = useTagSearchV3();
+  const recordClick = useSearchClickStore((s) => s.record);
+  const clickStats = useSearchClickStore((s) => s.queryToTagCount);
+  const recentInLastHour = useSearchHistoryStore((s) => s.recentInLastHour);
+
+  // クエリ Intent
+  const queryIntent = useMemo(() => (debounced ? classifyIntent(debounced) : null), [debounced]);
+
+  // 関連検索 (Google "Related searches")
+  const relatedQueries = useMemo(() => {
+    if (!debounced.trim()) return [];
+    return generateRelatedQueries(debounced, {
+      nodes: v3Ctx.nodes,
+      cooccur: v3Ctx.cooccur,
+      embeddings: v3Ctx.embeddings,
+      clickStats,
+    }, 6);
+  }, [debounced, v3Ctx.nodes, v3Ctx.cooccur, v3Ctx.embeddings, clickStats]);
+
+  // 直近1時間に検索したクエリ
+  const hourlyRecent = useMemo(() => recentInLastHour().slice(0, 5), [recentInLastHour]);
   const autocomplete = useMemo(() => {
     if (q.trim().length < 1) return [];
     const lastToken = q.trim().split(/\s+/).pop() || '';
@@ -418,6 +441,22 @@ export default function SearchScreen() {
           )}
         </View>
 
+        {/* Intent badge */}
+        {queryIntent && debounced.trim().length > 0 && (
+          <View style={{
+            alignSelf: 'flex-start',
+            flexDirection: 'row', alignItems: 'center', gap: 4,
+            paddingHorizontal: SP['2'], paddingVertical: 2,
+            backgroundColor: C.bg3, borderRadius: R.full,
+            borderWidth: 1, borderColor: C.border,
+          }}>
+            <Text style={{ fontSize: 11 }}>{intentEmoji(queryIntent)}</Text>
+            <Text style={[T.caption, { color: C.text2, fontSize: 10 }]}>
+              {intentLabel(queryIntent)}検索
+            </Text>
+          </View>
+        )}
+
         {/* 保存ボタン (検索中) */}
         {debounced.trim().length > 0 && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
@@ -501,7 +540,10 @@ export default function SearchScreen() {
             {autocomplete.map((name) => (
               <PressableScale
                 key={name}
-                onPress={() => { setQ(name); setDebounced(name); addHist(name); }}
+                onPress={() => {
+                  recordClick(q.trim(), name);
+                  setQ(name); setDebounced(name); addHist(name);
+                }}
                 haptic="select"
                 style={{
                   flexDirection: 'row', alignItems: 'center', gap: SP['2'],
@@ -601,6 +643,31 @@ export default function SearchScreen() {
       >
         {!showResults ? (
           <View style={{ gap: SP['4'] }}>
+            {/* 直近1時間の検索 */}
+            {hourlyRecent.length > 0 && (
+              <View style={{ gap: SP['2'] }}>
+                <Text style={[T.h4, { color: C.text }]}>⏱️ 直近1時間</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
+                  {hourlyRecent.map((h) => (
+                    <PressableScale
+                      key={h}
+                      onPress={() => { setQ(h); setDebounced(h); }}
+                      haptic="tap"
+                      style={{
+                        paddingHorizontal: SP['3'], paddingVertical: 6,
+                        backgroundColor: C.bg3, borderRadius: R.full,
+                        borderWidth: 1, borderColor: C.border,
+                        flexDirection: 'row', alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      <Text style={{ fontSize: 10 }}>↺</Text>
+                      <Text style={[T.smallM, { color: C.text }]}>{h}</Text>
+                    </PressableScale>
+                  ))}
+                </View>
+              </View>
+            )}
+
             {/* 検索履歴 */}
             {history.length > 0 && (
               <View style={{ gap: SP['2'] }}>
@@ -660,6 +727,45 @@ export default function SearchScreen() {
           </View>
         ) : (
           <>
+            {/* 関連検索 (Google "Related searches") */}
+            {relatedQueries.length > 0 && (
+              <View style={{
+                padding: SP['3'],
+                backgroundColor: C.bg2,
+                borderRadius: R.md,
+                borderWidth: 1, borderColor: C.border,
+                gap: SP['2'],
+              }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={{ fontSize: 14 }}>🔗</Text>
+                  <Text style={[T.smallM, { color: C.text, fontWeight: '700', flex: 1 }]}>
+                    関連検索
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {relatedQueries.map((r) => (
+                    <PressableScale
+                      key={r.query}
+                      onPress={() => { setQ(r.query); setDebounced(r.query); addHist(r.query); }}
+                      haptic="tap"
+                      style={{
+                        flexDirection: 'row', alignItems: 'center', gap: 4,
+                        paddingHorizontal: SP['3'], paddingVertical: 6,
+                        backgroundColor: C.bg3,
+                        borderRadius: R.full,
+                        borderWidth: 1, borderColor: C.border,
+                      }}
+                    >
+                      <Text style={[T.smallM, { color: C.text }]}>{r.query}</Text>
+                      <Text style={{ fontSize: 9, color: C.text3, marginLeft: 2 }}>
+                        {r.reason}
+                      </Text>
+                    </PressableScale>
+                  ))}
+                </View>
+              </View>
+            )}
+
             {/* Did you mean */}
             {suggestion && (
               <View style={{

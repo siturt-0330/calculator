@@ -3,11 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { NgramIndex } from '@/lib/search/ngramIndex';
 import { buildEmbeddings } from '@/lib/search/embeddings';
+import { Trie } from '@/lib/search/trie';
 import { useTagGraphStore } from '@/stores/tagGraphStore';
 import { useTagCooccurStore } from '@/stores/tagCooccurStore';
 import { useTagFilterStore } from '@/stores/tagFilterStore';
 import { useSearchSignalsStore } from '@/stores/searchSignalsStore';
-import { searchTagsV3, predictCompletion, type V3Result, type SearchV3Context } from '@/lib/search/tagSearchV3';
+import { useSearchClickStore } from '@/stores/searchClickStore';
+import { searchTagsV3, type V3Result, type SearchV3Context } from '@/lib/search/tagSearchV3';
 
 async function fetchAllTagNames(): Promise<string[]> {
   const { data } = await supabase
@@ -19,7 +21,6 @@ async function fetchAllTagNames(): Promise<string[]> {
 }
 
 async function fetchTrendingTagNames(): Promise<string[]> {
-  // 過去 24h の post から急上昇タグを抽出
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data } = await supabase
     .from('posts')
@@ -43,12 +44,15 @@ export function useTagSearchV3() {
   const { cooccur, tagPopularity, hydrate: hydrateCooccur, ensureFresh } = useTagCooccurStore();
   const { likedTags, blockedTags } = useTagFilterStore();
   const aggregate = useSearchSignalsStore((s) => s.aggregate);
+  const getBoosts = useSearchClickStore((s) => s.getBoosts);
+  const hydrateClicks = useSearchClickStore((s) => s.hydrate);
 
   useEffect(() => {
     void hydrateGraph();
     void hydrateCooccur();
     void ensureFresh();
-  }, [hydrateGraph, hydrateCooccur, ensureFresh]);
+    void hydrateClicks();
+  }, [hydrateGraph, hydrateCooccur, ensureFresh, hydrateClicks]);
 
   const allTagsQ = useQuery({
     queryKey: ['all-tag-names-v3'],
@@ -63,7 +67,7 @@ export function useTagSearchV3() {
 
   const signals = useMemo(() => aggregate(), [aggregate]);
 
-  // N-gram インデックスを構築 (allTags + graph labels + cooccur keys)
+  // N-gram インデックス
   const ngramIndex = useMemo(() => {
     const idx = new NgramIndex();
     for (const t of (allTagsQ.data ?? [])) idx.add(t);
@@ -76,11 +80,61 @@ export function useTagSearchV3() {
     return idx;
   }, [allTagsQ.data, nodes, tagPopularity]);
 
-  // PMI Embeddings を構築 (キャッシュ)
+  // Trie for prefix completion
+  const trie = useMemo(() => {
+    const t = new Trie();
+    const entries: Array<{ tag: string; popularity: number }> = [];
+    const allTags = new Set<string>(allTagsQ.data ?? []);
+    for (const n of Object.values(nodes)) {
+      allTags.add(n.label);
+      for (const a of n.aliases) allTags.add(a);
+    }
+    for (const tag of allTags) {
+      entries.push({ tag, popularity: tagPopularity[tag] ?? 0 });
+    }
+    t.build(entries);
+    return t;
+  }, [allTagsQ.data, nodes, tagPopularity]);
+
+  // PMI Embeddings
   const embeddings = useMemo(() => buildEmbeddings(cooccur, tagPopularity), [cooccur, tagPopularity]);
 
   const trendingTags = useMemo(() => new Set(trendingQ.data ?? []), [trendingQ.data]);
 
+  const search = (query: string, limit = 12): V3Result[] => {
+    const clickBoosts = getBoosts(query);
+    const ctx: SearchV3Context = {
+      ngramIndex,
+      embeddings,
+      nodes,
+      cooccur,
+      tagPopularity,
+      likedTags,
+      blockedTags,
+      tagAffinity: signals.tagFreq,
+      trendingTags,
+      clickBoosts,
+    };
+    return searchTagsV3(query, ctx, { limit, diversify: true });
+  };
+
+  // Predict: Trie ベースの prefix completion (人気度順)
+  const predict = (query: string): string | null => {
+    if (!query) return null;
+    const completions = trie.completions(query, 1);
+    if (completions.length === 0) return null;
+    const top = completions[0]!.tag;
+    if (top.toLowerCase() === query.toLowerCase()) return null;
+    return top;
+  };
+
+  // 上位 K の prefix 候補
+  const completions = (query: string, k = 5): string[] => {
+    if (!query) return [];
+    return trie.completions(query, k).map((c) => c.tag).filter((t) => t.toLowerCase() !== query.toLowerCase());
+  };
+
+  // Context は外部からも参照可能に
   const ctx: SearchV3Context = useMemo(() => ({
     ngramIndex,
     embeddings,
@@ -93,11 +147,5 @@ export function useTagSearchV3() {
     trendingTags,
   }), [ngramIndex, embeddings, nodes, cooccur, tagPopularity, likedTags, blockedTags, signals.tagFreq, trendingTags]);
 
-  const search = (query: string, limit = 12): V3Result[] =>
-    searchTagsV3(query, ctx, { limit, diversify: true });
-
-  const predict = (query: string): string | null =>
-    predictCompletion(query, ctx);
-
-  return { ctx, search, predict, isReady: !!allTagsQ.data };
+  return { ctx, search, predict, completions, isReady: !!allTagsQ.data };
 }

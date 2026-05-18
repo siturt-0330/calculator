@@ -46,6 +46,8 @@ export type SearchV3Context = {
   blockedTags?: string[];
   tagAffinity?: Record<string, number>;
   trendingTags?: Set<string>;
+  // Click-through learning ボーナス: query → tag → count
+  clickBoosts?: Record<string, number>;  // tag → boost score
 };
 
 export type V3Result = {
@@ -362,6 +364,14 @@ export function searchTagsV3(
       score += trSig;
       signalsAgg.trending = trSig;
       reasons.push('🔥トレンド');
+    }
+
+    // Click-Through Learning ボーナス: 過去にこのクエリで選ばれたタグを優遇
+    if (ctx.clickBoosts && ctx.clickBoosts[candidate]) {
+      const ctrSig = Math.min(150, ctx.clickBoosts[candidate]! * 20);
+      score += ctrSig;
+      signalsAgg.ctr = ctrSig;
+      reasons.push('🎯前回選択');
     }
 
     if (score > 0) {

@@ -2,7 +2,8 @@ import { useMemo } from 'react';
 import { View, Text } from 'react-native';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { useTagSearchV3 } from '@/hooks/useTagSearchV3';
-import { normalize } from '@/lib/search/tokenize';
+import { useSearchClickStore } from '@/stores/searchClickStore';
+import { classifyIntent, intentEmoji, intentLabel } from '@/lib/search/queryIntent';
 import { didYouMean } from '@/lib/search/tagSearchV2';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
@@ -31,6 +32,7 @@ export function TagInputSuggestions({
   limit?: number;
 }) {
   const { ctx, search } = useTagSearchV3();
+  const recordClick = useSearchClickStore((s) => s.record);
 
   // 既存除外を context に合体
   const ctxWithExclude = useMemo(() => ({
@@ -44,6 +46,15 @@ export function TagInputSuggestions({
     return search(trimmed, limit);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trimmed, limit, ctx.tagPopularity, ctx.cooccur, ctx.nodes, ctx.likedTags, ctx.blockedTags]);
+
+  // クエリ Intent (人名/作品/場所/年/質問/タグ)
+  const intent = useMemo(() => (trimmed ? classifyIntent(trimmed) : null), [trimmed]);
+
+  // CTR Boost wrap: クリック時に記録
+  const pickWithLearning = (tag: string) => {
+    recordClick(trimmed, tag);
+    onPick(tag);
+  };
 
   const dymResult = useMemo(() => {
     if (suggestions.length > 0 || trimmed.length < 2) return null;
@@ -82,7 +93,7 @@ export function TagInputSuggestions({
         }}>
           <Text style={[T.caption, { color: C.text3 }]}>もしかして:</Text>
           <PressableScale
-            onPress={() => onPick(dymResult.tag)}
+            onPress={() => pickWithLearning(dymResult.tag)}
             haptic="confirm"
             style={{
               flexDirection: 'row', alignItems: 'center', gap: 4,
@@ -100,6 +111,19 @@ export function TagInputSuggestions({
         </View>
       )}
 
+      {/* Intent Badge */}
+      {intent && suggestions.length > 0 && (
+        <View style={{
+          flexDirection: 'row', alignItems: 'center', gap: 4,
+          paddingHorizontal: 4,
+        }}>
+          <Text style={{ fontSize: 11 }}>{intentEmoji(intent)}</Text>
+          <Text style={[T.caption, { color: C.text3 }]}>
+            意図: {intentLabel(intent)}
+          </Text>
+        </View>
+      )}
+
       {suggestions.length > 0 && (
         <>
           <Text style={[T.caption, { color: C.text3, paddingHorizontal: 4 }]}>
@@ -109,7 +133,7 @@ export function TagInputSuggestions({
             {suggestions.map((s) => (
               <PressableScale
                 key={s.tag}
-                onPress={() => onPick(s.tag)}
+                onPress={() => pickWithLearning(s.tag)}
                 haptic="confirm"
                 style={{
                   flexDirection: 'row', alignItems: 'center', gap: 4,
