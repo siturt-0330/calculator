@@ -27,6 +27,7 @@ import { generateVariants, previewVariants } from '@/lib/search/variants';
 import { useLanguageStore } from '@/stores/languageStore';
 import { useSavedSearches, useCreateSavedSearch, useDeleteSavedSearch } from '@/hooks/useSavedSearches';
 import { searchTags as searchTagsV2 } from '@/lib/search/tagSearchV2';
+import { useTagSearchV3 } from '@/hooks/useTagSearchV3';
 import { expandWithTagGraph } from '@/lib/utils/searchAlgo';
 
 type BBSResult = { id: string; title: string; category: string; replies_count: number; created_at: string };
@@ -288,25 +289,28 @@ export default function SearchScreen() {
     return findClosest(kw, allTagsQ.data, 0.55);
   }, [rankedTags, debounced, parsedQuery, allTagsQ.data]);
 
-  // オートコンプリート: V2 エンジン (8シグナル統合 + 個人化 + ダイバーシフィケーション)
+  // オートコンプリート: V3 エンジン (N-gram + PMI + 適応的ウェイト + トレンドブースト)
+  const { search: tagSearchV3, predict: predictV3 } = useTagSearchV3();
   const autocomplete = useMemo(() => {
     if (q.trim().length < 1) return [];
-    if (!allTagsQ.data) return [];
     const lastToken = q.trim().split(/\s+/).pop() || '';
     if (lastToken.length < 1) return [];
-
-    const results = searchTagsV2(lastToken, {
-      allTags: allTagsQ.data,
-      nodes,
-      cooccur,
-      tagPopularity,
-      likedTags,
-      blockedTags: [...blockedTags],
-      tagAffinity: signals.tagFreq,
-    }, { limit: 8, diversify: true });
-
+    const results = tagSearchV3(lastToken, 8);
     return results.map((r) => r.tag);
-  }, [q, allTagsQ.data, nodes, cooccur, tagPopularity, likedTags, blockedTags, signals.tagFreq]);
+  }, [q, tagSearchV3]);
+
+  // Ghost typeahead: アニ → アニメ を予測
+  const ghostPrediction = useMemo(() => {
+    if (q.trim().length < 1) return null;
+    const lastToken = q.trim().split(/\s+/).pop() || '';
+    if (lastToken.length < 1) return null;
+    const pred = predictV3(lastToken);
+    if (!pred || pred === lastToken) return null;
+    // 元クエリの prefix を保ちつつ、続きを ghost で表示
+    const lower = lastToken.toLowerCase();
+    if (!pred.toLowerCase().startsWith(lower)) return null;
+    return { full: pred, suffix: pred.slice(lastToken.length) };
+  }, [q, predictV3]);
 
   // バリアントプレビュー (Google 風: "ポケモン も検索しています")
   const variantPreview = useMemo(() => {
@@ -365,17 +369,48 @@ export default function SearchScreen() {
           borderWidth: 1, borderColor: C.border,
         }}>
           <Icon.search size={18} color={C.text3} strokeWidth={2.2} />
-          <TextInput
-            value={q}
-            onChangeText={setQ}
-            placeholder="検索 (tag:〇〇  has:image  -除外  &quot;フレーズ&quot;)"
-            placeholderTextColor={C.text3}
-            onSubmitEditing={commit}
-            autoFocus
-            autoCorrect={false}
-            autoCapitalize="none"
-            style={[T.body, { flex: 1, color: C.text, paddingVertical: 0 }]}
-          />
+          <View style={{ flex: 1, position: 'relative', justifyContent: 'center' }}>
+            <TextInput
+              value={q}
+              onChangeText={setQ}
+              placeholder="検索 (tag:〇〇  has:image  -除外  &quot;フレーズ&quot;)"
+              placeholderTextColor={C.text3}
+              onSubmitEditing={commit}
+              autoFocus
+              autoCorrect={false}
+              autoCapitalize="none"
+              style={[T.body, { color: C.text, paddingVertical: 0 }]}
+            />
+            {/* ゴースト予測補完 */}
+            {ghostPrediction && (
+              <View pointerEvents="none" style={{
+                position: 'absolute',
+                left: 0, top: 0, right: 0, bottom: 0,
+                flexDirection: 'row',
+                alignItems: 'center',
+              }}>
+                <Text style={[T.body, { color: 'transparent', paddingVertical: 0 }]} numberOfLines={1}>
+                  {q}
+                  <Text style={{ color: C.text3 }}>{ghostPrediction.suffix}</Text>
+                </Text>
+              </View>
+            )}
+          </View>
+          {ghostPrediction && (
+            <PressableScale
+              onPress={() => { setQ(ghostPrediction.full); setDebounced(ghostPrediction.full); }}
+              haptic="tap"
+              style={{
+                paddingHorizontal: SP['2'], paddingVertical: 2,
+                backgroundColor: C.bg3, borderRadius: R.sm,
+                borderWidth: 1, borderColor: C.border,
+              }}
+            >
+              <Text style={{ fontSize: 10, color: C.text2, fontWeight: '700' }}>
+                Tab → {ghostPrediction.suffix}
+              </Text>
+            </PressableScale>
+          )}
           {q.length > 0 && (
             <PressableScale onPress={() => setQ('')} haptic="tap">
               <Icon.close size={16} color={C.text3} strokeWidth={2.2} />
