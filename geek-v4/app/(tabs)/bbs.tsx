@@ -16,7 +16,6 @@ import { parseQuery } from '@/lib/search/queryParser';
 import { generateVariants } from '@/lib/search/variants';
 import { normalize } from '@/lib/search/tokenize';
 import { textRelevance } from '@/lib/utils/searchAlgo';
-import { classifyIntent, intentEmoji, intentLabel } from '@/lib/search/queryIntent';
 import { useSearchClickStore } from '@/stores/searchClickStore';
 
 type SortMode = 'recent' | 'popular' | 'relevance';
@@ -61,9 +60,6 @@ export default function BBSScreen() {
   const getCtrBoosts = useSearchClickStore((s) => s.getBoosts);
   const recordCtr = useSearchClickStore((s) => s.record);
   const ctrBoosts = useMemo(() => getCtrBoosts(debounced), [debounced, getCtrBoosts]);
-
-  // Intent badge
-  const bbsIntent = useMemo(() => (debounced ? classifyIntent(debounced) : null), [debounced]);
 
   const filtered = useMemo(() => {
     let result = threads;
@@ -155,8 +151,10 @@ export default function BBSScreen() {
             <TextInput
               value={search}
               onChangeText={setSearch}
-              placeholder="スレッドを検索…"
+              placeholder="スレッドを検索"
               placeholderTextColor={C.text3}
+              keyboardAppearance="dark"
+              selectionColor={C.accent}
               style={[T.body, { flex: 1, color: C.text, paddingVertical: 0 }]}
               autoCorrect={false}
               autoCapitalize="none"
@@ -167,21 +165,6 @@ export default function BBSScreen() {
               </PressableScale>
             )}
           </View>
-          {/* Intent Badge */}
-          {bbsIntent && debounced.length > 0 && (
-            <View style={{
-              alignSelf: 'flex-start', marginTop: 4,
-              flexDirection: 'row', alignItems: 'center', gap: 4,
-              paddingHorizontal: SP['2'], paddingVertical: 2,
-              backgroundColor: C.bg3, borderRadius: R.full,
-              borderWidth: 1, borderColor: C.border,
-            }}>
-              <Text style={{ fontSize: 11 }}>{intentEmoji(bbsIntent)}</Text>
-              <Text style={[T.caption, { color: C.text2, fontSize: 10 }]}>
-                {intentLabel(bbsIntent)}検索
-              </Text>
-            </View>
-          )}
         </View>
 
         {/* カテゴリ (横スクロール) */}

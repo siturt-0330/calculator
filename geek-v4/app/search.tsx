@@ -30,7 +30,6 @@ import { searchTags as searchTagsV2 } from '@/lib/search/tagSearchV2';
 import { useTagSearchV3 } from '@/hooks/useTagSearchV3';
 import { useSearchClickStore } from '@/stores/searchClickStore';
 import { generateRelatedQueries } from '@/lib/search/relatedSearches';
-import { classifyIntent, intentEmoji, intentLabel } from '@/lib/search/queryIntent';
 import { expandWithTagGraph } from '@/lib/utils/searchAlgo';
 
 type BBSResult = { id: string; title: string; category: string; replies_count: number; created_at: string };
@@ -298,9 +297,6 @@ export default function SearchScreen() {
   const clickStats = useSearchClickStore((s) => s.queryToTagCount);
   const recentInLastHour = useSearchHistoryStore((s) => s.recentInLastHour);
 
-  // クエリ Intent
-  const queryIntent = useMemo(() => (debounced ? classifyIntent(debounced) : null), [debounced]);
-
   // 関連検索 (Google "Related searches")
   const relatedQueries = useMemo(() => {
     if (!debounced.trim()) return [];
@@ -396,12 +392,14 @@ export default function SearchScreen() {
             <TextInput
               value={q}
               onChangeText={setQ}
-              placeholder="検索 (tag:〇〇  has:image  -除外  &quot;フレーズ&quot;)"
+              placeholder="検索"
               placeholderTextColor={C.text3}
               onSubmitEditing={commit}
               autoFocus
               autoCorrect={false}
               autoCapitalize="none"
+              keyboardAppearance="dark"
+              selectionColor={C.accent}
               style={[T.body, { color: C.text, paddingVertical: 0 }]}
             />
             {/* ゴースト予測補完 */}
@@ -419,21 +417,6 @@ export default function SearchScreen() {
               </View>
             )}
           </View>
-          {ghostPrediction && (
-            <PressableScale
-              onPress={() => { setQ(ghostPrediction.full); setDebounced(ghostPrediction.full); }}
-              haptic="tap"
-              style={{
-                paddingHorizontal: SP['2'], paddingVertical: 2,
-                backgroundColor: C.bg3, borderRadius: R.sm,
-                borderWidth: 1, borderColor: C.border,
-              }}
-            >
-              <Text style={{ fontSize: 10, color: C.text2, fontWeight: '700' }}>
-                Tab → {ghostPrediction.suffix}
-              </Text>
-            </PressableScale>
-          )}
           {q.length > 0 && (
             <PressableScale onPress={() => setQ('')} haptic="tap">
               <Icon.close size={16} color={C.text3} strokeWidth={2.2} />
@@ -441,47 +424,29 @@ export default function SearchScreen() {
           )}
         </View>
 
-        {/* Intent badge */}
-        {queryIntent && debounced.trim().length > 0 && (
-          <View style={{
-            alignSelf: 'flex-start',
-            flexDirection: 'row', alignItems: 'center', gap: 4,
-            paddingHorizontal: SP['2'], paddingVertical: 2,
-            backgroundColor: C.bg3, borderRadius: R.full,
-            borderWidth: 1, borderColor: C.border,
-          }}>
-            <Text style={{ fontSize: 11 }}>{intentEmoji(queryIntent)}</Text>
-            <Text style={[T.caption, { color: C.text2, fontSize: 10 }]}>
-              {intentLabel(queryIntent)}検索
-            </Text>
-          </View>
-        )}
-
         {/* 保存ボタン (検索中) */}
         {debounced.trim().length > 0 && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-            <PressableScale
-              onPress={saveCurrentQuery}
-              haptic="confirm"
-              disabled={isCurrentSaved}
-              style={{
-                paddingHorizontal: SP['3'], paddingVertical: 4,
-                backgroundColor: isCurrentSaved ? C.bg3 : C.accent,
-                borderRadius: R.full,
-                opacity: isCurrentSaved ? 0.6 : 1,
-              }}
-            >
-              <Text style={[T.caption, { color: isCurrentSaved ? C.text2 : '#fff', fontWeight: '700' }]}>
-                {isCurrentSaved ? '✓ 保存済み' : '☆ この検索を保存'}
-              </Text>
-            </PressableScale>
-          </View>
+          <PressableScale
+            onPress={saveCurrentQuery}
+            haptic="confirm"
+            disabled={isCurrentSaved}
+            style={{
+              alignSelf: 'flex-start',
+              paddingHorizontal: SP['3'], paddingVertical: 4,
+              backgroundColor: isCurrentSaved ? C.bg3 : C.accent,
+              borderRadius: R.full,
+            }}
+          >
+            <Text style={[T.caption, { color: isCurrentSaved ? C.text3 : '#fff', fontWeight: '700' }]}>
+              {isCurrentSaved ? '保存済み' : '保存'}
+            </Text>
+          </PressableScale>
         )}
 
         {/* 保存検索一覧 (検索無し時のみ) */}
         {!debounced.trim() && savedSearches.length > 0 && (
           <View style={{ gap: SP['1'] }}>
-            <Text style={[T.smallM, { color: C.text2 }]}>⭐ 保存した検索</Text>
+            <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>保存した検索</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
               {savedSearches.map((s) => (
                 <View key={s.id} style={{
@@ -505,9 +470,8 @@ export default function SearchScreen() {
         {/* バリアントプレビュー: アルファベット入力時に日本語変換を表示 */}
         {variantPreview.length > 0 && (
           <View style={{
-            flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 4,
+            flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6,
           }}>
-            <Text style={[T.caption, { color: C.text3 }]}>これも検索:</Text>
             {variantPreview.map((v) => (
               <PressableScale
                 key={v}
@@ -603,7 +567,6 @@ export default function SearchScreen() {
             </ScrollView>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={{ flexDirection: 'row', gap: 6 }}>
-                <Text style={[T.caption, { color: C.text3, alignSelf: 'center' }]}>並び:</Text>
                 {(Object.keys(SORT_LABELS) as SortMode[]).map((s) => {
                   const active = sortMode === s;
                   const meta = SORT_LABELS[s];
@@ -646,7 +609,7 @@ export default function SearchScreen() {
             {/* 直近1時間の検索 */}
             {hourlyRecent.length > 0 && (
               <View style={{ gap: SP['2'] }}>
-                <Text style={[T.h4, { color: C.text }]}>⏱️ 直近1時間</Text>
+                <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>直近1時間</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
                   {hourlyRecent.map((h) => (
                     <PressableScale
@@ -672,9 +635,9 @@ export default function SearchScreen() {
             {history.length > 0 && (
               <View style={{ gap: SP['2'] }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={[T.h4, { color: C.text }]}>🕐 履歴</Text>
+                  <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>履歴</Text>
                   <PressableScale onPress={clearHist} haptic="warn">
-                    <Text style={[T.caption, { color: C.text3 }]}>全消去</Text>
+                    <Text style={[T.caption, { color: C.text3 }]}>消去</Text>
                   </PressableScale>
                 </View>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
@@ -699,7 +662,7 @@ export default function SearchScreen() {
 
             {/* 人気タグ */}
             <View style={{ gap: SP['2'] }}>
-              <Text style={[T.h4, { color: C.text }]}>🔥 人気のタグ</Text>
+              <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>人気のタグ</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
                 {trending.data?.map((tg) => (
                   <PressableScale
@@ -727,21 +690,10 @@ export default function SearchScreen() {
           </View>
         ) : (
           <>
-            {/* 関連検索 (Google "Related searches") */}
+            {/* 関連検索 */}
             {relatedQueries.length > 0 && (
-              <View style={{
-                padding: SP['3'],
-                backgroundColor: C.bg2,
-                borderRadius: R.md,
-                borderWidth: 1, borderColor: C.border,
-                gap: SP['2'],
-              }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={{ fontSize: 14 }}>🔗</Text>
-                  <Text style={[T.smallM, { color: C.text, fontWeight: '700', flex: 1 }]}>
-                    関連検索
-                  </Text>
-                </View>
+              <View style={{ gap: SP['2'] }}>
+                <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>関連</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                   {relatedQueries.map((r) => (
                     <PressableScale
@@ -749,17 +701,13 @@ export default function SearchScreen() {
                       onPress={() => { setQ(r.query); setDebounced(r.query); addHist(r.query); }}
                       haptic="tap"
                       style={{
-                        flexDirection: 'row', alignItems: 'center', gap: 4,
                         paddingHorizontal: SP['3'], paddingVertical: 6,
-                        backgroundColor: C.bg3,
+                        backgroundColor: C.bg2,
                         borderRadius: R.full,
                         borderWidth: 1, borderColor: C.border,
                       }}
                     >
                       <Text style={[T.smallM, { color: C.text }]}>{r.query}</Text>
-                      <Text style={{ fontSize: 9, color: C.text3, marginLeft: 2 }}>
-                        {r.reason}
-                      </Text>
                     </PressableScale>
                   ))}
                 </View>
