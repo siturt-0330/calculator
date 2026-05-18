@@ -146,12 +146,20 @@ export async function createPost({
   }
 }
 
-export async function fetchPostById(id: string): Promise<Post> {
+// UUID 形式チェック (壊れた URL や古い ID 対策)
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function fetchPostById(id: string): Promise<Post | null> {
+  if (!id || !UUID_RE.test(id)) return null;
   const { data, error } = await supabase
     .from('posts')
     .select('id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, created_at')
     .eq('id', id)
-    .single();
-  if (error) throw error;
-  return data as Post;
+    .maybeSingle();
+  if (error) {
+    // RLS で読めない場合や fetch エラー — 致命的ではないので null を返す
+    console.warn('[fetchPostById] error:', error.message);
+    return null;
+  }
+  return (data ?? null) as Post | null;
 }

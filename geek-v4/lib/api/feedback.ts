@@ -65,16 +65,25 @@ export type AdminFeedbackRow = FeedbackRow & {
 export async function fetchAllFeedback(
   filter?: { status?: FeedbackRow['status'] | 'all'; kind?: FeedbackKind | 'all' },
 ): Promise<AdminFeedbackRow[]> {
-  let q = supabase
-    .from('app_feedback')
-    .select('id, user_id, kind, message, route, status, admin_notes, user_agent, screen_w, screen_h, created_at, updated_at, profiles(nickname)')
-    .order('created_at', { ascending: false })
-    .limit(200);
-  if (filter?.status && filter.status !== 'all') q = q.eq('status', filter.status);
-  if (filter?.kind && filter.kind !== 'all') q = q.eq('kind', filter.kind);
-  const { data, error } = await q;
-  if (error) return [];
-  return (data ?? []).map((r: Record<string, unknown>) => {
+  // profiles への join は FK を明示しないと PGRST201 で全件落ちることがあるので
+  // 明示 + フォールバック (nickname 抜きで再取得) で必ず一覧が表示されるようにする。
+  const baseCols = 'id, user_id, kind, message, route, status, admin_notes, user_agent, screen_w, screen_h, created_at, updated_at';
+  const buildQuery = (cols: string) => {
+    let q = supabase.from('app_feedback').select(cols).order('created_at', { ascending: false }).limit(200);
+    if (filter?.status && filter.status !== 'all') q = q.eq('status', filter.status);
+    if (filter?.kind && filter.kind !== 'all') q = q.eq('kind', filter.kind);
+    return q;
+  };
+  // 1st try: FK 明示で nickname も取る
+  let res = await buildQuery(`${baseCols}, profiles!app_feedback_user_id_fkey(nickname)`);
+  if (res.error) {
+    // 2nd try: nickname 抜きで本体だけ取得
+    console.warn('[fetchAllFeedback] nickname join failed, falling back:', res.error.message);
+    res = await buildQuery(baseCols);
+  }
+  if (res.error) return [];
+  const data = (res.data ?? []) as unknown as Record<string, unknown>[];
+  return data.map((r) => {
     const p = r.profiles as { nickname?: string } | { nickname?: string }[] | null;
     const nickname = Array.isArray(p) ? p[0]?.nickname : p?.nickname;
     return {

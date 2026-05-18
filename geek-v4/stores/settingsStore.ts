@@ -57,6 +57,44 @@ type SettingsState = Settings & {
   update: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
 };
 
+// 永続化された設定の形 (バージョン違い / 壊れたデータ) を実行時バリデート。
+// 余計なキーは捨てて、型が違う値は DEFAULTS で上書きする。これで誤った
+// 設定値による画面クラッシュを防ぐ。
+function sanitizeSettings(raw: unknown): Settings {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULTS };
+  const r = raw as Record<string, unknown>;
+  const pickBool = (k: keyof Settings): boolean =>
+    typeof r[k] === 'boolean' ? (r[k] as boolean) : (DEFAULTS[k] as boolean);
+  const pickLang = (): Settings['language'] => {
+    const valid: Settings['language'][] = ['ja', 'en', 'ko', 'zh', 'th', 'fr', 'es'];
+    const v = r.language;
+    return typeof v === 'string' && (valid as string[]).includes(v) ? (v as Settings['language']) : DEFAULTS.language;
+  };
+  const pickHour = (k: 'quietStartHour' | 'quietEndHour'): number | null => {
+    const v = r[k];
+    if (v === null) return null;
+    if (typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 23) return v;
+    return null;
+  };
+  return {
+    language: pickLang(),
+    pushEnabled: pickBool('pushEnabled'),
+    notifyLike: pickBool('notifyLike'),
+    notifyComment: pickBool('notifyComment'),
+    notifyFollow: pickBool('notifyFollow'),
+    notifyEvent: pickBool('notifyEvent'),
+    notifyReply: pickBool('notifyReply'),
+    notifyMention: pickBool('notifyMention'),
+    notifyTagNew: pickBool('notifyTagNew'),
+    notifyAnnouncement: pickBool('notifyAnnouncement'),
+    quietStartHour: pickHour('quietStartHour'),
+    quietEndHour: pickHour('quietEndHour'),
+    reduceMotion: pickBool('reduceMotion'),
+    dataSaver: pickBool('dataSaver'),
+    concernsPrivate: pickBool('concernsPrivate'),
+  };
+}
+
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   ...DEFAULTS,
   hydrated: false,
@@ -64,11 +102,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       const saved = await AsyncStorage.getItem(KEY);
       if (saved) {
-        const parsed = JSON.parse(saved) as Partial<Settings>;
-        set({ ...DEFAULTS, ...parsed, hydrated: true });
+        const parsed: unknown = JSON.parse(saved);
+        set({ ...sanitizeSettings(parsed), hydrated: true });
         return;
       }
-    } catch {}
+    } catch (e) {
+      console.warn('[settingsStore] hydrate failed, using defaults:', e);
+    }
     set({ hydrated: true });
   },
   update: (key, value) => {

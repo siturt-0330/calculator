@@ -39,71 +39,70 @@ export type UserExportData = {
   concerns: unknown[];
 };
 
-export async function exportUserData(): Promise<UserExportData> {
+// 個別テーブルの fetch ヘルパー。存在しないテーブルや RLS で弾かれた場合は
+// 空配列を返し、エラー内容は warnings に記録する。サイレントに失敗させない。
+async function fetchUserTable(
+  table: string,
+  col: string,
+  uid: string,
+  warnings: string[],
+): Promise<unknown[]> {
+  const { data, error } = await supabase.from(table).select('*').eq(col, uid);
+  if (error) {
+    warnings.push(`${table}: ${error.message}`);
+    return [];
+  }
+  return data ?? [];
+}
+
+export async function exportUserData(): Promise<UserExportData & { _warnings?: string[] }> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
   const uid = user.id;
 
-  // 並列で全テーブル取得
+  const warnings: string[] = [];
+  const profileRes = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle();
+  if (profileRes.error) warnings.push(`profiles: ${profileRes.error.message}`);
+
+  // 並列で全テーブル取得 (各々で error を捕捉してサイレント失敗を防ぐ)
   const [
-    profile,
-    posts,
-    comments,
-    bbsThreads,
-    bbsReplies,
-    likes,
-    postReactions,
-    bbsReplyReactions,
-    saves,
-    bookmarkCollections,
-    tagSubscriptions,
-    userLikedTags,
-    userBlockedTags,
-    userStamps,
-    savedSearches,
-    notifications,
-    concerns,
+    posts, comments, bbsThreads, bbsReplies, likes, postReactions,
+    bbsReplyReactions, saves, bookmarkCollections, tagSubscriptions,
+    userLikedTags, userBlockedTags, userStamps, savedSearches,
+    notifications, concerns,
   ] = await Promise.all([
-    supabase.from('profiles').select('*').eq('id', uid).maybeSingle(),
-    supabase.from('posts').select('*').eq('author_id', uid),
-    supabase.from('comments').select('*').eq('author_id', uid),
-    supabase.from('bbs_threads').select('*').eq('author_id', uid),
-    supabase.from('bbs_replies').select('*').eq('author_id', uid),
-    supabase.from('likes').select('*').eq('user_id', uid),
-    supabase.from('post_reactions').select('*').eq('user_id', uid),
-    supabase.from('bbs_reply_reactions').select('*').eq('user_id', uid),
-    supabase.from('saves').select('*').eq('user_id', uid),
-    supabase.from('bookmark_collections').select('*').eq('user_id', uid),
-    supabase.from('tag_subscriptions').select('*').eq('user_id', uid),
-    supabase.from('user_liked_tags').select('*').eq('user_id', uid),
-    supabase.from('user_blocked_tags').select('*').eq('user_id', uid),
-    supabase.from('user_stamps').select('*').eq('user_id', uid),
-    supabase.from('saved_searches').select('*').eq('user_id', uid),
-    supabase.from('notifications').select('*').eq('user_id', uid),
-    supabase.from('concerns').select('*').eq('user_id', uid),
+    fetchUserTable('posts', 'author_id', uid, warnings),
+    fetchUserTable('comments', 'author_id', uid, warnings),
+    fetchUserTable('bbs_threads', 'author_id', uid, warnings),
+    fetchUserTable('bbs_replies', 'author_id', uid, warnings),
+    fetchUserTable('likes', 'user_id', uid, warnings),
+    fetchUserTable('post_reactions', 'user_id', uid, warnings),
+    fetchUserTable('bbs_reply_reactions', 'user_id', uid, warnings),
+    fetchUserTable('saves', 'user_id', uid, warnings),
+    fetchUserTable('bookmark_collections', 'user_id', uid, warnings),
+    fetchUserTable('tag_subscriptions', 'user_id', uid, warnings),
+    fetchUserTable('user_liked_tags', 'user_id', uid, warnings),
+    fetchUserTable('user_blocked_tags', 'user_id', uid, warnings),
+    fetchUserTable('user_stamps', 'user_id', uid, warnings),
+    fetchUserTable('saved_searches', 'user_id', uid, warnings),
+    fetchUserTable('notifications', 'user_id', uid, warnings),
+    fetchUserTable('concerns', 'user_id', uid, warnings),
   ]);
 
-  return {
+  const result: UserExportData & { _warnings?: string[] } = {
     exported_at: new Date().toISOString(),
     user_id: uid,
-    profile: (profile.data as Record<string, unknown> | null) ?? null,
-    posts: posts.data ?? [],
-    comments: comments.data ?? [],
-    bbs_threads: bbsThreads.data ?? [],
-    bbs_replies: bbsReplies.data ?? [],
-    likes: likes.data ?? [],
-    post_reactions: postReactions.data ?? [],
-    bbs_reply_reactions: bbsReplyReactions.data ?? [],
-    saves: saves.data ?? [],
-    bookmark_collections: bookmarkCollections.data ?? [],
-    tag_subscriptions: tagSubscriptions.data ?? [],
-    user_liked_tags: userLikedTags.data ?? [],
-    user_blocked_tags: userBlockedTags.data ?? [],
-    user_stamps: userStamps.data ?? [],
-    saved_searches: savedSearches.data ?? [],
-    notifications: notifications.data ?? [],
-    concerns: concerns.data ?? [],
+    profile: (profileRes.data as Record<string, unknown> | null) ?? null,
+    posts, comments, bbs_threads: bbsThreads, bbs_replies: bbsReplies,
+    likes, post_reactions: postReactions, bbs_reply_reactions: bbsReplyReactions,
+    saves, bookmark_collections: bookmarkCollections,
+    tag_subscriptions: tagSubscriptions,
+    user_liked_tags: userLikedTags, user_blocked_tags: userBlockedTags,
+    user_stamps: userStamps, saved_searches: savedSearches,
+    notifications, concerns,
   };
+  if (warnings.length > 0) result._warnings = warnings;
+  return result;
 }
 
 // JSON ファイルとして保存 (Web は Blob ダウンロード, RN は Share)
@@ -127,6 +126,12 @@ export async function downloadUserDataAsJson(): Promise<{ ok: boolean; bytes: nu
   }
   // RN (mobile): expo-sharing で共有
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Platform } = require('react-native') as typeof import('react-native');
+    if (Platform.OS === 'web') {
+      // Web で window/document が無かったケース (SSR 中など) — 何もしない
+      return { ok: false, bytes };
+    }
     // 動的 require: web バンドルにモバイル専用モジュールを含めない
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const FS = require('expo-file-system') as typeof import('expo-file-system');
