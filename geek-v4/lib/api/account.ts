@@ -26,13 +26,17 @@ export type UserExportData = {
   bbs_threads: unknown[];
   bbs_replies: unknown[];
   likes: unknown[];
-  reactions: unknown[];
-  bookmarks: unknown[];
-  follows: unknown[];
-  tag_filters: unknown[];
-  oshi: unknown[];
+  post_reactions: unknown[];
+  bbs_reply_reactions: unknown[];
+  saves: unknown[];
+  bookmark_collections: unknown[];
+  tag_subscriptions: unknown[];
+  user_liked_tags: unknown[];
+  user_blocked_tags: unknown[];
+  user_stamps: unknown[];
   saved_searches: unknown[];
   notifications: unknown[];
+  concerns: unknown[];
 };
 
 export async function exportUserData(): Promise<UserExportData> {
@@ -48,13 +52,17 @@ export async function exportUserData(): Promise<UserExportData> {
     bbsThreads,
     bbsReplies,
     likes,
-    reactions,
-    bookmarks,
-    follows,
-    tagFilters,
-    oshi,
+    postReactions,
+    bbsReplyReactions,
+    saves,
+    bookmarkCollections,
+    tagSubscriptions,
+    userLikedTags,
+    userBlockedTags,
+    userStamps,
     savedSearches,
     notifications,
+    concerns,
   ] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', uid).maybeSingle(),
     supabase.from('posts').select('*').eq('author_id', uid),
@@ -62,13 +70,17 @@ export async function exportUserData(): Promise<UserExportData> {
     supabase.from('bbs_threads').select('*').eq('author_id', uid),
     supabase.from('bbs_replies').select('*').eq('author_id', uid),
     supabase.from('likes').select('*').eq('user_id', uid),
-    supabase.from('reactions').select('*').eq('user_id', uid),
-    supabase.from('bookmarks').select('*').eq('user_id', uid),
-    supabase.from('follows').select('*').eq('follower_id', uid),
-    supabase.from('tag_filters').select('*').eq('user_id', uid),
-    supabase.from('oshi').select('*').eq('user_id', uid),
+    supabase.from('post_reactions').select('*').eq('user_id', uid),
+    supabase.from('bbs_reply_reactions').select('*').eq('user_id', uid),
+    supabase.from('saves').select('*').eq('user_id', uid),
+    supabase.from('bookmark_collections').select('*').eq('user_id', uid),
+    supabase.from('tag_subscriptions').select('*').eq('user_id', uid),
+    supabase.from('user_liked_tags').select('*').eq('user_id', uid),
+    supabase.from('user_blocked_tags').select('*').eq('user_id', uid),
+    supabase.from('user_stamps').select('*').eq('user_id', uid),
     supabase.from('saved_searches').select('*').eq('user_id', uid),
     supabase.from('notifications').select('*').eq('user_id', uid),
+    supabase.from('concerns').select('*').eq('user_id', uid),
   ]);
 
   return {
@@ -80,13 +92,17 @@ export async function exportUserData(): Promise<UserExportData> {
     bbs_threads: bbsThreads.data ?? [],
     bbs_replies: bbsReplies.data ?? [],
     likes: likes.data ?? [],
-    reactions: reactions.data ?? [],
-    bookmarks: bookmarks.data ?? [],
-    follows: follows.data ?? [],
-    tag_filters: tagFilters.data ?? [],
-    oshi: oshi.data ?? [],
+    post_reactions: postReactions.data ?? [],
+    bbs_reply_reactions: bbsReplyReactions.data ?? [],
+    saves: saves.data ?? [],
+    bookmark_collections: bookmarkCollections.data ?? [],
+    tag_subscriptions: tagSubscriptions.data ?? [],
+    user_liked_tags: userLikedTags.data ?? [],
+    user_blocked_tags: userBlockedTags.data ?? [],
+    user_stamps: userStamps.data ?? [],
     saved_searches: savedSearches.data ?? [],
     notifications: notifications.data ?? [],
+    concerns: concerns.data ?? [],
   };
 }
 
@@ -150,16 +166,20 @@ export async function deleteAccount(): Promise<{ ok: boolean; error?: string }> 
   }
 
   // 2) フォールバック: クライアントから各テーブルを削除
-  //    RLS の DELETE ポリシーが必要 (0014_hardening.sql で追加済)
+  //    RLS の DELETE ポリシーが必要 (0015_account_deletion.sql で追加済)
   const tables: Array<{ table: string; col: string }> = [
     { table: 'likes', col: 'user_id' },
-    { table: 'reactions', col: 'user_id' },
-    { table: 'bookmarks', col: 'user_id' },
-    { table: 'follows', col: 'follower_id' },
-    { table: 'tag_filters', col: 'user_id' },
-    { table: 'oshi', col: 'user_id' },
+    { table: 'post_reactions', col: 'user_id' },
+    { table: 'bbs_reply_reactions', col: 'user_id' },
+    { table: 'saves', col: 'user_id' },
+    { table: 'bookmark_collections', col: 'user_id' },
+    { table: 'tag_subscriptions', col: 'user_id' },
+    { table: 'user_liked_tags', col: 'user_id' },
+    { table: 'user_blocked_tags', col: 'user_id' },
+    { table: 'user_stamps', col: 'user_id' },
     { table: 'saved_searches', col: 'user_id' },
     { table: 'notifications', col: 'user_id' },
+    { table: 'concerns', col: 'user_id' },
     { table: 'comments', col: 'author_id' },
     { table: 'bbs_replies', col: 'author_id' },
     { table: 'posts', col: 'author_id' },
