@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Modal, View, Text, ScrollView, TextInput, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -18,6 +18,7 @@ export function MemeReactionPicker({
   visible: boolean;
   onClose: () => void;
   onPick: (meme: string) => void;
+  // 親から渡される「サーバー側で確定済み」のスタンプ一覧
   picked: string[];
 }) {
   const insets = useSafeAreaInsets();
@@ -27,11 +28,39 @@ export function MemeReactionPicker({
   const { mutateAsync: createStamp, isPending: creating } = useCreateUserStamp();
   const { show } = useToastStore();
 
+  // ★ ローカル「直近で押したスタンプ」を保持。サーバー反映が遅くても
+  // すぐにチップが選択状態に見えるようにする (Realtime invalidate 中に
+  // 選択状態が一瞬消える "勝手に消える" 現象の対策)。
+  const [recentLocalPicks, setRecentLocalPicks] = useState<Set<string>>(new Set());
+
+  // モーダルを開き直すたびに local state をリセット
+  useEffect(() => {
+    if (visible) setRecentLocalPicks(new Set());
+  }, [visible]);
+
   // 公開ユーザースタンプを use_count 降順で取得 → "みんなの" カテゴリ
   const popularUserStamps = useMemo(
     () => userStamps.filter((s) => s.is_public).slice(0, 30).map((s) => s.text),
     [userStamps],
   );
+
+  // 表示用の選択状態 = サーバー確定済み ∪ 直近ローカルタップ
+  const visiblyPicked = useMemo(
+    () => new Set<string>([...picked, ...recentLocalPicks]),
+    [picked, recentLocalPicks],
+  );
+
+  const handlePick = (meme: string) => {
+    // ローカル選択をすぐ反映 (toggle 動作)
+    setRecentLocalPicks((prev) => {
+      const next = new Set(prev);
+      if (next.has(meme)) next.delete(meme);
+      else next.add(meme);
+      return next;
+    });
+    // サーバーへ送信は親に委譲 (optimistic update + realtime)
+    onPick(meme);
+  };
 
   const handleCreate = async () => {
     const t = customText.trim();
@@ -42,7 +71,10 @@ export function MemeReactionPicker({
       setCustomText('');
       setShowCustomInput(false);
       // 作成と同時に送信もする
-      if (stamp) onPick(stamp.text);
+      if (stamp) {
+        setRecentLocalPicks((prev) => new Set(prev).add(stamp.text));
+        onPick(stamp.text);
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'スタンプの作成に失敗しました';
       show(msg, 'error');
@@ -63,17 +95,38 @@ export function MemeReactionPicker({
           borderColor: C.border,
           gap: SP['3'],
         }}>
+          {/* ヘッダー: 左 ×  / 中央 タイトル / 右 完了 */}
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={{ fontSize: 20 }}>🪶</Text>
-            <Text style={[T.h3, { color: C.text, marginLeft: SP['2'], flex: 1 }]}>
-              テキストスタンプ
-            </Text>
-            <PressableScale onPress={onClose} style={{ padding: SP['2'] }} haptic="tap">
-              <Icon.close size={22} color={C.text2} strokeWidth={2.2} />
+            <PressableScale
+              onPress={onClose}
+              style={{
+                padding: SP['2'],
+                marginLeft: -SP['2'],
+              }}
+              haptic="tap"
+            >
+              <Icon.close size={24} color={C.text2} strokeWidth={2.4} />
+            </PressableScale>
+            <View style={{ flex: 1, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}>
+              <Text style={{ fontSize: 18 }}>🪶</Text>
+              <Text style={[T.h4, { color: C.text, marginLeft: SP['1'] }]}>
+                テキストスタンプ
+              </Text>
+            </View>
+            <PressableScale
+              onPress={onClose}
+              haptic="confirm"
+              style={{
+                paddingHorizontal: SP['3'],
+                paddingVertical: SP['1'],
+                marginRight: -SP['2'],
+              }}
+            >
+              <Text style={[T.bodyM, { color: C.accent, fontWeight: '700' }]}>完了</Text>
             </PressableScale>
           </View>
           <Text style={[T.caption, { color: C.text3 }]}>
-            タップして送信。同じスタンプを送った人数が、投稿者に通知されます (24時間集計)。
+            タップして送信。何個でも押せます。完了で閉じる。
           </Text>
 
           {/* カスタム作成エリア */}
@@ -93,6 +146,7 @@ export function MemeReactionPicker({
                 placeholderTextColor={C.text3}
                 maxLength={40}
                 autoFocus
+                keyboardAppearance="dark"
                 style={{
                   color: C.text,
                   fontSize: 14,
@@ -167,8 +221,8 @@ export function MemeReactionPicker({
               <CategoryRow
                 title="✨ みんなが作った人気のスタンプ"
                 items={popularUserStamps}
-                picked={picked}
-                onPick={onPick}
+                picked={visiblyPicked}
+                onPick={handlePick}
               />
             )}
             {/* 定型スタンプ */}
@@ -177,8 +231,8 @@ export function MemeReactionPicker({
                 key={cat.category}
                 title={cat.category}
                 items={cat.items}
-                picked={picked}
-                onPick={onPick}
+                picked={visiblyPicked}
+                onPick={handlePick}
               />
             ))}
           </ScrollView>
@@ -193,7 +247,7 @@ function CategoryRow({
 }: {
   title: string;
   items: string[];
-  picked: string[];
+  picked: Set<string>;
   onPick: (m: string) => void;
 }) {
   return (
@@ -201,7 +255,7 @@ function CategoryRow({
       <Text style={[T.smallM, { color: C.text3 }]}>{title}</Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
         {items.map((m) => {
-          const isPicked = picked.includes(m);
+          const isPicked = picked.has(m);
           return (
             <PressableScale
               key={m}
