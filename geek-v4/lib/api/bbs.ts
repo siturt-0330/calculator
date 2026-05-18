@@ -3,6 +3,15 @@ import type { BBSThread, BBSReply, Comment } from '@/types/models';
 import { sanitizeContent } from '@/lib/sanitize';
 import { checkRate, rateLimitMessage } from '@/lib/rateLimit';
 
+// シードデータが残してしまった "[v3] " などの内部マーカープレフィックスは
+// ユーザーに見せたくないので、クライアント側で読み出し時に必ず除去する。
+// DB の UPDATE を待たなくてもこの関数1つで全画面のタイトルが綺麗になる。
+const INTERNAL_PREFIX_RE = /^\s*\[v\d+\]\s*/;
+function cleanTitle(title: string | null | undefined): string {
+  if (!title) return '';
+  return title.replace(INTERNAL_PREFIX_RE, '');
+}
+
 export async function fetchThread(id: string): Promise<BBSThread | null> {
   if (!id) return null;
   // UUID 形式チェック (古い URL や壊れた ID への対策)
@@ -17,7 +26,8 @@ export async function fetchThread(id: string): Promise<BBSThread | null> {
     console.warn('[fetchThread] error:', error.message);
     throw error;
   }
-  return data as BBSThread | null;
+  if (!data) return null;
+  return { ...data, title: cleanTitle(data.title) } as BBSThread;
 }
 
 export async function fetchThreads(): Promise<BBSThread[]> {
@@ -27,7 +37,7 @@ export async function fetchThreads(): Promise<BBSThread[]> {
     .order('last_reply_at', { ascending: false, nullsFirst: false })
     .limit(50);
   if (error) throw error;
-  return (data ?? []) as BBSThread[];
+  return (data ?? []).map((t: { title: string }) => ({ ...t, title: cleanTitle(t.title) })) as BBSThread[];
 }
 
 export async function createThread(title: string, category: string): Promise<BBSThread> {
