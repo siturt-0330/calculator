@@ -404,6 +404,161 @@ export function searchTagsV3(
 }
 
 // ============================================================
+// recommendForTags: 複数シードタグから次におすすめタグを返す
+//   - 「これも好きでは？」「これもブロック？」などのレコメンド全般に使う
+//   - V4 のすべてのシグナル統合 (PMI + graph + cooccur + CTR + trending)
+//   - クエリ文字列ではなく seed の集合を入力
+// ============================================================
+export type RecommendResult = {
+  tag: string;
+  score: number;
+  reasons: string[];
+  primaryReason: string;
+  signals: Record<string, number>;
+};
+
+export function recommendForTags(
+  seedTags: string[],
+  ctx: SearchV3Context,
+  excludeTags: string[] = [],
+  opts: { limit?: number; diversify?: boolean } = {},
+): RecommendResult[] {
+  const limit = opts.limit ?? 12;
+  const diversify = opts.diversify ?? true;
+  if (seedTags.length === 0) return [];
+
+  const excludeSet = new Set([...seedTags, ...excludeTags].map(normalize));
+  const blockedSet = new Set((ctx.blockedTags ?? []).map(normalize));
+
+  // ラベル → ノードID
+  const labelToId: Record<string, string> = {};
+  for (const [id, n] of Object.entries(ctx.nodes)) {
+    labelToId[n.label] = id;
+    for (const a of n.aliases) labelToId[a] = id;
+  }
+
+  // 候補集合とスコアを構築
+  const map = new Map<string, { score: number; reasons: Set<string>; signals: Record<string, number> }>();
+  const push = (tag: string, score: number, reason: string, signalKey?: string) => {
+    if (excludeSet.has(normalize(tag)) || blockedSet.has(normalize(tag))) return;
+    const cur = map.get(tag) ?? { score: 0, reasons: new Set<string>(), signals: {} };
+    cur.score += score;
+    cur.reasons.add(reason);
+    if (signalKey) cur.signals[signalKey] = (cur.signals[signalKey] ?? 0) + score;
+    map.set(tag, cur);
+  };
+
+  for (const seed of seedTags) {
+    // (1) PMI 意味類似度
+    const seedEmb = ctx.embeddings.get(seed);
+    if (seedEmb) {
+      const candidates: Array<{ tag: string; sim: number }> = [];
+      for (const [other, vec] of ctx.embeddings) {
+        if (other === seed) continue;
+        const sim = (function () {
+          // inline cosine to avoid extra import
+          let dot = 0, normA = 0, normB = 0;
+          for (const v of seedEmb.values()) normA += v * v;
+          for (const v of vec.values()) normB += v * v;
+          if (normA === 0 || normB === 0) return 0;
+          const [small, big] = seedEmb.size <= vec.size ? [seedEmb, vec] : [vec, seedEmb];
+          for (const [k, va] of small) {
+            const vb = big.get(k);
+            if (vb !== undefined) dot += va * vb;
+          }
+          return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+        })();
+        if (sim >= 0.15) candidates.push({ tag: other, sim });
+      }
+      candidates.sort((a, b) => b.sim - a.sim);
+      for (const c of candidates.slice(0, 20)) {
+        push(c.tag, c.sim * 120, '意味類似', 'semantic');
+      }
+    }
+
+    // (2) Graph 1-hop: children / related / sibling
+    const seedId = labelToId[seed];
+    if (seedId) {
+      const node = ctx.nodes[seedId];
+      if (node) {
+        for (const r of (node.related ?? [])) push(r, 65, '関連', 'graph');
+        for (const cid of node.children) {
+          const child = ctx.nodes[cid];
+          if (child) push(child.label, 55, '下位', 'graph');
+        }
+        // parent + sibling
+        for (const [id, n] of Object.entries(ctx.nodes)) {
+          if (n.children.includes(seedId)) {
+            push(n.label, 30, '上位', 'graph');
+            for (const sid of n.children) {
+              if (sid === seedId) continue;
+              const sib = ctx.nodes[sid];
+              if (sib) push(sib.label, 25, '同グループ', 'graph');
+            }
+          }
+        }
+      }
+    }
+
+    // (3) 共起マトリクス
+    const coo = ctx.cooccur[seed];
+    if (coo) {
+      const sortedCoo = Object.entries(coo).sort((a, b) => b[1] - a[1]).slice(0, 15);
+      for (const [other, cnt] of sortedCoo) {
+        push(other, Math.log(1 + cnt) * 10, '共起', 'cooccur');
+      }
+    }
+
+    // (4) CTR: 同じシードを過去にクリックした候補に伝播
+    if (ctx.clickBoosts && ctx.clickBoosts[seed]) {
+      push(seed, 0, '', undefined);  // self-skip happens at push
+    }
+  }
+
+  // ブースト: 人気度 / トレンド / CTR
+  for (const [tag, entry] of map) {
+    const pop = ctx.tagPopularity[tag] ?? 0;
+    if (pop > 0) entry.score += Math.log(1 + pop) * 2;
+    if (ctx.trendingTags?.has(tag)) {
+      entry.score += 50;
+      entry.reasons.add('🔥トレンド');
+    }
+    if (ctx.clickBoosts?.[tag]) {
+      const ctrBoost = Math.min(100, ctx.clickBoosts[tag]! * 15);
+      entry.score += ctrBoost;
+      entry.reasons.add('🎯前回選択');
+    }
+  }
+
+  // ランキング
+  const ranked: RecommendResult[] = [...map.entries()]
+    .map(([tag, e]) => {
+      const reasonList = [...e.reasons].filter((r) => r);
+      return {
+        tag,
+        score: e.score,
+        reasons: reasonList,
+        primaryReason: reasonList[0] ?? '関連',
+        signals: e.signals,
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  // ダイバーシフィケーション
+  if (!diversify) return ranked.slice(0, limit);
+  const picked: RecommendResult[] = [];
+  for (const r of ranked) {
+    if (picked.length >= limit) break;
+    const tooSimilar = picked.some((p) =>
+      damerauSimilarity(normalize(p.tag), normalize(r.tag)) >= 0.85,
+    );
+    if (tooSimilar) continue;
+    picked.push(r);
+  }
+  return picked;
+}
+
+// ============================================================
 // 予測補完 (typeahead ghost text)
 // "アニ" → "アニメ" を予測して返す。 prefix 一致で最も人気なタグ。
 // ============================================================

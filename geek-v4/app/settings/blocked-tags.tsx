@@ -13,6 +13,7 @@ import { PressableScale } from '@/components/ui/PressableScale';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { TagInputSuggestions } from '@/components/tag/TagInputSuggestions';
 import { buildTagSuggestions, REASON_LABEL } from '@/lib/utils/tagSuggest';
+import { useTagRecommendations } from '@/hooks/useTagRecommendations';
 import { Icon } from '@/constants/icons';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
@@ -46,13 +47,20 @@ export default function BlockedTagsSettingsScreen() {
   const defaultBlocked = useMemo(() => blockedTags.filter((t) => DEFAULT_SET.has(t)), [blockedTags]);
   const customBlocked = useMemo(() => blockedTags.filter((t) => !DEFAULT_SET.has(t)), [blockedTags]);
 
-  // 関連タグ提案 (タグ連携)
+  // 関連タグ提案 (V4 エンジン: PMI 埋め込み + グラフ + 共起 + CTR + トレンド)
+  const v4Recommendations = useTagRecommendations(blockedTags, [...likedTags, ...blockedTags], 24);
   const blockSuggestions = useMemo(() => {
-    const raw = buildTagSuggestions(blockedTags, nodes, rootIds, 24);
-    return raw.filter(
+    if (v4Recommendations.length > 0) {
+      return v4Recommendations.map((r) => ({
+        tag: r.tag,
+        reason: 'related' as const,
+        via: r.primaryReason,
+      }));
+    }
+    return buildTagSuggestions(blockedTags, nodes, rootIds, 24).filter(
       (s) => !likedTags.includes(s.tag) && !blockedTags.includes(s.tag),
     );
-  }, [blockedTags, likedTags, nodes, rootIds]);
+  }, [v4Recommendations, blockedTags, likedTags, nodes, rootIds]);
 
   // デフォルトに戻す: 全 default を再追加 (重複は無視される)
   const restoreDefaults = () => {

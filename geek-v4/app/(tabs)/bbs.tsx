@@ -15,6 +15,8 @@ import { parseQuery } from '@/lib/search/queryParser';
 import { generateVariants } from '@/lib/search/variants';
 import { normalize } from '@/lib/search/tokenize';
 import { textRelevance } from '@/lib/utils/searchAlgo';
+import { classifyIntent, intentEmoji, intentLabel } from '@/lib/search/queryIntent';
+import { useSearchClickStore } from '@/stores/searchClickStore';
 
 type SortMode = 'recent' | 'popular' | 'relevance';
 
@@ -54,6 +56,14 @@ export default function BBSScreen() {
     return [...all].filter((s) => s.length >= 1);
   }, [parsedQuery]);
 
+  // V4 シグナル: CTR boost (過去にこのクエリで開いたスレッド)
+  const getCtrBoosts = useSearchClickStore((s) => s.getBoosts);
+  const recordCtr = useSearchClickStore((s) => s.record);
+  const ctrBoosts = useMemo(() => getCtrBoosts(debounced), [debounced, getCtrBoosts]);
+
+  // Intent badge
+  const bbsIntent = useMemo(() => (debounced ? classifyIntent(debounced) : null), [debounced]);
+
   const filtered = useMemo(() => {
     let result = threads;
     if (category !== 'すべて') {
@@ -83,6 +93,9 @@ export default function BBSScreen() {
       score += Math.log(1 + t.replies_count) * 3;
       const ageH = (Date.now() - new Date(t.last_reply_at ?? t.created_at).getTime()) / 3600000;
       score += 10 * Math.exp(-ageH / 168);
+      // CTR boost: 過去にこのクエリで開いたスレッドを優遇
+      const ctrBoost = ctrBoosts[t.id] ?? 0;
+      if (ctrBoost > 0) score += Math.min(100, ctrBoost * 15);
       return { item: t, score };
     });
     if (sort === 'recent') {
@@ -153,6 +166,21 @@ export default function BBSScreen() {
               </PressableScale>
             )}
           </View>
+          {/* Intent Badge */}
+          {bbsIntent && debounced.length > 0 && (
+            <View style={{
+              alignSelf: 'flex-start', marginTop: 4,
+              flexDirection: 'row', alignItems: 'center', gap: 4,
+              paddingHorizontal: SP['2'], paddingVertical: 2,
+              backgroundColor: C.bg3, borderRadius: R.full,
+              borderWidth: 1, borderColor: C.border,
+            }}>
+              <Text style={{ fontSize: 11 }}>{intentEmoji(bbsIntent)}</Text>
+              <Text style={[T.caption, { color: C.text2, fontSize: 10 }]}>
+                {intentLabel(bbsIntent)}検索
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* カテゴリ (横スクロール) */}
@@ -237,7 +265,10 @@ export default function BBSScreen() {
           return (
             <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'], paddingBottom: SP['3'] }}>
               <PressableScale
-                onPress={() => router.push(`/bbs/${item.id}` as never)}
+                onPress={() => {
+                  if (debounced) recordCtr(debounced, item.id);
+                  router.push(`/bbs/${item.id}` as never);
+                }}
                 haptic="tap"
                 style={{
                   flexDirection: 'row',

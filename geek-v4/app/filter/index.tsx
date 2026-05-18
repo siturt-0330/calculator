@@ -16,6 +16,7 @@ import { Icon } from '@/constants/icons';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { buildTagSuggestions, REASON_LABEL } from '@/lib/utils/tagSuggest';
+import { useTagRecommendations } from '@/hooks/useTagRecommendations';
 
 export default function FilterScreen() {
   const router = useRouter();
@@ -30,20 +31,39 @@ export default function FilterScreen() {
 
   useEffect(() => { void hydrateGraph(); }, [hydrateGraph]);
 
-  // タグツリーをベースに「好き」用サジェスト
-  const suggestions = useMemo(
+  // V4 エンジン: PMI 埋め込み + グラフ + 共起 + CTR + トレンド 統合レコメンド
+  const likedRecommendations = useTagRecommendations(likedTags, [...likedTags, ...blockedTags], 20);
+  const blockedRecommendations = useTagRecommendations(blockedTags, [...likedTags, ...blockedTags], 30);
+
+  // 旧 graph-only サジェストも fallback として保持 (タグツリーが疎な時のため)
+  const graphSuggestions = useMemo(
     () => buildTagSuggestions(likedTags, nodes, rootIds, 20),
     [likedTags, nodes, rootIds],
   );
+  // V4 レコメンドに変換して filter screen の表示形式に合わせる
+  const suggestions = useMemo(() => {
+    if (likedRecommendations.length > 0) {
+      return likedRecommendations.map((r) => ({
+        tag: r.tag,
+        reason: 'related' as const,
+        via: r.primaryReason,
+      }));
+    }
+    return graphSuggestions;
+  }, [likedRecommendations, graphSuggestions]);
 
-  // 「ブロック」用サジェスト: 既にブロックしてるタグから関連を提案
-  // 既に liked/blocked にあるタグは除外
   const blockSuggestions = useMemo(() => {
-    const raw = buildTagSuggestions(blockedTags, nodes, rootIds, 30);
-    return raw.filter(
+    if (blockedRecommendations.length > 0) {
+      return blockedRecommendations.map((r) => ({
+        tag: r.tag,
+        reason: 'related' as const,
+        via: r.primaryReason,
+      }));
+    }
+    return buildTagSuggestions(blockedTags, nodes, rootIds, 30).filter(
       (s) => !likedTags.includes(s.tag) && !blockedTags.includes(s.tag),
     );
-  }, [blockedTags, likedTags, nodes, rootIds]);
+  }, [blockedRecommendations, blockedTags, likedTags, nodes, rootIds]);
 
   const handleAddLiked = () => {
     const t = likedInput.trim().replace(/^#/, '');

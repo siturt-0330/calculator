@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { View, Text } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { TagPill } from './TagPill';
 import { AddTagInline } from './AddTagInline';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { useToastStore } from '@/stores/toastStore';
+import { useTagRecommendations } from '@/hooks/useTagRecommendations';
 import {
   fetchTagRelations,
   fetchGroupsForTag,
@@ -38,6 +39,13 @@ export function TagRelations({
   const aliases = relations.filter((r) => r.relation_type === 'alias').map((r) => otherSide(r.tag_a, r.tag_b));
   const related = relations.filter((r) => r.relation_type === 'related').map((r) => otherSide(r.tag_a, r.tag_b));
 
+  // V4 エンジン: PMI + graph + cooccur + CTR で AI 関連タグ生成
+  const v4Recommendations = useTagRecommendations(
+    [tagName],
+    [tagName, ...aliases, ...related],
+    8,
+  );
+
   const { mutate: suggest } = useMutation({
     mutationFn: (other: string) => suggestTagRelation(tagName, other, mode ?? 'related'),
     onSuccess: () => {
@@ -69,6 +77,35 @@ export function TagRelations({
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
             {related.map((t) => (
               <TagPill key={t} name={t} state="group" onPress={() => onTagPress(t)} />
+            ))}
+          </View>
+        </Section>
+      )}
+
+      {/* V4 AI レコメンド */}
+      {v4Recommendations.length > 0 && (
+        <Section title="🤖 AI が選んだ関連タグ" desc="検索エンジン (PMI + グラフ + 共起 + CTR) で発見">
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
+            {v4Recommendations.map((r) => (
+              <PressableScale
+                key={r.tag}
+                onPress={() => onTagPress(r.tag)}
+                haptic="tap"
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 4,
+                  paddingHorizontal: SP['3'], paddingVertical: SP['1'],
+                  backgroundColor: C.accentBg,
+                  borderRadius: R.full,
+                  borderWidth: 1, borderColor: C.accentSoft,
+                }}
+              >
+                <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>
+                  #{r.tag}
+                </Text>
+                <Text style={{ fontSize: 9, color: C.text3, marginLeft: 2 }}>
+                  {r.primaryReason}
+                </Text>
+              </PressableScale>
             ))}
           </View>
         </Section>
