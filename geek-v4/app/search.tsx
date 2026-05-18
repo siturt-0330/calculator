@@ -26,6 +26,7 @@ import { findClosest, findClosestK } from '@/lib/search/typoCorrect';
 import { generateVariants, previewVariants } from '@/lib/search/variants';
 import { useLanguageStore } from '@/stores/languageStore';
 import { useSavedSearches, useCreateSavedSearch, useDeleteSavedSearch } from '@/hooks/useSavedSearches';
+import { searchTags as searchTagsV2 } from '@/lib/search/tagSearchV2';
 import { expandWithTagGraph } from '@/lib/utils/searchAlgo';
 
 type BBSResult = { id: string; title: string; category: string; replies_count: number; created_at: string };
@@ -287,35 +288,25 @@ export default function SearchScreen() {
     return findClosest(kw, allTagsQ.data, 0.55);
   }, [rankedTags, debounced, parsedQuery, allTagsQ.data]);
 
-  // オートコンプリート: 入力中のタグ候補 (variants も考慮)
+  // オートコンプリート: V2 エンジン (8シグナル統合 + 個人化 + ダイバーシフィケーション)
   const autocomplete = useMemo(() => {
     if (q.trim().length < 1) return [];
     if (!allTagsQ.data) return [];
     const lastToken = q.trim().split(/\s+/).pop() || '';
     if (lastToken.length < 1) return [];
-    const variants = generateVariants(lastToken);
-    const variantSet = new Set(variants.map(normalize));
-    const qn = normalize(lastToken);
-    const scored = allTagsQ.data
-      .filter((name) => !blockedSet.has(name))
-      .map((name) => {
-        const n = normalize(name);
-        let score = 0;
-        // 完全一致
-        if (n === qn) score += 1000;
-        else if (variantSet.has(n)) score += 500; // variant マッチ
-        else if (n.startsWith(qn)) score += 100;
-        else if (n.includes(qn)) score += 50;
-        else if (variants.some((v) => n.includes(normalize(v)))) score += 30;
-        else return null;
-        // 親和度
-        score += (signals.tagFreq[name] ?? 0) * 5;
-        return { name, score };
-      })
-      .filter((x): x is { name: string; score: number } => x !== null);
-    scored.sort((a, b) => b.score - a.score || a.name.length - b.name.length);
-    return scored.slice(0, 8).map((s) => s.name);
-  }, [q, allTagsQ.data, blockedSet, signals]);
+
+    const results = searchTagsV2(lastToken, {
+      allTags: allTagsQ.data,
+      nodes,
+      cooccur,
+      tagPopularity,
+      likedTags,
+      blockedTags: [...blockedTags],
+      tagAffinity: signals.tagFreq,
+    }, { limit: 8, diversify: true });
+
+    return results.map((r) => r.tag);
+  }, [q, allTagsQ.data, nodes, cooccur, tagPopularity, likedTags, blockedTags, signals.tagFreq]);
 
   // バリアントプレビュー (Google 風: "ポケモン も検索しています")
   const variantPreview = useMemo(() => {

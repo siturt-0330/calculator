@@ -1,27 +1,40 @@
-// タイポ補正 (Levenshtein distance ベース)
+// タイポ補正 (Damerau-Levenshtein distance ベース)
 // 既知のタグ名から類似度の高いものを「Did you mean...」として提案
+// Damerau-Levenshtein: 隣接2文字の入れ替え (transposition) を 1 操作として扱う
+//   例: "ポケモソ" → "ポケモン" は通常の Levenshtein なら 1 (substitute)、
+//       "ポケンモ" → "ポケモン" も通常なら 2 だが、Damerau なら 1 (transpose)
 
-function levenshtein(a: string, b: string): number {
+function damerauLevenshtein(a: string, b: string): number {
   if (a === b) return 0;
   const m = a.length;
   const n = b.length;
   if (m === 0) return n;
   if (n === 0) return m;
-  let prev = Array.from({ length: n + 1 }, (_, i) => i);
-  let cur = new Array(n + 1);
+
+  // 3行を使い回す (一つ前 + 二つ前)
+  const d: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) d[i]![0] = i;
+  for (let j = 0; j <= n; j++) d[0]![j] = j;
   for (let i = 1; i <= m; i++) {
-    cur[0] = i;
     for (let j = 1; j <= n; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      cur[j] = Math.min(
-        cur[j - 1]! + 1,
-        prev[j]! + 1,
-        prev[j - 1]! + cost,
+      d[i]![j] = Math.min(
+        d[i - 1]![j]! + 1,       // delete
+        d[i]![j - 1]! + 1,       // insert
+        d[i - 1]![j - 1]! + cost, // substitute
       );
+      // transposition: a[i-2..i-1] と b[j-2..j-1] が swap してたら +1 で OK
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        d[i]![j] = Math.min(d[i]![j]!, d[i - 2]![j - 2]! + 1);
+      }
     }
-    [prev, cur] = [cur, prev];
   }
-  return prev[n]!;
+  return d[m]![n]!;
+}
+
+// 互換性のため旧名でもエクスポート
+function levenshtein(a: string, b: string): number {
+  return damerauLevenshtein(a, b);
 }
 
 // 類似度 (0-1, 1が同一)
