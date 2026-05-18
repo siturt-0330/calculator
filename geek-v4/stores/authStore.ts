@@ -190,8 +190,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
   signUp: async (email, password, phone) => {
     try {
+      const cleanEmail = email.trim().toLowerCase();
       const { data, error } = await supabase.auth.signUp({
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
         password,
         options: { data: { phone } },
       });
@@ -202,6 +203,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           await supabase.from('profiles').upsert({ id: data.user.id, phone }).select();
         } catch {}
       }
+
+      // ケース 1: signUp 直後に session が返ってきた = email confirmation 無効
       if (data.session?.user) {
         try {
           const user = await buildUser(data.session.user);
@@ -211,20 +214,31 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
         return { error: null, autoLoggedIn: true, needsConfirmEmail: false };
       }
-      // セッション無し → 自動ログイン試行
-      const { data: signIn, error: signInErr } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
-        password,
-      });
-      if (!signInErr && signIn.session?.user) {
-        try {
-          const user = await buildUser(signIn.session.user);
-          set({ user });
-        } catch {
-          set({ user: signIn.session.user as AppUser });
+
+      // ケース 2: セッション無し → 自動ログイン試行 (短い backoff で 3 回)
+      // タイミング race と Supabase の伝播遅延を吸収
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 350 * attempt));
+        const { data: signIn, error: signInErr } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        });
+        if (signIn?.session?.user) {
+          try {
+            const user = await buildUser(signIn.session.user);
+            set({ user });
+          } catch {
+            set({ user: signIn.session.user as AppUser });
+          }
+          return { error: null, autoLoggedIn: true, needsConfirmEmail: false };
         }
-        return { error: null, autoLoggedIn: true, needsConfirmEmail: false };
+        // "Email not confirmed" エラーが返ってくるなら email confirmation が ON 設定
+        if (signInErr?.message?.toLowerCase().includes('email not confirmed')
+            || signInErr?.message?.toLowerCase().includes('confirm')) {
+          return { error: null, autoLoggedIn: false, needsConfirmEmail: true };
+        }
       }
+      // 3 回試して session が取れなかった (理由不明)
       return { error: null, autoLoggedIn: false, needsConfirmEmail: true };
     } catch (e) {
       console.error('signUp exception:', e);
