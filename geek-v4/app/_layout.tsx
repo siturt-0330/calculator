@@ -70,9 +70,6 @@ export default function RootLayout() {
     void hydrateTagFilter();
   }, [hydrateAuth, hydrateSettings, hydrateLang, hydrateTagFilter]);
 
-  // Offline action queue processor: ネットワーク復活時に保留中アクションを再実行
-  useOfflineQueueProcessor();
-
   // ★ Safety: hydration / font 読み込みが何らかの理由で詰まっても、
   //   2.5 秒で強制的にレンダー開始 (黒画面のまま止まるのを絶対に防ぐ)
   const [forceReady, setForceReady] = useState(false);
@@ -114,6 +111,7 @@ export default function RootLayout() {
             client={qc}
             persistOptions={{ persister, maxAge: 1000 * 60 * 60 * 24 }}
           >
+            <OfflineQueueRunner />
             <BottomSheetModalProvider>
               <View style={{ flex: 1, backgroundColor: C.bg }}>
                 <StatusBar style="light" />
@@ -129,7 +127,6 @@ export default function RootLayout() {
                   <Stack.Screen name="(tabs)" />
                   <Stack.Screen name="(auth)" />
                   <Stack.Screen name="onboarding" />
-                  <Stack.Screen name="onboarding/language" />
                   <Stack.Screen
                     name="post/create"
                     options={{
@@ -185,4 +182,11 @@ export default function RootLayout() {
       </GestureHandlerRootView>
     </ErrorBoundary>
   );
+}
+
+// ネットワーク復活時に保留中アクションを再実行。
+// useQueryClient() を呼ぶので PersistQueryClientProvider の中に置く必要がある。
+function OfflineQueueRunner() {
+  useOfflineQueueProcessor();
+  return null;
 }
