@@ -3,7 +3,6 @@ import { View, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/stores/authStore';
-import { useIntroStore } from '@/stores/introStore';
 import { useIsAdmin } from '@/hooks/useAdmin';
 import { TopBar } from '@/components/nav/TopBar';
 import { BackButton } from '@/components/nav/BackButton';
@@ -20,7 +19,6 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { signOut } = useAuthStore();
   const isAdmin = useIsAdmin();
-  const playIntro = useIntroStore((s) => s.play);
   const [logoutOpen, setLogoutOpen] = useState(false);
 
   return (
@@ -57,8 +55,6 @@ export default function SettingsScreen() {
         )}
 
         <SectionHeader title="その他" />
-        <ListItem icon={Icon.sparkles} label="起動アニメーションを再生" onPress={playIntro} />
-        <Divider />
         <ListItem icon={Icon.info} label="このアプリについて" onPress={() => router.push('/settings/about' as never)} />
         <Divider />
         <ListItem icon={Icon.logout} label="ログアウト" onPress={() => setLogoutOpen(true)} destructive />
