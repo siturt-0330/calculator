@@ -23,7 +23,8 @@ import { parseQuery, type ParsedQuery } from '@/lib/search/queryParser';
 import { normalize } from '@/lib/search/tokenize';
 import { scorePost, scoreTagItem, type PostDoc, type TagDoc } from '@/lib/search/scoring';
 import { findClosest, findClosestK } from '@/lib/search/typoCorrect';
-import { generateVariants } from '@/lib/search/variants';
+import { generateVariants, previewVariants } from '@/lib/search/variants';
+import { useLanguageStore } from '@/stores/languageStore';
 import { expandWithTagGraph } from '@/lib/utils/searchAlgo';
 
 type BBSResult = { id: string; title: string; category: string; replies_count: number; created_at: string };
@@ -110,6 +111,7 @@ export default function SearchScreen() {
   const [sortMode, setSortMode] = useState<SortMode>('relevance');
 
   const { nodes, hydrate: hydrateGraph } = useTagGraphStore();
+  const lang = useLanguageStore((s) => s.lang);
   const { history, hydrate: hydrateHist, add: addHist, remove: removeHist, clear: clearHist } = useSearchHistoryStore();
   const { hydrate: hydrateSignals, record: recordSignal, aggregate } = useSearchSignalsStore();
   const { likedTags, blockedTags } = useTagFilterStore();
@@ -299,6 +301,12 @@ export default function SearchScreen() {
     return scored.slice(0, 8).map((s) => s.name);
   }, [q, allTagsQ.data, blockedSet, signals]);
 
+  // バリアントプレビュー (Google 風: "ポケモン も検索しています")
+  const variantPreview = useMemo(() => {
+    if (q.trim().length < 1) return [];
+    return previewVariants(q.trim(), lang, 4);
+  }, [q, lang]);
+
   const moreSuggestions = useMemo(() => {
     if (!allTagsQ.data) return [];
     const kw = parsedQuery.keywords[0];
@@ -367,6 +375,32 @@ export default function SearchScreen() {
             </PressableScale>
           )}
         </View>
+
+        {/* バリアントプレビュー: アルファベット入力時に日本語変換を表示 */}
+        {variantPreview.length > 0 && (
+          <View style={{
+            flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 4,
+          }}>
+            <Text style={[T.caption, { color: C.text3 }]}>これも検索:</Text>
+            {variantPreview.map((v) => (
+              <PressableScale
+                key={v}
+                onPress={() => { setQ(v); setDebounced(v); addHist(v); }}
+                haptic="select"
+                style={{
+                  paddingHorizontal: SP['2'], paddingVertical: 3,
+                  backgroundColor: C.accentBg,
+                  borderRadius: R.full,
+                  borderWidth: 1, borderColor: C.accentSoft,
+                }}
+              >
+                <Text style={{ fontSize: 11, color: C.accentLight, fontWeight: '700' }}>
+                  → {v}
+                </Text>
+              </PressableScale>
+            ))}
+          </View>
+        )}
 
         {/* オートコンプリート候補 */}
         {autocomplete.length > 0 && q.length > 0 && (
