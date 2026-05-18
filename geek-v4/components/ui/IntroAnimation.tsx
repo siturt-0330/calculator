@@ -24,9 +24,9 @@ const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const SHORTER = Math.min(SCREEN_W, SCREEN_H);
 
 const CFG = {
-  // 文字
+  // 文字: 細身で美しい (Inter Light) + ほんの少しだけ広めの文字間
   FONT_SIZE:       Math.round(Math.min(SHORTER * 0.26, 150)),
-  LETTER_SPACING:  -4,
+  LETTER_SPACING:  1.5,
   BG_COLOR:        '#000000',
   LOGO_COLOR:      '#FFFFFF',
   GLOW_COLOR:      '#7C6AF7',
@@ -230,9 +230,10 @@ function Letter({
 
 function baseLogoStyle() {
   const base = {
-    fontFamily: 'Inter_900Black',
+    // 細身で美しい Inter Light
+    fontFamily: 'Inter_300Light',
     fontSize: CFG.FONT_SIZE,
-    fontWeight: '900' as const,
+    fontWeight: '300' as const,
     letterSpacing: CFG.LETTER_SPACING,
     color: CFG.LOGO_COLOR,
     includeFontPadding: false as const,
@@ -240,9 +241,8 @@ function baseLogoStyle() {
   if (Platform.OS === 'web') {
     return {
       ...base,
-      // Web では system-ui を併用して、フォント読み込み中もシャープに見せる
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      fontFamily: 'Inter_900Black, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' as any,
+      fontFamily: 'Inter_300Light, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' as any,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       WebkitFontSmoothing: 'antialiased',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
