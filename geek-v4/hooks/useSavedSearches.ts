@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
 import {
   fetchSavedSearches, createSavedSearch, updateSavedSearch, deleteSavedSearch, type SavedSearch,
 } from '@/lib/api/savedSearches';
@@ -15,12 +15,10 @@ export function useSavedSearches() {
     staleTime: 60_000,
   });
   useEffect(() => {
-    const channel = supabase
-      .channel('saved-searches-watch')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'saved_searches' },
-        () => qc.invalidateQueries({ queryKey: KEY }))
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return attachChannel('saved-searches-watch', (ch) =>
+      ch.on('postgres_changes', { event: '*', schema: 'public', table: 'saved_searches' },
+        () => qc.invalidateQueries({ queryKey: KEY })),
+    );
   }, [qc]);
   return { searches: (q.data ?? []) as SavedSearch[], isLoading: q.isLoading };
 }

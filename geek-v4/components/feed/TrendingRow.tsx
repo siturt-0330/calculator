@@ -3,7 +3,7 @@ import { View, Text, ScrollView } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { fetchTrendingTags } from '@/lib/api/trending';
-import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
@@ -22,9 +22,8 @@ export function TrendingRow() {
   // Realtime: 新規投稿があったらトレンドを refresh (debounce)
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const channel = supabase
-      .channel('trending-tags-refresh')
-      .on(
+    const detach = attachChannel('trending-tags-refresh', (ch) =>
+      ch.on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'posts' },
         () => {
@@ -33,10 +32,10 @@ export function TrendingRow() {
             qc.invalidateQueries({ queryKey: ['trending-tags'] });
           }, 8000);
         },
-      )
-      .subscribe();
+      ),
+    );
     return () => {
-      supabase.removeChannel(channel);
+      detach();
       if (timer) clearTimeout(timer);
     };
   }, [qc]);

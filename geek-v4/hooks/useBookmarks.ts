@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
 import {
   fetchMyCollections, createCollection, deleteCollection, saveToCollection,
   fetchPostsInCollection, type BookmarkCollection,
@@ -16,12 +16,10 @@ export function useCollections() {
     staleTime: 60_000,
   });
   useEffect(() => {
-    const channel = supabase
-      .channel('bookmark-collections-watch')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookmark_collections' },
-        () => qc.invalidateQueries({ queryKey: COL_KEY }))
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return attachChannel('bookmark-collections-watch', (ch) =>
+      ch.on('postgres_changes', { event: '*', schema: 'public', table: 'bookmark_collections' },
+        () => qc.invalidateQueries({ queryKey: COL_KEY })),
+    );
   }, [qc]);
   return { collections: (q.data ?? []) as BookmarkCollection[], isLoading: q.isLoading };
 }

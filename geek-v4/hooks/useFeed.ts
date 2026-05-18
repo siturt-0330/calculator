@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchPosts } from '@/lib/api/posts';
 import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
 import { useTagFilterStore } from '@/stores/tagFilterStore';
 import { useFeedStore } from '@/stores/feedStore';
 import { useSearchSignalsStore } from '@/stores/searchSignalsStore';
@@ -96,14 +97,12 @@ export function useFeed() {
   // Realtime: posts UPDATE (likes/comments/concern カウント変動) と INSERT (新規投稿)
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    const channel = supabase
-      .channel('feed-posts')
-      .on(
+    const detach = attachChannel('feed-posts', (ch) =>
+      ch.on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'posts' },
         (payload) => {
           const updated = payload.new as Partial<Post> & { id: string };
-          // 該当 post をキャッシュ内で局所更新
           qc.setQueriesData({ queryKey: ['feed'] }, (data: unknown) => {
             if (!data || typeof data !== 'object') return data;
             const old = data as { pages?: Array<{ posts: Post[] }> };
@@ -117,8 +116,7 @@ export function useFeed() {
             };
           });
         },
-      )
-      .on(
+      ).on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'posts' },
         () => {
@@ -128,10 +126,10 @@ export function useFeed() {
             qc.invalidateQueries({ queryKey: ['feed'] });
           }, 1500);
         },
-      )
-      .subscribe();
+      ),
+    );
     return () => {
-      supabase.removeChannel(channel);
+      detach();
       if (pendingTimer.current) clearTimeout(pendingTimer.current);
     };
   }, [qc]);
