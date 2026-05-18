@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, useWindowDimensions,
 } from 'react-native';
@@ -42,6 +42,22 @@ export default function BBSThreadScreen() {
   const BackIcon = Icon.arrowL;
 
   const { thread, replies, loading, refreshing, refresh, reply, error } = useBBSThread(id);
+
+  // 入力欄への ref。クォート返信時に focus する。
+  const inputRef = useRef<TextInput>(null);
+
+  // 「>>N で返信」: 該当番号を入力先頭に挿入してフォーカス。
+  // 既に >>N が含まれていれば二重挿入しない。
+  const quoteReply = useCallback((replyIndex: number) => {
+    const tag = `>>${replyIndex + 1}`;
+    setText((prev) => {
+      if (prev.includes(tag)) return prev;
+      const trimmed = prev.trim();
+      return trimmed ? `${tag} ${trimmed}` : `${tag} `;
+    });
+    // ちょい遅延 focus (state 反映後)
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, []);
 
   // @メンション候補 (#1, #2, ...)
   const mentionTargets = useMemo<MentionTarget[]>(
@@ -159,6 +175,26 @@ export default function BBSThreadScreen() {
                   <TrustBadge score={item.trust_score} />
                   <Text style={[T.caption, { color: C.text3 }]}>{formatRelative(item.created_at)}</Text>
                   <View style={{ flex: 1 }} />
+                  {/* >>N で返信 */}
+                  <PressableScale
+                    onPress={() => quoteReply(index)}
+                    haptic="tap"
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 3,
+                      paddingHorizontal: 8,
+                      paddingVertical: 4,
+                      backgroundColor: C.bg3,
+                      borderRadius: R.full,
+                      borderWidth: 1,
+                      borderColor: C.border,
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, color: C.text2, fontWeight: '700' }}>
+                      ↩ &gt;&gt;{index + 1}
+                    </Text>
+                  </PressableScale>
                   <PressableScale
                     onPress={() => setPickerForReplyId(item.id)}
                     haptic="tap"
@@ -340,12 +376,15 @@ export default function BBSThreadScreen() {
             paddingVertical: 6,
           }}>
             <TextInput
+              ref={inputRef}
               value={text}
               onChangeText={setText}
               placeholder="返信を入力…"
               placeholderTextColor={C.text3}
               multiline
               maxLength={500}
+              keyboardAppearance="dark"
+              selectionColor={C.accent}
               style={[
                 T.body,
                 {

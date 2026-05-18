@@ -93,6 +93,8 @@ export default function BBSCreateScreen() {
             placeholderTextColor={C.text3}
             maxLength={60}
             autoFocus
+            keyboardAppearance="dark"
+            selectionColor={C.accent}
             style={[
               T.body,
               {
@@ -115,6 +117,8 @@ export default function BBSCreateScreen() {
             onChangeText={setCategory}
             placeholder="例: アニメ、ゲーム、雑談..."
             placeholderTextColor={C.text3}
+            keyboardAppearance="dark"
+            selectionColor={C.accent}
             style={[
               T.body,
               {
