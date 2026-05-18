@@ -6,6 +6,7 @@ import { useBBS } from '@/hooks/useBBS';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { HighlightedText } from '@/components/ui/HighlightedText';
+import { ThreadCardSkeleton } from '@/components/ui/Skeleton';
 import { Icon } from '@/constants/icons';
 import { C, R, SP } from '@/design/tokens';
 import { T, FONT } from '@/design/typography';
@@ -344,7 +345,11 @@ export default function BBSScreen() {
           );
         }}
         ListEmptyComponent={
-          !loading ? (
+          loading ? (
+            <View>
+              {Array.from({ length: 5 }).map((_, i) => <ThreadCardSkeleton key={i} />)}
+            </View>
+          ) : (
             <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'], paddingTop: SP['4'] }}>
               {showResults ? (
                 <View style={{ padding: SP['8'], alignItems: 'center', gap: SP['3'] }}>
@@ -393,7 +398,7 @@ export default function BBSScreen() {
                 </>
               )}
             </View>
-          ) : null
+          )
         }
       />
     </View>

@@ -224,6 +224,7 @@ export function AnonPostCard({
             width={cardWidth - 2}
             height={cardWidth - 2}
             radius={0}
+            lazy
           />
         </DoubleTapHeart>
       )}

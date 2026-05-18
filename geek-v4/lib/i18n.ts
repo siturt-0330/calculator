@@ -98,6 +98,9 @@ export const LANG_LABEL: Record<Lang, string> = {
   en: '🇺🇸 English',
   zh: '🇨🇳 中文',
   ko: '🇰🇷 한국어',
+  th: '🇹🇭 ภาษาไทย',
+  vi: '🇻🇳 Tiếng Việt',
+  id: '🇮🇩 Bahasa Indonesia',
   es: '🇪🇸 Español',
   fr: '🇫🇷 Français',
 };

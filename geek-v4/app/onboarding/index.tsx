@@ -109,7 +109,7 @@ export default function OnboardingIndex() {
 
         <Button
           label="はじめる / Start"
-          onPress={() => router.push('/onboarding/language')}
+          onPress={() => router.push('/onboarding/language' as never)}
           haptic="confirm"
         />
       </ScrollView>

@@ -378,7 +378,7 @@ function QuickItem({
   onPress,
   color,
 }: {
-  icon: React.ComponentType<{ size: number; color: string; strokeWidth: number }>;
+  icon: React.ComponentType<Record<string, unknown>>;
   title: string;
   sub: string;
   onPress: () => void;

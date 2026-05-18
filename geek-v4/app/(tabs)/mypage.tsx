@@ -15,6 +15,7 @@ import { NotificationBadge } from '@/components/ui/NotificationBadge';
 import { ActivitySummary } from '@/components/mypage/ActivitySummary';
 import { BadgeRibbon } from '@/components/mypage/BadgeRibbon';
 import { useFeatureFlag } from '@/hooks/useFeatureFlag';
+import { MypageSkeleton } from '@/components/ui/Skeleton';
 import { Icon } from '@/constants/icons';
 import { C, GRAD, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
@@ -29,7 +30,7 @@ export default function MypageScreen() {
   const showActivity = useFeatureFlag('profile_summary');
   const [logoutOpen, setLogoutOpen] = useState(false);
 
-  const { data: stats } = useQuery({
+  const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['mypage-stats', user?.id],
     queryFn: async () => {
       if (!user) return null;
@@ -55,6 +56,14 @@ export default function MypageScreen() {
     : 0;
 
   const trustScore = stats?.trust_score ?? 50;
+
+  if (statsLoading && !stats) {
+    return (
+      <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
+        <MypageSkeleton />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -338,13 +347,15 @@ function StatDivider() {
   return <View style={{ width: 1, backgroundColor: C.border, marginVertical: SP['1'] }} />;
 }
 
+type IconComponent = React.ComponentType<Record<string, unknown>>;
+
 function MenuTile({
   icon: I,
   label,
   onPress,
   color,
 }: {
-  icon: React.ComponentType<{ size: number; color: string; strokeWidth: number }>;
+  icon: IconComponent;
   label: string;
   onPress: () => void;
   color: string;

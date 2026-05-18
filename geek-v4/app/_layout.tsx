@@ -23,12 +23,14 @@ import { FeedbackFAB } from '@/components/feedback/FeedbackFAB';
 import { useOfflineQueueProcessor } from '@/hooks/useOfflineQueueProcessor';
 import { initAnalytics } from '@/lib/analytics';
 import { initSentry } from '@/lib/sentry';
+import { initWebVitals } from '@/lib/webVitals';
 import { C } from '@/design/tokens';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 if (!__DEV__) initSentry();
 initAnalytics();
+initWebVitals();
 
 const qc = new QueryClient({
   defaultOptions: {

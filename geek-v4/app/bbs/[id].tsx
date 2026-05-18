@@ -399,7 +399,7 @@ function Header({
 }: {
   insets: { top: number };
   router: { back: () => void };
-  BackIcon: React.ComponentType<{ size: number; color: string; strokeWidth: number }>;
+  BackIcon: React.ComponentType<Record<string, unknown>>;
 }) {
   return (
     <View style={{ alignItems: 'center', backgroundColor: C.bg, paddingTop: insets.top }}>
