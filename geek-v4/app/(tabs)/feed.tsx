@@ -13,6 +13,7 @@ import { useShare } from '@/hooks/useShare';
 import { useReport } from '@/hooks/useReport';
 import { useReactions, useReactionToggle } from '@/hooks/useReactions';
 import { useAddedTags, useAddTag } from '@/hooks/useAddedTags';
+import { usePolls } from '@/hooks/usePolls';
 import { useNotifications } from '@/hooks/useNotifications';
 import { NotificationBadge } from '@/components/ui/NotificationBadge';
 import { useToastStore } from '@/stores/toastStore';
@@ -66,6 +67,7 @@ export default function FeedScreen() {
   const { data: mySaves = {} } = useSaves(postIds);
   const { data: reactionsByPost } = useReactions(postIds);
   const { data: addedTagsByPost } = useAddedTags(postIds);
+  const { polls } = usePolls(postIds);
   const { addTag } = useAddTag();
   const { show: showToast } = useToastStore();
 
@@ -89,6 +91,7 @@ export default function FeedScreen() {
         saved={!!mySaves[item.id]}
         reactions={reactionsByPost[item.id] ?? []}
         addedTags={addedTagsByPost[item.id] ?? []}
+        poll={polls[item.id]}
         onLike={() => toggleLike(item.id)}
         onConcern={() => toggleConcern(item.id, !!myConcerns[item.id])}
         onComment={() => router.push(`/post/${item.id}` as never)}
@@ -100,7 +103,7 @@ export default function FeedScreen() {
         onAddTag={(tag) => handleAddTag(item.id, tag)}
       />
     ),
-    [router, toggleLike, toggleConcern, toggleSave, toggleReact, share, myLikes, myConcerns, mySaves, reactionsByPost, addedTagsByPost, handleAddTag],
+    [router, toggleLike, toggleConcern, toggleSave, toggleReact, share, myLikes, myConcerns, mySaves, reactionsByPost, addedTagsByPost, polls, handleAddTag],
   );
 
   const Bell = Icon.bell;

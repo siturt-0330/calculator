@@ -2,6 +2,8 @@ export type PostKind = 'fact' | 'opinion' | 'joke' | 'wip';
 export type AccountState = 'healthy' | 'caution' | 'restricted' | 'warned' | 'suspended';
 export type ConcernReason = 'misinfo' | 'unverified' | 'spam' | 'rude' | 'scam' | 'other';
 
+export type CWCategory = 'spoiler' | 'nsfw' | 'violence' | 'sensitive' | null;
+
 export type Post = {
   id: string;
   content: string;
@@ -18,6 +20,8 @@ export type Post = {
   is_public: boolean;
   trust_score_at_post: number;
   is_anonymous: boolean;
+  content_warning?: string | null;
+  cw_category?: CWCategory;
   created_at: string;
 };
 

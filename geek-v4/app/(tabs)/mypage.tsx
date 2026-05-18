@@ -13,6 +13,7 @@ import { PressableScale } from '@/components/ui/PressableScale';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { NotificationBadge } from '@/components/ui/NotificationBadge';
 import { ActivitySummary } from '@/components/mypage/ActivitySummary';
+import { BadgeRibbon } from '@/components/mypage/BadgeRibbon';
 import { useFeatureFlag } from '@/hooks/useFeatureFlag';
 import { Icon } from '@/constants/icons';
 import { C, GRAD, R, SP } from '@/design/tokens';
@@ -160,6 +161,9 @@ export default function MypageScreen() {
           <StatDivider />
           <StatItem value={trustScore} label="信頼" color={trustScore >= 70 ? C.green : trustScore >= 40 ? C.amber : C.red} />
         </View>
+
+        {/* バッジ */}
+        <BadgeRibbon />
 
         {/* 今週の活動サマリー */}
         {showActivity && <ActivitySummary />}

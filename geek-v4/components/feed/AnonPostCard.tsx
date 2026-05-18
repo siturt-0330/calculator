@@ -15,7 +15,9 @@ import { TagPill } from '@/components/tag/TagPill';
 import { AddTagInline } from '@/components/tag/AddTagInline';
 import { MarkdownText } from '@/components/ui/MarkdownText';
 import { LinkPreviewCard } from './LinkPreviewCard';
+import { PollCard } from './PollCard';
 import { useFeatureFlag } from '@/hooks/useFeatureFlag';
+import type { Poll } from '@/lib/api/polls';
 import { Avatar } from '@/components/ui/Avatar';
 import { PostKindBadge } from './PostKindBadge';
 import { TrustBadge } from '@/components/ui/TrustBadge';
@@ -38,6 +40,7 @@ export function AnonPostCard({
   saved = false,
   reactions = [],
   addedTags = [],
+  poll,
   onLike,
   onConcern,
   onComment,
@@ -54,6 +57,7 @@ export function AnonPostCard({
   saved?: boolean;
   reactions?: ReactionAgg[];
   addedTags?: string[];
+  poll?: Poll;
   onLike: () => void;
   onConcern: () => void;
   onComment: () => void;
@@ -77,6 +81,11 @@ export function AnonPostCard({
   const [memePickerOpen, setMemePickerOpen] = useState(false);
   const reactionsList = reactions;
   const myReactionsForPost = reactions.filter((r) => r.mine).map((r) => r.meme);
+
+  // CW (content warning) 開示状態
+  const cwCategory = post.cw_category ?? null;
+  const [cwRevealed, setCwRevealed] = useState(false);
+  const isCwHidden = !!cwCategory && !cwRevealed;
 
   // Feature flags
   const useMarkdown = useFeatureFlag('markdown_render');
@@ -174,8 +183,41 @@ export function AnonPostCard({
         </PressableScale>
       </View>
 
+      {/* CW (content warning) ベール */}
+      {isCwHidden && (
+        <PressableScale
+          onPress={() => setCwRevealed(true)}
+          haptic="tap"
+          style={{
+            marginHorizontal: SP['4'],
+            marginTop: SP['2'],
+            paddingHorizontal: SP['4'],
+            paddingVertical: SP['4'],
+            backgroundColor: C.bg3,
+            borderRadius: R.lg,
+            borderWidth: 1,
+            borderColor: C.amber,
+            alignItems: 'center',
+            gap: SP['1'],
+          }}
+        >
+          <Text style={{ fontSize: 32 }}>
+            {cwCategory === 'spoiler' ? '🤐' : cwCategory === 'nsfw' ? '🔞' : cwCategory === 'violence' ? '⚠️' : '🛡️'}
+          </Text>
+          <Text style={[T.smallM, { color: C.amber, fontWeight: '700' }]}>
+            {cwCategory === 'spoiler' ? 'ネタバレ' : cwCategory === 'nsfw' ? 'センシティブな内容' : cwCategory === 'violence' ? '暴力的描写' : '注意'}
+          </Text>
+          {post.content_warning && (
+            <Text style={[T.caption, { color: C.text2, textAlign: 'center' }]}>
+              {post.content_warning}
+            </Text>
+          )}
+          <Text style={[T.caption, { color: C.accent, marginTop: 4 }]}>タップして表示</Text>
+        </PressableScale>
+      )}
+
       {/* メディア */}
-      {hasMedia && (
+      {hasMedia && !isCwHidden && (
         <DoubleTapHeart onDoubleTap={onLike}>
           <ProgressiveImage
             uri={mediaUrls[0] ?? ''}
@@ -187,7 +229,7 @@ export function AnonPostCard({
       )}
 
       {/* 本文 */}
-      {post.content ? (
+      {post.content && !isCwHidden ? (
         <View>
           <PressableScale
             onPress={onComment}
@@ -289,6 +331,9 @@ export function AnonPostCard({
           </PressableScale>
         )
       )}
+
+      {/* 投票 */}
+      {poll && !isCwHidden && <PollCard poll={poll} />}
 
       {/* タグ群（2つ目以降 + 他人が追加したタグ + 追加ボタン） */}
       <View style={{

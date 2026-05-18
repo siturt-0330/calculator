@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchPosts } from '@/lib/api/posts';
 import { supabase } from '@/lib/supabase';
 import { useTagFilterStore } from '@/stores/tagFilterStore';
 import { useFeedStore } from '@/stores/feedStore';
+import { useSearchSignalsStore } from '@/stores/searchSignalsStore';
+import { smartSort } from '@/lib/feed/smartRank';
 import type { Post } from '@/types/models';
 
 export function useFeed() {
@@ -23,7 +25,24 @@ export function useFeed() {
     staleTime: 30_000,
   });
 
-  const posts: Post[] = data?.pages.flatMap((p) => p.posts) ?? [];
+  const rawPosts: Post[] = data?.pages.flatMap((p) => p.posts) ?? [];
+
+  // Smart Rank: sort==='hot' のときだけ個人化スコアで並べ替え
+  const aggregate = useSearchSignalsStore((s) => s.aggregate);
+  const signals = useMemo(() => aggregate(), [aggregate]);
+  const posts: Post[] = useMemo(() => {
+    if (sort !== 'hot') return rawPosts;
+    const likedSet = new Set(likedTags);
+    const blockedSet = new Set(blockedTags);
+    return smartSort(rawPosts, {
+      likedTags: likedSet,
+      blockedTags: blockedSet,
+      tagAffinity: signals.tagFreq,
+      recentTags: signals.recentTags,
+      recentQueries: [],
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawPosts, sort, likedTags, blockedTags, signals.tagFreq, signals.recentTags]);
 
   const loadMore = useCallback(() => {
     if (hasNextPage && !isFetching) fetchNextPage();

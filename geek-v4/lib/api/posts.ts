@@ -21,7 +21,7 @@ export async function fetchPosts({
 }: FetchPostsOpts): Promise<{ posts: Post[]; nextCursor: string | null }> {
   let query = supabase
     .from('posts')
-    .select('id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, created_at')
+    .select('id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, created_at')
     .eq('is_anonymous', true)
     .eq('is_public', true)
     .limit(limit);
@@ -79,6 +79,9 @@ export async function createPost({
   kind = 'opinion',
   sourceUrl,
   isPublic = true,
+  contentWarning = null,
+  cwCategory = null,
+  poll,
 }: {
   content: string;
   mediaUris: string[];
@@ -87,11 +90,14 @@ export async function createPost({
   kind?: 'fact' | 'opinion' | 'joke' | 'wip';
   sourceUrl?: string | null;
   isPublic?: boolean;
+  contentWarning?: string | null;
+  cwCategory?: 'spoiler' | 'nsfw' | 'violence' | 'sensitive' | null;
+  poll?: { question: string; options: string[]; multiSelect?: boolean; expiresInHours?: number };
 }): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  const { error } = await supabase.from('posts').insert({
+  const { data: post, error } = await supabase.from('posts').insert({
     content,
     media_urls: mediaUris,
     media_blurhashes: [],
@@ -101,14 +107,36 @@ export async function createPost({
     kind,
     source_url: sourceUrl ?? null,
     is_public: isPublic,
-  });
+    content_warning: contentWarning,
+    cw_category: cwCategory,
+  }).select('id').single();
   if (error) throw error;
+
+  // Poll を作成
+  if (poll && poll.options.filter((o) => o.trim()).length >= 2) {
+    const expiresAt = poll.expiresInHours
+      ? new Date(Date.now() + poll.expiresInHours * 3600 * 1000).toISOString()
+      : null;
+    const { data: pollRow, error: pollErr } = await supabase.from('polls').insert({
+      post_id: (post as { id: string }).id,
+      question: poll.question.trim(),
+      expires_at: expiresAt,
+      multi_select: !!poll.multiSelect,
+    }).select('id').single();
+    if (pollErr) throw pollErr;
+    const opts = poll.options
+      .map((label, i) => ({ poll_id: (pollRow as { id: string }).id, label: label.trim(), ordinal: i }))
+      .filter((o) => o.label.length > 0);
+    if (opts.length > 0) {
+      await supabase.from('poll_options').insert(opts);
+    }
+  }
 }
 
 export async function fetchPostById(id: string): Promise<Post> {
   const { data, error } = await supabase
     .from('posts')
-    .select('id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, created_at')
+    .select('id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, created_at')
     .eq('id', id)
     .single();
   if (error) throw error;

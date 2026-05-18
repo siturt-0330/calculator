@@ -16,6 +16,75 @@ writeFileSync(
 `,
 );
 
+// ============================================================
+// PWA: manifest.json + service-worker.js
+// ============================================================
+const manifest = {
+  name: 'Geek',
+  short_name: 'Geek',
+  description: '匿名で趣味を語り、共感が本人に届くSNS',
+  start_url: '/',
+  display: 'standalone',
+  background_color: '#0a0a0a',
+  theme_color: '#0a0a0a',
+  orientation: 'portrait',
+  lang: 'ja',
+  icons: [
+    { src: '/favicon.ico', sizes: '64x64 32x32 24x24 16x16', type: 'image/x-icon' },
+    { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+    { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+  ],
+};
+writeFileSync(join(dist, 'manifest.webmanifest'), JSON.stringify(manifest, null, 2));
+
+const sw = `// Geek Service Worker — keeps the app shell available offline.
+const CACHE = 'geek-shell-v3';
+const SHELL = ['/', '/index.html', '/manifest.webmanifest'];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL).catch(() => {})));
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(caches.keys().then((keys) =>
+    Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))),
+  ));
+  self.clients.claim();
+});
+
+// Strategy: network-first for app shell, fallback to cache.
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  // Supabase realtime / API calls — skip cache
+  if (url.hostname.includes('supabase')) return;
+  // HTML navigations: network-first, cache fallback
+  if (req.mode === 'navigate') {
+    event.respondWith(
+      fetch(req).then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy));
+        return res;
+      }).catch(() => caches.match(req).then((r) => r || caches.match('/index.html'))),
+    );
+    return;
+  }
+  // Static assets: cache-first
+  if (/\\.(?:js|css|woff2?|png|jpg|jpeg|svg|webp|ico|json)$/.test(url.pathname)) {
+    event.respondWith(
+      caches.match(req).then((cached) => cached || fetch(req).then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy));
+        return res;
+      }).catch(() => cached)),
+    );
+  }
+});
+`;
+writeFileSync(join(dist, 'service-worker.js'), sw);
+
 
 // lang を ja に
 html = html.replace('<html lang="en">', '<html lang="ja" translate="no">');
@@ -45,6 +114,20 @@ const inject = `    <meta name="google" content="notranslate" />
     <meta name="twitter:title" content="Geek — 匿名で趣味を語る SNS" />
     <meta name="twitter:description" content="共感が本人に届く、新しい匿名 SNS。あなたの推しを、もっと深く語ろう。" />
     <meta name="twitter:image" content="${SITE_URL}/og-image.png" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Geek" />
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+        });
+      }
+    </script>
 
     <link rel="canonical" href="${SITE_URL}" />
     <style>

@@ -39,6 +39,16 @@ export default function CreatePost() {
   const [sourceUrl, setSourceUrl] = useState('');
   const [isPublic, setIsPublic] = useState(true);
   const [posting, setPosting] = useState(false);
+  // CW (content warning)
+  type CWCat = 'none' | 'spoiler' | 'nsfw' | 'violence' | 'sensitive';
+  const [cwCategory, setCwCategory] = useState<CWCat>('none');
+  const [cwText, setCwText] = useState('');
+  // Poll
+  const [showPoll, setShowPoll] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState('');
+  const [pollOptions, setPollOptions] = useState<string[]>(['', '']);
+  const [pollMulti, setPollMulti] = useState(false);
+  const [pollHours, setPollHours] = useState<number | null>(24);
 
   // 下書き自動保存
   const DRAFT_KEY = 'geek:post_draft_v1';
@@ -137,6 +147,15 @@ export default function CreatePost() {
         Alert.alert('投稿できません', check.reason ?? 'コンテンツポリシーに反する可能性があります');
         return;
       }
+      const validOptions = pollOptions.filter((o) => o.trim());
+      const pollPayload = (showPoll && pollQuestion.trim() && validOptions.length >= 2)
+        ? {
+            question: pollQuestion,
+            options: validOptions,
+            multiSelect: pollMulti,
+            expiresInHours: pollHours ?? undefined,
+          }
+        : undefined;
       await createPost({
         content,
         mediaUris: images,
@@ -145,6 +164,9 @@ export default function CreatePost() {
         kind,
         sourceUrl: sourceUrl.trim() || null,
         isPublic,
+        contentWarning: cwCategory !== 'none' ? (cwText.trim() || null) : null,
+        cwCategory: cwCategory !== 'none' ? cwCategory : null,
+        poll: pollPayload,
       });
       hap.success();
       show('投稿しました', 'success');
@@ -332,6 +354,160 @@ export default function CreatePost() {
                 <TagPill key={t} name={t} state="liked" onPress={() => removeTag(t)} />
               ))}
             </View>
+          </View>
+
+          {/* コンテンツ警告 (CW) */}
+          <View style={{ gap: SP['2'] }}>
+            <Text style={[T.smallM, { color: C.text2 }]}>⚠️ コンテンツ警告 (任意)</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              {([
+                { v: 'none', label: 'なし', emoji: '🟢' },
+                { v: 'spoiler', label: 'ネタバレ', emoji: '🤐' },
+                { v: 'nsfw', label: 'センシティブ', emoji: '🔞' },
+                { v: 'violence', label: '暴力的', emoji: '⚠️' },
+                { v: 'sensitive', label: '注意', emoji: '🛡️' },
+              ] as { v: CWCat; label: string; emoji: string }[]).map((opt) => {
+                const active = cwCategory === opt.v;
+                return (
+                  <PressableScale
+                    key={opt.v}
+                    onPress={() => setCwCategory(opt.v)}
+                    haptic="select"
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 4,
+                      paddingHorizontal: SP['3'], paddingVertical: SP['2'],
+                      borderRadius: R.full,
+                      backgroundColor: active ? C.amberBg : C.bg3,
+                      borderWidth: 1.5,
+                      borderColor: active ? C.amber : C.border,
+                    }}
+                  >
+                    <Text style={{ fontSize: 13 }}>{opt.emoji}</Text>
+                    <Text style={[T.smallM, { color: active ? C.amber : C.text2 }]}>{opt.label}</Text>
+                  </PressableScale>
+                );
+              })}
+            </View>
+            {cwCategory !== 'none' && (
+              <Input
+                placeholder="警告の詳細 (任意) 例: 鬼滅 無限城編のネタバレを含みます"
+                value={cwText}
+                onChangeText={setCwText}
+                maxLength={120}
+              />
+            )}
+          </View>
+
+          {/* 投票 */}
+          <View style={{ gap: SP['2'] }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+              <Text style={[T.smallM, { color: C.text2 }]}>📊 投票を追加 (任意)</Text>
+              <View style={{ flex: 1 }} />
+              <PressableScale
+                onPress={() => setShowPoll((v) => !v)}
+                haptic="tap"
+                style={{
+                  paddingHorizontal: SP['3'], paddingVertical: 4,
+                  borderRadius: R.full,
+                  backgroundColor: showPoll ? C.accent : C.bg3,
+                  borderWidth: 1,
+                  borderColor: showPoll ? C.accent : C.border,
+                }}
+              >
+                <Text style={[T.caption, { color: showPoll ? '#fff' : C.text }]}>
+                  {showPoll ? '✓ 投票あり' : '+ 投票を追加'}
+                </Text>
+              </PressableScale>
+            </View>
+            {showPoll && (
+              <View style={{
+                padding: SP['3'],
+                backgroundColor: C.bg3,
+                borderRadius: R.md,
+                borderWidth: 1, borderColor: C.border,
+                gap: SP['2'],
+              }}>
+                <Input
+                  placeholder="質問 (例: 鬼滅で一番強い柱は？)"
+                  value={pollQuestion}
+                  onChangeText={setPollQuestion}
+                  maxLength={200}
+                />
+                {pollOptions.map((opt, i) => (
+                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+                    <Text style={[T.caption, { color: C.text3, width: 18 }]}>{i + 1}.</Text>
+                    <View style={{ flex: 1 }}>
+                      <Input
+                        placeholder={`選択肢 ${i + 1}`}
+                        value={opt}
+                        onChangeText={(v) => setPollOptions(pollOptions.map((o, j) => j === i ? v : o))}
+                        maxLength={80}
+                      />
+                    </View>
+                    {pollOptions.length > 2 && (
+                      <PressableScale
+                        onPress={() => setPollOptions(pollOptions.filter((_, j) => j !== i))}
+                        haptic="warn"
+                        style={{ padding: 4 }}
+                      >
+                        <X size={14} color={C.text3} strokeWidth={2.4} />
+                      </PressableScale>
+                    )}
+                  </View>
+                ))}
+                {pollOptions.length < 6 && (
+                  <PressableScale
+                    onPress={() => setPollOptions([...pollOptions, ''])}
+                    haptic="tap"
+                    style={{
+                      alignSelf: 'flex-start',
+                      paddingHorizontal: SP['3'], paddingVertical: 4,
+                      borderRadius: R.full,
+                      backgroundColor: C.bg2, borderWidth: 1, borderColor: C.border,
+                    }}
+                  >
+                    <Text style={[T.caption, { color: C.text2 }]}>+ 選択肢を追加</Text>
+                  </PressableScale>
+                )}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], marginTop: SP['1'] }}>
+                  <PressableScale
+                    onPress={() => setPollMulti((v) => !v)}
+                    haptic="select"
+                    style={{
+                      paddingHorizontal: SP['2'], paddingVertical: 4,
+                      borderRadius: R.full,
+                      backgroundColor: pollMulti ? C.accent : C.bg2,
+                      borderWidth: 1,
+                      borderColor: pollMulti ? C.accent : C.border,
+                    }}
+                  >
+                    <Text style={[T.caption, { color: pollMulti ? '#fff' : C.text2 }]}>
+                      {pollMulti ? '✓ 複数選択可' : '単一選択'}
+                    </Text>
+                  </PressableScale>
+                  <View style={{ flex: 1 }} />
+                  <Text style={[T.caption, { color: C.text3 }]}>期間:</Text>
+                  {[6, 24, 72, 168].map((h) => (
+                    <PressableScale
+                      key={h}
+                      onPress={() => setPollHours(h)}
+                      haptic="select"
+                      style={{
+                        paddingHorizontal: SP['2'], paddingVertical: 4,
+                        borderRadius: R.full,
+                        backgroundColor: pollHours === h ? C.accent : C.bg2,
+                        borderWidth: 1,
+                        borderColor: pollHours === h ? C.accent : C.border,
+                      }}
+                    >
+                      <Text style={[T.caption, { color: pollHours === h ? '#fff' : C.text2 }]}>
+                        {h < 24 ? `${h}h` : `${h / 24}d`}
+                      </Text>
+                    </PressableScale>
+                  ))}
+                </View>
+              </View>
+            )}
           </View>
 
           {/* 公開範囲 */}

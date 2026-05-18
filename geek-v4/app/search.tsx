@@ -25,6 +25,7 @@ import { scorePost, scoreTagItem, type PostDoc, type TagDoc } from '@/lib/search
 import { findClosest, findClosestK } from '@/lib/search/typoCorrect';
 import { generateVariants, previewVariants } from '@/lib/search/variants';
 import { useLanguageStore } from '@/stores/languageStore';
+import { useSavedSearches, useCreateSavedSearch, useDeleteSavedSearch } from '@/hooks/useSavedSearches';
 import { expandWithTagGraph } from '@/lib/utils/searchAlgo';
 
 type BBSResult = { id: string; title: string; category: string; replies_count: number; created_at: string };
@@ -113,6 +114,21 @@ export default function SearchScreen() {
   const { nodes, hydrate: hydrateGraph } = useTagGraphStore();
   const lang = useLanguageStore((s) => s.lang);
   const { history, hydrate: hydrateHist, add: addHist, remove: removeHist, clear: clearHist } = useSearchHistoryStore();
+  // 保存検索
+  const { searches: savedSearches } = useSavedSearches();
+  const { mutateAsync: createSavedSearchMut } = useCreateSavedSearch();
+  const { mutateAsync: deleteSavedSearchMut } = useDeleteSavedSearch();
+  const saveCurrentQuery = () => {
+    if (!debounced.trim()) return;
+    createSavedSearchMut({ query: debounced }).catch(() => {});
+  };
+  const removeSavedSearchFn = (id: string) => {
+    deleteSavedSearchMut(id).catch(() => {});
+  };
+  const isCurrentSaved = useMemo(
+    () => savedSearches.some((s) => s.query === debounced.trim()),
+    [savedSearches, debounced],
+  );
   const { hydrate: hydrateSignals, record: recordSignal, aggregate } = useSearchSignalsStore();
   const { likedTags, blockedTags } = useTagFilterStore();
   const { cooccur, tagPopularity, hydrate: hydrateCooccur, ensureFresh: ensureCooccur } = useTagCooccurStore();
@@ -375,6 +391,51 @@ export default function SearchScreen() {
             </PressableScale>
           )}
         </View>
+
+        {/* 保存ボタン (検索中) */}
+        {debounced.trim().length > 0 && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+            <PressableScale
+              onPress={saveCurrentQuery}
+              haptic="confirm"
+              disabled={isCurrentSaved}
+              style={{
+                paddingHorizontal: SP['3'], paddingVertical: 4,
+                backgroundColor: isCurrentSaved ? C.bg3 : C.accent,
+                borderRadius: R.full,
+                opacity: isCurrentSaved ? 0.6 : 1,
+              }}
+            >
+              <Text style={[T.caption, { color: isCurrentSaved ? C.text2 : '#fff', fontWeight: '700' }]}>
+                {isCurrentSaved ? '✓ 保存済み' : '☆ この検索を保存'}
+              </Text>
+            </PressableScale>
+          </View>
+        )}
+
+        {/* 保存検索一覧 (検索無し時のみ) */}
+        {!debounced.trim() && savedSearches.length > 0 && (
+          <View style={{ gap: SP['1'] }}>
+            <Text style={[T.smallM, { color: C.text2 }]}>⭐ 保存した検索</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              {savedSearches.map((s) => (
+                <View key={s.id} style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 4,
+                  paddingHorizontal: SP['2'], paddingVertical: 4,
+                  backgroundColor: C.accentBg, borderRadius: R.full,
+                  borderWidth: 1, borderColor: C.accentSoft,
+                }}>
+                  <PressableScale onPress={() => { setQ(s.query); setDebounced(s.query); }} haptic="tap">
+                    <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>★ {s.query}</Text>
+                  </PressableScale>
+                  <PressableScale onPress={() => removeSavedSearchFn(s.id)} haptic="warn">
+                    <Text style={{ fontSize: 10, color: C.text3 }}>✕</Text>
+                  </PressableScale>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
 
         {/* バリアントプレビュー: アルファベット入力時に日本語変換を表示 */}
         {variantPreview.length > 0 && (
