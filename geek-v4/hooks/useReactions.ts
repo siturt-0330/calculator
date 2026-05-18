@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
 import { fetchReactionsForPosts, toggleReaction, type ReactionsByPost } from '@/lib/api/reactions';
 
 const KEY_PREFIX = 'reactions';
@@ -23,9 +23,8 @@ export function useReactions(postIds: string[]) {
 
   useEffect(() => {
     if (postIds.length === 0) return;
-    const channel = supabase
-      .channel(`reactions:${sortedKey.slice(0, 64)}`)
-      .on(
+    return attachChannel(`reactions:${sortedKey.slice(0, 64)}`, (ch) =>
+      ch.on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'post_reactions' },
         (payload) => {
@@ -34,9 +33,8 @@ export function useReactions(postIds: string[]) {
             qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
           }
         },
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+      ),
+    );
   }, [sortedKey, postIds, qc]);
 
   return { data: (q.data ?? {}) as ReactionsByPost, isLoading: q.isLoading };
