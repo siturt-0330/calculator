@@ -37,9 +37,10 @@ const CFG = {
   POST_LETTERS_HOLD: 320,  // 全文字揃ってからグロー開始まで
   GLOW_DURATION:   520,    // グロー拡大
   ZOOM_START_DELAY: 200,   // グロー開始からズーム開始まで
-  ZOOM_DURATION:   1500,   // ズームイン尺
-  HOLD_AT_PEAK:    260,    // ズーム最大の瞬間ホールド
-  FADE_OUT:        500,    // 全体フェードアウト
+  ZOOM_DURATION:   1900,   // ズームイン尺 (長めに)
+  ZOOM_MAX:        8,      // ズーム最大倍率 — 大胆な突き抜け感
+  HOLD_AT_PEAK:    180,
+  FADE_OUT:        520,
 };
 
 const LETTERS = ['G', 'e', 'e', 'k'] as const;
@@ -99,13 +100,14 @@ export function IntroAnimation({ onComplete }: { onComplete: () => void }) {
       ),
     );
 
-    // 3) カメラズームイン (ゆっくり大きくなる)
+    // 3) カメラズームイン (Netflix 風に大胆な突き抜け)
     const zoomStart = glowStart + CFG.ZOOM_START_DELAY;
     zoom.value = withDelay(
       zoomStart,
-      withTiming(1.45, {
+      withTiming(CFG.ZOOM_MAX, {
         duration: CFG.ZOOM_DURATION,
-        easing: Easing.bezier(0.45, 0.05, 0.55, 0.95),
+        // 後半でぐっと加速して画面外へ抜ける感じ
+        easing: Easing.bezier(0.32, 0, 0.68, 0.06),
       }),
     );
 
