@@ -8,6 +8,7 @@ import { FlashList } from '@shopify/flash-list';
 import { useBBSThread } from '@/hooks/useBBSThread';
 import { useBBSReplyReactions, useBBSReplyReactionToggle } from '@/hooks/useBBSReplyReactions';
 import { MemeReactionPicker } from '@/components/feed/MemeReactionPicker';
+import { MentionAutocomplete, type MentionTarget } from '@/components/bbs/MentionAutocomplete';
 import { C, SP, R } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -41,6 +42,12 @@ export default function BBSThreadScreen() {
   const BackIcon = Icon.arrowL;
 
   const { thread, replies, loading, refreshing, refresh, reply, error } = useBBSThread(id);
+
+  // @メンション候補 (#1, #2, ...)
+  const mentionTargets = useMemo<MentionTarget[]>(
+    () => replies.map((r, i) => ({ id: r.id, label: `${i + 1}` })),
+    [replies],
+  );
 
   // テキストスタンプ (リアクション)
   const replyIds = useMemo(() => replies.map((r) => r.id), [replies]);
@@ -294,6 +301,23 @@ export default function BBSThreadScreen() {
           </View>
         }
       />
+
+      {/* @メンション候補 (返信入力バーの上) */}
+      <View style={{ width: '100%', alignItems: 'center', backgroundColor: C.bg }}>
+        <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: SP['3'] }}>
+          <MentionAutocomplete
+            input={text}
+            candidates={mentionTargets}
+            onPick={(target) => {
+              // @<token> を @<label> に置換
+              const at = text.lastIndexOf('@');
+              if (at === -1) return;
+              const before = text.slice(0, at);
+              setText(`${before}@${target.label} `);
+            }}
+          />
+        </View>
+      </View>
 
       {/* 返信入力バー */}
       <View style={{ width: '100%', alignItems: 'center', borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.bg2 }}>

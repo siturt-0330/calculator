@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlashList } from '@shopify/flash-list';
 import { fetchPostById } from '@/lib/api/posts';
+import { fetchSimilarPosts } from '@/lib/api/similarPosts';
 import { fetchComments, createComment } from '@/lib/api/bbs';
 import { fetchPostAddedTags, addPostTag } from '@/lib/api/tags';
 import { supabase } from '@/lib/supabase';
@@ -57,6 +58,14 @@ export default function PostDetailScreen() {
     queryKey: ['post-added-tags', id],
     queryFn: () => fetchPostAddedTags(id),
     enabled: !!id,
+  });
+
+  // 似た投稿
+  const { data: similarPosts = [] } = useQuery({
+    queryKey: ['similar-posts', id, post?.tag_names ?? []],
+    queryFn: () => fetchSimilarPosts(id, post?.tag_names ?? [], 6),
+    enabled: !!id && !!post && (post?.tag_names?.length ?? 0) > 0,
+    staleTime: 60_000,
   });
 
   const { show } = useToastStore();
@@ -206,6 +215,53 @@ export default function PostDetailScreen() {
             )}
           </View>
         </View>
+
+        {/* 似たような投稿 (V4 タグマッチング) */}
+        {similarPosts.length > 0 && (
+          <View style={{ paddingHorizontal: SP['4'], paddingBottom: SP['3'], gap: SP['2'] }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={{ fontSize: 14 }}>🔗</Text>
+              <Text style={[T.smallM, { color: C.text, fontWeight: '700', flex: 1 }]}>
+                似たような投稿
+              </Text>
+              <Text style={[T.caption, { color: C.text3 }]}>
+                {similarPosts.length}件
+              </Text>
+            </View>
+            <View style={{ gap: SP['2'] }}>
+              {similarPosts.map((p) => (
+                <PressableScale
+                  key={p.id}
+                  onPress={() => router.push(`/post/${p.id}` as never)}
+                  haptic="tap"
+                  style={{
+                    padding: SP['3'],
+                    backgroundColor: C.bg3,
+                    borderRadius: R.md,
+                    borderWidth: 1, borderColor: C.border,
+                    gap: 4,
+                  }}
+                >
+                  <Text style={[T.small, { color: C.text, lineHeight: 18 }]} numberOfLines={2}>
+                    {p.content}
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+                    <Text style={[T.caption, { color: C.accent }]}>
+                      #{p.tag_names[0] ?? '雑談'}
+                    </Text>
+                    <Text style={[T.caption, { color: C.text3 }]}>
+                      · 💛 {p.likes_count ?? 0}
+                    </Text>
+                    <Text style={[T.caption, { color: C.text3 }]}>
+                      · {formatRelative(p.created_at)}
+                    </Text>
+                  </View>
+                </PressableScale>
+              ))}
+            </View>
+          </View>
+        )}
+
         {replies.length > 0 && (
           <Text style={[T.smallM, { color: C.text2, paddingHorizontal: SP['4'], paddingTop: SP['2'], paddingBottom: SP['1'], fontWeight: '700' }]}>
             💬 {replies.length}件のコメント

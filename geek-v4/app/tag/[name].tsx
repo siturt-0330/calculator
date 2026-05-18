@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { View, Text, RefreshControl } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,6 +13,9 @@ import { useSave } from '@/hooks/useSave';
 import { useShare } from '@/hooks/useShare';
 import { useReactions, useReactionToggle } from '@/hooks/useReactions';
 import { useAddedTags, useAddTag } from '@/hooks/useAddedTags';
+import { useSearchSignalsStore } from '@/stores/searchSignalsStore';
+import { useSearchClickStore } from '@/stores/searchClickStore';
+import { smartSort } from '@/lib/feed/smartRank';
 import { useTagFilterStore } from '@/stores/tagFilterStore';
 import { useToastStore } from '@/stores/toastStore';
 import { C, R, SP } from '@/design/tokens';
@@ -70,7 +74,29 @@ export default function TagDetailScreen() {
     staleTime: 30_000,
   });
 
-  const posts: Post[] = data?.pages.flatMap((p) => p.posts) ?? [];
+  const rawPostsT: Post[] = data?.pages.flatMap((p) => p.posts) ?? [];
+  // V4 smart-rank: タグページの投稿も個人化スコアで並べ替え
+  const aggregateT = useSearchSignalsStore((s) => s.aggregate);
+  const signalsT = useMemo(() => aggregateT(), [aggregateT]);
+  const queryToTagCountT = useSearchClickStore((s) => s.queryToTagCount);
+  const ctrBoostsT = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const tagMap of Object.values(queryToTagCountT)) {
+      for (const [tag, count] of Object.entries(tagMap)) m[tag] = (m[tag] ?? 0) + count;
+    }
+    return m;
+  }, [queryToTagCountT]);
+  const posts: Post[] = useMemo(() => {
+    if (rawPostsT.length === 0) return rawPostsT;
+    return smartSort(rawPostsT, {
+      likedTags: new Set(useTagFilterStore.getState().likedTags),
+      blockedTags: new Set(blockedTags),
+      tagAffinity: signalsT.tagFreq,
+      recentTags: signalsT.recentTags,
+      recentQueries: [],
+      ctrBoosts: ctrBoostsT,
+    });
+  }, [rawPostsT, blockedTags, signalsT.tagFreq, signalsT.recentTags, ctrBoostsT]);
   const postIds = posts.map((p) => p.id);
   const { data: myLikes = {} } = useLikes(postIds);
   const { data: myConcerns = {} } = useConcerns(postIds);

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAutoTagSuggest } from '@/hooks/useAutoTagSuggest';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -49,6 +50,14 @@ export default function CreatePost() {
   const [pollOptions, setPollOptions] = useState<string[]>(['', '']);
   const [pollMulti, setPollMulti] = useState(false);
   const [pollHours, setPollHours] = useState<number | null>(24);
+
+  // 内容から自動タグ提案 (debounce 600ms)
+  const [debouncedContent, setDebouncedContent] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedContent(content), 600);
+    return () => clearTimeout(t);
+  }, [content]);
+  const autoTagSuggestions = useAutoTagSuggest(debouncedContent, tags, 6);
 
   // 下書き自動保存
   const DRAFT_KEY = 'geek:post_draft_v1';
@@ -326,6 +335,53 @@ export default function CreatePost() {
           {/* タグ */}
           <View style={{ gap: SP['2'] }}>
             <Text style={[T.smallM, { color: C.text2 }]}>タグ（必須・最大 5 個）</Text>
+
+            {/* AI 自動タグ提案 (本文から推測) */}
+            {autoTagSuggestions.length > 0 && tags.length < 5 && (
+              <View style={{
+                padding: SP['2'],
+                backgroundColor: 'rgba(124,177,255,0.10)',
+                borderRadius: R.md,
+                borderWidth: 1, borderColor: 'rgba(124,177,255,0.35)',
+                gap: SP['1'],
+              }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Text style={{ fontSize: 13 }}>🤖</Text>
+                  <Text style={[T.caption, { color: '#7CB1FF', fontWeight: '700', flex: 1 }]}>
+                    本文から提案 ({autoTagSuggestions.length})
+                  </Text>
+                  <Text style={[T.caption, { color: C.text3, fontSize: 9 }]}>
+                    タップで追加
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                  {autoTagSuggestions.map((s) => (
+                    <PressableScale
+                      key={s.tag}
+                      onPress={() => {
+                        if (tags.includes(s.tag) || tags.length >= 5) return;
+                        setTags([...tags, s.tag]);
+                        hap.confirm();
+                      }}
+                      haptic="confirm"
+                      style={{
+                        flexDirection: 'row', alignItems: 'center', gap: 3,
+                        paddingHorizontal: SP['2'], paddingVertical: 4,
+                        backgroundColor: 'rgba(124,177,255,0.15)',
+                        borderRadius: R.full,
+                        borderWidth: 1, borderColor: 'rgba(124,177,255,0.4)',
+                      }}
+                    >
+                      <Text style={{ fontSize: 11, color: '#7CB1FF', fontWeight: '700' }}>
+                        ＋ {s.tag}
+                      </Text>
+                      <Text style={{ fontSize: 8, color: C.text3 }}>{s.reason}</Text>
+                    </PressableScale>
+                  ))}
+                </View>
+              </View>
+            )}
+
             <Input
               placeholder="タグを追加（例: ポケモン）"
               value={tagInput}

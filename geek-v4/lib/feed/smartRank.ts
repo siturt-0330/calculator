@@ -15,6 +15,8 @@ export type RankingContext = {
   tagAffinity: Record<string, number>;  // tag → 使われた回数
   recentTags: string[];                 // 直近見たタグ
   recentQueries: string[];
+  trendingTags?: Set<string>;           // 急上昇タグ (24h)
+  ctrBoosts?: Record<string, number>;   // tag → CTR 加点
 };
 
 const HALF_LIFE_HOURS = 24;  // 24時間で半減
@@ -45,6 +47,11 @@ export function smartScore(p: Post, ctx: RankingContext): number {
     if (ctx.likedTags.has(t)) affinity += 1.5;
     affinity += (ctx.tagAffinity[t] ?? 0) * 0.1;
     if (ctx.recentTags.includes(t)) affinity += 0.5;
+    // トレンドタグなら追加ブースト
+    if (ctx.trendingTags?.has(t)) affinity += 0.8;
+    // CTR ブースト (過去にこのタグの投稿をよくクリック)
+    const ctr = ctx.ctrBoosts?.[t] ?? 0;
+    if (ctr > 0) affinity += Math.min(2, ctr * 0.3);
   }
 
   // 信頼スコア (低信頼を後退)

@@ -5,8 +5,27 @@ import { supabase } from '@/lib/supabase';
 import { useTagFilterStore } from '@/stores/tagFilterStore';
 import { useFeedStore } from '@/stores/feedStore';
 import { useSearchSignalsStore } from '@/stores/searchSignalsStore';
+import { useSearchClickStore } from '@/stores/searchClickStore';
 import { smartSort } from '@/lib/feed/smartRank';
 import type { Post } from '@/types/models';
+import { useQuery as useReactQuery } from '@tanstack/react-query';
+
+async function fetchTrendingTagSet(): Promise<Set<string>> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data } = await supabase
+    .from('posts')
+    .select('tag_names')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  const counts: Record<string, number> = {};
+  for (const row of (data ?? []) as Array<{ tag_names: string[] }>) {
+    for (const t of row.tag_names ?? []) counts[t] = (counts[t] ?? 0) + 1;
+  }
+  return new Set(
+    Object.entries(counts).filter(([, c]) => c >= 2).map(([t]) => t),
+  );
+}
 
 export function useFeed() {
   const { likedTags, blockedTags } = useTagFilterStore();
@@ -30,6 +49,23 @@ export function useFeed() {
   // Smart Rank: sort==='hot' のときだけ個人化スコアで並べ替え
   const aggregate = useSearchSignalsStore((s) => s.aggregate);
   const signals = useMemo(() => aggregate(), [aggregate]);
+  // CTR タグ集計: 全ての過去クエリのタグクリック数を合計
+  const queryToTagCount = useSearchClickStore((s) => s.queryToTagCount);
+  const ctrBoosts = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const tagMap of Object.values(queryToTagCount)) {
+      for (const [tag, count] of Object.entries(tagMap)) m[tag] = (m[tag] ?? 0) + count;
+    }
+    return m;
+  }, [queryToTagCount]);
+  // トレンドタグ
+  const trendingQ = useReactQuery({
+    queryKey: ['trending-tag-set'],
+    queryFn: fetchTrendingTagSet,
+    staleTime: 5 * 60 * 1000,
+  });
+  const trendingTags = useMemo(() => trendingQ.data ?? new Set<string>(), [trendingQ.data]);
+
   const posts: Post[] = useMemo(() => {
     if (sort !== 'hot') return rawPosts;
     const likedSet = new Set(likedTags);
@@ -40,9 +76,11 @@ export function useFeed() {
       tagAffinity: signals.tagFreq,
       recentTags: signals.recentTags,
       recentQueries: [],
+      trendingTags,
+      ctrBoosts,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawPosts, sort, likedTags, blockedTags, signals.tagFreq, signals.recentTags]);
+  }, [rawPosts, sort, likedTags, blockedTags, signals.tagFreq, signals.recentTags, trendingTags, ctrBoosts]);
 
   const loadMore = useCallback(() => {
     if (hasNextPage && !isFetching) fetchNextPage();
