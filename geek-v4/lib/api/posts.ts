@@ -71,6 +71,9 @@ export async function fetchPosts({
   return { posts, nextCursor };
 }
 
+import { sanitizeContent, sanitizeTag, sanitizeUrl } from '@/lib/sanitize';
+import { checkRate, rateLimitMessage } from '@/lib/rateLimit';
+
 export async function createPost({
   content,
   mediaUris,
@@ -94,20 +97,30 @@ export async function createPost({
   cwCategory?: 'spoiler' | 'nsfw' | 'violence' | 'sensitive' | null;
   poll?: { question: string; options: string[]; multiSelect?: boolean; expiresInHours?: number };
 }): Promise<void> {
+  // Rate limit (client-side, defense-in-depth)
+  const rl = checkRate('post');
+  if (!rl.ok) throw new Error(rateLimitMessage('post', rl.retryAfterMs));
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
+  // Sanitize 入力
+  const safeContent = sanitizeContent(content, { maxLength: 2000 });
+  const safeTags = tagNames.map(sanitizeTag).filter(Boolean);
+  const safeSourceUrl = sourceUrl ? sanitizeUrl(sourceUrl) : null;
+  const safeContentWarning = contentWarning ? sanitizeContent(contentWarning, { maxLength: 200 }) : null;
+
   const { data: post, error } = await supabase.from('posts').insert({
-    content,
+    content: safeContent,
     media_urls: mediaUris,
     media_blurhashes: [],
-    tag_names: tagNames,
+    tag_names: safeTags,
     is_anonymous: isAnonymous,
     author_id: user.id,
     kind,
-    source_url: sourceUrl ?? null,
+    source_url: safeSourceUrl,
     is_public: isPublic,
-    content_warning: contentWarning,
+    content_warning: safeContentWarning,
     cw_category: cwCategory,
   }).select('id').single();
   if (error) throw error;

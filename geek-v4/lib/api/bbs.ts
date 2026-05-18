@@ -1,5 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import type { BBSThread, BBSReply, Comment } from '@/types/models';
+import { sanitizeContent } from '@/lib/sanitize';
+import { checkRate, rateLimitMessage } from '@/lib/rateLimit';
 
 export async function fetchThread(id: string): Promise<BBSThread | null> {
   if (!id) return null;
@@ -63,12 +65,16 @@ export async function fetchReplies(threadId: string): Promise<BBSReply[]> {
 }
 
 export async function createReply(threadId: string, content: string): Promise<void> {
+  const rl = checkRate('bbs_reply');
+  if (!rl.ok) throw new Error(rateLimitMessage('bbs_reply', rl.retryAfterMs));
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
+  const safeContent = sanitizeContent(content, { maxLength: 1000 });
+  if (!safeContent) throw new Error('内容を入力してください');
   const color = `hsl(${Math.floor(Math.random() * 360)}, 60%, 70%)`;
   const { error } = await supabase
     .from('bbs_replies')
-    .insert({ thread_id: threadId, content, color, author_id: user.id });
+    .insert({ thread_id: threadId, content: safeContent, color, author_id: user.id });
   if (error) throw error;
 }
 
@@ -94,11 +100,15 @@ export async function fetchComments(postId: string): Promise<Comment[]> {
 }
 
 export async function createComment(postId: string, content: string): Promise<void> {
+  const rl = checkRate('comment');
+  if (!rl.ok) throw new Error(rateLimitMessage('comment', rl.retryAfterMs));
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
+  const safeContent = sanitizeContent(content, { maxLength: 500 });
+  if (!safeContent) throw new Error('内容を入力してください');
   const color = `hsl(${Math.floor(Math.random() * 360)}, 60%, 70%)`;
   const { error } = await supabase
     .from('comments')
-    .insert({ post_id: postId, content, avatar_color: color, author_id: user.id });
+    .insert({ post_id: postId, content: safeContent, avatar_color: color, author_id: user.id });
   if (error) throw error;
 }

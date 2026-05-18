@@ -20,6 +20,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { IntroAnimation, markIntroShown } from '@/components/ui/IntroAnimation';
 import { OfflineBanner } from '@/components/ui/OfflineBanner';
 import { FeedbackFAB } from '@/components/feedback/FeedbackFAB';
+import { useOfflineQueueProcessor } from '@/hooks/useOfflineQueueProcessor';
 import { initAnalytics } from '@/lib/analytics';
 import { initSentry } from '@/lib/sentry';
 import { C } from '@/design/tokens';
@@ -66,6 +67,9 @@ export default function RootLayout() {
     void hydrateLang();
     void hydrateTagFilter();
   }, [hydrateAuth, hydrateSettings, hydrateLang, hydrateTagFilter]);
+
+  // Offline action queue processor: ネットワーク復活時に保留中アクションを再実行
+  useOfflineQueueProcessor();
 
   // ★ Safety: hydration / font 読み込みが何らかの理由で詰まっても、
   //   2.5 秒で強制的にレンダー開始 (黒画面のまま止まるのを絶対に防ぐ)
