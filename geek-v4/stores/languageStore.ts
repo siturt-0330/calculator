@@ -1,13 +1,16 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export type Lang = 'ja' | 'en' | 'zh' | 'ko' | 'es' | 'fr';
+export type Lang = 'ja' | 'en' | 'zh' | 'ko' | 'es' | 'fr' | 'th' | 'vi' | 'id';
 
 export const LANG_OPTIONS: { code: Lang; name: string; native: string; flag: string }[] = [
   { code: 'ja', name: 'Japanese',  native: '日本語',     flag: '🇯🇵' },
   { code: 'en', name: 'English',   native: 'English',   flag: '🇺🇸' },
   { code: 'zh', name: 'Chinese',   native: '中文',       flag: '🇨🇳' },
   { code: 'ko', name: 'Korean',    native: '한국어',     flag: '🇰🇷' },
+  { code: 'th', name: 'Thai',      native: 'ภาษาไทย',   flag: '🇹🇭' },
+  { code: 'vi', name: 'Vietnamese', native: 'Tiếng Việt', flag: '🇻🇳' },
+  { code: 'id', name: 'Indonesian', native: 'Bahasa Indonesia', flag: '🇮🇩' },
   { code: 'es', name: 'Spanish',   native: 'Español',   flag: '🇪🇸' },
   { code: 'fr', name: 'French',    native: 'Français',  flag: '🇫🇷' },
 ];

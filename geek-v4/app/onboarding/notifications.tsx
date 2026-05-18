@@ -23,7 +23,8 @@ export default function NotificationsOnboarding() {
     try {
       if (allow && Platform.OS !== 'web') {
         try {
-          const Notifications = await import('expo-notifications');
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const Notifications = require('expo-notifications') as typeof import('expo-notifications');
           await Notifications.requestPermissionsAsync();
         } catch {}
       }

@@ -59,7 +59,7 @@ export function LinkPreviewCard({ url }: { url: string }) {
       overflow: 'hidden',
     }}>
       {data.image_url && (
-        <ProgressiveImage uri={data.image_url} width={'100%' as unknown as number} height={140} radius={0} />
+        <ProgressiveImage uri={data.image_url} width={'100%' as unknown as number} height={140} radius={0} lazy />
       )}
       <View style={{ padding: SP['3'], gap: 2 }}>
         {data.site_name && (

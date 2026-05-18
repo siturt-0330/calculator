@@ -44,6 +44,8 @@ export default function SettingsScreen() {
         <ListItem icon={Icon.block} label="ブロックしたユーザー" onPress={() => router.push('/settings/blocked-users' as never)} />
         <Divider />
         <ListItem icon={Icon.lock} label="プライバシー" onPress={() => router.push('/settings/privacy' as never)} />
+        <Divider />
+        <ListItem icon={Icon.shield} label="データとアカウント" onPress={() => router.push('/settings/account' as never)} />
 
         {isAdmin && (
           <>

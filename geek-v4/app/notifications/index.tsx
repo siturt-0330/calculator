@@ -12,6 +12,7 @@ import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { formatRelative } from '@/lib/utils/date';
 import { TABBAR } from '@/design/tabbar';
+import { NotificationSkeleton } from '@/components/ui/Skeleton';
 
 export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
@@ -23,6 +24,19 @@ export default function NotificationsScreen() {
     void markAllRead();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (isLoading && notifications.length === 0) {
+    return (
+      <View style={{ flex: 1, backgroundColor: C.bg }}>
+        <TopBar title="通知" left={<BackButton />} />
+        <View>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <NotificationSkeleton key={i} />
+          ))}
+        </View>
+      </View>
+    );
+  }
 
   if (!isLoading && notifications.length === 0) {
     return (
