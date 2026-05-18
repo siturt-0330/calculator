@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState } from 'react';
-import { View, Platform } from 'react-native';
+import { View } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -17,7 +17,6 @@ import { useLanguageStore } from '@/stores/languageStore';
 import { useTagFilterStore } from '@/stores/tagFilterStore';
 import { ToastHost } from '@/components/ui/ToastHost';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
-import { IntroAnimation, markIntroShown } from '@/components/ui/IntroAnimation';
 import { OfflineBanner } from '@/components/ui/OfflineBanner';
 import { FeedbackFAB } from '@/components/feedback/FeedbackFAB';
 import { useOfflineQueueProcessor } from '@/hooks/useOfflineQueueProcessor';
@@ -45,21 +44,12 @@ const qc = new QueryClient({
 
 const persister = createAsyncStoragePersister({ storage: AsyncStorage });
 
-function shouldShowIntro(): boolean {
-  // 毎回ページがロードされる時に必ずイントロを再生
-  // ただし SSR 時は再生しない
-  if (Platform.OS !== 'web') return true;
-  if (typeof window === 'undefined') return false;
-  return true;
-}
-
 export default function RootLayout() {
   const fontsLoaded = useAppFonts();
   const { hydrate: hydrateAuth, hydrated: authHydrated, user } = useAuthStore();
   const { hydrate: hydrateSettings, hydrated: settingsHydrated } = useSettingsStore();
   const router = useRouter();
   const segments = useSegments();
-  const [introDone, setIntroDone] = useState<boolean>(() => !shouldShowIntro());
 
   const hydrateLang = useLanguageStore((s) => s.hydrate);
   const hydrateTagFilter = useTagFilterStore((s) => s.hydrate);
@@ -69,9 +59,6 @@ export default function RootLayout() {
     void hydrateLang();
     void hydrateTagFilter();
   }, [hydrateAuth, hydrateSettings, hydrateLang, hydrateTagFilter]);
-
-  // Offline action queue processor: ネットワーク復活時に保留中アクションを再実行
-  useOfflineQueueProcessor();
 
   // ★ Safety: hydration / font 読み込みが何らかの理由で詰まっても、
   //   2.5 秒で強制的にレンダー開始 (黒画面のまま止まるのを絶対に防ぐ)
@@ -114,6 +101,7 @@ export default function RootLayout() {
             client={qc}
             persistOptions={{ persister, maxAge: 1000 * 60 * 60 * 24 }}
           >
+            <OfflineQueueRunner />
             <BottomSheetModalProvider>
               <View style={{ flex: 1, backgroundColor: C.bg }}>
                 <StatusBar style="light" />
@@ -129,7 +117,6 @@ export default function RootLayout() {
                   <Stack.Screen name="(tabs)" />
                   <Stack.Screen name="(auth)" />
                   <Stack.Screen name="onboarding" />
-                  <Stack.Screen name="onboarding/language" />
                   <Stack.Screen
                     name="post/create"
                     options={{
@@ -175,9 +162,6 @@ export default function RootLayout() {
                 </Stack>
                 <ToastHost />
                 <FeedbackFAB />
-                {!introDone && (
-                  <IntroAnimation onComplete={() => { markIntroShown(); setIntroDone(true); }} />
-                )}
               </View>
             </BottomSheetModalProvider>
           </PersistQueryClientProvider>
@@ -185,4 +169,11 @@ export default function RootLayout() {
       </GestureHandlerRootView>
     </ErrorBoundary>
   );
+}
+
+// ネットワーク復活時に保留中アクションを再実行。
+// useQueryClient() を呼ぶので PersistQueryClientProvider の中に置く必要がある。
+function OfflineQueueRunner() {
+  useOfflineQueueProcessor();
+  return null;
 }
