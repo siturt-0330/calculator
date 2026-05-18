@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchReplies, createReply, fetchThread } from '@/lib/api/bbs';
-import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
 
 export function useBBSThread(threadId: string) {
   const qc = useQueryClient();
@@ -31,18 +31,16 @@ export function useBBSThread(threadId: string) {
   // Realtime: 同じスレッドへの新着返信
   useEffect(() => {
     if (!threadId) return;
-    const channel = supabase
-      .channel(`bbs-thread:${threadId}`)
-      .on(
+    return attachChannel(`bbs-thread:${threadId}`, (ch) =>
+      ch.on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'bbs_replies', filter: `thread_id=eq.${threadId}` },
         () => {
           qc.invalidateQueries({ queryKey: ['bbs-replies', threadId] });
           qc.invalidateQueries({ queryKey: ['bbs-thread', threadId] });
         },
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+      ),
+    );
   }, [threadId, qc]);
 
   return {

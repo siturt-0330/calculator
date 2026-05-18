@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
 import { createUserStamp, deleteUserStamp, fetchUserStamps, type UserStamp } from '@/lib/api/userStamps';
 
 const KEY = ['user-stamps'];
@@ -15,15 +15,13 @@ export function useUserStamps() {
   });
 
   useEffect(() => {
-    const channel = supabase
-      .channel('user-stamps-feed')
-      .on(
+    return attachChannel('user-stamps-feed', (ch) =>
+      ch.on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'user_stamps' },
         () => qc.invalidateQueries({ queryKey: KEY }),
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+      ),
+    );
   }, [qc]);
 
   return { stamps: (q.data ?? []) as UserStamp[], isLoading: q.isLoading };

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
 import {
   fetchReactionsForReplies,
   toggleBBSReplyReaction,
@@ -27,9 +27,8 @@ export function useBBSReplyReactions(replyIds: string[]) {
   useEffect(() => {
     if (!sortedKey) return;
     const idSet = new Set(sortedKey.split(','));
-    const channel = supabase
-      .channel(`bbs-reply-reactions:${sortedKey.slice(0, 64)}`)
-      .on(
+    return attachChannel(`bbs-reply-reactions:${sortedKey.slice(0, 64)}`, (ch) =>
+      ch.on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'bbs_reply_reactions' },
         (payload) => {
@@ -38,9 +37,8 @@ export function useBBSReplyReactions(replyIds: string[]) {
             qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
           }
         },
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+      ),
+    );
   }, [sortedKey, qc]);
 
   return { data: (q.data ?? {}) as ReactionsByReply, isLoading: q.isLoading };

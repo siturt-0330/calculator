@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
 import { addPostTag, fetchAddedTagsForPosts, removePostTag } from '@/lib/api/tags';
 
 const KEY_PREFIX = 'post-added-tags-batch';
@@ -22,9 +22,8 @@ export function useAddedTags(postIds: string[]) {
 
   useEffect(() => {
     if (postIds.length === 0) return;
-    const channel = supabase
-      .channel(`post-added-tags:${sortedKey.slice(0, 64)}`)
-      .on(
+    return attachChannel(`post-added-tags:${sortedKey.slice(0, 64)}`, (ch) =>
+      ch.on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'post_added_tags' },
         (payload) => {
@@ -33,9 +32,8 @@ export function useAddedTags(postIds: string[]) {
             qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
           }
         },
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+      ),
+    );
   }, [sortedKey, postIds, qc]);
 
   return { data: (q.data ?? {}) as Record<string, string[]>, isLoading: q.isLoading };

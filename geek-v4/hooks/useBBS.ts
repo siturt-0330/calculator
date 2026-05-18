@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchThreads, createThread } from '@/lib/api/bbs';
-import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
 
 export function useBBS() {
   const qc = useQueryClient();
@@ -28,13 +28,12 @@ export function useBBS() {
         qc.invalidateQueries({ queryKey: ['bbs-threads'] });
       }, 1500);
     };
-    const channel = supabase
-      .channel('bbs-threads-list')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bbs_threads' }, invalidate)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bbs_replies' }, invalidate)
-      .subscribe();
+    const detach = attachChannel('bbs-threads-list', (ch) =>
+      ch.on('postgres_changes', { event: '*', schema: 'public', table: 'bbs_threads' }, invalidate)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bbs_replies' }, invalidate),
+    );
     return () => {
-      supabase.removeChannel(channel);
+      detach();
       if (debounce.current) clearTimeout(debounce.current);
     };
   }, [qc]);

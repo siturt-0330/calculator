@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchPosts } from '@/lib/api/posts';
 import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
 import { useTagFilterStore } from '@/stores/tagFilterStore';
 import { useFeedStore } from '@/stores/feedStore';
 import { useSearchSignalsStore } from '@/stores/searchSignalsStore';
@@ -10,7 +11,9 @@ import { smartSort } from '@/lib/feed/smartRank';
 import type { Post } from '@/types/models';
 import { useQuery as useReactQuery } from '@tanstack/react-query';
 
-async function fetchTrendingTagSet(): Promise<Set<string>> {
+// React Query の persist cache は JSON 経由なので Set を直接保存できない (空の {} になる)。
+// 配列で返して使い側で Set に包む。
+async function fetchTrendingTagList(): Promise<string[]> {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data } = await supabase
     .from('posts')
@@ -22,9 +25,7 @@ async function fetchTrendingTagSet(): Promise<Set<string>> {
   for (const row of (data ?? []) as Array<{ tag_names: string[] }>) {
     for (const t of row.tag_names ?? []) counts[t] = (counts[t] ?? 0) + 1;
   }
-  return new Set(
-    Object.entries(counts).filter(([, c]) => c >= 2).map(([t]) => t),
-  );
+  return Object.entries(counts).filter(([, c]) => c >= 2).map(([t]) => t);
 }
 
 export function useFeed() {
@@ -58,13 +59,13 @@ export function useFeed() {
     }
     return m;
   }, [queryToTagCount]);
-  // トレンドタグ
+  // トレンドタグ (string[] でキャッシュ → 使う時に Set へ包む)
   const trendingQ = useReactQuery({
-    queryKey: ['trending-tag-set'],
-    queryFn: fetchTrendingTagSet,
+    queryKey: ['trending-tag-list'],
+    queryFn: fetchTrendingTagList,
     staleTime: 5 * 60 * 1000,
   });
-  const trendingTags = useMemo(() => trendingQ.data ?? new Set<string>(), [trendingQ.data]);
+  const trendingTags = useMemo(() => new Set(trendingQ.data ?? []), [trendingQ.data]);
 
   const posts: Post[] = useMemo(() => {
     if (sort !== 'hot') return rawPosts;
@@ -96,14 +97,12 @@ export function useFeed() {
   // Realtime: posts UPDATE (likes/comments/concern カウント変動) と INSERT (新規投稿)
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    const channel = supabase
-      .channel('feed-posts')
-      .on(
+    const detach = attachChannel('feed-posts', (ch) =>
+      ch.on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'posts' },
         (payload) => {
           const updated = payload.new as Partial<Post> & { id: string };
-          // 該当 post をキャッシュ内で局所更新
           qc.setQueriesData({ queryKey: ['feed'] }, (data: unknown) => {
             if (!data || typeof data !== 'object') return data;
             const old = data as { pages?: Array<{ posts: Post[] }> };
@@ -117,8 +116,7 @@ export function useFeed() {
             };
           });
         },
-      )
-      .on(
+      ).on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'posts' },
         () => {
@@ -128,10 +126,10 @@ export function useFeed() {
             qc.invalidateQueries({ queryKey: ['feed'] });
           }, 1500);
         },
-      )
-      .subscribe();
+      ),
+    );
     return () => {
-      supabase.removeChannel(channel);
+      detach();
       if (pendingTimer.current) clearTimeout(pendingTimer.current);
     };
   }, [qc]);

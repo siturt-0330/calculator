@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
 import { fetchPolls, vote as voteApi, type Poll } from '@/lib/api/polls';
 
 const KEY_PREFIX = 'polls';
@@ -18,16 +18,13 @@ export function usePolls(postIds: string[]) {
 
   useEffect(() => {
     if (!sortedKey) return;
-    const channel = supabase
-      .channel(`polls:${sortedKey.slice(0, 64)}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'poll_votes' }, () => {
+    return attachChannel(`polls:${sortedKey.slice(0, 64)}`, (ch) =>
+      ch.on('postgres_changes', { event: '*', schema: 'public', table: 'poll_votes' }, () => {
         qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'poll_options' }, () => {
+      }).on('postgres_changes', { event: '*', schema: 'public', table: 'poll_options' }, () => {
         qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+      }),
+    );
   }, [sortedKey, qc]);
 
   return { polls: (q.data ?? {}) as Record<string, Poll>, isLoading: q.isLoading };

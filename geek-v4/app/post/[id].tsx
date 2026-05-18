@@ -11,6 +11,7 @@ import { fetchSimilarPosts } from '@/lib/api/similarPosts';
 import { fetchComments, createComment } from '@/lib/api/bbs';
 import { fetchPostAddedTags, addPostTag } from '@/lib/api/tags';
 import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
 import { C, SP, R } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -85,25 +86,21 @@ export default function PostDetailScreen() {
   // Realtime: 同じ投稿への新規コメント + 投稿カウンター更新
   useEffect(() => {
     if (!id) return;
-    const channel = supabase
-      .channel(`post-detail:${id}`)
-      .on(
+    return attachChannel(`post-detail:${id}`, (ch) =>
+      ch.on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'comments', filter: `post_id=eq.${id}` },
         () => qc.invalidateQueries({ queryKey: ['post-comments', id] }),
-      )
-      .on(
+      ).on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'posts', filter: `id=eq.${id}` },
         () => qc.invalidateQueries({ queryKey: ['post', id] }),
-      )
-      .on(
+      ).on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'post_reactions', filter: `post_id=eq.${id}` },
         () => qc.invalidateQueries({ queryKey: ['reactions'] }),
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+      ),
+    );
   }, [id, qc]);
 
   const handleAddTag = async (tag: string) => {

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
 import {
   fetchIsAdmin,
   fetchAllFeedback,
@@ -33,15 +33,13 @@ export function useAllFeedback(filter?: { status?: FeedbackRow['status'] | 'all'
   });
 
   useEffect(() => {
-    const channel = supabase
-      .channel('feedback-admin-live')
-      .on(
+    return attachChannel('feedback-admin-live', (ch) =>
+      ch.on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'app_feedback' },
         () => qc.invalidateQueries({ queryKey: ['feedback-admin'] }),
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+      ),
+    );
   }, [qc]);
 
   return { feedback: (q.data ?? []) as AdminFeedbackRow[], isLoading: q.isLoading };

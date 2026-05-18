@@ -48,7 +48,7 @@ export function smartScore(p: Post, ctx: RankingContext): number {
     affinity += (ctx.tagAffinity[t] ?? 0) * 0.1;
     if (ctx.recentTags.includes(t)) affinity += 0.5;
     // トレンドタグなら追加ブースト
-    if (ctx.trendingTags?.has(t)) affinity += 0.8;
+    if (ctx.trendingTags instanceof Set && ctx.trendingTags.has(t)) affinity += 0.8;
     // CTR ブースト (過去にこのタグの投稿をよくクリック)
     const ctr = ctx.ctrBoosts?.[t] ?? 0;
     if (ctr > 0) affinity += Math.min(2, ctr * 0.3);

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
 import { fetchFeatureFlags, userInRollout, type FeatureFlag } from '@/lib/api/featureFlags';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -16,15 +16,13 @@ export function useFeatureFlags() {
   });
 
   useEffect(() => {
-    const channel = supabase
-      .channel('feature-flags-watch')
-      .on(
+    return attachChannel('feature-flags-watch', (ch) =>
+      ch.on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'feature_flags' },
         () => qc.invalidateQueries({ queryKey: KEY }),
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+      ),
+    );
   }, [qc]);
 
   return q.data ?? [];

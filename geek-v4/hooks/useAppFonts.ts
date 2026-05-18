@@ -4,14 +4,14 @@ import {
   NotoSansJP_400Regular, NotoSansJP_500Medium, NotoSansJP_700Bold,
 } from '@expo-google-fonts/noto-sans-jp';
 import {
-  Inter_400Regular, Inter_500Medium, Inter_600SemiBold,
+  Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold,
 } from '@expo-google-fonts/inter';
 
 export function useAppFonts(): boolean {
   const [loaded, error] = useFonts({
     Syne_600SemiBold, Syne_700Bold,
     NotoSansJP_400Regular, NotoSansJP_500Medium, NotoSansJP_700Bold,
-    Inter_400Regular, Inter_500Medium, Inter_600SemiBold,
+    Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold,
   });
 
   // フォント失敗はシステムフォントにフォールバック（アプリは止めない）
