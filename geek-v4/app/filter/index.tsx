@@ -145,56 +145,11 @@ export default function FilterScreen() {
             )}
           </View>
 
-          {/* タグツリーからのサジェスト (常時表示) */}
-          <View style={{
-            marginTop: SP['1'],
-            padding: SP['3'],
-            backgroundColor: C.bg2,
-            borderRadius: R.md,
-            borderWidth: 1,
-            borderColor: C.border,
-            gap: SP['2'],
-          }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ fontSize: 14 }}>💡</Text>
-              <Text style={[T.smallM, { color: C.text, fontWeight: '700', flex: 1 }]}>
-                これもどうですか？
-              </Text>
-              <PressableScale onPress={() => router.push('/oshi/tag-graph' as never)} haptic="tap">
-                <Text style={[T.caption, { color: C.accent }]}>連携を編集</Text>
-              </PressableScale>
-            </View>
-            {suggestions.length === 0 ? (
-              <View style={{ paddingVertical: SP['3'], gap: SP['2'] }}>
-                <Text style={[T.small, { color: C.text2 }]}>
-                  タグ連携を作ると、入力したタグから関連タグを自動提案します。
-                </Text>
-                <PressableScale
-                  onPress={() => router.push('/oshi/tag-graph' as never)}
-                  haptic="confirm"
-                  style={{
-                    alignSelf: 'flex-start',
-                    paddingHorizontal: SP['3'],
-                    paddingVertical: SP['2'],
-                    backgroundColor: C.accentBg,
-                    borderRadius: R.full,
-                    borderWidth: 1,
-                    borderColor: C.accentSoft,
-                  }}
-                >
-                  <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>
-                    🔗 タグ連携を作る
-                  </Text>
-                </PressableScale>
-              </View>
-            ) : (
-              <>
-                <Text style={[T.caption, { color: C.text3 }]}>
-                  {likedTags.length === 0
-                    ? 'タグツリーから探してみよう'
-                    : '入力したタグから関連を分析・提案'}
-                </Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+          {/* タグツリーからのサジェスト: 候補がある時だけ表示 */}
+          {suggestions.length > 0 && (
+            <View style={{ marginTop: SP['2'], gap: SP['2'] }}>
+              <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5 }]}>おすすめ</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                   {suggestions.map((s) => {
                     const meta = REASON_LABEL[s.reason];
                     return (
@@ -229,9 +184,8 @@ export default function FilterScreen() {
                   );
                 })}
               </View>
-              </>
-            )}
-          </View>
+            </View>
+          )}
         </View>
 
         <SectionHeader title="ブロックするタグ" />
