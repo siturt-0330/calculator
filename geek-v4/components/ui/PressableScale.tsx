@@ -1,8 +1,7 @@
 import { Platform, Pressable, type PressableProps } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { PRESS_SCALE } from '@/design/motion';
-import { SPRING_TIGHT } from '@/design/motion';
+import { PRESS_SCALE, SPRING_SNAP } from '@/design/motion';
 
 type HapticType = 'tap' | 'select' | 'pop' | 'confirm' | 'success' | 'warn' | 'error';
 
@@ -14,7 +13,22 @@ type Props = PressableProps & {
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-export function PressableScale({ haptic, scaleValue = PRESS_SCALE, children, onPress, style, ...rest }: Props) {
+// より反応の良い press-feedback に調整した PressableScale。
+// - SPRING_SNAP (stiffness 400, damping 14) で press-in→onPress の体感ラグを短く
+// - delayPressIn=0 で OS の遅延を排除
+// - デフォルト hitSlop=8 で誤タップを減らす
+// - haptic は press-in で即発火 (onPress 時より早い)
+export function PressableScale({
+  haptic,
+  scaleValue = PRESS_SCALE,
+  children,
+  onPress,
+  onPressIn,
+  onPressOut,
+  style,
+  hitSlop,
+  ...rest
+}: Props) {
   const scale = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
@@ -33,14 +47,25 @@ export function PressableScale({ haptic, scaleValue = PRESS_SCALE, children, onP
     } catch {}
   }
 
+  // delayPressIn は AnimatedPressable の型に乗ってないのでキャストして渡す
+  // (実際は Pressable がサポートしている — OS デフォルトの ~130ms 遅延を消す)
+  const extra = { delayPressIn: 0 } as Record<string, unknown>;
+
   return (
     <AnimatedPressable
-      onPressIn={() => { scale.value = withSpring(scaleValue, SPRING_TIGHT); }}
-      onPressOut={() => { scale.value = withSpring(1, SPRING_TIGHT); }}
-      onPress={(e) => {
+      {...extra}
+      hitSlop={hitSlop ?? 8}
+      onPressIn={(e) => {
+        scale.value = withSpring(scaleValue, SPRING_SNAP);
+        // haptic を press-in で即発火 → 体感応答速度が上がる
         if (haptic) triggerHaptic(haptic);
-        onPress?.(e);
+        onPressIn?.(e);
       }}
+      onPressOut={(e) => {
+        scale.value = withSpring(1, SPRING_SNAP);
+        onPressOut?.(e);
+      }}
+      onPress={onPress}
       style={[animStyle, style as object]}
       {...rest}
     >
