@@ -94,20 +94,6 @@ export default function FilterScreen() {
         contentContainerStyle={{ paddingBottom: insets.bottom + SP['10'] }}
         keyboardShouldPersistTaps="handled"
       >
-        {/* ガイド */}
-        <View style={{
-          margin: SP['4'],
-          padding: SP['3'],
-          backgroundColor: C.accentBg,
-          borderRadius: R.md,
-          borderWidth: 1,
-          borderColor: C.accentSoft,
-        }}>
-          <Text style={[T.small, { color: C.accentLight }]}>
-            💡 好きとブロックは重複できません。同じタグを両方に登録しようとすると自動で片方が外れます。
-          </Text>
-        </View>
-
         <SectionHeader title="好きなタグ" />
         <View style={{ paddingHorizontal: SP['4'], gap: SP['3'] }}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: SP['2'] }}>
@@ -251,24 +237,9 @@ export default function FilterScreen() {
         <SectionHeader title="ブロックするタグ" />
         <View style={{ paddingHorizontal: SP['4'], gap: SP['3'] }}>
           {/* 安全のため事前にブロック中のタグの案内 */}
-          <View style={{
-            padding: SP['3'],
-            backgroundColor: 'rgba(226,75,74,0.08)',
-            borderRadius: R.md,
-            borderWidth: 1,
-            borderColor: 'rgba(226,75,74,0.3)',
-            gap: SP['1'],
-          }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ fontSize: 14 }}>🛡️</Text>
-              <Text style={[T.smallM, { color: '#E24B4A', fontWeight: '700' }]}>
-                安全のため、有害カテゴリを自動ブロック中
-              </Text>
-            </View>
-            <Text style={[T.caption, { color: C.text2, lineHeight: 16 }]}>
-              詐欺・マルチ・暴力・自殺・虐待・わいせつ・誹謗中傷・薬物・カルト等を含む投稿は非表示。下のタグをタップで個別解除できます。
-            </Text>
-          </View>
+          <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5 }]}>
+            有害カテゴリを自動ブロック中
+          </Text>
 
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: SP['2'] }}>
             <View style={{ flex: 1 }}>
