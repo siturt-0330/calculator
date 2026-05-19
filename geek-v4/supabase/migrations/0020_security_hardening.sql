@@ -78,40 +78,53 @@ create policy "likes_read" on public.likes for select using (
 );
 
 -- ============================================================
--- 5. poll_votes: 投票者を秘匿
+-- 5. poll_votes: 投票者を秘匿 (table が無ければスキップ)
 -- ============================================================
-drop policy if exists "pv_read" on public.poll_votes;
-create policy "pv_read" on public.poll_votes for select using (
-  user_id = auth.uid()
-  or poll_id in (
-    select pl.id from public.polls pl
-    join public.posts p on pl.post_id = p.id
-    where p.author_id = auth.uid()
-  )
-  or public.current_user_is_admin()
-);
+do $$
+begin
+  if to_regclass('public.poll_votes') is not null and to_regclass('public.polls') is not null then
+    drop policy if exists "pv_read" on public.poll_votes;
+    create policy "pv_read" on public.poll_votes for select using (
+      user_id = auth.uid()
+      or poll_id in (
+        select pl.id from public.polls pl
+        join public.posts p on pl.post_id = p.id
+        where p.author_id = auth.uid()
+      )
+      or public.current_user_is_admin()
+    );
+  end if;
+end $$;
 
 -- ============================================================
--- 6. concerns: 通報者を秘匿
+-- 6. concerns: 通報者を秘匿 (table が無ければスキップ)
 -- ============================================================
-drop policy if exists "c_read" on public.concerns;
-create policy "c_read" on public.concerns for select using (
-  user_id = auth.uid()
-  or post_id in (select id from public.posts where author_id = auth.uid())
-  or public.current_user_is_admin()
-);
+do $$
+begin
+  if to_regclass('public.concerns') is not null then
+    drop policy if exists "c_read" on public.concerns;
+    create policy "c_read" on public.concerns for select using (
+      user_id = auth.uid()
+      or post_id in (select id from public.posts where author_id = auth.uid())
+      or public.current_user_is_admin()
+    );
+  end if;
+end $$;
 
 -- ============================================================
 -- 7. post_link_previews: 任意ユーザーの UPDATE を禁止 (cache poisoning 対策)
+--    table が無い環境 (link preview 機能未適用) ではスキップ
 -- ============================================================
-drop policy if exists "plp_update" on public.post_link_previews;
--- update policy を削除 (cache は immutable に)
--- 期限切れキャッシュは insert + on conflict do nothing で更新できる別パターンに変更
--- (アプリ側で cache 期限切れたら一度 delete してから insert)
-drop policy if exists "plp_delete" on public.post_link_previews;
-create policy "plp_delete" on public.post_link_previews for delete using (
-  public.current_user_is_admin()
-);
+do $$
+begin
+  if to_regclass('public.post_link_previews') is not null then
+    drop policy if exists "plp_update" on public.post_link_previews;
+    drop policy if exists "plp_delete" on public.post_link_previews;
+    create policy "plp_delete" on public.post_link_previews for delete using (
+      public.current_user_is_admin()
+    );
+  end if;
+end $$;
 
 -- ============================================================
 -- 8. community_posts: 作者自身が自分の投稿を削除できるよう
@@ -175,13 +188,16 @@ create policy "community_icons_delete" on storage.objects for delete using (
 -- 10. tags: 内容バリデーション強化
 --     悪意あるユーザーが超長文 / 制御文字 を tag にする攻撃を防ぐ
 -- ============================================================
-alter table public.tags
-  drop constraint if exists tags_name_check;
-alter table public.tags
-  add constraint tags_name_check check (
-    length(name) between 1 and 40
-    and name ~ '^[^\x00-\x1f\x7f]+$'  -- 制御文字禁止
-  );
+do $$
+begin
+  if to_regclass('public.tags') is not null then
+    alter table public.tags drop constraint if exists tags_name_check;
+    alter table public.tags add constraint tags_name_check check (
+      length(name) between 1 and 40
+      and name ~ '^[^\x00-\x1f\x7f]+$'
+    );
+  end if;
+end $$;
 
 -- ============================================================
 -- 11. 整合性: 各種 CHECK 制約強化
@@ -194,10 +210,13 @@ alter table public.communities
   alter column description set default '';
 
 -- poll vote count 負数防止
-alter table public.poll_options
-  drop constraint if exists poll_options_vote_count_check;
-alter table public.poll_options
-  add constraint poll_options_vote_count_check check (vote_count >= 0);
+do $$
+begin
+  if to_regclass('public.poll_options') is not null then
+    alter table public.poll_options drop constraint if exists poll_options_vote_count_check;
+    alter table public.poll_options add constraint poll_options_vote_count_check check (vote_count >= 0);
+  end if;
+end $$;
 
 -- post-engagement counters は 0 以上
 alter table public.communities
