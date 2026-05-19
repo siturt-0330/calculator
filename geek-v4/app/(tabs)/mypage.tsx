@@ -250,6 +250,12 @@ export default function MypageScreen() {
             onPress={() => router.push('/settings/blocked-users' as never)}
             color={C.block}
           />
+          <MenuTile
+            icon={Icon.edit}
+            label="Obsidian"
+            onPress={() => router.push('/settings/obsidian' as never)}
+            color={C.accent}
+          />
         </View>
 
         {/* ログアウト */}
