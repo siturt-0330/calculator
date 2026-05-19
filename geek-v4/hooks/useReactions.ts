@@ -29,9 +29,18 @@ export function useReactions(postIds: string[]) {
         { event: '*', schema: 'public', table: 'post_reactions' },
         (payload) => {
           const row = (payload.new ?? payload.old) as { post_id?: string } | null;
-          if (row?.post_id && postIds.includes(row.post_id)) {
-            qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
-          }
+          if (!row?.post_id) return;
+          // 影響を受ける post を含むクエリだけを refetch
+          // (KEY_PREFIX で全 reactions キーを invalidate すると、画面上の
+          //  関係ない post まで refetch されて UI がチカチカする)
+          qc.invalidateQueries({
+            predicate: (query) => {
+              const k = query.queryKey;
+              if (!Array.isArray(k) || k[0] !== KEY_PREFIX) return false;
+              const ids = typeof k[1] === 'string' ? k[1] : '';
+              return ids.split(',').includes(row.post_id!);
+            },
+          });
         },
       ),
     );

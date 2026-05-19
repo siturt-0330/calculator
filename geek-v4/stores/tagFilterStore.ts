@@ -76,11 +76,11 @@ export const useTagFilterStore = create<TagFilterState>((set, get) => ({
         const merged = new Set(blockedArr);
         for (const t of DEFAULT_BLOCKED_TAGS) merged.add(t);
         blockedArr = [...merged];
-        await AsyncStorage.setItem(KEY_BLOCKED, JSON.stringify(blockedArr)).catch(() => {});
-        await AsyncStorage.setItem(KEY_BLOCKED_INIT, '1').catch(() => {});
+        await AsyncStorage.setItem(KEY_BLOCKED, JSON.stringify(blockedArr)).catch((e) => console.warn('[tagFilterStore] AsyncStorage write failed:', e));
+        await AsyncStorage.setItem(KEY_BLOCKED_INIT, '1').catch((e) => console.warn('[tagFilterStore] AsyncStorage write failed:', e));
         // 旧キーは消しておく (二度と評価しない)
-        if (initV1) await AsyncStorage.removeItem(KEY_BLOCKED_INIT_V1).catch(() => {});
-        if (initV2) await AsyncStorage.removeItem(KEY_BLOCKED_INIT_V2).catch(() => {});
+        if (initV1) await AsyncStorage.removeItem(KEY_BLOCKED_INIT_V1).catch((e) => console.warn('[tagFilterStore] AsyncStorage write failed:', e));
+        if (initV2) await AsyncStorage.removeItem(KEY_BLOCKED_INIT_V2).catch((e) => console.warn('[tagFilterStore] AsyncStorage write failed:', e));
       }
       set({
         likedTags: likedArr,
@@ -97,13 +97,13 @@ export const useTagFilterStore = create<TagFilterState>((set, get) => ({
     const blocked = blockedTags.filter((t) => t !== tag);
     const liked = [...new Set([...likedTags, tag])];
     set({ likedTags: liked, blockedTags: blocked });
-    AsyncStorage.setItem(KEY_LIKED, JSON.stringify(liked)).catch(() => {});
-    AsyncStorage.setItem(KEY_BLOCKED, JSON.stringify(blocked)).catch(() => {});
+    AsyncStorage.setItem(KEY_LIKED, JSON.stringify(liked)).catch((e) => console.warn('[tagFilterStore] AsyncStorage write failed:', e));
+    AsyncStorage.setItem(KEY_BLOCKED, JSON.stringify(blocked)).catch((e) => console.warn('[tagFilterStore] AsyncStorage write failed:', e));
   },
   removeLiked: (tag) => {
     const liked = get().likedTags.filter((t) => t !== tag);
     set({ likedTags: liked });
-    AsyncStorage.setItem(KEY_LIKED, JSON.stringify(liked)).catch(() => {});
+    AsyncStorage.setItem(KEY_LIKED, JSON.stringify(liked)).catch((e) => console.warn('[tagFilterStore] AsyncStorage write failed:', e));
   },
   addBlocked: (tag) => {
     const { likedTags, blockedTags } = get();
@@ -111,12 +111,12 @@ export const useTagFilterStore = create<TagFilterState>((set, get) => ({
     const liked = likedTags.filter((t) => t !== tag);
     const blocked = [...new Set([...blockedTags, tag])];
     set({ likedTags: liked, blockedTags: blocked });
-    AsyncStorage.setItem(KEY_LIKED, JSON.stringify(liked)).catch(() => {});
-    AsyncStorage.setItem(KEY_BLOCKED, JSON.stringify(blocked)).catch(() => {});
+    AsyncStorage.setItem(KEY_LIKED, JSON.stringify(liked)).catch((e) => console.warn('[tagFilterStore] AsyncStorage write failed:', e));
+    AsyncStorage.setItem(KEY_BLOCKED, JSON.stringify(blocked)).catch((e) => console.warn('[tagFilterStore] AsyncStorage write failed:', e));
   },
   removeBlocked: (tag) => {
     const blocked = get().blockedTags.filter((t) => t !== tag);
     set({ blockedTags: blocked });
-    AsyncStorage.setItem(KEY_BLOCKED, JSON.stringify(blocked)).catch(() => {});
+    AsyncStorage.setItem(KEY_BLOCKED, JSON.stringify(blocked)).catch((e) => console.warn('[tagFilterStore] AsyncStorage write failed:', e));
   },
 }));

@@ -26,8 +26,16 @@ export async function fetchPosts({
     .eq('is_public', true)
     .limit(limit);
 
+  // PostgREST の URL 長さ制限 (≒8KB) 対策:
+  // サーバー側で除外できるのは先頭 80 個まで。残りはクライアント側で smartSort
+  // 経由で弾いている (lib/feed/smartRank.ts の blockedSet 判定)。
+  // これで 92+ blocked tags でも URL が肥大化して 414 にならない。
   if (blockedTags.length > 0) {
-    query = query.not('tag_names', 'cs', `{${blockedTags.join(',')}}`);
+    const SERVER_LIMIT = 80;
+    const serverSide = blockedTags.length > SERVER_LIMIT
+      ? blockedTags.slice(0, SERVER_LIMIT)
+      : blockedTags;
+    query = query.not('tag_names', 'cs', `{${serverSide.join(',')}}`);
   }
 
   if (filterTags && filterTags.length > 0) {
