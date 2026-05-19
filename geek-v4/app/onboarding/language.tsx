@@ -153,7 +153,10 @@ export default function LanguageOnboarding() {
                  lang === 'zh' ? '下一步' :
                  lang === 'ko' ? '다음' :
                  lang === 'es' ? 'Siguiente' :
-                 lang === 'fr' ? 'Suivant' : '次へ'}
+                 lang === 'fr' ? 'Suivant' :
+                 lang === 'th' ? 'ถัดไป' :
+                 lang === 'vi' ? 'Tiếp theo' :
+                 lang === 'id' ? 'Lanjut' : '次へ'}
           onPress={() => router.push('/onboarding/nickname')}
           haptic="confirm"
         />
