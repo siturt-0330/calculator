@@ -14,6 +14,7 @@ import { useTagGraphStore } from '@/stores/tagGraphStore';
 import { buildTagSuggestions, REASON_LABEL } from '@/lib/utils/tagSuggest';
 import { useTagRecommendations } from '@/hooks/useTagRecommendations';
 import { useToastStore } from '@/stores/toastStore';
+import { BackButton } from '@/components/nav/BackButton';
 import { Icon } from '@/constants/icons';
 
 export default function BlockedTagsScreen() {
@@ -54,12 +55,14 @@ export default function BlockedTagsScreen() {
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScrollView
         contentContainerStyle={{
-          paddingTop: insets.top + SP['8'],
+          paddingTop: insets.top + SP['2'],
           paddingHorizontal: SP['6'],
           paddingBottom: insets.bottom + SP['20'],
-          gap: SP['6'],
+          gap: SP['4'],
         }}
+        keyboardShouldPersistTaps="handled"
       >
+        <BackButton />
         <View style={{ gap: SP['2'] }}>
           <Text style={[T.h1, { color: C.text }]}>見たくないタグを除外しよう</Text>
           <Text style={[T.body, { color: C.text2 }]}>

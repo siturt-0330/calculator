@@ -10,6 +10,7 @@ import { BackButton } from '@/components/nav/BackButton';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { useAuthStore } from '@/stores/authStore';
 import { useToastStore } from '@/stores/toastStore';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { Icon } from '@/constants/icons';
 
 // 初回ユーザーの障壁を最小化するため、
@@ -30,6 +31,7 @@ export default function SignupScreen() {
   const passwordRef = useRef<TextInput>(null);
   const { signUp } = useAuthStore();
   const { show } = useToastStore();
+  const { online } = useNetworkStatus();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const MailIcon = Icon.at;
@@ -61,6 +63,10 @@ export default function SignupScreen() {
 
   const submitSignup = async (phoneInput: string) => {
     if (loading) return;  // 二重 submit 防止
+    if (!online) {
+      show('オフラインです。インターネット接続を確認してください。', 'error');
+      return;
+    }
     setLoading(true);
     const result = await signUp(email.trim(), password, phoneInput.trim());
     setLoading(false);

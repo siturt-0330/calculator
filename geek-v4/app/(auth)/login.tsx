@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/Input';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { useAuthStore } from '@/stores/authStore';
 import { useToastStore } from '@/stores/toastStore';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { Icon } from '@/constants/icons';
 
 export default function LoginScreen() {
@@ -25,6 +26,7 @@ export default function LoginScreen() {
   const passwordRef = useRef<TextInput>(null);
   const { signIn } = useAuthStore();
   const { show } = useToastStore();
+  const { online } = useNetworkStatus();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const EyeIcon = showPass ? Icon.eyeOff : Icon.eye;
@@ -36,6 +38,10 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (loading) return;  // 二重 submit 防止
+    if (!online) {
+      show('オフラインです。インターネット接続を確認してください。', 'error');
+      return;
+    }
     const trimmedEmail = email.trim();
     if (!trimmedEmail || !password) {
       show('メールアドレスとパスワードを入力してください。', 'warn');
