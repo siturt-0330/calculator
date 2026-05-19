@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { forwardRef, useState } from 'react';
 import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react-native';
 import { View, TextInput, Text, type TextInputProps, type ViewStyle } from 'react-native';
@@ -13,9 +13,15 @@ type Props = TextInputProps & {
   right?: React.ReactNode;
 };
 
-export function Input({ label, error, containerStyle, style, icon: IconComp, right, ...rest }: Props) {
+export const Input = forwardRef<TextInput, Props>(function Input(
+  { label, error, containerStyle, style, icon: IconComp, right, ...rest },
+  ref,
+) {
   const [focused, setFocused] = useState(false);
   const multiline = rest.multiline === true;
+  // エラー状態: 視覚的に明確にする (赤枠) — focused より優先
+  const showError = Boolean(error);
+  const borderColor = showError ? C.red : focused ? C.accent : 'transparent';
 
   return (
     <View style={[{ gap: SP['1'] }, containerStyle]}>
@@ -30,7 +36,7 @@ export function Input({ label, error, containerStyle, style, icon: IconComp, rig
           borderRadius: R.md,
           backgroundColor: C.bg3,
           borderWidth: 1.5,
-          borderColor: focused ? C.accent : 'transparent',
+          borderColor,
           flexDirection: 'row',
           alignItems: multiline ? 'flex-start' : 'center',
           paddingHorizontal: SP['4'],
@@ -43,6 +49,7 @@ export function Input({ label, error, containerStyle, style, icon: IconComp, rig
           </View>
         )}
         <TextInput
+          ref={ref}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           placeholderTextColor={C.text3}
@@ -54,4 +61,4 @@ export function Input({ label, error, containerStyle, style, icon: IconComp, rig
       {error && <Text style={[T.small, { color: C.red }]}>{error}</Text>}
     </View>
   );
-}
+});

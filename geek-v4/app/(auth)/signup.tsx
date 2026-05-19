@@ -1,5 +1,5 @@
-import { View, Text, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
-import { useState } from 'react';
+import { View, Text, KeyboardAvoidingView, Platform, ScrollView, Keyboard, TextInput } from 'react-native';
+import { useState, useRef } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, R, SP } from '@/design/tokens';
@@ -27,6 +27,7 @@ export default function SignupScreen() {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
+  const passwordRef = useRef<TextInput>(null);
   const { signUp } = useAuthStore();
   const { show } = useToastStore();
   const router = useRouter();
@@ -35,8 +36,9 @@ export default function SignupScreen() {
   const PhoneIcon = Icon.phone;
   const EyeIcon = showPass ? Icon.eyeOff : Icon.eye;
 
-  // メール簡易バリデーション (アット込みかだけ — 厳密チェックは Supabase 側)
-  const validEmail = (v: string) => /\S+@\S+\.\S+/.test(v);
+  // 厳しめのメール正規表現 — TLD 2 文字以上必須 (a@b.c など 1 char 弾く)
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  const validEmail = (v: string) => EMAIL_RE.test(v);
 
   const goToPhoneStep = () => {
     if (!validEmail(email.trim())) {
@@ -47,10 +49,18 @@ export default function SignupScreen() {
       show('パスワードは 8 文字以上にしてください。', 'warn');
       return;
     }
+    if (password.length > 72) {
+      // Supabase / bcrypt の上限 — 超えると cryptic エラー
+      show('パスワードは 72 文字以内にしてください。', 'warn');
+      return;
+    }
+    // ステップ切替前にキーボードを閉じる (iOS でジャンクなアニメ防止)
+    Keyboard.dismiss();
     setStep('phone');
   };
 
   const submitSignup = async (phoneInput: string) => {
+    if (loading) return;  // 二重 submit 防止
     setLoading(true);
     const result = await signUp(email.trim(), password, phoneInput.trim());
     setLoading(false);
@@ -90,7 +100,18 @@ export default function SignupScreen() {
     }
   };
 
-  const handleSkipPhone = () => submitSignup('');
+  const handleSkipPhone = () => {
+    // 電話番号を入力済みのまま「スキップして登録」を押すと silent data loss になる
+    // ので軽い確認 (toast 2 段) を入れる
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length > 0) {
+      show('電話番号がスキップされます。もう一度タップで確定。', 'warn');
+      // 2 度目のタップを判別するため state を一瞬切り替える
+      setPhone('');
+      return;
+    }
+    submitSignup('');
+  };
   const handleSubmitWithPhone = () => {
     const digits = phone.replace(/\D/g, '');
     // 電話番号入れた人だけチェック (空ならスキップ扱い)
@@ -154,21 +175,36 @@ export default function SignupScreen() {
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
+                autoComplete="email"
+                textContentType="emailAddress"
+                returnKeyType="next"
+                onSubmitEditing={() => passwordRef.current?.focus()}
                 autoFocus
                 keyboardAppearance="dark"
                 selectionColor={C.accent}
               />
               <Input
-                label="パスワード（8 文字以上）"
+                ref={passwordRef}
+                label="パスワード（8 - 72 文字）"
                 value={password}
                 onChangeText={setPassword}
                 placeholder="パスワード"
                 secureTextEntry={!showPass}
+                autoComplete="new-password"
+                textContentType="newPassword"
+                returnKeyType="go"
+                onSubmitEditing={goToPhoneStep}
                 keyboardAppearance="dark"
                 selectionColor={C.accent}
                 right={
-                  <PressableScale onPress={() => setShowPass((v) => !v)} haptic="tap">
-                    <EyeIcon size={18} color={C.text3} strokeWidth={2.2} />
+                  <PressableScale
+                    onPress={() => setShowPass((v) => !v)}
+                    haptic="tap"
+                    hitSlop={14}
+                    accessibilityLabel={showPass ? 'パスワードを非表示にする' : 'パスワードを表示する'}
+                    accessibilityRole="button"
+                  >
+                    <EyeIcon size={20} color={C.text3} strokeWidth={2.2} />
                   </PressableScale>
                 }
               />

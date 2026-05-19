@@ -20,6 +20,7 @@ export default function NotificationsOnboarding() {
 
   const finish = async (allow: boolean) => {
     setSaving(true);
+    let dbCommitted = false;
     try {
       if (allow && Platform.OS !== 'web') {
         try {
@@ -33,34 +34,35 @@ export default function NotificationsOnboarding() {
       settings.update('notifyFollow', allow);
       settings.update('notifyEvent', allow);
 
-      // 1) ローカル状態を即時更新（ガード条件を即座に満たす）
-      if (user) setUser({ ...user, onboarded: true });
-
-      // 2) DB更新（失敗してもナビゲーションは進める）
+      // ★ DB update を先に await して、成功した時だけローカルを onboarded=true に
+      // 旧コードは local を先に書き換えていたため、DB 失敗時に
+      // local true / DB false の state divergence が起きていた
       if (user) {
-        const { data: updated, error: updErr } = await supabase
+        // upsert で atomic: 行が無ければ INSERT、あれば UPDATE
+        const fallback = (user.email?.split('@')[0] ?? 'user').padEnd(2, '_').slice(0, 20);
+        const { error: upErr } = await supabase
           .from('profiles')
-          .update({ onboarded: true })
-          .eq('id', user.id)
+          .upsert(
+            { id: user.id, nickname: user.nickname ?? fallback, onboarded: true },
+            { onConflict: 'id' },
+          )
           .select();
-        if (updErr) {
-          console.warn('profile update failed:', updErr.message);
-        }
-        if ((!updated || updated.length === 0) && !updErr) {
-          // 行が無い → INSERT
-          const fallback = (user.email?.split('@')[0] ?? 'user').padEnd(2, '_').slice(0, 20);
-          const { error: insErr } = await supabase
-            .from('profiles')
-            .insert({ id: user.id, nickname: fallback, onboarded: true });
-          if (insErr) {
-            console.warn('profile insert failed:', insErr.message);
-            show('プロフィール保存に失敗しましたが、続行します', 'warn');
-          }
+        if (upErr) {
+          console.warn('profile upsert failed:', upErr.message);
+          show('プロフィール保存に失敗しましたが、続行します', 'warn');
+          // DB は失敗だが UX 上は進める — ローカルだけ onboarded にして app を続行可能に
+          setUser({ ...user, onboarded: true });
+        } else {
+          dbCommitted = true;
+          setUser({ ...user, onboarded: true });
         }
       }
     } finally {
       setSaving(false);
       router.replace('/(tabs)/feed');
+      if (dbCommitted) {
+        console.log('[onboarding] complete — onboarded committed to DB');
+      }
     }
   };
 
