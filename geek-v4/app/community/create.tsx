@@ -1,7 +1,8 @@
-import { View, Text, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
-import { useState } from 'react';
+import { View, Text, ScrollView, KeyboardAvoidingView, Platform, Image, ActivityIndicator } from 'react-native';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { Button } from '@/components/ui/Button';
@@ -9,33 +10,27 @@ import { Input } from '@/components/ui/Input';
 import { BackButton } from '@/components/nav/BackButton';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { Icon } from '@/constants/icons';
-import { createCommunity, type Visibility } from '@/lib/api/communities';
+import {
+  createCommunity,
+  searchByName,
+  uploadCommunityIcon,
+  updateCommunity,
+  type Visibility,
+  type Community,
+} from '@/lib/api/communities';
 import { useToastStore } from '@/stores/toastStore';
 
-// よく使いそうな絵文字選択肢 — emoji picker は重いので固定リストで
-const EMOJI_OPTIONS = [
-  '👥', '🎮', '📚', '🎵', '🎨', '⚽', '🍙', '☕',
-  '🌸', '🎬', '📷', '🎤', '💼', '🧑‍💻', '🏃', '🎯',
-  '🐱', '🐶', '🦊', '🌍', '🔬', '⚙️', '✨', '🔥',
-];
-
-const COLOR_OPTIONS = [
-  '#7C6AF7', // accent purple
-  '#22D3A4', // green
-  '#F5A623', // amber
-  '#F472B6', // pink
-  '#3B82F6', // blue
-  '#E24B4A', // red
-  '#9F96F9', // light purple
-  '#cca87a', // beige
-];
-
 type VisibilityOption = {
-  value: Visibility;
+  value: Visibility | 'request' | 'invite';
   label: string;
   desc: string;
   icon: React.ReactNode;
 };
+
+async function uriToBlob(uri: string): Promise<Blob> {
+  const res = await fetch(uri);
+  return res.blob();
+}
 
 export default function CreateCommunityScreen() {
   const insets = useSafeAreaInsets();
@@ -43,13 +38,39 @@ export default function CreateCommunityScreen() {
   const { show } = useToastStore();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [emoji, setEmoji] = useState('👥');
-  const [color, setColor] = useState<string>(COLOR_OPTIONS[0] ?? '#7C6AF7');
+  // ローカルでアップロード待ちの画像 (URI + blob)
+  const [localIconUri, setLocalIconUri] = useState<string | null>(null);
+  const [localIconBlob, setLocalIconBlob] = useState<Blob | null>(null);
+  const [localIconMime, setLocalIconMime] = useState<string>('image/jpeg');
+  const [iconLoading, setIconLoading] = useState(false);
   const [visibility, setVisibility] = useState<Visibility>('open');
   const [closedMode, setClosedMode] = useState<'request' | 'invite'>('request');
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // 類似名チェック (300ms debounce)
+  const [similar, setSimilar] = useState<Community[]>([]);
+  const [checking, setChecking] = useState(false);
+  const lastQueryRef = useRef('');
+  useEffect(() => {
+    const q = name.trim();
+    if (q.length < 2) {
+      setSimilar([]);
+      return;
+    }
+    lastQueryRef.current = q;
+    setChecking(true);
+    const t = setTimeout(async () => {
+      const results = await searchByName(q, 5);
+      // race condition 防止 — 最後のクエリと一致しているかチェック
+      if (lastQueryRef.current === q) {
+        setSimilar(results);
+        setChecking(false);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [name]);
 
   const VISIBILITY_OPTIONS: VisibilityOption[] = [
     {
@@ -71,6 +92,52 @@ export default function CreateCommunityScreen() {
       icon: <Icon.shield size={18} color={C.red} strokeWidth={2} />,
     },
   ];
+
+  const pickIcon = async () => {
+    if (iconLoading || submitting) return;
+    setIconLoading(true);
+    try {
+      if (Platform.OS !== 'web') {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+          show('写真へのアクセス権限が必要です', 'warn');
+          setIconLoading(false);
+          return;
+        }
+      }
+      const r = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: 'images',
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
+      if (r.canceled || !r.assets[0]) {
+        setIconLoading(false);
+        return;
+      }
+      const asset = r.assets[0];
+      const blob = await uriToBlob(asset.uri);
+      // 5MB チェック (Storage と client 両方)
+      if (blob.size > 5 * 1024 * 1024) {
+        show('画像は 5MB 以下にしてください', 'warn');
+        setIconLoading(false);
+        return;
+      }
+      setLocalIconUri(asset.uri);
+      setLocalIconBlob(blob);
+      setLocalIconMime(asset.mimeType ?? 'image/jpeg');
+    } catch (e) {
+      console.warn('[community/create] pick icon failed:', e);
+      show('画像の取得に失敗しました', 'error');
+    } finally {
+      setIconLoading(false);
+    }
+  };
+
+  const removeIcon = () => {
+    setLocalIconUri(null);
+    setLocalIconBlob(null);
+  };
 
   const addTag = () => {
     const t = tagInput.trim().replace(/^#/, '');
@@ -95,25 +162,64 @@ export default function CreateCommunityScreen() {
       show('コミュニティ名は 40 文字以内にしてください', 'warn');
       return;
     }
+    if (!localIconBlob) {
+      show('アイコン画像を選択してください', 'warn');
+      return;
+    }
     setSubmitting(true);
-    // closed 配下では closedMode を選んだ方を渡す
     const v: Visibility = visibility === 'open' ? 'open' : closedMode;
-    const { data, error } = await createCommunity({
+    // Step 1: row を INSERT (icon_url なし)
+    const { data: created, error } = await createCommunity({
       name,
       description,
-      icon_emoji: emoji,
-      icon_color: color,
+      icon_emoji: '👥', // placeholder
+      icon_color: '#7C6AF7', // placeholder
       visibility: v,
       tags,
     });
-    setSubmitting(false);
-    if (error || !data) {
+    if (error || !created) {
+      setSubmitting(false);
       show(error ?? 'コミュニティ作成に失敗しました', 'error');
       return;
     }
+    // Step 2: アイコンアップロード — 失敗しても community は出来ているので警告だけ
+    const { url, error: upErr } = await uploadCommunityIcon(created.id, localIconBlob, localIconMime);
+    if (upErr || !url) {
+      console.warn('[community/create] icon upload failed:', upErr);
+      show('コミュニティは作成されましたがアイコンアップロードに失敗しました。詳細画面から再設定できます。', 'warn');
+      setSubmitting(false);
+      router.replace(`/community/${created.id}` as never);
+      return;
+    }
+    // Step 3: icon_url を反映
+    await updateCommunity(created.id, { icon_url: url });
+    setSubmitting(false);
     show('コミュニティを作成しました！', 'success');
-    router.replace(`/community/${data.id}` as never);
+    router.replace(`/community/${created.id}` as never);
   };
+
+  // Preview avatar — uploaded image or fallback
+  const previewAvatar = (
+    <View
+      style={{
+        width: 96,
+        height: 96,
+        borderRadius: 48,
+        backgroundColor: C.bg3,
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: C.border,
+      }}
+    >
+      {localIconUri ? (
+        <Image source={{ uri: localIconUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+      ) : (
+        <Icon.image size={40} color={C.text4} strokeWidth={1.6} />
+      )}
+    </View>
+  );
 
   return (
     <KeyboardAvoidingView
@@ -131,10 +237,12 @@ export default function CreateCommunityScreen() {
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
           <BackButton />
-          <Text style={[T.h2, { color: C.text, flex: 1 }]}>新しいコミュニティ</Text>
+          <Text style={[T.h2, { color: C.text, flex: 1 }]} numberOfLines={1}>
+            新しいコミュニティ
+          </Text>
         </View>
 
-        {/* プレビュー */}
+        {/* プレビュー + アイコン操作 */}
         <View
           style={{
             padding: SP['4'],
@@ -143,29 +251,60 @@ export default function CreateCommunityScreen() {
             borderWidth: 1,
             borderColor: C.border,
             alignItems: 'center',
-            gap: SP['2'],
+            gap: SP['3'],
           }}
         >
-          <View
-            style={{
-              width: 80,
-              height: 80,
-              borderRadius: 40,
-              backgroundColor: color,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Text style={{ fontSize: 44 }}>{emoji}</Text>
+          {previewAvatar}
+          <View style={{ flexDirection: 'row', gap: SP['2'] }}>
+            <PressableScale
+              onPress={pickIcon}
+              haptic="tap"
+              hitSlop={8}
+              disabled={iconLoading || submitting}
+              style={{
+                paddingHorizontal: SP['4'],
+                paddingVertical: SP['2'],
+                backgroundColor: C.accent,
+                borderRadius: R.full,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                opacity: iconLoading ? 0.6 : 1,
+              }}
+            >
+              {iconLoading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Icon.image size={16} color="#fff" strokeWidth={2.4} />
+              )}
+              <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>
+                {localIconUri ? '変更' : 'アイコンを選ぶ'}
+              </Text>
+            </PressableScale>
+            {localIconUri && (
+              <PressableScale
+                onPress={removeIcon}
+                haptic="tap"
+                hitSlop={8}
+                style={{
+                  paddingHorizontal: SP['4'],
+                  paddingVertical: SP['2'],
+                  borderRadius: R.full,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                <Icon.close size={14} color={C.text2} strokeWidth={2.4} />
+                <Text style={[T.smallM, { color: C.text2 }]}>削除</Text>
+              </PressableScale>
+            )}
           </View>
-          <Text style={[T.h3, { color: C.text }]} numberOfLines={1}>
-            {name.trim() || '名前なし'}
+          <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
+            写真 / 画像ファイル (JPEG / PNG / WebP / GIF · 5MB まで)
           </Text>
-          {description.trim().length > 0 && (
-            <Text style={[T.small, { color: C.text3, textAlign: 'center' }]} numberOfLines={2}>
-              {description}
-            </Text>
-          )}
         </View>
 
         {/* 名前 */}
@@ -180,6 +319,76 @@ export default function CreateCommunityScreen() {
             keyboardAppearance="dark"
             selectionColor={C.accent}
           />
+          {/* 類似名チェック結果 */}
+          {checking && name.trim().length >= 2 && (
+            <Text style={[T.caption, { color: C.text3 }]}>類似名を検索中…</Text>
+          )}
+          {!checking && similar.length > 0 && (
+            <View
+              style={{
+                padding: SP['3'],
+                backgroundColor: C.amberBg,
+                borderRadius: R.md,
+                borderWidth: 1,
+                borderColor: C.amber + '55',
+                gap: SP['2'],
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Icon.warn size={14} color={C.amber} strokeWidth={2.4} />
+                <Text style={[T.smallM, { color: C.amber, fontWeight: '700', flex: 1 }]}>
+                  似た名前のコミュニティが {similar.length} 件あります
+                </Text>
+              </View>
+              <Text style={[T.caption, { color: C.text2 }]}>
+                参加した方が早いかも。タップして確認:
+              </Text>
+              {similar.map((c) => (
+                <PressableScale
+                  key={c.id}
+                  onPress={() => router.push(`/community/${c.id}` as never)}
+                  haptic="tap"
+                  scaleValue={0.98}
+                  hitSlop={4}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: SP['2'],
+                    padding: SP['2'],
+                    backgroundColor: C.bg2,
+                    borderRadius: R.md,
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 16,
+                      backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
+                      overflow: 'hidden',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    {c.icon_url ? (
+                      <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                    ) : (
+                      <Text style={{ fontSize: 16 }}>{c.icon_emoji}</Text>
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[T.smallM, { color: C.text, fontWeight: '600' }]} numberOfLines={1}>
+                      {c.name}
+                    </Text>
+                    <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
+                      メンバー {c.member_count} 人
+                    </Text>
+                  </View>
+                  <Icon.chevronR size={16} color={C.text3} strokeWidth={2} />
+                </PressableScale>
+              ))}
+            </View>
+          )}
         </View>
 
         {/* 説明 */}
@@ -194,60 +403,8 @@ export default function CreateCommunityScreen() {
             numberOfLines={4}
             keyboardAppearance="dark"
             selectionColor={C.accent}
-            style={{ minHeight: 88, paddingTop: 12, textAlignVertical: 'top' }}
+            style={{ minHeight: 72, textAlignVertical: 'top' }}
           />
-        </View>
-
-        {/* アイコン (絵文字) */}
-        <View style={{ gap: SP['2'] }}>
-          <Text style={[T.smallM, { color: C.text2 }]}>アイコン</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-            {EMOJI_OPTIONS.map((e) => (
-              <PressableScale
-                key={e}
-                onPress={() => setEmoji(e)}
-                haptic="tap"
-                style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: 22,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: emoji === e ? color + '33' : C.bg2,
-                  borderWidth: 2,
-                  borderColor: emoji === e ? color : 'transparent',
-                }}
-              >
-                <Text style={{ fontSize: 22 }}>{e}</Text>
-              </PressableScale>
-            ))}
-          </View>
-        </View>
-
-        {/* 色 */}
-        <View style={{ gap: SP['2'] }}>
-          <Text style={[T.smallM, { color: C.text2 }]}>背景色</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-            {COLOR_OPTIONS.map((c) => (
-              <PressableScale
-                key={c}
-                onPress={() => setColor(c)}
-                haptic="tap"
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 20,
-                  backgroundColor: c,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderWidth: 3,
-                  borderColor: color === c ? C.text : 'transparent',
-                }}
-              >
-                {color === c && <Icon.ok size={18} color="#fff" strokeWidth={3} />}
-              </PressableScale>
-            ))}
-          </View>
         </View>
 
         {/* タグ */}
@@ -269,6 +426,7 @@ export default function CreateCommunityScreen() {
             <PressableScale
               onPress={addTag}
               haptic="tap"
+              hitSlop={6}
               disabled={!tagInput.trim()}
               style={{
                 paddingHorizontal: SP['4'],
@@ -290,6 +448,7 @@ export default function CreateCommunityScreen() {
                   key={t}
                   onPress={() => removeTag(t)}
                   haptic="tap"
+                  hitSlop={4}
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
@@ -325,11 +484,12 @@ export default function CreateCommunityScreen() {
                   if (opt.value === 'open') {
                     setVisibility('open');
                   } else {
-                    setVisibility('request'); // sentinel — closed flag
-                    setClosedMode(opt.value);
+                    setVisibility('request');
+                    setClosedMode(opt.value as 'request' | 'invite');
                   }
                 }}
                 haptic="select"
+                hitSlop={4}
                 style={{
                   flexDirection: 'row',
                   gap: SP['3'],
@@ -338,12 +498,11 @@ export default function CreateCommunityScreen() {
                   borderRadius: R.md,
                   borderWidth: 1.5,
                   borderColor: isSelected ? C.accent : C.border,
-                  alignItems: 'flex-start',
+                  alignItems: 'center',
                 }}
               >
                 <View
                   style={{
-                    marginTop: 2,
                     width: 32,
                     height: 32,
                     borderRadius: 16,
@@ -355,8 +514,12 @@ export default function CreateCommunityScreen() {
                   {opt.icon}
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]}>{opt.label}</Text>
-                  <Text style={[T.caption, { color: C.text3, marginTop: 2 }]}>{opt.desc}</Text>
+                  <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
+                    {opt.label}
+                  </Text>
+                  <Text style={[T.caption, { color: C.text3, marginTop: 2 }]} numberOfLines={2}>
+                    {opt.desc}
+                  </Text>
                 </View>
                 <View
                   style={{
@@ -368,7 +531,6 @@ export default function CreateCommunityScreen() {
                     backgroundColor: isSelected ? C.accent : 'transparent',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    marginTop: 4,
                   }}
                 >
                   {isSelected && <Icon.ok size={12} color="#fff" strokeWidth={3} />}
@@ -382,7 +544,8 @@ export default function CreateCommunityScreen() {
           label="コミュニティを作成"
           onPress={onSubmit}
           loading={submitting}
-          disabled={submitting || name.trim().length < 2}
+          disabled={submitting || name.trim().length < 2 || !localIconBlob}
+          haptic="confirm"
         />
       </ScrollView>
     </KeyboardAvoidingView>

@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, RefreshControl, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, ScrollView, RefreshControl, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -152,12 +152,17 @@ export default function DiscoverCommunitiesScreen() {
                   width: 52,
                   height: 52,
                   borderRadius: 26,
-                  backgroundColor: c.icon_color,
+                  backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
                   alignItems: 'center',
                   justifyContent: 'center',
+                  overflow: 'hidden',
                 }}
               >
-                <Text style={{ fontSize: 26 }}>{c.icon_emoji}</Text>
+                {c.icon_url ? (
+                  <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                ) : (
+                  <Text style={{ fontSize: 26 }}>{c.icon_emoji}</Text>
+                )}
               </View>
               <View style={{ flex: 1, gap: 2 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>

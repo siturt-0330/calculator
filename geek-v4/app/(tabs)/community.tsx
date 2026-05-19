@@ -149,14 +149,19 @@ export default function CommunityScreen() {
                       width: 56,
                       height: 56,
                       borderRadius: 28,
-                      backgroundColor: c.icon_color,
+                      backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
                       alignItems: 'center',
                       justifyContent: 'center',
                       borderWidth: 1,
                       borderColor: C.border,
+                      overflow: 'hidden',
                     }}
                   >
-                    <Text style={{ fontSize: 28 }}>{c.icon_emoji}</Text>
+                    {c.icon_url ? (
+                      <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                    ) : (
+                      <Text style={{ fontSize: 28 }}>{c.icon_emoji}</Text>
+                    )}
                   </View>
                   <Text
                     numberOfLines={1}
@@ -276,12 +281,19 @@ export default function CommunityScreen() {
                       width: 32,
                       height: 32,
                       borderRadius: 16,
-                      backgroundColor: p.community?.icon_color ?? C.accent,
+                      backgroundColor: p.community?.icon_url
+                        ? C.bg3
+                        : (p.community?.icon_color ?? C.accent),
                       alignItems: 'center',
                       justifyContent: 'center',
+                      overflow: 'hidden',
                     }}
                   >
-                    <Text style={{ fontSize: 16 }}>{p.community?.icon_emoji ?? '👥'}</Text>
+                    {p.community?.icon_url ? (
+                      <Image source={{ uri: p.community.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                    ) : (
+                      <Text style={{ fontSize: 16 }}>{p.community?.icon_emoji ?? '👥'}</Text>
+                    )}
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>

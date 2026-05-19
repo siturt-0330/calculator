@@ -27,6 +27,7 @@ export function PressableScale({
   onPressOut,
   style,
   hitSlop,
+  disabled,
   ...rest
 }: Props) {
   const scale = useSharedValue(1);
@@ -55,13 +56,18 @@ export function PressableScale({
     <AnimatedPressable
       {...extra}
       hitSlop={hitSlop ?? 8}
+      disabled={disabled}
       onPressIn={(e) => {
+        // disabled の時は scale animation も haptic も発火させない (誤って反応した
+        // ように見える bug を防ぐ)
+        if (disabled) return;
         scale.value = withSpring(scaleValue, SPRING_SNAP);
         // haptic を press-in で即発火 → 体感応答速度が上がる
         if (haptic) triggerHaptic(haptic);
         onPressIn?.(e);
       }}
       onPressOut={(e) => {
+        if (disabled) return;
         scale.value = withSpring(1, SPRING_SNAP);
         onPressOut?.(e);
       }}
