@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import type { User } from '@supabase/supabase-js';
 import { detachAllChannels } from '@/lib/realtime';
+import { setUnauthorizedHandler } from '@/lib/resilient';
 
 // onboarded 状態のローカルキャッシュ — プロフィール取得失敗時のフォールバック
 const ONBOARDED_KEY = 'geek-v4-onboarded';
@@ -165,6 +166,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // 何があってもリスナは登録する
     registerAuthListener(set);
     registerStorageListener(set);
+    // 401 (token 期限切れ) を resilient 経由で検知したら signOut する
+    setUnauthorizedHandler(async () => {
+      const u = get().user;
+      if (!u) return; // 既に logged out
+      console.warn('[authStore] 401 detected, forcing signOut');
+      await get().signOut();
+    });
     // ★ Safety: 7 秒以内に返らなければ hydrated:true で起動継続
     // (旧 5s だと低速回線で false logout する事故が起きていた)
     let hydrationDone = false;

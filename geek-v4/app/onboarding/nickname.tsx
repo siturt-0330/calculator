@@ -6,6 +6,7 @@ import { C, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { BackButton } from '@/components/nav/BackButton';
 import { Icon } from '@/constants/icons';
 import { useAuthStore } from '@/stores/authStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -26,16 +27,23 @@ export default function NicknameScreen() {
   }, [user?.nickname]);
 
   // 2 - 20 文字以外なら error message を出す (空のまま放置されているときは出さない)
+  // 注: 絵文字 / CJK は JS の .length が code unit ベースなので grapheme cluster
+  // で数える必要がある (DB の length() は code point カウント、UI も grapheme で数える)
   const trimmed = nickname.trim();
-  const tooShort = touched && trimmed.length > 0 && trimmed.length < 2;
-  const tooLong = trimmed.length > 20;
-  const canSubmit = trimmed.length >= 2 && trimmed.length <= 20 && !saving;
+  // Array.from で iterator を経由すると code point ベースになる (絵文字 sequence
+  // は正しく扱えないが、一般的な日本語 / 英語は code point = grapheme で OK)
+  const charCount = Array.from(trimmed).length;
+  const tooShort = touched && charCount > 0 && charCount < 2;
+  const tooLong = charCount > 20;
+  const canSubmit = charCount >= 2 && charCount <= 20 && !saving;
 
   const next = async () => {
     if (!canSubmit) {
       setTouched(true);
-      if (trimmed.length < 2) {
+      if (charCount < 2) {
         show('ニックネームは 2 文字以上にしてください。', 'warn');
+      } else if (charCount > 20) {
+        show('ニックネームは 20 文字以内にしてください。', 'warn');
       }
       return;
     }
@@ -49,8 +57,20 @@ export default function NicknameScreen() {
           .select();
         if (error) {
           console.warn('[nickname] profile upsert failed:', error.message);
-          // ニックネームは onboarding 完了時に notifications.tsx 側で fallback 挿入されるので
-          // ここでは「進めるけど警告は出す」方針 — ブロックすると初回ユーザーが詰む
+          // 重複ニックネーム or CHECK 違反 → 明確にエラー表示してブロック
+          // 一方、ネットワーク系エラーは続行 (notifications.tsx で fallback insert)
+          const msg = error.message.toLowerCase();
+          if (msg.includes('duplicate') || msg.includes('unique')) {
+            show('このニックネームは既に使用されています。別の名前を入力してください。', 'error');
+            setSaving(false);
+            return;
+          }
+          if (msg.includes('check') || msg.includes('violates')) {
+            show('使用できない文字が含まれています。', 'error');
+            setSaving(false);
+            return;
+          }
+          // それ以外 (ネットワーク等) は警告して進める
           show('ニックネームの保存に失敗しましたが、続行します。', 'warn');
         } else {
           // ローカルストアも即時更新 — マイページ等で古いニックネームが見えるのを防ぐ
@@ -74,12 +94,13 @@ export default function NicknameScreen() {
       <View
         style={{
           flex: 1,
-          paddingTop: insets.top + SP['8'],
+          paddingTop: insets.top + SP['2'],
           paddingHorizontal: SP['6'],
           paddingBottom: insets.bottom + SP['6'],
           gap: SP['6'],
         }}
       >
+        <BackButton />
         <View style={{ gap: SP['2'] }}>
           <Text style={[T.h1, { color: C.text }]}>ニックネームを決めよう</Text>
           <Text style={[T.body, { color: C.text2 }]}>
@@ -103,12 +124,12 @@ export default function NicknameScreen() {
           />
           {tooShort && (
             <Text style={[T.caption, { color: C.amber, paddingLeft: SP['1'] }]}>
-              あと {2 - trimmed.length} 文字以上必要です
+              あと {2 - charCount} 文字以上必要です
             </Text>
           )}
           {tooLong && (
             <Text style={[T.caption, { color: C.amber, paddingLeft: SP['1'] }]}>
-              20 文字までにしてください
+              20 文字までにしてください（現在 {charCount} 文字）
             </Text>
           )}
         </View>

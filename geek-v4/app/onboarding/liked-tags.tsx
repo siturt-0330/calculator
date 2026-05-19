@@ -11,6 +11,7 @@ import { PressableScale } from '@/components/ui/PressableScale';
 import { TagInputSuggestions } from '@/components/tag/TagInputSuggestions';
 import { useTagFilterStore } from '@/stores/tagFilterStore';
 import { useTagGraphStore } from '@/stores/tagGraphStore';
+import { BackButton } from '@/components/nav/BackButton';
 import { Icon } from '@/constants/icons';
 import { buildTagSuggestions, REASON_LABEL } from '@/lib/utils/tagSuggest';
 
@@ -43,12 +44,14 @@ export default function LikedTagsScreen() {
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScrollView
         contentContainerStyle={{
-          paddingTop: insets.top + SP['8'],
+          paddingTop: insets.top + SP['2'],
           paddingHorizontal: SP['6'],
           paddingBottom: insets.bottom + SP['20'],
-          gap: SP['6'],
+          gap: SP['4'],
         }}
+        keyboardShouldPersistTaps="handled"
       >
+        <BackButton />
         <View style={{ gap: SP['2'] }}>
           <Text style={[T.h1, { color: C.text }]}>好きなタグを選ぼう</Text>
           <Text style={[T.body, { color: C.text2 }]}>
@@ -199,7 +202,7 @@ export default function LikedTagsScreen() {
       >
         {likedTags.length === 0 && (
           <Text style={[T.caption, { color: C.amber, textAlign: 'center', marginBottom: SP['2'] }]}>
-            ⚠ タグを選ばないとフィードに何も表示されません
+            ⚠ タグを選ばない場合、全ジャンルの投稿が表示されます。1 つ以上選ぶと自分専用のフィードになります。
           </Text>
         )}
         <Button

@@ -5,6 +5,7 @@ import { C, R, SP } from '@/design/tokens';
 import { T, FONT } from '@/design/typography';
 import { Button } from '@/components/ui/Button';
 import { PressableScale } from '@/components/ui/PressableScale';
+import { BackButton } from '@/components/nav/BackButton';
 import { useLanguageStore, LANG_OPTIONS, type Lang } from '@/stores/languageStore';
 
 export default function LanguageOnboarding() {
@@ -20,12 +21,13 @@ export default function LanguageOnboarding() {
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScrollView
         contentContainerStyle={{
-          paddingTop: insets.top + SP['8'],
+          paddingTop: insets.top + SP['2'],
           paddingHorizontal: SP['6'],
           paddingBottom: insets.bottom + SP['10'],
           gap: SP['5'],
         }}
       >
+        <BackButton />
         {/* タイトル */}
         <View style={{ alignItems: 'center', gap: SP['2'] }}>
           <Text style={{ fontSize: 56 }}>🌏</Text>

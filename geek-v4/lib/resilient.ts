@@ -52,6 +52,28 @@ function shouldRetry(err: unknown): boolean {
   return true;
 }
 
+// 401 検知用 — auth token が無効になった時に signOut を発火するヘルパ
+// authStore 側で setUnauthorizedHandler() を呼んで登録する
+let unauthorizedHandler: (() => Promise<void> | void) | null = null;
+export function setUnauthorizedHandler(fn: (() => Promise<void> | void) | null) {
+  unauthorizedHandler = fn;
+}
+
+function looksLikeUnauthorized(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  return msg.includes('401') || msg.includes('JWT expired') || msg.toLowerCase().includes('unauthorized');
+}
+
+async function maybeTriggerUnauthorized(err: unknown) {
+  if (!looksLikeUnauthorized(err)) return;
+  if (!unauthorizedHandler) return;
+  try {
+    await unauthorizedHandler();
+  } catch (e) {
+    console.warn('[resilient] unauthorized handler error:', e);
+  }
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -106,6 +128,9 @@ export async function resilient<T>(
       await sleep(backoff);
     }
   }
+  // 最終失敗が 401/JWT expired なら signOut を発火 (1 回だけ; ハンドラ側で
+  // 二重 signOut を防いでいる)
+  void maybeTriggerUnauthorized(lastError);
   throw lastError;
 }
 
