@@ -41,11 +41,16 @@ export async function fetchThreads(): Promise<BBSThread[]> {
 }
 
 export async function createThread(title: string, category: string): Promise<BBSThread> {
+  const rl = checkRate('bbs_thread');
+  if (!rl.ok) throw new Error(rateLimitMessage('bbs_thread', rl.retryAfterMs));
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
+  // タイトルも sanitize (XSS 対策 + 内部マーカー除去)
+  const safeTitle = sanitizeContent(title, { maxLength: 80 });
+  if (safeTitle.length < 2) throw new Error('タイトルは 2 文字以上にしてください');
   const { data, error } = await supabase
     .from('bbs_threads')
-    .insert({ title, category, author_id: user.id })
+    .insert({ title: safeTitle, category, author_id: user.id })
     .select('id, title, category, replies_count, last_reply_at, created_at')
     .single();
   if (error) throw error;
@@ -79,7 +84,8 @@ export async function fetchReplies(threadId: string): Promise<BBSReply[]> {
     .from('bbs_replies')
     .select('id, thread_id, content, color, created_at, author:profiles!bbs_replies_author_id_fkey(trust_score)')
     .eq('thread_id', threadId)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true })
+    .limit(500);  // DoS 防止: 巨大スレッドで OOM/UI フリーズ防止
 
   if (!withAuthor.error) {
     return (withAuthor.data ?? []).map((r: RawReply) => {
@@ -101,7 +107,8 @@ export async function fetchReplies(threadId: string): Promise<BBSReply[]> {
     .from('bbs_replies')
     .select('id, thread_id, content, color, created_at')
     .eq('thread_id', threadId)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true })
+    .limit(500);  // DoS 防止: 巨大スレッドで OOM/UI フリーズ防止
   if (fallback.error) throw fallback.error;
   return (fallback.data ?? []).map((r) => ({
     id: r.id,

@@ -21,6 +21,10 @@ type Entry = {
 
 const channels = new Map<string, Entry>();
 
+// DoS 防止: 1 セッションあたりの同時 channel 数を制限
+// Supabase Realtime の per-connection 上限よりも前にクライアント側で reject
+const MAX_CONCURRENT_CHANNELS = 20;
+
 // 指定 name の channel に対し subscribe (初回のみ) + refCount を増やす。
 // 戻り値の関数を呼ぶと refCount を減らし、ゼロになったら channel を破棄する。
 export function attachChannel(name: string, build: ChannelBuilder): () => void {
@@ -29,11 +33,24 @@ export function attachChannel(name: string, build: ChannelBuilder): () => void {
     existing.refCount++;
     return () => detachChannel(name);
   }
+  // 上限到達: 警告だけ出して何もしない (戻り値は no-op detacher)
+  if (channels.size >= MAX_CONCURRENT_CHANNELS) {
+    console.warn(`[realtime] channel limit reached (${MAX_CONCURRENT_CHANNELS}). Skipping subscription for "${name}".`);
+    return () => {};
+  }
   // 新規 channel を作成 → builder で .on(...) を全部チェーン → subscribe
   const ch = build(supabase.channel(name));
   ch.subscribe();
   channels.set(name, { channel: ch, refCount: 1 });
   return () => detachChannel(name);
+}
+
+// 全 channel を強制的に detach (logout 時など)
+export function detachAllChannels() {
+  for (const [name, entry] of channels) {
+    void supabase.removeChannel(entry.channel);
+    channels.delete(name);
+  }
 }
 
 function detachChannel(name: string) {

@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { generateVariants } from '@/lib/search/variants';
 import { findSimilar } from '@/lib/search/similarity';
+import { sanitizeContent } from '@/lib/sanitize';
 
 export type Visibility = 'open' | 'request' | 'invite';
 export type MemberRole = 'owner' | 'admin' | 'member';
@@ -134,11 +135,17 @@ export async function createCommunity(input: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'ログインしてください' };
 
+  // 名前 / 説明を sanitize (HTML / script / onerror= / javascript: / 制御文字を除去)
+  const safeName = sanitizeContent(input.name, { maxLength: 40 });
+  const safeDesc = sanitizeContent(input.description, { maxLength: 500 });
+  if (safeName.length < 2) {
+    return { data: null, error: 'コミュニティ名は 2 文字以上にしてください' };
+  }
   const { data, error } = await supabase
     .from('communities')
     .insert({
-      name: input.name.trim(),
-      description: input.description.trim(),
+      name: safeName,
+      description: safeDesc,
       icon_emoji: input.icon_emoji,
       icon_color: input.icon_color,
       icon_url: input.icon_url ?? null,

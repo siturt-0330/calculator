@@ -244,13 +244,20 @@ const COMMON_SYNONYMS: Record<string, string[]> = {
   'like': ['いいね', 'ファボ', 'お気に入り', 'favorite'],
 };
 
+// DoS 防止: variant 数の上限 — 異常に大きいクエリで爆発しないよう全 push に
+// 通過させる。
+const MAX_VARIANTS = 24;
+// クエリ長の上限 — "=====" のような繰り返し記号で variant が爆発する攻撃を抑止
+const MAX_QUERY_LEN = 80;
+
 // 1つのクエリから全 variant を生成 (重要度順: 同義語 → 記号読み → 表記ゆらぎ)
 export function generateVariants(query: string): string[] {
-  const original = query.trim();
+  const original = query.trim().slice(0, MAX_QUERY_LEN);
   if (!original) return [];
   const ordered: string[] = [];
   const seen = new Set<string>();
   const push = (v: string) => {
+    if (ordered.length >= MAX_VARIANTS) return;  // hard cap
     const t = v.trim();
     if (!t || seen.has(t)) return;
     seen.add(t);
