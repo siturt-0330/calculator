@@ -107,66 +107,44 @@ export default function MypageScreen() {
 
           {/* プロフィール中央 */}
           <View style={{ alignItems: 'center', gap: SP['3'] }}>
-            <View style={{
-              padding: 3,
-              borderRadius: 56,
-              backgroundColor: C.bg,
-            }}>
-              <LinearGradient
-                colors={[...GRAD.accent]}
-                style={{ padding: 3, borderRadius: 53 }}
-              >
-                <View style={{ borderRadius: 50, overflow: 'hidden', backgroundColor: C.bg }}>
-                  <Avatar size={100} name={user?.nickname ?? user?.email} emoji={stats?.avatar_emoji ?? undefined} uri={stats?.avatar_url ?? undefined} />
-                </View>
-              </LinearGradient>
-            </View>
-            <View style={{ alignItems: 'center', gap: 2 }}>
+            <LinearGradient
+              colors={[...GRAD.accent]}
+              style={{ padding: 2, borderRadius: 54 }}
+            >
+              <View style={{ borderRadius: 52, overflow: 'hidden', backgroundColor: C.bg }}>
+                <Avatar size={100} name={user?.nickname ?? user?.email} emoji={stats?.avatar_emoji ?? undefined} uri={stats?.avatar_url ?? undefined} />
+              </View>
+            </LinearGradient>
+            <View style={{ alignItems: 'center', gap: 4 }}>
               <Text style={[T.h2, { color: C.text }]}>
                 {user?.nickname ?? 'ユーザー'}
               </Text>
-              <View style={{
-                flexDirection: 'row', alignItems: 'center', gap: SP['1'],
-                paddingHorizontal: SP['2'], paddingVertical: 2,
-                backgroundColor: C.bg2, borderRadius: R.full,
-                borderWidth: 1, borderColor: C.border,
-              }}>
-                <Icon.lock size={10} color={C.text3} strokeWidth={2.4} />
-                <Text style={[T.caption, { color: C.text3 }]}>匿名 · {accountAge}日目</Text>
-              </View>
+              <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5 }]}>
+                匿名 · {accountAge}日目
+              </Text>
             </View>
             <PressableScale
               onPress={() => router.push('/settings/profile-edit' as never)}
               haptic="tap"
               style={{
-                paddingHorizontal: SP['5'],
-                paddingVertical: SP['2'],
-                borderRadius: R.full,
-                backgroundColor: C.bg2,
-                borderWidth: 1,
-                borderColor: C.border,
+                paddingHorizontal: SP['4'],
+                paddingVertical: 6,
               }}
             >
-              <Text style={[T.smallM, { color: C.text }]}>プロフィール編集</Text>
+              <Text style={[T.smallM, { color: C.accent, fontWeight: '600' }]}>編集</Text>
             </PressableScale>
           </View>
         </LinearGradient>
 
-        {/* 統計カード */}
+        {/* 統計 (フラット 3 列) */}
         <View style={{
           flexDirection: 'row',
           marginHorizontal: SP['4'],
-          marginTop: -SP['4'],
-          backgroundColor: C.bg2,
-          borderRadius: R.xl,
-          borderWidth: 1,
-          borderColor: C.border,
-          padding: SP['4'],
+          marginTop: -SP['2'],
+          paddingVertical: SP['3'],
         }}>
           <StatItem value={stats?.post_count ?? 0} label="投稿" />
-          <StatDivider />
           <StatItem value={stats?.like_received_count ?? 0} label="いいね" />
-          <StatDivider />
           <StatItem value={trustScore} label="信頼" color={trustScore >= 70 ? C.green : trustScore >= 40 ? C.amber : C.red} />
         </View>
 
@@ -174,14 +152,11 @@ export default function MypageScreen() {
         {showActivity && <ActivitySummary />}
 
 
-        {/* 好きタグ（コミュニティ） */}
+        {/* 好きタグ */}
         {likedTags.length > 0 && (
-          <View style={{ paddingHorizontal: SP['4'], marginTop: SP['5'], gap: SP['3'] }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={[T.h4, { color: C.text }]}>参加中のコミュニティ</Text>
-              <Text style={[T.caption, { color: C.text3 }]}>{likedTags.length}</Text>
-            </View>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
+          <View style={{ paddingHorizontal: SP['4'], marginTop: SP['4'], gap: SP['2'] }}>
+            <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5 }]}>タグ</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
               {likedTags.slice(0, 10).map((t) => (
                 <PressableScale
                   key={t}
@@ -189,14 +164,12 @@ export default function MypageScreen() {
                   haptic="tap"
                   style={{
                     paddingHorizontal: SP['3'],
-                    paddingVertical: SP['2'],
-                    backgroundColor: C.accentBg,
+                    paddingVertical: 6,
+                    backgroundColor: C.bg2,
                     borderRadius: R.full,
-                    borderWidth: 1,
-                    borderColor: C.accentSoft,
                   }}
                 >
-                  <Text style={[T.smallM, { color: C.accentLight }]}>#{t}</Text>
+                  <Text style={[T.smallM, { color: C.text }]}>#{t}</Text>
                 </PressableScale>
               ))}
               {likedTags.length > 10 && (
@@ -204,14 +177,11 @@ export default function MypageScreen() {
                   onPress={() => router.push('/filter' as never)}
                   style={{
                     paddingHorizontal: SP['3'],
-                    paddingVertical: SP['2'],
-                    backgroundColor: C.bg3,
+                    paddingVertical: 6,
                     borderRadius: R.full,
-                    borderWidth: 1,
-                    borderColor: C.border,
                   }}
                 >
-                  <Text style={[T.smallM, { color: C.text2 }]}>+{likedTags.length - 10}</Text>
+                  <Text style={[T.smallM, { color: C.text3 }]}>+{likedTags.length - 10}</Text>
                 </PressableScale>
               )}
             </View>
@@ -294,19 +264,12 @@ export default function MypageScreen() {
             onPress={() => setLogoutOpen(true)}
             haptic="warn"
             style={{
-              flexDirection: 'row',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: SP['2'],
-              padding: SP['4'],
-              backgroundColor: C.redBg,
-              borderRadius: R.lg,
-              borderWidth: 1,
-              borderColor: C.red + '44',
+              paddingVertical: SP['3'],
             }}
           >
-            <Icon.logout size={16} color={C.red} strokeWidth={2.4} />
-            <Text style={[T.smallM, { color: C.red }]}>ログアウト</Text>
+            <Text style={[T.smallM, { color: C.red, letterSpacing: 0.5 }]}>ログアウト</Text>
           </PressableScale>
         </View>
       </ScrollView>
@@ -330,17 +293,13 @@ export default function MypageScreen() {
 
 function StatItem({ value, label, color }: { value: number; label: string; color?: string }) {
   return (
-    <View style={{ flex: 1, alignItems: 'center', gap: 2 }}>
-      <Text style={[T.h3, { color: color ?? C.text, fontWeight: '700' }]}>
+    <View style={{ flex: 1, alignItems: 'center', gap: 4 }}>
+      <Text style={{ fontSize: 24, fontWeight: '700', color: color ?? C.text, letterSpacing: -0.5 }}>
         {value.toLocaleString()}
       </Text>
-      <Text style={[T.caption, { color: C.text3 }]}>{label}</Text>
+      <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5 }]}>{label}</Text>
     </View>
   );
-}
-
-function StatDivider() {
-  return <View style={{ width: 1, backgroundColor: C.border, marginVertical: SP['1'] }} />;
 }
 
 type IconComponent = React.ComponentType<Record<string, unknown>>;
@@ -363,25 +322,15 @@ function MenuTile({
       style={{
         flexBasis: '30%',
         flexGrow: 1,
-        padding: SP['4'],
+        paddingVertical: SP['4'],
+        paddingHorizontal: SP['2'],
         backgroundColor: C.bg2,
         borderRadius: R.lg,
-        borderWidth: 1,
-        borderColor: C.border,
         alignItems: 'center',
         gap: SP['2'],
       }}
     >
-      <View style={{
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: color + '22',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}>
-        <I size={20} color={color} strokeWidth={2.2} />
-      </View>
+      <I size={22} color={color} strokeWidth={2} />
       <Text style={[T.smallM, { color: C.text }]}>{label}</Text>
     </PressableScale>
   );
