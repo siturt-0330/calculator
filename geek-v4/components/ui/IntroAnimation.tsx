@@ -40,9 +40,9 @@ const CFG = {
   POST_FORM_HOLD:  120,    // 完成後ホールド (グロー一瞬)
   GLOW_FLASH:      160,    // グロー (短く控えめ)
   ZOOM_START_DELAY: 80,
-  ZOOM_DURATION:   900,    // ズームイン尺
+  ZOOM_DURATION:   1500,   // ズームイン尺 — 旧 900 → 1500ms。文字拡大をゆっくり見せる
   ZOOM_MAX:        25,     // 突き抜ける勢いの拡大率
-  FADE_OUT:        280,
+  FADE_OUT:        320,    // ズームが長くなった分 fade も少し長く
 };
 
 const LETTERS = ['G', 'e', 'e', 'k'] as const;

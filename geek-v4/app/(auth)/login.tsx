@@ -1,6 +1,7 @@
-import { View, Text, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
-import { useState } from 'react';
+import { View, Text, KeyboardAvoidingView, Platform, ScrollView, TextInput } from 'react-native';
+import { useState, useRef } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { supabase } from '@/lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
@@ -19,6 +20,9 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const [credErrorBanner, setCredErrorBanner] = useState(false);
+  const [needsConfirmBanner, setNeedsConfirmBanner] = useState(false);
+  const [resending, setResending] = useState(false);
+  const passwordRef = useRef<TextInput>(null);
   const { signIn } = useAuthStore();
   const { show } = useToastStore();
   const router = useRouter();
@@ -26,25 +30,35 @@ export default function LoginScreen() {
   const EyeIcon = showPass ? Icon.eyeOff : Icon.eye;
   const MailIcon = Icon.at;
 
+  // 厳しめのメール正規表現 — 1 文字ドメイン (a@b.c) を弾く
+  // TLD は最低 2 文字必要、@ 前後は単純な英数記号許可
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
   const handleLogin = async () => {
     if (loading) return;  // 二重 submit 防止
-    // 入力チェック (trim も含めて空判定)
     const trimmedEmail = email.trim();
     if (!trimmedEmail || !password) {
       show('メールアドレスとパスワードを入力してください。', 'warn');
       return;
     }
-    if (!/\S+@\S+\.\S+/.test(trimmedEmail)) {
+    if (!EMAIL_RE.test(trimmedEmail)) {
       show('メールアドレスの形式が正しくありません。', 'warn');
+      return;
+    }
+    if (password.length > 72) {
+      // Supabase / bcrypt の上限を超えると cryptic エラーになるので事前 reject
+      show('パスワードは 72 文字以内にしてください。', 'warn');
       return;
     }
     setLoading(true);
     setCredErrorBanner(false);
-    // 最終安全タイマー: 15秒経っても応答が無ければ loading 解除
+    setNeedsConfirmBanner(false);
+    // 最終安全タイマー: 18秒経っても応答が無ければ loading 解除 (旧 15s だと
+    // 低速回線で authStore の 10s と重なって誤発火)
     const safety = setTimeout(() => {
       setLoading(false);
-      show('応答がありません。もう一度お試しください。', 'error');
-    }, 15000);
+      show('応答がありません。回線を確認して再度お試しください。', 'error');
+    }, 18000);
     let result;
     try {
       result = await signIn(trimmedEmail, password);
@@ -53,12 +67,14 @@ export default function LoginScreen() {
       setLoading(false);
     }
     if (result.error) {
-      if (result.error.includes('Invalid login credentials')) {
-        // Supabase はセキュリティ上「未登録」と「パスワード違い」を区別しないので
-        // 中立的なメッセージにする。バナーで両方のリカバリ手段を提示。
+      // アカウント停止系 — buildUser + signIn 側で文字列をそのまま返してる
+      if (result.error.includes('利用停止') || result.error.includes('制限中')) {
+        show(result.error, 'error');
+      } else if (result.error.includes('Invalid login credentials')) {
         setCredErrorBanner(true);
         show('メールアドレスまたはパスワードが違います。', 'warn');
-      } else if (result.error.includes('Email not confirmed')) {
+      } else if (result.error.includes('Email not confirmed') || result.error.includes('confirm')) {
+        setNeedsConfirmBanner(true);
         show('確認メールのリンクをクリックしてからログインしてください。', 'error');
       } else if (result.error.includes('Too many') || result.error.includes('rate')) {
         show('短時間に試行しすぎました。少し待ってから再度お試しください。', 'warn');
@@ -73,6 +89,29 @@ export default function LoginScreen() {
       router.replace('/onboarding');
     } else {
       router.replace('/(tabs)/feed');
+    }
+  };
+
+  // 確認メールを再送信
+  const handleResendConfirmation = async () => {
+    if (resending) return;
+    const e = email.trim();
+    if (!EMAIL_RE.test(e)) {
+      show('メールアドレスを入力してください。', 'warn');
+      return;
+    }
+    setResending(true);
+    try {
+      const { error } = await supabase.auth.resend({ type: 'signup', email: e });
+      if (error) {
+        show('再送信に失敗しました: ' + error.message, 'error');
+      } else {
+        show('確認メールを再送しました。受信箱を確認してください。', 'success');
+      }
+    } catch (err) {
+      show('再送信に失敗しました。少し時間を置いてください。', 'error');
+    } finally {
+      setResending(false);
     }
   };
 
@@ -137,30 +176,91 @@ export default function LoginScreen() {
           </View>
         )}
 
+        {/* 確認メール未送信バナー */}
+        {needsConfirmBanner && (
+          <View style={{
+            padding: SP['4'],
+            backgroundColor: C.amberBg,
+            borderRadius: R.lg,
+            borderWidth: 1,
+            borderColor: C.amber + '66',
+            marginBottom: SP['4'],
+            gap: SP['2'],
+          }}>
+            <Text style={[T.bodyMd, { color: C.amber, fontWeight: '700' }]}>
+              確認メール未確認
+            </Text>
+            <Text style={[T.small, { color: C.text2 }]}>
+              受信箱の確認メールリンクをクリックしてください。届いていない場合は再送できます。
+            </Text>
+            <PressableScale
+              onPress={handleResendConfirmation}
+              haptic="tap"
+              hitSlop={6}
+              disabled={resending}
+              style={{
+                marginTop: SP['1'],
+                padding: SP['2'],
+                borderRadius: R.md,
+                backgroundColor: C.amber,
+                alignItems: 'center',
+                opacity: resending ? 0.6 : 1,
+              }}
+            >
+              <Text style={[T.smallM, { color: '#000', fontWeight: '700' }]}>
+                {resending ? '送信中…' : '確認メールを再送する'}
+              </Text>
+            </PressableScale>
+          </View>
+        )}
+
         <View style={{ gap: SP['4'], marginBottom: SP['6'] }}>
           <Input
             label="メールアドレス"
             icon={MailIcon}
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(t) => {
+              setEmail(t);
+              // 編集時にエラーバナー auto-dismiss
+              if (credErrorBanner) setCredErrorBanner(false);
+              if (needsConfirmBanner) setNeedsConfirmBanner(false);
+            }}
             placeholder="you@example.com"
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
+            autoComplete="email"
+            textContentType="emailAddress"
+            returnKeyType="next"
+            onSubmitEditing={() => passwordRef.current?.focus()}
             keyboardAppearance="dark"
             selectionColor={C.accent}
           />
           <Input
+            ref={passwordRef}
             label="パスワード"
             value={password}
-            onChangeText={setPassword}
+            onChangeText={(t) => {
+              setPassword(t);
+              if (credErrorBanner) setCredErrorBanner(false);
+            }}
             placeholder="パスワード"
             secureTextEntry={!showPass}
+            autoComplete="current-password"
+            textContentType="password"
+            returnKeyType="go"
+            onSubmitEditing={handleLogin}
             keyboardAppearance="dark"
             selectionColor={C.accent}
             right={
-              <PressableScale onPress={() => setShowPass((v) => !v)} haptic="tap">
-                <EyeIcon size={18} color={C.text3} strokeWidth={2.2} />
+              <PressableScale
+                onPress={() => setShowPass((v) => !v)}
+                haptic="tap"
+                hitSlop={14}
+                accessibilityLabel={showPass ? 'パスワードを非表示にする' : 'パスワードを表示する'}
+                accessibilityRole="button"
+              >
+                <EyeIcon size={20} color={C.text3} strokeWidth={2.2} />
               </PressableScale>
             }
           />

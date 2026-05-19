@@ -74,28 +74,57 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
 async function buildUser(authUser: User): Promise<AppUser> {
   // プロフィール取得は 3 秒でタイムアウト → ログインを絶対詰まらせない
   const profile = await withTimeout(fetchProfile(authUser.id), 3000);
-  let onboarded = profile?.onboarded;
+  let onboarded: boolean | undefined = profile?.onboarded;
   if (onboarded === undefined || onboarded === null) {
     // プロフィール取得失敗 → キャッシュから復元
     const cached = await withTimeout(getCachedOnboarded(authUser.id), 1000);
     if (cached !== null) onboarded = cached ?? undefined;
   } else {
-    void setCachedOnboarded(authUser.id, onboarded);
+    // 失敗してもログだけ
+    void setCachedOnboarded(authUser.id, onboarded).catch((e) =>
+      console.warn('[authStore] cache write failed:', e),
+    );
   }
   return { ...authUser, ...(profile ?? {}), onboarded };
 }
 
+// アカウント状態が問題 (suspended/restricted) なら強制 signOut してエラーを返す
+// 戻り値: null = OK, string = エラーメッセージ
+function checkAccountState(user: AppUser): string | null {
+  if (user.account_state === 'suspended') {
+    return 'このアカウントは利用停止中です。サポートにお問い合わせください。';
+  }
+  if (user.account_state === 'restricted') {
+    return 'このアカウントは制限中のためログインできません。';
+  }
+  return null;
+}
+
 let listenerRegistered = false;
+let storageListenerRegistered = false;
+// 二重 signOut を防ぐ — module-scope lock
+let signOutInFlight = false;
 
 function registerAuthListener(set: (partial: Partial<AuthState>) => void) {
   if (listenerRegistered) return;
   listenerRegistered = true;
   supabase.auth.onAuthStateChange(async (event, session) => {
+    // 全イベント明示処理 — ログで debug 可能に
     if (event === 'INITIAL_SESSION') return;
     if (event === 'SIGNED_OUT') {
       set({ user: null });
       return;
     }
+    if (event === 'PASSWORD_RECOVERY') {
+      console.log('[authStore] PASSWORD_RECOVERY event — user is in reset flow');
+      return;
+    }
+    if (event === 'TOKEN_REFRESHED') {
+      console.log('[authStore] token refreshed');
+      // 何もしない (session の token は内部で更新済み)
+      return;
+    }
+    // SIGNED_IN or USER_UPDATED
     const authUser = session?.user ?? null;
     if (!authUser) {
       set({ user: null });
@@ -103,10 +132,28 @@ function registerAuthListener(set: (partial: Partial<AuthState>) => void) {
     }
     try {
       const next = await buildUser(authUser);
+      // 制限アカウントは listener 側で signOut しない (race を避ける) — signIn 側で対処
       set({ user: next });
     } catch (e) {
       console.warn('build user (listener) failed:', e);
       set({ user: authUser as AppUser });
+    }
+  });
+}
+
+// Web 専用: 他タブの storage 変更を検知して同一セッションを共有
+function registerStorageListener(set: (partial: Partial<AuthState>) => void) {
+  if (storageListenerRegistered) return;
+  if (Platform.OS !== 'web') return;
+  if (typeof window === 'undefined') return;
+  storageListenerRegistered = true;
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'geek-v4-auth') {
+      // 他タブで auth が消えた = 他タブで logout した → 同期する
+      if (e.newValue === null || e.newValue === '') {
+        console.log('[authStore] cross-tab logout detected');
+        set({ user: null });
+      }
     }
   });
 }
@@ -117,27 +164,35 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   hydrate: async () => {
     // 何があってもリスナは登録する
     registerAuthListener(set);
-    // ★ Safety: getSession / buildUser が何らかの理由で 5 秒以内に返らなければ
-    //   hydrated を強制的に true にしてアプリ起動を継続させる
+    registerStorageListener(set);
+    // ★ Safety: 7 秒以内に返らなければ hydrated:true で起動継続
+    // (旧 5s だと低速回線で false logout する事故が起きていた)
     let hydrationDone = false;
     const safetyTimer = setTimeout(() => {
       if (!hydrationDone) {
         console.warn('auth hydrate timeout — forcing hydrated:true');
-        set({ user: null, hydrated: true });
         hydrationDone = true;
+        set({ user: null, hydrated: true });
       }
-    }, 5000);
+    }, 7000);
     try {
       const { data, error } = await supabase.auth.getSession();
       if (error) console.warn('getSession error:', error.message);
       const authUser = data?.session?.user ?? null;
       let user: AppUser | null = null;
       if (authUser) {
-        try {
-          user = await buildUser(authUser);
-        } catch (e) {
-          console.warn('build user (hydrate) failed:', e);
-          user = authUser as AppUser;
+        // session の token expiry を check — 期限切れなら強制 signOut
+        const expiresAt = data?.session?.expires_at;
+        if (expiresAt && expiresAt * 1000 < Date.now()) {
+          console.warn('[authStore] hydrate: token expired, forcing signOut');
+          try { await supabase.auth.signOut(); } catch {}
+        } else {
+          try {
+            user = await buildUser(authUser);
+          } catch (e) {
+            console.warn('build user (hydrate) failed:', e);
+            user = authUser as AppUser;
+          }
         }
       }
       if (!hydrationDone) {
@@ -180,8 +235,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         console.warn('build user (signIn) failed:', e);
         user = data.session.user as AppUser;
       }
+      // 凍結 / 制限アカウントなら強制 signOut してエラー返却
+      const stateError = checkAccountState(user);
+      if (stateError) {
+        try { await supabase.auth.signOut(); } catch {}
+        set({ user: null });
+        return { error: stateError };
+      }
       set({ user });
-      const next: 'feed' | 'onboarding' = user.onboarded ? 'feed' : 'onboarding';
+      // onboarded が undefined (profile fetch failed) なら安全側 = onboarding に飛ばす
+      const next: 'feed' | 'onboarding' = user.onboarded === true ? 'feed' : 'onboarding';
       return { error: null, user, next };
     } catch (e) {
       console.error('signIn exception:', e);
@@ -285,25 +348,31 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
   signOut: async () => {
+    // 二重 signOut を防ぐ — シングルフライト lock
+    if (signOutInFlight) return;
+    signOutInFlight = true;
     try {
-      await supabase.auth.signOut();
-    } catch (e) {
-      console.warn('signOut error:', e);
-    }
-    // 全 realtime channel を強制 detach (logout 後に他人の通知を受信し続けるのを防ぐ)
-    try { detachAllChannels(); } catch (e) { console.warn('detachAllChannels error:', e); }
-    // 古い onboarded キャッシュも掃除
-    const u = get().user;
-    if (u) {
+      // 先に local state をクリア (UI 即時反映 + 同タブの他コンポーネントが新規 channel を
+      // 作るのを防ぐ)
+      const u = get().user;
+      set({ user: null });
+      // Supabase 側
+      try { await supabase.auth.signOut(); } catch (e) { console.warn('signOut error:', e); }
+      // 全 realtime channel を強制 detach
+      try { detachAllChannels(); } catch (e) { console.warn('detachAllChannels error:', e); }
+      // onboarded キャッシュ + supabase auth キーを掃除
       try {
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          window.localStorage.removeItem(`${ONBOARDED_KEY}:${u.id}`);
+          if (u) window.localStorage.removeItem(`${ONBOARDED_KEY}:${u.id}`);
+          window.localStorage.removeItem('geek-v4-auth');
         } else {
-          await AsyncStorage.removeItem(`${ONBOARDED_KEY}:${u.id}`);
+          if (u) await AsyncStorage.removeItem(`${ONBOARDED_KEY}:${u.id}`);
+          await AsyncStorage.removeItem('geek-v4-auth');
         }
       } catch {}
+    } finally {
+      signOutInFlight = false;
     }
-    set({ user: null });
   },
   setUser: (user) => set({ user }),
   refreshProfile: async () => {
