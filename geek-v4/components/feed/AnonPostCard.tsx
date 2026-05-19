@@ -23,6 +23,7 @@ import { PostKindBadge } from './PostKindBadge';
 import { TrustBadge } from '@/components/ui/TrustBadge';
 import { formatRelative } from '@/lib/utils/date';
 import { SHADOW } from '@/design/shadows';
+import { sanitizeUrl } from '@/lib/sanitize';
 
 function shortHost(url: string): string {
   try {
@@ -124,10 +125,13 @@ export function AnonPostCard({
 
   const openSource = () => {
     if (!post.source_url) return;
+    // sanitizeUrl は http/https 以外を null にする — javascript:/data:/vbscript: XSS 防止
+    const safe = sanitizeUrl(post.source_url);
+    if (!safe) return;
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.open(post.source_url, '_blank', 'noopener,noreferrer');
+      window.open(safe, '_blank', 'noopener,noreferrer');
     } else {
-      Linking.openURL(post.source_url).catch(() => {});
+      Linking.openURL(safe).catch(() => {});
     }
   };
 

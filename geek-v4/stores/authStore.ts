@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import type { User } from '@supabase/supabase-js';
+import { detachAllChannels } from '@/lib/realtime';
 
 // onboarded 状態のローカルキャッシュ — プロフィール取得失敗時のフォールバック
 const ONBOARDED_KEY = 'geek-v4-onboarded';
@@ -288,6 +289,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await supabase.auth.signOut();
     } catch (e) {
       console.warn('signOut error:', e);
+    }
+    // 全 realtime channel を強制 detach (logout 後に他人の通知を受信し続けるのを防ぐ)
+    try { detachAllChannels(); } catch (e) { console.warn('detachAllChannels error:', e); }
+    // 古い onboarded キャッシュも掃除
+    const u = get().user;
+    if (u) {
+      try {
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          window.localStorage.removeItem(`${ONBOARDED_KEY}:${u.id}`);
+        } else {
+          await AsyncStorage.removeItem(`${ONBOARDED_KEY}:${u.id}`);
+        }
+      } catch {}
     }
     set({ user: null });
   },

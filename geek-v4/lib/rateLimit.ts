@@ -17,16 +17,19 @@
 type Window = { count: number; windowStart: number };
 
 const limits: Record<string, { max: number; windowMs: number }> = {
-  post:         { max: 5,  windowMs: 60 * 1000 },
-  comment:      { max: 10, windowMs: 60 * 1000 },
-  bbs_reply:    { max: 10, windowMs: 60 * 1000 },
-  reaction:     { max: 30, windowMs: 60 * 1000 },
-  like:         { max: 60, windowMs: 60 * 1000 },
-  concern:      { max: 20, windowMs: 60 * 1000 },
-  tag_add:      { max: 20, windowMs: 60 * 1000 },
-  custom_stamp: { max: 5,  windowMs: 10 * 60 * 1000 },
-  bookmark:     { max: 30, windowMs: 60 * 1000 },
-  feedback:     { max: 3,  windowMs: 10 * 60 * 1000 },
+  post:           { max: 5,  windowMs: 60 * 1000 },
+  comment:        { max: 10, windowMs: 60 * 1000 },
+  bbs_reply:      { max: 10, windowMs: 60 * 1000 },
+  bbs_thread:     { max: 3,  windowMs: 60 * 1000 },
+  reaction:       { max: 30, windowMs: 60 * 1000 },
+  like:           { max: 60, windowMs: 60 * 1000 },
+  concern:        { max: 20, windowMs: 60 * 1000 },
+  tag_add:        { max: 20, windowMs: 60 * 1000 },
+  custom_stamp:   { max: 5,  windowMs: 10 * 60 * 1000 },
+  bookmark:       { max: 30, windowMs: 60 * 1000 },
+  feedback:       { max: 3,  windowMs: 10 * 60 * 1000 },
+  community_post: { max: 5,  windowMs: 60 * 1000 },
+  community_create: { max: 3, windowMs: 10 * 60 * 1000 },
 };
 
 const state = new Map<string, Window>();

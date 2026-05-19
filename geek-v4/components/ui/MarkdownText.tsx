@@ -1,6 +1,7 @@
 import { Text, Linking, Platform } from 'react-native';
 import type { TextStyle, StyleProp } from 'react-native';
 import { C } from '@/design/tokens';
+import { sanitizeUrl } from '@/lib/sanitize';
 
 // 軽量 inline Markdown レンダラ
 // 対応: **bold**, *italic*, `code`, ~~strike~~, [text](url)
@@ -56,10 +57,13 @@ export function MarkdownText({
   const segs = parse(text);
 
   const open = (url: string) => {
+    // パーサ regex は https? のみ通すが、defense-in-depth で再検証
+    const safe = sanitizeUrl(url);
+    if (!safe) return;
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.open(url, '_blank', 'noopener,noreferrer');
+      window.open(safe, '_blank', 'noopener,noreferrer');
     } else {
-      Linking.openURL(url).catch(() => {});
+      Linking.openURL(safe).catch(() => {});
     }
   };
 

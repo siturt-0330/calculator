@@ -121,18 +121,38 @@ if (myLoc) {
 }
 
 const locations = ${locJson};
+// HTML エスケープ + CSS 値サニタイズ — popup HTML 生成時に DB 由来の文字列を
+// 直接 innerHTML 経由で挿入するので、defense-in-depth で必須
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+function safeColor(c) {
+  // # + hex 6-8 桁 だけ通す
+  if (typeof c !== 'string') return '#7C6AF7';
+  return /^#[0-9a-fA-F]{6,8}$/.test(c) ? c : '#7C6AF7';
+}
+function safeNum(n) {
+  return typeof n === 'number' && isFinite(n) ? n : 0;
+}
 const cluster = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 40 });
 locations.forEach(loc => {
+  const lat = safeNum(loc.lat);
+  const lng = safeNum(loc.lng);
   const icon = L.divIcon({
-    html: '<div class="pin"><div class="head" style="background:' + loc.color + '"><span class="emoji">' + loc.emoji + '</span></div></div>',
+    html: '<div class="pin"><div class="head" style="background:' + safeColor(loc.color) + '"><span class="emoji">' + escapeHtml(loc.emoji) + '</span></div></div>',
     className: '', iconSize: [32, 42], iconAnchor: [16, 42], popupAnchor: [0, -38]
   });
-  const m = L.marker([loc.lat, loc.lng], { icon });
-  let html = '<div class="pop-title">' + loc.name + '</div>';
-  if (loc.tag) html += '<div class="pop-tag">#' + loc.tag + '</div>';
-  if (loc.date) html += '<div class="pop-addr">🗓 ' + loc.date + '</div>';
+  const m = L.marker([lat, lng], { icon });
+  let html = '<div class="pop-title">' + escapeHtml(loc.name) + '</div>';
+  if (loc.tag) html += '<div class="pop-tag">#' + escapeHtml(loc.tag) + '</div>';
+  if (loc.date) html += '<div class="pop-addr">🗓 ' + escapeHtml(loc.date) + '</div>';
   html += '<div class="pop-actions">';
-  html += '<a class="pop-btn gmap" target="_top" href="https://www.google.com/maps/dir/?api=1&destination=' + loc.lat + ',' + loc.lng + '">🗺 Google Maps</a>';
+  html += '<a class="pop-btn gmap" target="_top" href="https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(lat + ',' + lng) + '">🗺 Google Maps</a>';
   html += '</div>';
   m.bindPopup(html);
   cluster.addLayer(m);

@@ -6,9 +6,11 @@ import { TopBar } from '@/components/nav/TopBar';
 import { BackButton } from '@/components/nav/BackButton';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Input } from '@/components/ui/Input';
 import { useToastStore } from '@/stores/toastStore';
 import { useAuthStore } from '@/stores/authStore';
 import { downloadUserDataAsJson, deleteAccount } from '@/lib/api/account';
+import { supabase } from '@/lib/supabase';
 import { Icon } from '@/constants/icons';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
@@ -21,6 +23,10 @@ export default function AccountScreen() {
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // 再認証フェーズ — 不可逆操作なのでパスワード再入力を必須にする
+  const [reAuthOpen, setReAuthOpen] = useState(false);
+  const [reAuthPwd, setReAuthPwd] = useState('');
+  const [reAuthing, setReAuthing] = useState(false);
 
   const onExport = async () => {
     if (exporting) return;
@@ -41,11 +47,38 @@ export default function AccountScreen() {
     }
   };
 
-  const onConfirmDelete = async () => {
+  // 第 1 ステップ: 警告ダイアログ で OK → 第 2 ステップ: パスワード再入力
+  const onConfirmDelete = () => {
     setConfirmDelete(false);
-    if (deleting) return;
-    setDeleting(true);
+    setReAuthPwd('');
+    setReAuthOpen(true);
+  };
+
+  // 第 2 ステップ: パスワードで再認証 → 削除実行
+  const onReAuthSubmit = async () => {
+    if (reAuthing) return;
+    if (!user?.email) {
+      showToast('メールアドレスが取得できませんでした', 'error');
+      return;
+    }
+    if (reAuthPwd.length < 4) {
+      showToast('パスワードを入力してください', 'warn');
+      return;
+    }
+    setReAuthing(true);
     try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: reAuthPwd,
+      });
+      if (error) {
+        showToast('パスワードが正しくありません', 'error');
+        setReAuthing(false);
+        return;
+      }
+      // 再認証成功 → 削除
+      setReAuthOpen(false);
+      setDeleting(true);
       const r = await deleteAccount();
       if (r.ok) {
         setUser(null);
@@ -58,6 +91,7 @@ export default function AccountScreen() {
       const msg = e instanceof Error ? e.message : '削除に失敗しました';
       showToast(msg, 'error');
     } finally {
+      setReAuthing(false);
       setDeleting(false);
     }
   };
@@ -167,13 +201,92 @@ export default function AccountScreen() {
       <ConfirmDialog
         visible={confirmDelete}
         title="本当に削除しますか？"
-        message={`「${user?.email ?? 'このアカウント'}」のすべてのデータが完全に削除されます。この操作は取り消せません。`}
-        confirmLabel="削除する"
+        message={`「${user?.email ?? 'このアカウント'}」のすべてのデータが完全に削除されます。この操作は取り消せません。次の画面でパスワード再入力が必要です。`}
+        confirmLabel="次へ"
         cancelLabel="キャンセル"
         destructive
         onCancel={() => setConfirmDelete(false)}
-        onConfirm={() => { void onConfirmDelete(); }}
+        onConfirm={onConfirmDelete}
       />
+
+      {/* 再認証モーダル */}
+      {reAuthOpen && (
+        <View
+          style={{
+            position: 'absolute',
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.85)',
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: SP['5'],
+          }}
+        >
+          <View
+            style={{
+              width: '100%',
+              maxWidth: 420,
+              backgroundColor: C.bg2,
+              borderRadius: R.lg,
+              padding: SP['5'],
+              gap: SP['3'],
+              borderWidth: 1,
+              borderColor: C.border,
+            }}
+          >
+            <Text style={[T.h3, { color: C.red }]}>パスワード再入力</Text>
+            <Text style={[T.body, { color: C.text2 }]}>
+              アカウントを削除するため、現在のパスワードを入力してください。
+            </Text>
+            <Input
+              value={reAuthPwd}
+              onChangeText={setReAuthPwd}
+              placeholder="パスワード"
+              secureTextEntry
+              keyboardAppearance="dark"
+              selectionColor={C.accent}
+              autoFocus
+            />
+            <View style={{ flexDirection: 'row', gap: SP['2'], marginTop: SP['2'] }}>
+              <PressableScale
+                onPress={() => { setReAuthOpen(false); setReAuthPwd(''); }}
+                haptic="tap"
+                disabled={reAuthing}
+                style={{
+                  flex: 1,
+                  padding: SP['3'],
+                  backgroundColor: C.bg3,
+                  borderRadius: R.md,
+                  alignItems: 'center',
+                  opacity: reAuthing ? 0.5 : 1,
+                }}
+              >
+                <Text style={[T.bodyMd, { color: C.text, fontWeight: '600' }]}>キャンセル</Text>
+              </PressableScale>
+              <PressableScale
+                onPress={onReAuthSubmit}
+                haptic="warn"
+                disabled={reAuthing || reAuthPwd.length < 4}
+                style={{
+                  flex: 1,
+                  padding: SP['3'],
+                  backgroundColor: C.red,
+                  borderRadius: R.md,
+                  alignItems: 'center',
+                  opacity: (reAuthing || reAuthPwd.length < 4) ? 0.5 : 1,
+                  flexDirection: 'row',
+                  justifyContent: 'center',
+                  gap: SP['1'],
+                }}
+              >
+                {reAuthing && <ActivityIndicator size="small" color="#fff" />}
+                <Text style={[T.bodyMd, { color: '#fff', fontWeight: '700' }]}>
+                  {reAuthing ? '確認中…' : '削除を実行'}
+                </Text>
+              </PressableScale>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
   );
 }

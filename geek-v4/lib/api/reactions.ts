@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { checkRate, rateLimitMessage } from '@/lib/rateLimit';
 
 export type ReactionRow = { post_id: string; user_id: string; meme: string };
 
@@ -51,6 +52,8 @@ export async function fetchReactionsForPost(postId: string): Promise<ReactionAgg
 
 // トグル: 既にあれば DELETE / なければ INSERT
 export async function toggleReaction(postId: string, meme: string): Promise<boolean> {
+  const rl = checkRate('reaction');
+  if (!rl.ok) throw new Error(rateLimitMessage('reaction', rl.retryAfterMs));
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) throw new Error('Not authenticated');

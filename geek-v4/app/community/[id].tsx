@@ -24,6 +24,7 @@ import {
 } from '@/lib/api/communities';
 import { useAuthStore } from '@/stores/authStore';
 import { useToastStore } from '@/stores/toastStore';
+import { sanitizeContent, sanitizeUrl } from '@/lib/sanitize';
 
 function timeAgo(iso: string): string {
   const t = Date.parse(iso);
@@ -36,10 +37,7 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString('ja-JP');
 }
 
-async function uriToBlob(uri: string): Promise<Blob> {
-  const res = await fetch(uri);
-  return res.blob();
-}
+import { prepareImageUpload } from '@/lib/image';
 
 // Avatar component — image_url 優先、なければ emoji フォールバック
 function CommunityAvatar({
@@ -53,20 +51,22 @@ function CommunityAvatar({
   icon_color: string;
   size: number;
 }) {
+  // icon_url を sanitize — http/https 以外を弾く
+  const safeIconUrl = icon_url ? sanitizeUrl(icon_url) : null;
   return (
     <View
       style={{
         width: size,
         height: size,
         borderRadius: size / 2,
-        backgroundColor: icon_url ? C.bg3 : icon_color,
+        backgroundColor: safeIconUrl ? C.bg3 : icon_color,
         overflow: 'hidden',
         alignItems: 'center',
         justifyContent: 'center',
       }}
     >
-      {icon_url ? (
-        <Image source={{ uri: icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+      {safeIconUrl ? (
+        <Image source={{ uri: safeIconUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
       ) : (
         <Text style={{ fontSize: size * 0.55 }}>{icon_emoji}</Text>
       )}
@@ -187,16 +187,23 @@ export default function CommunityDetailScreen() {
         return;
       }
       const asset = r.assets[0];
-      const blob = await uriToBlob(asset.uri);
-      if (blob.size > 5 * 1024 * 1024) {
-        show('画像は 5MB 以下にしてください', 'warn');
+      let prepared;
+      try {
+        prepared = await prepareImageUpload(asset.uri, {
+          maxSizeBytes: 5 * 1024 * 1024,
+          maxWidth: 512,
+          maxHeight: 512,
+          quality: 0.85,
+        });
+      } catch (e) {
+        show(e instanceof Error ? e.message : '画像処理に失敗しました', 'warn');
         setIconUploading(false);
         return;
       }
       const { url, error: upErr } = await uploadCommunityIcon(
         community.id,
-        blob,
-        asset.mimeType ?? 'image/jpeg',
+        prepared.blob,
+        prepared.mime,
       );
       if (upErr || !url) {
         show('アップロードに失敗しました', 'error');
@@ -376,7 +383,9 @@ export default function CommunityDetailScreen() {
               borderColor: C.border,
             }}
           >
-            <Text style={[T.body, { color: C.text2 }]}>{community.description}</Text>
+            <Text style={[T.body, { color: C.text2 }]}>
+              {sanitizeContent(community.description, { maxLength: 500 })}
+            </Text>
           </View>
         )}
 

@@ -27,10 +27,7 @@ type VisibilityOption = {
   icon: React.ReactNode;
 };
 
-async function uriToBlob(uri: string): Promise<Blob> {
-  const res = await fetch(uri);
-  return res.blob();
-}
+import { prepareImageUpload } from '@/lib/image';
 
 export default function CreateCommunityScreen() {
   const insets = useSafeAreaInsets();
@@ -116,16 +113,23 @@ export default function CreateCommunityScreen() {
         return;
       }
       const asset = r.assets[0];
-      const blob = await uriToBlob(asset.uri);
-      // 5MB チェック (Storage と client 両方)
-      if (blob.size > 5 * 1024 * 1024) {
-        show('画像は 5MB 以下にしてください', 'warn');
+      // prepareImageUpload: EXIF 除去 + magic byte 検証 + size check (5MB)
+      let prepared;
+      try {
+        prepared = await prepareImageUpload(asset.uri, {
+          maxSizeBytes: 5 * 1024 * 1024,
+          maxWidth: 512, // アイコンなので大きすぎないように
+          maxHeight: 512,
+          quality: 0.85,
+        });
+      } catch (e) {
+        show(e instanceof Error ? e.message : '画像処理に失敗しました', 'warn');
         setIconLoading(false);
         return;
       }
       setLocalIconUri(asset.uri);
-      setLocalIconBlob(blob);
-      setLocalIconMime(asset.mimeType ?? 'image/jpeg');
+      setLocalIconBlob(prepared.blob);
+      setLocalIconMime(prepared.mime);
     } catch (e) {
       console.warn('[community/create] pick icon failed:', e);
       show('画像の取得に失敗しました', 'error');
