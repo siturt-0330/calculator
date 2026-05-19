@@ -141,7 +141,8 @@ export default function RootLayout() {
                     headerShown: false,
                     contentStyle: { backgroundColor: C.bg },
                     animation: 'slide_from_right',
-                    animationDuration: 280,
+                    // 280ms → 220ms: 画面遷移を一段速く (体感 sluggish 感を削減)
+                    animationDuration: 220,
                   }}
                 >
                   <Stack.Screen name="(tabs)" />

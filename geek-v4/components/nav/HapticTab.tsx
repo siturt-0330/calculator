@@ -2,7 +2,7 @@ import { Pressable, PressableProps } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useEffect } from 'react';
 import { hap } from '@/design/haptics';
-import { SPRING_TIGHT, PRESS_SCALE } from '@/design/motion';
+import { SPRING_TIGHT, SPRING_SNAP, PRESS_SCALE } from '@/design/motion';
 import { C } from '@/design/tokens';
 import { TABBAR } from '@/design/tabbar';
 
@@ -28,19 +28,22 @@ export function HapticTab({ focused, onPress, children, ...rest }: Props) {
     transform: [{ scaleX: indicator.value }],
   }));
 
+  // delayPressIn は AnimatedPressable の型に乗ってないのでキャストして渡す
+  const extra = { delayPressIn: 0 } as Record<string, unknown>;
+
   return (
     <APressable
       {...rest}
+      {...extra}
       onPressIn={() => {
-        scale.value = withSpring(PRESS_SCALE, SPRING_TIGHT);
+        scale.value = withSpring(PRESS_SCALE, SPRING_SNAP);
+        // press-in で即 haptic → 体感反応速度向上
+        hap.tap();
       }}
       onPressOut={() => {
-        scale.value = withSpring(1, SPRING_TIGHT);
+        scale.value = withSpring(1, SPRING_SNAP);
       }}
-      onPress={() => {
-        hap.tap();
-        onPress();
-      }}
+      onPress={onPress}
       accessibilityRole="tab"
       accessibilityState={{ selected: focused }}
       style={[
