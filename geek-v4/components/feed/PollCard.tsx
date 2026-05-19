@@ -1,3 +1,4 @@
+import { useState, useRef } from 'react';
 import { View, Text } from 'react-native';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { usePollVote } from '@/hooks/usePolls';
@@ -6,11 +7,34 @@ import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { formatRelative } from '@/lib/utils/date';
 
+// 期限切れ判定: 不正な expires_at (null / 壊れた文字列) でも throw しないように
+function isExpired(expiresAt: string | null | undefined): boolean {
+  if (!expiresAt) return false;
+  const t = Date.parse(expiresAt);  // Date.parse は失敗時 NaN
+  if (Number.isNaN(t)) return false;
+  return t < Date.now();
+}
+
 export function PollCard({ poll }: { poll: Poll }) {
   const { vote } = usePollVote();
-  const expired = poll.expires_at ? new Date(poll.expires_at).getTime() < Date.now() : false;
+  const expired = isExpired(poll.expires_at);
   const showResults = poll.my_vote_option_ids.length > 0 || expired;
   const total = Math.max(1, poll.total_votes);
+  // 連打防止: 投票送信中はボタンを無効化
+  const [busy, setBusy] = useState<string | null>(null);
+  const inflightRef = useRef(false);
+
+  const handleVote = async (optionId: string) => {
+    if (expired || inflightRef.current) return;
+    inflightRef.current = true;
+    setBusy(optionId);
+    try {
+      await vote(poll.id, optionId, poll.multi_select);
+    } finally {
+      inflightRef.current = false;
+      setBusy(null);
+    }
+  };
 
   return (
     <View style={{
@@ -44,9 +68,9 @@ export function PollCard({ poll }: { poll: Poll }) {
           return (
             <PressableScale
               key={opt.id}
-              onPress={() => !expired && vote(poll.id, opt.id, poll.multi_select)}
+              onPress={() => handleVote(opt.id)}
               haptic="select"
-              disabled={expired}
+              disabled={expired || busy !== null}
               style={{
                 position: 'relative',
                 paddingHorizontal: SP['3'],
@@ -56,6 +80,7 @@ export function PollCard({ poll }: { poll: Poll }) {
                 borderWidth: 1.5,
                 borderColor: mine ? C.accent : C.border,
                 overflow: 'hidden',
+                opacity: busy && busy !== opt.id ? 0.5 : 1,
               }}
             >
               {/* % バー */}
