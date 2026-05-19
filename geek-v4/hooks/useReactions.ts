@@ -85,6 +85,10 @@ export function useReactionToggle() {
 
   return {
     toggle: (postId: string, meme: string) =>
-      mutateAsync({ postId, meme }).catch(() => {}),
+      mutateAsync({ postId, meme }).catch((e) => {
+        console.warn('[useReactions] toggle failed:', e);
+        // 失敗時は invalidate して server-truth に戻す (楽観更新の rollback)
+        qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
+      }),
   };
 }
