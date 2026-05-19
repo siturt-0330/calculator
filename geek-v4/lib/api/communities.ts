@@ -1,4 +1,6 @@
 import { supabase } from '@/lib/supabase';
+import { generateVariants } from '@/lib/search/variants';
+import { findSimilar } from '@/lib/search/similarity';
 
 export type Visibility = 'open' | 'request' | 'invite';
 export type MemberRole = 'owner' | 'admin' | 'member';
@@ -9,6 +11,7 @@ export type Community = {
   description: string;
   icon_emoji: string;
   icon_color: string;
+  icon_url: string | null;
   visibility: Visibility;
   member_count: number;
   post_count: number;
@@ -33,7 +36,7 @@ export type CommunityPost = {
 };
 
 export type CommunityPostWithCommunity = CommunityPost & {
-  community: Pick<Community, 'id' | 'name' | 'icon_emoji' | 'icon_color'>;
+  community: Pick<Community, 'id' | 'name' | 'icon_emoji' | 'icon_color' | 'icon_url'>;
   author_nickname?: string;
 };
 
@@ -89,7 +92,7 @@ export async function fetchMyCommunityFeed(limit = 30): Promise<CommunityPostWit
 
   const { data, error } = await supabase
     .from('community_posts')
-    .select('*, community:communities(id, name, icon_emoji, icon_color)')
+    .select('*, community:communities(id, name, icon_emoji, icon_color, icon_url)')
     .in('community_id', ids)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -124,6 +127,7 @@ export async function createCommunity(input: {
   description: string;
   icon_emoji: string;
   icon_color: string;
+  icon_url?: string | null;
   visibility: Visibility;
   tags: string[];
 }): Promise<{ data: Community | null; error: string | null }> {
@@ -137,6 +141,7 @@ export async function createCommunity(input: {
       description: input.description.trim(),
       icon_emoji: input.icon_emoji,
       icon_color: input.icon_color,
+      icon_url: input.icon_url ?? null,
       visibility: input.visibility,
       created_by: user.id,
     })
@@ -168,7 +173,7 @@ export async function createCommunity(input: {
 // ============================================================
 export async function updateCommunity(
   id: string,
-  patch: Partial<Pick<Community, 'name' | 'description' | 'icon_emoji' | 'icon_color' | 'visibility'>>,
+  patch: Partial<Pick<Community, 'name' | 'description' | 'icon_emoji' | 'icon_color' | 'icon_url' | 'visibility'>>,
 ): Promise<{ error: string | null }> {
   const { error } = await supabase.from('communities').update(patch).eq('id', id);
   if (error) return { error: error.message };
@@ -209,6 +214,41 @@ export async function fetchCommunity(id: string): Promise<CommunityWithMembershi
     is_member: role !== null,
     role,
   };
+}
+
+// ============================================================
+// 類似名チェック (作成時の重複防止)
+// open + request だけ取得 (invite は除外 — 他人に存在を知らせない)
+// あとで client side similarity で絞り込む
+// ============================================================
+export async function searchByName(query: string, limit = 20): Promise<Community[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  // バリエーション生成 (== / イコール / 同義語 etc.) して or-ilike で broad fetch
+  // それから client similarity で再ランキング
+  const variants = generateVariants(q).slice(0, 6); // 上位 6 種類だけ — URL 肥大化防止
+  const orClauses = variants
+    .filter((v) => v.length >= 2)
+    .map((v) => `name.ilike.%${v.replace(/[\\,()]/g, '')}%`);
+  // フォールバック: orClauses が空なら q だけで ilike
+  const orQuery = orClauses.length > 0 ? orClauses.join(',') : `name.ilike.%${q}%`;
+
+  const { data, error } = await supabase
+    .from('communities')
+    .select('*')
+    .in('visibility', ['open', 'request'])
+    .or(orQuery)
+    .limit(80);
+
+  if (error) {
+    console.warn('[communities] searchByName failed:', error.message);
+    return [];
+  }
+  const rows = (data ?? []) as Community[];
+  // クライアント側で similarity score で再ランキング (近重複だけを上位に)
+  const ranked = findSimilar(q, rows, { threshold: 0.4, limit });
+  return ranked.map((r) => r.item);
 }
 
 // ============================================================
@@ -320,7 +360,7 @@ export async function fetchCommunityPosts(
 ): Promise<CommunityPostWithCommunity[]> {
   const { data, error } = await supabase
     .from('community_posts')
-    .select('*, community:communities(id, name, icon_emoji, icon_color)')
+    .select('*, community:communities(id, name, icon_emoji, icon_color, icon_url)')
     .eq('community_id', community_id)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -338,4 +378,29 @@ export async function fetchCommunityPosts(
     nickMap = Object.fromEntries((profs ?? []).map((p) => [p.id, p.nickname]));
   }
   return (data ?? []).map((p) => ({ ...p, author_nickname: nickMap[p.author_id] }));
+}
+
+// ============================================================
+// コミュニティアイコン画像のアップロード
+// path 規約: '<community_id>/<timestamp>.<ext>'
+// (Storage RLS でこの community_id のメンバーだけ書き込めるよう制限してある)
+// 仮の community_id (作成前) を渡したい場合は createCommunity 成功後にもう一度
+// updateCommunity({ icon_url }) を呼ぶ必要がある — そのため tmp uploads は
+// 自前の bucket folder 'pending/<user_id>/...' を使うパターンも検討余地あり。
+// ============================================================
+export async function uploadCommunityIcon(
+  community_id: string,
+  blob: Blob,
+  contentType = 'image/jpeg',
+): Promise<{ url: string | null; error: string | null }> {
+  const ext = contentType.split('/')[1] ?? 'jpg';
+  const path = `${community_id}/${Date.now()}.${ext}`;
+  const { error: upErr } = await supabase.storage.from('community-icons').upload(path, blob, {
+    contentType,
+    upsert: true,
+    cacheControl: '3600',
+  });
+  if (upErr) return { url: null, error: upErr.message };
+  const { data: pub } = supabase.storage.from('community-icons').getPublicUrl(path);
+  return { url: pub.publicUrl, error: null };
 }

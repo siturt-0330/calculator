@@ -15,24 +15,33 @@ type Props = TextInputProps & {
 
 export function Input({ label, error, containerStyle, style, icon: IconComp, right, ...rest }: Props) {
   const [focused, setFocused] = useState(false);
+  const multiline = rest.multiline === true;
 
   return (
     <View style={[{ gap: SP['1'] }, containerStyle]}>
       {label && <Text style={[T.small, { color: C.text2 }]}>{label}</Text>}
       <View
         style={{
-          height: SIZE.input,
+          // multiline 時は固定高さを外して minHeight にする — placeholder が
+          // ラベルとぶつかったり content が cut off されないように
+          ...(multiline
+            ? { minHeight: SIZE.input, paddingVertical: SP['2'] }
+            : { height: SIZE.input }),
           borderRadius: R.md,
           backgroundColor: C.bg3,
           borderWidth: 1.5,
           borderColor: focused ? C.accent : 'transparent',
           flexDirection: 'row',
-          alignItems: 'center',
+          alignItems: multiline ? 'flex-start' : 'center',
           paddingHorizontal: SP['4'],
           gap: SP['2'],
         }}
       >
-        {IconComp && <IconComp size={18} color={C.text3} strokeWidth={2.2} />}
+        {IconComp && (
+          <View style={{ marginTop: multiline ? 10 : 0 }}>
+            <IconComp size={18} color={C.text3} strokeWidth={2.2} />
+          </View>
+        )}
         <TextInput
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
