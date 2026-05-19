@@ -57,15 +57,22 @@ export default function SignupScreen() {
     if (result.error) {
       let msg = 'アカウント作成に失敗しました。';
       const err = result.error.toLowerCase();
-      if (err.includes('already registered') || err.includes('user already')) {
+      // 1) 既に登録済み (user_already_exists / "User already registered")
+      if (err.includes('already registered') || err.includes('user already') || err.includes('already_exists')) {
         show('このメールアドレスは既に登録済みです。ログインしてください。', 'warn');
         router.replace({ pathname: '/(auth)/login', params: { email: email.trim() } } as never);
         return;
-      } else if (err.includes('valid email')) {
+      // 2) メール形式 (validation_failed / "Unable to validate email address")
+      } else if (err.includes('validate email') || err.includes('invalid format') || err.includes('valid email')) {
         msg = 'メールアドレスの形式が正しくありません。';
-      } else if (err.includes('password')) {
-        msg = 'パスワードが安全要件を満たしていません (8 文字以上)。';
-      } else if (err.includes('network')) {
+      // 3) パスワード弱い (weak_password / "Password should be at least N characters")
+      } else if (err.includes('password') || err.includes('weak')) {
+        msg = 'パスワードがセキュリティ要件を満たしていません。';
+      // 4) レート制限
+      } else if (err.includes('rate') || err.includes('too many')) {
+        msg = '短時間に試行しすぎました。少し待ってから再度お試しください。';
+      // 5) ネットワーク
+      } else if (err.includes('network') || err.includes('ネットワーク')) {
         msg = 'ネットワークエラー。接続を確認してください。';
       }
       show(msg, 'error');
