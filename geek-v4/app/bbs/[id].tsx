@@ -18,6 +18,8 @@ import { TrustBadge } from '@/components/ui/TrustBadge';
 import { formatRelative } from '@/lib/utils/date';
 import { randomAvatarColor } from '@/lib/utils/color';
 import type { BBSReply } from '@/types/models';
+import { ObsidianSaveButton } from '@/components/ui/ObsidianSaveButton';
+import { bbsReplyToObsidianNote, bbsThreadToObsidianNote } from '@/hooks/useObsidian';
 import type { ReactionAgg } from '@/lib/api/bbsReplyReactions';
 import { Icon } from '@/constants/icons';
 import { notify, Haptics } from '@/lib/haptics';
@@ -202,6 +204,10 @@ export default function BBSThreadScreen() {
                   >
                     <Text style={{ fontSize: 16 }}>🪶</Text>
                   </PressableScale>
+                  <ObsidianSaveButton
+                    note={bbsReplyToObsidianNote(item, thread?.title, thread?.id)}
+                    size={16}
+                  />
                 </View>
                 <Text style={[T.body, { color: C.text, lineHeight: 22 }]}>{item.content}</Text>
               </View>
@@ -314,6 +320,8 @@ export default function BBSThreadScreen() {
                     <Text style={[T.caption, { color: C.text3 }]}>
                       {formatRelative(thread.created_at)}
                     </Text>
+                    <View style={{ flex: 1 }} />
+                    <ObsidianSaveButton note={bbsThreadToObsidianNote(thread)} size={16} />
                   </View>
                 </View>
               </View>

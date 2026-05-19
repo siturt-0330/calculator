@@ -12,6 +12,8 @@ import { Icon } from '@/constants/icons';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { formatRelative } from '@/lib/utils/date';
+import { ObsidianSaveButton } from '@/components/ui/ObsidianSaveButton';
+import { postToObsidianNote } from '@/hooks/useObsidian';
 
 type Item = {
   id: string;
@@ -89,6 +91,8 @@ export default function LikedPosts() {
                     {p.tag_names[0] ? `#${p.tag_names[0]}` : '#雑談'}
                   </Text>
                   <Text style={[T.caption, { color: C.text3 }]}>· {formatRelative(p.created_at)}</Text>
+                  <View style={{ flex: 1 }} />
+                  <ObsidianSaveButton note={postToObsidianNote(p as never)} size={16} />
                 </View>
                 <Text style={[T.body, { color: C.text }]} numberOfLines={3}>{p.content}</Text>
                 <View style={{ flexDirection: 'row', gap: SP['3'] }}>

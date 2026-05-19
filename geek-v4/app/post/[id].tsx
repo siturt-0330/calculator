@@ -24,6 +24,8 @@ import { useToastStore } from '@/stores/toastStore';
 import { formatRelative } from '@/lib/utils/date';
 import type { Comment } from '@/types/models';
 import { Icon } from '@/constants/icons';
+import { ObsidianSaveButton } from '@/components/ui/ObsidianSaveButton';
+import { postToObsidianNote, commentToObsidianNote } from '@/hooks/useObsidian';
 import * as Haptics from 'expo-haptics';
 
 function safeHaptic(type: Haptics.NotificationFeedbackType) {
@@ -163,6 +165,11 @@ export default function PostDetailScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], marginBottom: 4 }}>
               <TrustBadge score={item.trust_score} />
               <Text style={[T.caption, { color: C.text3 }]}>{formatRelative(item.created_at)}</Text>
+              <View style={{ flex: 1 }} />
+              <ObsidianSaveButton
+                note={commentToObsidianNote(item, post.content, post.id)}
+                size={14}
+              />
             </View>
             <Text style={[T.body, { color: C.text, lineHeight: 22 }]}>{item.content}</Text>
           </View>
@@ -194,6 +201,7 @@ export default function PostDetailScreen() {
               <Avatar size={36} anonymous />
               <TrustBadge score={post.trust_score_at_post} size="md" />
               <Text style={[T.caption, { color: C.text3, flex: 1 }]}>· {formatRelative(post.created_at)}</Text>
+              <ObsidianSaveButton note={postToObsidianNote(post)} size={18} />
             </View>
             <Text style={[T.body, { color: C.text, lineHeight: 24 }]}>{post.content}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'], alignItems: 'center' }}>

@@ -24,8 +24,8 @@ import { TrustBadge } from '@/components/ui/TrustBadge';
 import { formatRelative } from '@/lib/utils/date';
 import { SHADOW } from '@/design/shadows';
 import { sanitizeUrl } from '@/lib/sanitize';
-import { useObsidianEnabled, savePostToObsidian } from '@/hooks/useObsidian';
-import { useToastStore } from '@/stores/toastStore';
+import { ObsidianSaveButton } from '@/components/ui/ObsidianSaveButton';
+import { postToObsidianNote } from '@/hooks/useObsidian';
 
 function shortHost(url: string): string {
   try {
@@ -101,28 +101,6 @@ export function AnonPostCard({
   const [translating, setTranslating] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
   const canTranslate = lang !== 'ja' && post.content;
-  const { enabled: obsidianEnabled } = useObsidianEnabled();
-  const { show } = useToastStore();
-  const [obsidianSaving, setObsidianSaving] = useState(false);
-
-  const handleObsidianSave = async () => {
-    if (obsidianSaving) return;
-    setObsidianSaving(true);
-    try {
-      const r = await savePostToObsidian(post);
-      if (r.ok) {
-        show('Obsidian にノートを送信しました', 'success');
-      } else if (r.reason === 'vault_not_set') {
-        show('Vault 名が未設定です。マイページ → Obsidian で設定してください。', 'warn');
-      } else if (r.reason === 'obsidian_not_installed') {
-        show('Obsidian がインストールされていません', 'error');
-      } else {
-        show('送信に失敗しました', 'error');
-      }
-    } finally {
-      setObsidianSaving(false);
-    }
-  };
 
   const doTranslate = async () => {
     if (!post.content || translating) return;
@@ -424,17 +402,7 @@ export function AnonPostCard({
           )}
         </PressableScale>
         <View style={{ flex: 1 }} />
-        {obsidianEnabled && (
-          <PressableScale
-            onPress={handleObsidianSave}
-            haptic="tap"
-            disabled={obsidianSaving}
-            style={{ padding: 2, opacity: obsidianSaving ? 0.5 : 1 }}
-            accessibilityLabel="Obsidian に保存"
-          >
-            <Icon.edit size={20} color={C.accent} strokeWidth={2.2} />
-          </PressableScale>
-        )}
+        <ObsidianSaveButton note={postToObsidianNote(post)} />
         <PressableScale onPress={onShare} haptic="tap" style={{ padding: 2 }}>
           <Share size={20} color={C.text2} strokeWidth={2.2} />
         </PressableScale>
