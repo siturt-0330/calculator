@@ -31,7 +31,7 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 
 if (!__DEV__) initSentry();
 initAnalytics();
-initWebVitals();
+// initWebVitals は useEffect 内で cleanup 込みで呼ぶ — listener が leak しないように
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -100,6 +100,12 @@ export default function RootLayout() {
     void hydrateLang();
     void hydrateTagFilter();
   }, [hydrateAuth, hydrateSettings, hydrateLang, hydrateTagFilter]);
+
+  // Web Vitals 初期化 — cleanup 関数を握って unmount 時に observer + listener を解放
+  useEffect(() => {
+    const cleanup = initWebVitals();
+    return cleanup;
+  }, []);
 
   // ★ Safety: hydration / font 読み込みが何らかの理由で詰まっても、
   //   1.2 秒で強制的にレンダー開始 (黒画面のまま止まるのを絶対に防ぐ)。

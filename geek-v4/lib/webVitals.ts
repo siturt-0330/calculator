@@ -66,6 +66,7 @@ export function initWebVitals(): () => void {
   if (typeof window === 'undefined' || typeof performance === 'undefined') return () => {};
 
   const observers: PerformanceObserver[] = [];
+  const cleanupCallbacks: Array<() => void> = [];
 
   // ---- LCP ----
   try {
@@ -113,10 +114,14 @@ export function initWebVitals(): () => void {
       clsReported = true;
       reportOnce('CLS', clsValue);
     };
-    window.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') flushCls();
-    });
+    const onVis = () => { if (document.visibilityState === 'hidden') flushCls(); };
+    window.addEventListener('visibilitychange', onVis);
     window.addEventListener('pagehide', flushCls);
+    // cleanup 用に保存しておく
+    cleanupCallbacks.push(() => {
+      window.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('pagehide', flushCls);
+    });
   } catch {}
 
   // ---- FCP ----
@@ -144,6 +149,9 @@ export function initWebVitals(): () => void {
   return () => {
     for (const o of observers) {
       try { o.disconnect(); } catch {}
+    }
+    for (const c of cleanupCallbacks) {
+      try { c(); } catch {}
     }
   };
 }

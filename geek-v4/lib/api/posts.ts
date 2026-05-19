@@ -42,15 +42,42 @@ export async function fetchPosts({
     query = query.overlaps('tag_names', filterTags);
   }
 
+  // cursor 検証ヘルパ — 不正な cursor で偽 pagination が動くのを防ぐ
+  // 期待フォーマット:
+  //   new mode:        ISO timestamp (e.g. '2026-05-19T12:34:56.789Z')
+  //   hot/top mode:    '<integer>|<ISO timestamp>'  e.g. '42|2026-05-19T12:34:56.789Z'
+  const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+  function parseTimestampCursor(c: string): string | null {
+    return ISO_RE.test(c) ? c : null;
+  }
+  function parseCompositeCursor(c: string): { likes: number; ts: string } | null {
+    const parts = c.split('|');
+    if (parts.length !== 2) return null;
+    const likesStr = parts[0];
+    const ts = parts[1];
+    if (!likesStr || !ts) return null;
+    // likes_count は正整数 (0 以上、INT4 上限以下)
+    if (!/^\d{1,10}$/.test(likesStr)) return null;
+    const likes = Number(likesStr);
+    if (!Number.isFinite(likes) || likes < 0 || likes > 2147483647) return null;
+    if (!ISO_RE.test(ts)) return null;
+    return { likes, ts };
+  }
+
   if (sort === 'new') {
     query = query.order('created_at', { ascending: false });
-    if (cursor) query = query.lt('created_at', cursor);
+    if (cursor) {
+      const validTs = parseTimestampCursor(cursor);
+      if (validTs) query = query.lt('created_at', validTs);
+      // 不正なら cursor を無視して先頭から (DoS 防止 — error throw だと無限リロード起こす)
+    }
   } else if (sort === 'top') {
     query = query.order('likes_count', { ascending: false }).order('created_at', { ascending: false });
     if (cursor) {
-      const [likesStr, ts] = cursor.split('|');
-      const l = Number(likesStr ?? 0);
-      query = query.or(`likes_count.lt.${l},and(likes_count.eq.${l},created_at.lt.${ts})`);
+      const parsed = parseCompositeCursor(cursor);
+      if (parsed) {
+        query = query.or(`likes_count.lt.${parsed.likes},and(likes_count.eq.${parsed.likes},created_at.lt.${parsed.ts})`);
+      }
     }
   } else {
     // hot: いいね順 + 新しい順（時間制限なしで全件表示）
@@ -58,9 +85,10 @@ export async function fetchPosts({
       .order('likes_count', { ascending: false })
       .order('created_at', { ascending: false });
     if (cursor) {
-      const [likesStr, ts] = cursor.split('|');
-      const l = Number(likesStr ?? 0);
-      query = query.or(`likes_count.lt.${l},and(likes_count.eq.${l},created_at.lt.${ts})`);
+      const parsed = parseCompositeCursor(cursor);
+      if (parsed) {
+        query = query.or(`likes_count.lt.${parsed.likes},and(likes_count.eq.${parsed.likes},created_at.lt.${parsed.ts})`);
+      }
     }
   }
 

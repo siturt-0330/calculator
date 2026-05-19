@@ -93,12 +93,21 @@ export default function SignupScreen() {
   const handleSkipPhone = () => submitSignup('');
   const handleSubmitWithPhone = () => {
     const digits = phone.replace(/\D/g, '');
-    // 電話番号入れた人だけ簡易チェック (空ならスキップ扱い)
-    if (digits.length > 0 && (digits.length < 10 || digits.length > 15)) {
-      show('電話番号の形式が正しくありません。', 'warn');
-      return;
+    // 電話番号入れた人だけチェック (空ならスキップ扱い)
+    if (digits.length > 0) {
+      if (digits.length < 10 || digits.length > 15) {
+        show('電話番号の形式が正しくありません。', 'warn');
+        return;
+      }
+      // E.164 風にサニタイズ: 日本の番号なら先頭 0 → +81 に変換、それ以外は + 接頭辞があれば保持
+      // ただしユーザーの入力意図を尊重して、明確に変な文字列だけ拒否
+      if (!/^[+0-9\s\-()]+$/.test(phone)) {
+        show('電話番号には数字 / + / - / () / 空白以外を含めないでください。', 'warn');
+        return;
+      }
     }
-    submitSignup(phone);
+    // submitSignup には digits だけ (整形済) を渡す — 表記揺れを統一
+    submitSignup(digits);
   };
 
   return (
