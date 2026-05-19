@@ -46,12 +46,23 @@ const qc = new QueryClient({
 
 const persister = createAsyncStoragePersister({ storage: AsyncStorage });
 
+// イントロ再生制御
+//   - 初回ロード: 再生
+//   - 同セッション内の再ロード (PWA タブ切り替え後の戻り等): スキップ
+//   - SSR 時: 再生しない
+// sessionStorage を使うので、ブラウザを閉じれば次回また再生される。
+const INTRO_SEEN_KEY = 'geek:intro_seen_session';
 function shouldShowIntro(): boolean {
-  // 毎回ページがロードされる時に必ずイントロを再生
-  // ただし SSR 時は再生しない
   if (Platform.OS !== 'web') return true;
   if (typeof window === 'undefined') return false;
+  try {
+    if (sessionStorage.getItem(INTRO_SEEN_KEY) === '1') return false;
+  } catch {}
   return true;
+}
+function markIntroSeenForSession() {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  try { sessionStorage.setItem(INTRO_SEEN_KEY, '1'); } catch {}
 }
 
 export default function RootLayout() {
@@ -91,10 +102,11 @@ export default function RootLayout() {
   }, [hydrateAuth, hydrateSettings, hydrateLang, hydrateTagFilter]);
 
   // ★ Safety: hydration / font 読み込みが何らかの理由で詰まっても、
-  //   2.5 秒で強制的にレンダー開始 (黒画面のまま止まるのを絶対に防ぐ)
+  //   1.2 秒で強制的にレンダー開始 (黒画面のまま止まるのを絶対に防ぐ)。
+  //   旧 2.5 秒は安全マージンが大きすぎて、ネットワーク遅延時に体感ラグの原因に。
   const [forceReady, setForceReady] = useState(false);
   useEffect(() => {
-    const t = setTimeout(() => setForceReady(true), 2500);
+    const t = setTimeout(() => setForceReady(true), 1200);
     return () => clearTimeout(t);
   }, []);
 
@@ -195,7 +207,13 @@ export default function RootLayout() {
                 <FeedbackFAB />
                 {/* 初回起動時のイントロ */}
                 {!introDone && !introReplaying && (
-                  <IntroAnimation onComplete={() => { markIntroShown(); setIntroDone(true); }} />
+                  <IntroAnimation
+                    onComplete={() => {
+                      markIntroShown();
+                      markIntroSeenForSession();  // 同セッション内の再表示を抑制
+                      setIntroDone(true);
+                    }}
+                  />
                 )}
                 {/* 設定からの「再生」リクエスト — key を変えて強制リマウント */}
                 {introReplaying && (

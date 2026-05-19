@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { StyleSheet, Dimensions, Platform, View } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -30,17 +30,19 @@ const CFG = {
   LOGO_COLOR:      '#FFFFFF',
   GLOW_COLOR:      '#7C6AF7',
 
-  // タイミング (ms)
-  G_REVEAL:        520,    // G が中央でフェードイン
-  G_CENTER_HOLD:   360,    // G を中央でホールド
-  SHIFT_DURATION:  900,    // G が左へ移動する尺
-  LETTER_STAGGER:  170,    // e→e→k の登場間隔
-  LETTER_REVEAL:   380,    // 1文字のフェードイン
-  POST_FORM_HOLD:  260,    // 完成後ホールド (グロー一瞬)
-  GLOW_FLASH:      280,    // グロー (短く控えめ)
-  ZOOM_DURATION:   2000,   // ズームイン尺
-  ZOOM_MAX:        25,     // ★ 突き抜ける勢いの拡大率
-  FADE_OUT:        420,
+  // タイミング (ms) — 旧 ~5.5s → 新 ~3.0s
+  // ユーザーの体感応答を最優先するため、迫力は保ちつつ全体を短縮
+  G_REVEAL:        320,    // G が中央でフェードイン
+  G_CENTER_HOLD:   180,    // G を中央でホールド
+  SHIFT_DURATION:  500,    // G が左へ移動する尺
+  LETTER_STAGGER:  100,    // e→e→k の登場間隔
+  LETTER_REVEAL:   240,    // 1文字のフェードイン
+  POST_FORM_HOLD:  120,    // 完成後ホールド (グロー一瞬)
+  GLOW_FLASH:      160,    // グロー (短く控えめ)
+  ZOOM_START_DELAY: 80,
+  ZOOM_DURATION:   900,    // ズームイン尺
+  ZOOM_MAX:        25,     // 突き抜ける勢いの拡大率
+  FADE_OUT:        280,
 };
 
 const LETTERS = ['G', 'e', 'e', 'k'] as const;
@@ -78,6 +80,22 @@ export function IntroAnimation({ onComplete }: { onComplete: () => void }) {
   const zoom = useSharedValue(1);
   // コンテナ不透明度 (フェードアウト用)
   const containerOp = useSharedValue(1);
+
+  // 完了済みフラグ (タップでスキップ後の二重発火防止)
+  const completedRef = useRef(false);
+  const fireComplete = () => {
+    if (completedRef.current) return;
+    completedRef.current = true;
+    onComplete();
+  };
+
+  // タップでスキップ: 急いでフェードアウトして onComplete
+  const handleSkip = () => {
+    if (completedRef.current) return;
+    containerOp.value = withTiming(0, { duration: 180, easing: Easing.in(Easing.quad) }, () => {
+      runOnJS(fireComplete)();
+    });
+  };
 
   useEffect(() => {
     const EASE_OUT = Easing.bezier(0.16, 1, 0.3, 1);
@@ -136,13 +154,13 @@ export function IntroAnimation({ onComplete }: { onComplete: () => void }) {
     containerOp.value = withDelay(
       fadeStart,
       withTiming(0, { duration: CFG.FADE_OUT, easing: Easing.in(Easing.quad) }, () => {
-        runOnJS(onComplete)();
+        runOnJS(fireComplete)();
       }),
     );
 
     // Safety
     const total = fadeStart + CFG.FADE_OUT + 1500;
-    const safety = setTimeout(onComplete, total);
+    const safety = setTimeout(fireComplete, total);
     return () => clearTimeout(safety);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -163,7 +181,12 @@ export function IntroAnimation({ onComplete }: { onComplete: () => void }) {
 
   return (
     <Animated.View
-      pointerEvents="none"
+      // タップでスキップできるよう pointerEvents は box-only (子要素のヒットは無視)
+      pointerEvents="box-only"
+      // @ts-ignore — Animated.View に onTouchEnd を直接渡す (Pressable で包むと
+      //   zIndex/レイヤー順が複雑になるので簡易ハンドリング)
+      onStartShouldSetResponder={() => true}
+      onResponderRelease={handleSkip}
       style={[
         StyleSheet.absoluteFill,
         {
