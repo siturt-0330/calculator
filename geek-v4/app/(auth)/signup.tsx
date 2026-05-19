@@ -12,15 +12,19 @@ import { useAuthStore } from '@/stores/authStore';
 import { useToastStore } from '@/stores/toastStore';
 import { Icon } from '@/constants/icons';
 
-type Step = 'phone' | 'credentials';
+// 初回ユーザーの障壁を最小化するため、
+//   - ステップ 1: メール + パスワード (必須)
+//   - ステップ 2: 電話番号 (任意、スキップで進める)
+// に再構成。匿名 SNS のコンセプトに沿って phone は optional に。
+type Step = 'credentials' | 'phone';
 
 export default function SignupScreen() {
   const params = useLocalSearchParams();
   const presetEmail = typeof params.email === 'string' ? params.email : '';
-  const [step, setStep] = useState<Step>(presetEmail ? 'credentials' : 'phone');
-  const [phone, setPhone] = useState('');
+  const [step, setStep] = useState<Step>('credentials');
   const [email, setEmail] = useState(presetEmail);
   const [password, setPassword] = useState('');
+  const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const { signUp } = useAuthStore();
@@ -31,39 +35,38 @@ export default function SignupScreen() {
   const PhoneIcon = Icon.phone;
   const EyeIcon = showPass ? Icon.eyeOff : Icon.eye;
 
-  const goNext = () => {
-    if (!phone) {
-      show('電話番号を入力してください。', 'warn');
-      return;
-    }
-    const digits = phone.replace(/\D/g, '');
-    if (digits.length < 10 || digits.length > 11) {
-      show('電話番号を正しく入力してください。', 'warn');
-      return;
-    }
-    setStep('credentials');
-  };
+  // メール簡易バリデーション (アット込みかだけ — 厳密チェックは Supabase 側)
+  const validEmail = (v: string) => /\S+@\S+\.\S+/.test(v);
 
-  const handleSignup = async () => {
-    if (!email || !password) {
-      show('メールアドレスとパスワードを入力してください。', 'warn');
+  const goToPhoneStep = () => {
+    if (!validEmail(email.trim())) {
+      show('メールアドレスの形式が正しくありません。', 'warn');
       return;
     }
     if (password.length < 8) {
-      show('パスワードは8文字以上で設定してください。', 'warn');
+      show('パスワードは 8 文字以上にしてください。', 'warn');
       return;
     }
+    setStep('phone');
+  };
+
+  const submitSignup = async (phoneInput: string) => {
     setLoading(true);
-    const result = await signUp(email.trim(), password, phone.trim());
+    const result = await signUp(email.trim(), password, phoneInput.trim());
     setLoading(false);
     if (result.error) {
       let msg = 'アカウント作成に失敗しました。';
-      if (result.error.includes('already registered') || result.error.includes('User already')) {
-        msg = 'このメールアドレスは既に登録されています。ログインしてください。';
-      } else if (result.error.includes('valid email')) {
+      const err = result.error.toLowerCase();
+      if (err.includes('already registered') || err.includes('user already')) {
+        show('このメールアドレスは既に登録済みです。ログインしてください。', 'warn');
+        router.replace({ pathname: '/(auth)/login', params: { email: email.trim() } } as never);
+        return;
+      } else if (err.includes('valid email')) {
         msg = 'メールアドレスの形式が正しくありません。';
-      } else if (result.error.includes('Password')) {
-        msg = 'パスワードは8文字以上で設定してください。';
+      } else if (err.includes('password')) {
+        msg = 'パスワードが安全要件を満たしていません (8 文字以上)。';
+      } else if (err.includes('network')) {
+        msg = 'ネットワークエラー。接続を確認してください。';
       }
       show(msg, 'error');
       return;
@@ -72,12 +75,23 @@ export default function SignupScreen() {
       show('アカウントを作成しました！', 'success');
       router.replace('/onboarding');
     } else if (result.needsConfirmEmail) {
-      show('確認メールを送信しました。', 'success');
+      show('確認メールを送信しました。リンクをクリックしてからログインしてください。', 'success');
       router.replace('/(auth)/login');
     } else {
       show('登録完了。ログインしてください。', 'success');
       router.replace('/(auth)/login');
     }
+  };
+
+  const handleSkipPhone = () => submitSignup('');
+  const handleSubmitWithPhone = () => {
+    const digits = phone.replace(/\D/g, '');
+    // 電話番号入れた人だけ簡易チェック (空ならスキップ扱い)
+    if (digits.length > 0 && (digits.length < 10 || digits.length > 15)) {
+      show('電話番号の形式が正しくありません。', 'warn');
+      return;
+    }
+    submitSignup(phone);
   };
 
   return (
@@ -94,24 +108,73 @@ export default function SignupScreen() {
         }}
         keyboardShouldPersistTaps="handled"
       >
-        <BackButton onPress={step === 'credentials' ? () => setStep('phone') : undefined} />
+        <BackButton onPress={step === 'phone' ? () => setStep('credentials') : undefined} />
 
         {/* ステップインジケーター */}
         <View style={{ flexDirection: 'row', gap: SP['1'], marginTop: SP['4'] }}>
           <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: C.accent }} />
-          <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: step === 'credentials' ? C.accent : C.bg3 }} />
+          <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: step === 'phone' ? C.accent : C.bg3 }} />
         </View>
         <Text style={[T.caption, { color: C.text3, marginTop: SP['1'] }]}>
-          ステップ {step === 'phone' ? '1' : '2'} / 2
+          ステップ {step === 'credentials' ? '1' : '2'} / 2
         </Text>
 
-        {step === 'phone' ? (
+        {step === 'credentials' ? (
           <>
-            <View style={{ marginTop: SP['6'], marginBottom: SP['8'] }}>
-              <Text style={[T.h1, { color: C.text, marginBottom: SP['2'] }]}>電話番号を入力</Text>
+            <View style={{ marginTop: SP['6'], marginBottom: SP['6'] }}>
+              <Text style={[T.h1, { color: C.text, marginBottom: SP['2'] }]}>アカウントを作成</Text>
               <Text style={[T.body, { color: C.text2 }]}>
-                アカウントの安全のため、まず電話番号を登録します。
-                {'\n'}非公開で、他のユーザーには表示されません。
+                メールとパスワードでログインできるようにします。
+              </Text>
+            </View>
+
+            <View style={{ gap: SP['4'], marginBottom: SP['6'] }}>
+              <Input
+                label="メールアドレス"
+                icon={MailIcon}
+                value={email}
+                onChangeText={setEmail}
+                placeholder="you@example.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoFocus
+                keyboardAppearance="dark"
+                selectionColor={C.accent}
+              />
+              <Input
+                label="パスワード（8 文字以上）"
+                value={password}
+                onChangeText={setPassword}
+                placeholder="パスワード"
+                secureTextEntry={!showPass}
+                keyboardAppearance="dark"
+                selectionColor={C.accent}
+                right={
+                  <PressableScale onPress={() => setShowPass((v) => !v)} haptic="tap">
+                    <EyeIcon size={18} color={C.text3} strokeWidth={2.2} />
+                  </PressableScale>
+                }
+              />
+            </View>
+
+            <Button label="次へ" onPress={goToPhoneStep} />
+
+            <View style={{ alignItems: 'center', marginTop: SP['4'] }}>
+              <PressableScale onPress={() => router.replace('/(auth)/login' as never)} haptic="tap">
+                <Text style={[T.small, { color: C.text3 }]}>
+                  既にアカウントをお持ちですか？ <Text style={{ color: C.accent, fontWeight: '700' }}>ログイン</Text>
+                </Text>
+              </PressableScale>
+            </View>
+          </>
+        ) : (
+          <>
+            <View style={{ marginTop: SP['6'], marginBottom: SP['6'] }}>
+              <Text style={[T.h1, { color: C.text, marginBottom: SP['2'] }]}>電話番号 (任意)</Text>
+              <Text style={[T.body, { color: C.text2 }]}>
+                登録すると、パスワードを忘れた時の復旧やセキュリティ通知に使われます。
+                {'\n'}他のユーザーには公開されません。
               </Text>
             </View>
 
@@ -123,48 +186,24 @@ export default function SignupScreen() {
               placeholder="090-0000-0000"
               keyboardType="phone-pad"
               autoFocus
+              keyboardAppearance="dark"
+              selectionColor={C.accent}
             />
 
-            <View style={{ marginTop: SP['8'] }}>
-              <Button label="次へ" onPress={goNext} />
-            </View>
-          </>
-        ) : (
-          <>
-            <View style={{ marginTop: SP['6'], marginBottom: SP['8'] }}>
-              <Text style={[T.h1, { color: C.text, marginBottom: SP['2'] }]}>メール＆パスワード</Text>
-              <Text style={[T.body, { color: C.text2 }]}>
-                ログイン用の情報を設定してください。
-              </Text>
-            </View>
-
-            <View style={{ gap: SP['4'], marginBottom: SP['8'] }}>
-              <Input
-                label="メールアドレス"
-                icon={MailIcon}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="you@example.com"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoFocus
+            <View style={{ marginTop: SP['8'], gap: SP['3'] }}>
+              <Button
+                label="登録"
+                onPress={handleSubmitWithPhone}
+                loading={loading}
+                disabled={loading}
               />
-              <Input
-                label="パスワード（8文字以上）"
-                value={password}
-                onChangeText={setPassword}
-                placeholder="パスワード"
-                secureTextEntry={!showPass}
-                right={
-                  <PressableScale onPress={() => setShowPass((v) => !v)} haptic="tap">
-                    <EyeIcon size={18} color={C.text3} strokeWidth={2.2} />
-                  </PressableScale>
-                }
+              <Button
+                label="スキップして登録"
+                onPress={handleSkipPhone}
+                variant="ghost"
+                disabled={loading}
               />
             </View>
-
-            <Button label="アカウントを作成" onPress={handleSignup} loading={loading} />
           </>
         )}
       </ScrollView>
