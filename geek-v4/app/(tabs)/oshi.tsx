@@ -112,12 +112,9 @@ export default function OshiScreen() {
             gap: SP['2'],
           }}
         >
-          <Text style={[T.small, { color: '#ffffffcc' }]}>推し活継続</Text>
-          <Text style={{ fontSize: 56, fontWeight: '800', color: '#fff', letterSpacing: -2 }}>
-            {accountAge}<Text style={{ fontSize: 20, fontWeight: '600' }}> 日</Text>
-          </Text>
-          <Text style={[T.small, { color: '#ffffffcc' }]}>
-            Geekで推し活を始めてから
+          <Text style={[T.small, { color: '#ffffffcc', letterSpacing: 0.5 }]}>推し活</Text>
+          <Text style={{ fontSize: 64, fontWeight: '800', color: '#fff', letterSpacing: -2 }}>
+            {accountAge}<Text style={{ fontSize: 22, fontWeight: '600' }}> 日</Text>
           </Text>
         </LinearGradient>
 
@@ -131,7 +128,7 @@ export default function OshiScreen() {
           gap: SP['3'],
         }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={[T.h4, { color: C.text }]}>あなたの推し ({likedTags.length})</Text>
+            <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>推し</Text>
             <View style={{ flexDirection: 'row', gap: SP['3'] }}>
               <PressableScale onPress={() => router.push('/oshi/tag-graph' as never)} haptic="tap">
                 <Text style={[T.smallM, { color: '#22D3A4' }]}>連携</Text>
@@ -165,7 +162,6 @@ export default function OshiScreen() {
                   }}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={{ fontSize: 14 }}>📁</Text>
                     <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700', flex: 1 }]}>
                       {g.rootLabel}
                     </Text>
@@ -206,37 +202,29 @@ export default function OshiScreen() {
 
                   {/* 関連タグサジェスト */}
                   {g.relatedSuggestions.length > 0 && (
-                    <View style={{ gap: 4, marginTop: 2 }}>
-                      <Text style={[T.caption, { color: '#7CB1FF', fontWeight: '600' }]}>
-                        🔗 関連タグ
-                      </Text>
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                        {g.relatedSuggestions.map((s) => (
-                          <PressableScale
-                            key={s.tag}
-                            onPress={() => {
-                              addLiked(s.tag);
-                            }}
-                            haptic="confirm"
-                            style={{
-                              flexDirection: 'row',
-                              alignItems: 'center',
-                              gap: 3,
-                              paddingHorizontal: SP['3'],
-                              paddingVertical: 6,
-                              backgroundColor: 'rgba(124,177,255,0.13)',
-                              borderRadius: R.full,
-                              borderWidth: 1,
-                              borderColor: 'rgba(124,177,255,0.4)',
-                              borderStyle: 'dashed',
-                            }}
-                          >
-                            <Text style={{ fontSize: 10 }}>＋</Text>
-                            <Text style={[T.caption, { color: '#7CB1FF' }]}>{s.tag}</Text>
-                            <Text style={{ fontSize: 8, color: C.text3 }}>via {s.via}</Text>
-                          </PressableScale>
-                        ))}
-                      </View>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
+                      {g.relatedSuggestions.map((s) => (
+                        <PressableScale
+                          key={s.tag}
+                          onPress={() => addLiked(s.tag)}
+                          haptic="confirm"
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 3,
+                            paddingHorizontal: SP['3'],
+                            paddingVertical: 6,
+                            backgroundColor: 'rgba(124,177,255,0.10)',
+                            borderRadius: R.full,
+                            borderWidth: 1,
+                            borderColor: 'rgba(124,177,255,0.3)',
+                            borderStyle: 'dashed',
+                          }}
+                        >
+                          <Text style={{ fontSize: 10, color: '#7CB1FF' }}>＋</Text>
+                          <Text style={[T.caption, { color: '#7CB1FF' }]}>{s.tag}</Text>
+                        </PressableScale>
+                      ))}
                     </View>
                   )}
                 </View>

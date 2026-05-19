@@ -58,37 +58,11 @@ export default function NotificationsScreen() {
             </Text>
           </View>
 
-          {/* 通知を増やすヒント */}
-          <Text style={[T.smallM, { color: C.text3, marginTop: SP['2'] }]}>通知が届くタイミング</Text>
-          <View style={{ gap: SP['2'] }}>
-            <Hint
-              emoji="💜"
-              title="好きなタグに新着があったとき"
-              cta="タグを追加"
-              onAction={() => router.push('/filter' as never)}
-              tone={C.accent}
-            />
-            <Hint
-              emoji="💬"
-              title="あなたの投稿にコメントが付いたとき"
-              cta="投稿する"
-              onAction={() => router.push('/post/create' as never)}
-              tone={C.green}
-            />
-            <Hint
-              emoji="🎉"
-              title="推しのイベント情報"
-              cta="カレンダー"
-              onAction={() => router.push('/corners/calendar' as never)}
-              tone={C.amber}
-            />
-          </View>
-
           <PressableScale
             onPress={() => router.push('/settings/notifications' as never)}
             haptic="tap"
             style={{
-              marginTop: SP['4'],
+              marginTop: SP['2'],
               padding: SP['4'],
               backgroundColor: C.bg2,
               borderRadius: R.lg,
@@ -98,7 +72,7 @@ export default function NotificationsScreen() {
             }}
           >
             <Icon.settings size={20} color={C.text2} strokeWidth={2.2} />
-            <Text style={[T.bodyM, { color: C.text, flex: 1 }]}>通知の種類を設定する</Text>
+            <Text style={[T.bodyM, { color: C.text, flex: 1 }]}>通知設定</Text>
             <Icon.chevronR size={18} color={C.text3} strokeWidth={2.2} />
           </PressableScale>
         </ScrollView>
@@ -196,25 +170,3 @@ export default function NotificationsScreen() {
   );
 }
 
-function Hint({
-  emoji, title, cta, onAction, tone,
-}: { emoji: string; title: string; cta: string; onAction: () => void; tone: string }) {
-  return (
-    <View style={{
-      flexDirection: 'row', alignItems: 'center',
-      padding: SP['3'], backgroundColor: C.bg2,
-      borderRadius: R.lg, borderWidth: 1, borderColor: C.border,
-      gap: SP['3'],
-    }}>
-      <Text style={{ fontSize: 28 }}>{emoji}</Text>
-      <Text style={[T.smallM, { color: C.text, flex: 1 }]}>{title}</Text>
-      <PressableScale onPress={onAction} haptic="tap" style={{
-        paddingHorizontal: SP['3'], paddingVertical: SP['1'],
-        backgroundColor: tone + '22', borderRadius: R.full,
-        borderWidth: 1, borderColor: tone + '44',
-      }}>
-        <Text style={[T.caption, { color: tone, fontWeight: '600' }]}>{cta}</Text>
-      </PressableScale>
-    </View>
-  );
-}

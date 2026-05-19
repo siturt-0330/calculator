@@ -163,12 +163,9 @@ export default function BBSCreateScreen() {
           </View>
         ) : null}
 
-        <View style={{ backgroundColor: C.bg3, borderRadius: R.md, padding: SP['4'], gap: SP['2'] }}>
-          <Text style={[T.smallM, { color: C.text2 }]}>投稿のヒント</Text>
-          <Text style={[T.small, { color: C.text3 }]}>・議論したいテーマを具体的に書くと参加者が増えます</Text>
-          <Text style={[T.small, { color: C.text3 }]}>・全ての投稿は匿名で表示されます</Text>
-          <Text style={[T.small, { color: C.text3 }]}>・個人情報は書き込まないでください</Text>
-        </View>
+        <Text style={[T.caption, { color: C.text3, textAlign: 'center', marginTop: SP['2'] }]}>
+          匿名で投稿されます · 個人情報は書かない
+        </Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );

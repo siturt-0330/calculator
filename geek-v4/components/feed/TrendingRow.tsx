@@ -45,15 +45,9 @@ export function TrendingRow() {
   return (
     <View style={{ alignItems: 'center', backgroundColor: C.bg }}>
       <View style={{ width: '100%', maxWidth: 720, paddingHorizontal: SP['4'], paddingTop: SP['2'], paddingBottom: SP['3'] }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: SP['2'] }}>
-          <Text style={{ fontSize: 14 }}>🔥</Text>
-          <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>
-            いま盛り上がっているタグ
-          </Text>
-          <Text style={[T.caption, { color: C.text3, marginLeft: 4 }]}>
-            · 24時間
-          </Text>
-        </View>
+        <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5, marginBottom: SP['2'] }]}>
+          トレンド
+        </Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
