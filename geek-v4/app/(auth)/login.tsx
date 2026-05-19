@@ -27,8 +27,15 @@ export default function LoginScreen() {
   const MailIcon = Icon.at;
 
   const handleLogin = async () => {
-    if (!email || !password) {
+    if (loading) return;  // 二重 submit 防止
+    // 入力チェック (trim も含めて空判定)
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
       show('メールアドレスとパスワードを入力してください。', 'warn');
+      return;
+    }
+    if (!/\S+@\S+\.\S+/.test(trimmedEmail)) {
+      show('メールアドレスの形式が正しくありません。', 'warn');
       return;
     }
     setLoading(true);
@@ -40,7 +47,7 @@ export default function LoginScreen() {
     }, 15000);
     let result;
     try {
-      result = await signIn(email.trim(), password);
+      result = await signIn(trimmedEmail, password);
     } finally {
       clearTimeout(safety);
       setLoading(false);
@@ -53,7 +60,9 @@ export default function LoginScreen() {
         show('メールアドレスまたはパスワードが違います。', 'warn');
       } else if (result.error.includes('Email not confirmed')) {
         show('確認メールのリンクをクリックしてからログインしてください。', 'error');
-      } else if (result.error.includes('network') || result.error.includes('Network')) {
+      } else if (result.error.includes('Too many') || result.error.includes('rate')) {
+        show('短時間に試行しすぎました。少し待ってから再度お試しください。', 'warn');
+      } else if (result.error.includes('network') || result.error.includes('Network') || result.error.includes('ネットワーク')) {
         show('ネットワークエラー。接続を確認してください。', 'error');
       } else {
         show('ログインに失敗しました: ' + result.error, 'error');

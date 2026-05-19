@@ -191,17 +191,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   signUp: async (email, password, phone) => {
     try {
       const cleanEmail = email.trim().toLowerCase();
-      const { data, error } = await supabase.auth.signUp({
-        email: cleanEmail,
-        password,
-        options: { data: { phone } },
-      });
+      // signUp 自体に 12 秒タイムアウト (ハング防止)
+      const signUpRes = await withTimeout(
+        supabase.auth.signUp({
+          email: cleanEmail,
+          password,
+          options: { data: { phone } },
+        }),
+        12000,
+      );
+      if (!signUpRes) {
+        return {
+          error: 'ネットワークが遅すぎます。接続を確認してもう一度お試しください。',
+          autoLoggedIn: false,
+          needsConfirmEmail: false,
+        };
+      }
+      const { data, error } = signUpRes;
       if (error) return { error: error.message, autoLoggedIn: false, needsConfirmEmail: false };
 
+      // 電話番号があれば profile に保存 (失敗しても登録自体は成功扱い)
       if (data.user && phone) {
         try {
           await supabase.from('profiles').upsert({ id: data.user.id, phone }).select();
-        } catch {}
+        } catch (e) {
+          console.warn('[signUp] profile phone upsert failed:', e);
+        }
       }
 
       // ケース 1: signUp 直後に session が返ってきた = email confirmation 無効
@@ -217,12 +232,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       // ケース 2: セッション無し → 自動ログイン試行 (短い backoff で 3 回)
       // タイミング race と Supabase の伝播遅延を吸収
+      let lastSignInErr: string | null = null;
       for (let attempt = 0; attempt < 3; attempt++) {
         if (attempt > 0) await new Promise((r) => setTimeout(r, 350 * attempt));
-        const { data: signIn, error: signInErr } = await supabase.auth.signInWithPassword({
-          email: cleanEmail,
-          password,
-        });
+        const signInRes = await withTimeout(
+          supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password,
+          }),
+          8000,
+        );
+        if (!signInRes) {
+          // timeout — 次の attempt へ
+          lastSignInErr = 'timeout';
+          continue;
+        }
+        const { data: signIn, error: signInErr } = signInRes;
         if (signIn?.session?.user) {
           try {
             const user = await buildUser(signIn.session.user);
@@ -232,13 +257,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           }
           return { error: null, autoLoggedIn: true, needsConfirmEmail: false };
         }
-        // "Email not confirmed" エラーが返ってくるなら email confirmation が ON 設定
-        if (signInErr?.message?.toLowerCase().includes('email not confirmed')
-            || signInErr?.message?.toLowerCase().includes('confirm')) {
+        // "Email not confirmed" → email confirmation が ON 設定
+        const errMsg = (signInErr?.message ?? '').toLowerCase();
+        lastSignInErr = errMsg || null;
+        if (errMsg.includes('email not confirmed') || errMsg.includes('confirm')) {
           return { error: null, autoLoggedIn: false, needsConfirmEmail: true };
         }
+        // 認証情報エラー: パスワード間違いなどではここに来ないはず (signUp 成功してるので)
+        // 何か別の問題なので次の attempt へ
       }
-      // 3 回試して session が取れなかった (理由不明)
+      // 3 回試して session が取れなかった
+      // ネットワーク timeout だった場合はそれを伝える
+      if (lastSignInErr === 'timeout') {
+        return {
+          error: 'ネットワークが不安定です。ログイン画面から再度お試しください。',
+          autoLoggedIn: false,
+          needsConfirmEmail: false,
+        };
+      }
+      // それ以外: confirmation が必要な可能性が高い (Supabase 設定次第)
       return { error: null, autoLoggedIn: false, needsConfirmEmail: true };
     } catch (e) {
       console.error('signUp exception:', e);
