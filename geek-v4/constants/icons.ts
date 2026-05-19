@@ -12,6 +12,7 @@ import {
   ArrowLeft, ArrowRight, ArrowUp, ArrowDown,
   Eye, EyeOff, Edit3, Trash2, Copy,
   Send, Smile, Hash, AtSign, Phone, Gamepad2, Swords, Clock,
+  Users2, Globe2, UserPlus,
 } from 'lucide-react-native';
 
 export const Icon = {
@@ -29,6 +30,7 @@ export const Icon = {
   eye: Eye, eyeOff: EyeOff, edit: Edit3, trash: Trash2, copy: Copy,
   send: Send, emoji: Smile, hash: Hash, at: AtSign, phone: Phone,
   game: Gamepad2, swords: Swords, clock: Clock,
+  community: Users2, globe: Globe2, userPlus: UserPlus,
 } as const;
 
 export type IconName = keyof typeof Icon;

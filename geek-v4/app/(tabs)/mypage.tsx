@@ -215,9 +215,9 @@ export default function MypageScreen() {
             color={C.amber}
           />
           <MenuTile
-            icon={Icon.heart}
-            label="推し活"
-            onPress={() => router.push('/(tabs)/oshi' as never)}
+            icon={Icon.community}
+            label="コミュニティ"
+            onPress={() => router.push('/(tabs)/community' as never)}
             color={C.pink}
           />
           <MenuTile

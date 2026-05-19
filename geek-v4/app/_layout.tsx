@@ -197,7 +197,9 @@ export default function RootLayout() {
                   <Stack.Screen name="mypage/saved" />
                   <Stack.Screen name="mypage/liked" />
                   <Stack.Screen name="mypage/posts" />
-                  <Stack.Screen name="oshi/tag-graph" />
+                  <Stack.Screen name="community/[id]" />
+                  <Stack.Screen name="community/create" />
+                  <Stack.Screen name="community/discover" />
                   <Stack.Screen name="settings/terms" />
                   <Stack.Screen name="settings/privacy-policy" />
                   <Stack.Screen name="settings/help" />
