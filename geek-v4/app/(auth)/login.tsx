@@ -1,6 +1,6 @@
 import { View, Text, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
@@ -12,7 +12,9 @@ import { useToastStore } from '@/stores/toastStore';
 import { Icon } from '@/constants/icons';
 
 export default function LoginScreen() {
-  const [email, setEmail] = useState('');
+  const params = useLocalSearchParams();
+  const presetEmail = typeof params.email === 'string' ? params.email : '';
+  const [email, setEmail] = useState(presetEmail);
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
@@ -45,9 +47,10 @@ export default function LoginScreen() {
     }
     if (result.error) {
       if (result.error.includes('Invalid login credentials')) {
-        // 未登録 or パスワード違い → 専用バナー表示
+        // Supabase はセキュリティ上「未登録」と「パスワード違い」を区別しないので
+        // 中立的なメッセージにする。バナーで両方のリカバリ手段を提示。
         setCredErrorBanner(true);
-        show('アカウントが見つかりません。新規登録してください。', 'warn');
+        show('メールアドレスまたはパスワードが違います。', 'warn');
       } else if (result.error.includes('Email not confirmed')) {
         show('確認メールのリンクをクリックしてからログインしてください。', 'error');
       } else if (result.error.includes('network') || result.error.includes('Network')) {
@@ -89,29 +92,39 @@ export default function LoginScreen() {
           <Text style={[T.body, { color: C.text2 }]}>好きを、匿名で、安心して続ける。</Text>
         </View>
 
-        {/* 未登録時バナー */}
+        {/* ログイン失敗バナー */}
         {credErrorBanner && (
           <View style={{
             padding: SP['4'],
             backgroundColor: C.amberBg,
             borderRadius: R.lg,
             borderWidth: 1,
-            borderColor: C.amber + '88',
+            borderColor: C.amber + '66',
             marginBottom: SP['4'],
-            gap: SP['3'],
+            gap: SP['2'],
           }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-              <Text style={{ fontSize: 24 }}>👋</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={[T.bodyMd, { color: C.amber, fontWeight: '700' }]}>
-                  アカウントが見つかりません
-                </Text>
-                <Text style={[T.small, { color: C.text2, marginTop: 2 }]}>
-                  メール/パスワードが間違っているか、まだ登録していません。
-                </Text>
-              </View>
+            <Text style={[T.bodyMd, { color: C.amber, fontWeight: '700' }]}>
+              ログインできませんでした
+            </Text>
+            <Text style={[T.small, { color: C.text2 }]}>
+              メールアドレスとパスワードを確認してください。アカウントをまだお持ちでない場合は新規登録してください。
+            </Text>
+            <View style={{ flexDirection: 'row', gap: SP['2'], marginTop: SP['1'] }}>
+              <PressableScale
+                onPress={() => router.push('/(auth)/forgot-password' as never)}
+                haptic="tap"
+                style={{ flex: 1, padding: SP['2'], borderRadius: R.md, borderWidth: 1, borderColor: C.border, alignItems: 'center' }}
+              >
+                <Text style={[T.smallM, { color: C.text }]}>パスワード再設定</Text>
+              </PressableScale>
+              <PressableScale
+                onPress={goToSignup}
+                haptic="confirm"
+                style={{ flex: 1, padding: SP['2'], borderRadius: R.md, backgroundColor: C.accent, alignItems: 'center' }}
+              >
+                <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>新規登録</Text>
+              </PressableScale>
             </View>
-            <Button label="🆕 新規登録に進む" onPress={goToSignup} haptic="confirm" />
           </View>
         )}
 
@@ -125,6 +138,8 @@ export default function LoginScreen() {
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
+            keyboardAppearance="dark"
+            selectionColor={C.accent}
           />
           <Input
             label="パスワード"
@@ -132,6 +147,8 @@ export default function LoginScreen() {
             onChangeText={setPassword}
             placeholder="パスワード"
             secureTextEntry={!showPass}
+            keyboardAppearance="dark"
+            selectionColor={C.accent}
             right={
               <PressableScale onPress={() => setShowPass((v) => !v)} haptic="tap">
                 <EyeIcon size={18} color={C.text3} strokeWidth={2.2} />

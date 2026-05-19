@@ -18,14 +18,20 @@ export default function ForgotPasswordScreen() {
   const MailIcon = Icon.at;
 
   const handleReset = async () => {
-    if (!email) return;
+    const e = email.trim();
+    if (!/\S+@\S+\.\S+/.test(e)) {
+      show('メールアドレスの形式が正しくありません。', 'warn');
+      return;
+    }
+    if (loading) return;
     setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    const { error } = await supabase.auth.resetPasswordForEmail(e);
     setLoading(false);
     if (error) {
-      show('送信に失敗しました。', 'error');
+      show('送信に失敗しました。時間をおいて再度お試しください。', 'error');
     } else {
-      show('パスワードリセットメールを送信しました。', 'success');
+      // セキュリティ上、メールが登録されているかは伝えない
+      show('もしそのメールが登録済みなら、リセットメールが届きます。', 'success');
     }
   };
 
@@ -57,6 +63,10 @@ export default function ForgotPasswordScreen() {
           placeholder="you@example.com"
           keyboardType="email-address"
           autoCapitalize="none"
+          autoCorrect={false}
+          autoFocus
+          keyboardAppearance="dark"
+          selectionColor={C.accent}
         />
         <Button label="送信" onPress={handleReset} loading={loading} />
       </View>
