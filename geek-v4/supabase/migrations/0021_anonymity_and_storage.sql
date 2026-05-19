@@ -249,71 +249,65 @@ create trigger posts_rate_limit_trg
   before insert on public.posts
   for each row execute procedure public.enforce_post_rate_limit();
 
--- 同様: コメント (10/min)
-create or replace function public.enforce_comment_rate_limit()
-returns trigger language plpgsql security definer as $$
-declare
-  v_recent integer;
+-- 同様: コメント (10/min) — table が無ければスキップ
+do $$
 begin
-  select count(*) into v_recent
-    from public.comments
-    where author_id = NEW.author_id
-      and created_at > now() - interval '1 minute';
-  if v_recent >= 10 then
-    raise exception 'コメントペースが速すぎます。';
+  if to_regclass('public.comments') is not null then
+    create or replace function public.enforce_comment_rate_limit()
+    returns trigger language plpgsql security definer as $f$
+    declare v_recent integer;
+    begin
+      select count(*) into v_recent from public.comments
+        where author_id = NEW.author_id and created_at > now() - interval '1 minute';
+      if v_recent >= 10 then raise exception 'コメントペースが速すぎます。'; end if;
+      return NEW;
+    end;
+    $f$;
+    drop trigger if exists comments_rate_limit_trg on public.comments;
+    create trigger comments_rate_limit_trg before insert on public.comments
+      for each row execute procedure public.enforce_comment_rate_limit();
   end if;
-  return NEW;
-end;
-$$;
+end $$;
 
-drop trigger if exists comments_rate_limit_trg on public.comments;
-create trigger comments_rate_limit_trg
-  before insert on public.comments
-  for each row execute procedure public.enforce_comment_rate_limit();
-
--- BBS thread (3/min)
-create or replace function public.enforce_bbs_thread_rate_limit()
-returns trigger language plpgsql security definer as $$
-declare
-  v_recent integer;
+-- BBS thread (3/min) — table が無ければスキップ
+do $$
 begin
-  select count(*) into v_recent
-    from public.bbs_threads
-    where author_id = NEW.author_id
-      and created_at > now() - interval '1 minute';
-  if v_recent >= 3 then
-    raise exception 'スレッド作成ペースが速すぎます。';
+  if to_regclass('public.bbs_threads') is not null then
+    create or replace function public.enforce_bbs_thread_rate_limit()
+    returns trigger language plpgsql security definer as $f$
+    declare v_recent integer;
+    begin
+      select count(*) into v_recent from public.bbs_threads
+        where author_id = NEW.author_id and created_at > now() - interval '1 minute';
+      if v_recent >= 3 then raise exception 'スレッド作成ペースが速すぎます。'; end if;
+      return NEW;
+    end;
+    $f$;
+    drop trigger if exists bbs_threads_rate_limit_trg on public.bbs_threads;
+    create trigger bbs_threads_rate_limit_trg before insert on public.bbs_threads
+      for each row execute procedure public.enforce_bbs_thread_rate_limit();
   end if;
-  return NEW;
-end;
-$$;
+end $$;
 
-drop trigger if exists bbs_threads_rate_limit_trg on public.bbs_threads;
-create trigger bbs_threads_rate_limit_trg
-  before insert on public.bbs_threads
-  for each row execute procedure public.enforce_bbs_thread_rate_limit();
-
--- community_posts (5/min)
-create or replace function public.enforce_community_post_rate_limit()
-returns trigger language plpgsql security definer as $$
-declare
-  v_recent integer;
+-- community_posts (5/min) — 0017 が走ってないと存在しないので guard
+do $$
 begin
-  select count(*) into v_recent
-    from public.community_posts
-    where author_id = NEW.author_id
-      and created_at > now() - interval '1 minute';
-  if v_recent >= 5 then
-    raise exception 'コミュニティ投稿ペースが速すぎます。';
+  if to_regclass('public.community_posts') is not null then
+    create or replace function public.enforce_community_post_rate_limit()
+    returns trigger language plpgsql security definer as $f$
+    declare v_recent integer;
+    begin
+      select count(*) into v_recent from public.community_posts
+        where author_id = NEW.author_id and created_at > now() - interval '1 minute';
+      if v_recent >= 5 then raise exception 'コミュニティ投稿ペースが速すぎます。'; end if;
+      return NEW;
+    end;
+    $f$;
+    drop trigger if exists community_posts_rate_limit_trg on public.community_posts;
+    create trigger community_posts_rate_limit_trg before insert on public.community_posts
+      for each row execute procedure public.enforce_community_post_rate_limit();
   end if;
-  return NEW;
-end;
-$$;
-
-drop trigger if exists community_posts_rate_limit_trg on public.community_posts;
-create trigger community_posts_rate_limit_trg
-  before insert on public.community_posts
-  for each row execute procedure public.enforce_community_post_rate_limit();
+end $$;
 
 -- ============================================================
 -- 7. profiles: nickname の重複を許す現状はそのまま
