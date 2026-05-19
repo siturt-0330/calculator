@@ -246,15 +246,9 @@ export default function MypageScreen() {
           />
           <MenuTile
             icon={Icon.block}
-            label="ブロックユーザー"
+            label="ブロック中"
             onPress={() => router.push('/settings/blocked-users' as never)}
             color={C.block}
-          />
-          <MenuTile
-            icon={Icon.info}
-            label="アプリ"
-            onPress={() => router.push('/settings/about' as never)}
-            color={C.blue}
           />
         </View>
 
