@@ -1,5 +1,6 @@
 import { View, Text, ScrollView, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
@@ -8,10 +9,14 @@ import { BackButton } from '@/components/nav/BackButton';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { Avatar } from '@/components/ui/Avatar';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ObsidianSaveButton } from '@/components/ui/ObsidianSaveButton';
 import { Icon } from '@/constants/icons';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { formatRelative } from '@/lib/utils/date';
+import { useObsidianEnabled, postToObsidianNote } from '@/hooks/useObsidian';
+import { saveBatchToObsidian } from '@/lib/obsidian';
+import { useToastStore } from '@/stores/toastStore';
 
 type Item = {
   id: string;
@@ -20,6 +25,10 @@ type Item = {
   likes_count: number;
   comments_count: number;
   created_at: string;
+  // Post 型に揃えるための optional フィールド
+  media_urls?: string[];
+  source_url?: string | null;
+  kind?: string | null;
 };
 
 async function fetchSavedPosts(): Promise<Item[]> {
@@ -46,10 +55,33 @@ async function fetchSavedPosts(): Promise<Item[]> {
 export default function SavedPosts() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { show } = useToastStore();
+  const { enabled: obsidianEnabled } = useObsidianEnabled();
+  const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number } | null>(null);
   const { data: items = [], isLoading } = useQuery({
     queryKey: ['saved-posts'],
     queryFn: fetchSavedPosts,
   });
+
+  const handleBulkExport = async () => {
+    if (items.length === 0) {
+      show('保存済みの投稿がありません', 'warn');
+      return;
+    }
+    if (bulkProgress) return;
+    setBulkProgress({ current: 0, total: items.length });
+    const notes = items.map((p) => postToObsidianNote(p as never));
+    const result = await saveBatchToObsidian(notes, {
+      delayMs: 400,
+      onProgress: (current, total) => setBulkProgress({ current, total }),
+    });
+    setBulkProgress(null);
+    if (result.failed === 0) {
+      show(`${result.success} 件すべて Obsidian に送信しました`, 'success');
+    } else {
+      show(`成功 ${result.success} / 失敗 ${result.failed}`, 'warn');
+    }
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -62,6 +94,33 @@ export default function SavedPosts() {
         <ScrollView
           contentContainerStyle={{ padding: SP['4'], paddingBottom: insets.bottom + SP['10'], gap: SP['2'] }}
         >
+          {obsidianEnabled && items.length > 0 && (
+            <PressableScale
+              onPress={handleBulkExport}
+              haptic="confirm"
+              disabled={!!bulkProgress}
+              style={{
+                padding: SP['3'],
+                backgroundColor: C.accentBg,
+                borderRadius: R.md,
+                borderWidth: 1,
+                borderColor: C.accent + '55',
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: SP['2'],
+                opacity: bulkProgress ? 0.6 : 1,
+                marginBottom: SP['2'],
+              }}
+            >
+              <Icon.edit size={18} color={C.accent} strokeWidth={2.2} />
+              <Text style={[T.bodyMd, { color: C.accent, fontWeight: '700', flex: 1 }]}>
+                {bulkProgress
+                  ? `Obsidian に送信中… ${bulkProgress.current} / ${bulkProgress.total}`
+                  : `${items.length} 件をまとめて Obsidian に保存`}
+              </Text>
+              {bulkProgress && <ActivityIndicator size="small" color={C.accent} />}
+            </PressableScale>
+          )}
           {items.length === 0 ? (
             <EmptyState
               icon={Icon.save}
@@ -90,6 +149,8 @@ export default function SavedPosts() {
                     {p.tag_names[0] ? `#${p.tag_names[0]}` : '#雑談'}
                   </Text>
                   <Text style={[T.caption, { color: C.text3 }]}>· {formatRelative(p.created_at)}</Text>
+                  <View style={{ flex: 1 }} />
+                  <ObsidianSaveButton note={postToObsidianNote(p as never)} size={16} />
                 </View>
                 <Text style={[T.body, { color: C.text }]} numberOfLines={3}>{p.content}</Text>
                 <View style={{ flexDirection: 'row', gap: SP['3'] }}>

@@ -25,6 +25,8 @@ import {
 import { useAuthStore } from '@/stores/authStore';
 import { useToastStore } from '@/stores/toastStore';
 import { sanitizeContent, sanitizeUrl } from '@/lib/sanitize';
+import { ObsidianSaveButton } from '@/components/ui/ObsidianSaveButton';
+import { communityPostToObsidianNote, communityToObsidianNote } from '@/hooks/useObsidian';
 
 function timeAgo(iso: string): string {
   const t = Date.parse(iso);
@@ -368,6 +370,12 @@ export default function CommunityDetailScreen() {
               アイコンをタップして変更
             </Text>
           )}
+          {/* コミュニティ自体を Obsidian に保存 (説明 / タグなどメタ情報) */}
+          <ObsidianSaveButton
+            note={communityToObsidianNote(community)}
+            size={18}
+            style={{ marginTop: SP['1'] }}
+          />
         </View>
 
         {/* 説明 */}
@@ -502,6 +510,7 @@ export default function CommunityDetailScreen() {
                     {p.author_nickname ?? '匿名'}
                   </Text>
                   <Text style={[T.caption, { color: C.text3 }]}>{timeAgo(p.created_at)}</Text>
+                  <ObsidianSaveButton note={communityPostToObsidianNote(p)} size={16} />
                 </View>
                 <Text style={[T.body, { color: C.text }]}>{p.body}</Text>
                 {p.image_url && (

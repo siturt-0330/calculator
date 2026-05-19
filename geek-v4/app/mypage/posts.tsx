@@ -15,6 +15,8 @@ import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { formatRelative } from '@/lib/utils/date';
 import { useState } from 'react';
+import { ObsidianSaveButton } from '@/components/ui/ObsidianSaveButton';
+import { postToObsidianNote } from '@/hooks/useObsidian';
 
 type Item = {
   id: string;
@@ -115,7 +117,8 @@ export default function MyPosts() {
                     <Text style={[T.caption, { color: C.text3 }]}>💬 {p.comments_count}</Text>
                   </View>
                 </PressableScale>
-                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: SP['2'] }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: SP['2'] }}>
+                  <ObsidianSaveButton note={postToObsidianNote(p as never)} size={16} />
                   <PressableScale
                     onPress={() => setDeleteId(p.id)}
                     haptic="warn"
