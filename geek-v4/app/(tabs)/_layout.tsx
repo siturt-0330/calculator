@@ -6,7 +6,7 @@ export default function TabsLayout() {
     <Tabs tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false }}>
       <Tabs.Screen name="feed" />
       <Tabs.Screen name="bbs" />
-      <Tabs.Screen name="oshi" />
+      <Tabs.Screen name="community" />
       <Tabs.Screen name="mypage" />
     </Tabs>
   );

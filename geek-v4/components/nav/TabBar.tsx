@@ -13,7 +13,7 @@ import { NotificationBadge } from '@/components/ui/NotificationBadge';
 const ROUTE_TO_TAB: Record<string, TabKey> = {
   feed: 'home',
   bbs: 'bbs',
-  oshi: 'oshi',
+  community: 'community',
   mypage: 'mypage',
 };
 
@@ -21,7 +21,7 @@ const LABELS: Record<TabKey, string> = {
   home: 'ホーム',
   bbs: '掲示板',
   game: 'ゲーム',
-  oshi: '推し活',
+  community: 'コミュニティ',
   mypage: 'マイ',
 };
 
