@@ -15,7 +15,7 @@ import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { formatRelative } from '@/lib/utils/date';
 import { useObsidianEnabled, postToObsidianNote } from '@/hooks/useObsidian';
-import { saveBatchToObsidian } from '@/lib/obsidian';
+import { saveBatchToObsidian, OBSIDIAN_AVAILABLE } from '@/lib/obsidian';
 import { useToastStore } from '@/stores/toastStore';
 
 type Item = {
@@ -94,7 +94,7 @@ export default function SavedPosts() {
         <ScrollView
           contentContainerStyle={{ padding: SP['4'], paddingBottom: insets.bottom + SP['10'], gap: SP['2'] }}
         >
-          {obsidianEnabled && items.length > 0 && (
+          {OBSIDIAN_AVAILABLE && obsidianEnabled && items.length > 0 && (
             <PressableScale
               onPress={handleBulkExport}
               haptic="confirm"

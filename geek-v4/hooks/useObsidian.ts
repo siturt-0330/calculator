@@ -1,12 +1,17 @@
 import { useEffect, useState, useCallback } from 'react';
-import { isObsidianEnabled, saveNoteToObsidian, type ObsidianNote } from '@/lib/obsidian';
+import { isObsidianEnabled, saveNoteToObsidian, OBSIDIAN_AVAILABLE, type ObsidianNote } from '@/lib/obsidian';
 import type { Post, BBSThread, BBSReply, Comment } from '@/types/models';
 import type { CommunityPostWithCommunity, Community } from '@/lib/api/communities';
 
 // 連携 ON/OFF 状態を購読する軽量フック
+// 開発者専用フラグが false (production) なら常に enabled=false を返す
 export function useObsidianEnabled(): { enabled: boolean; refresh: () => Promise<void> } {
   const [enabled, setEnabled] = useState(false);
   const refresh = useCallback(async () => {
+    if (!OBSIDIAN_AVAILABLE) {
+      setEnabled(false);
+      return;
+    }
     const e = await isObsidianEnabled();
     setEnabled(e);
   }, []);

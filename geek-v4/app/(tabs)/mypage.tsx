@@ -19,6 +19,7 @@ import { Icon } from '@/constants/icons';
 import { C, GRAD, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { TABBAR } from '@/design/tabbar';
+import { OBSIDIAN_AVAILABLE } from '@/lib/obsidian';
 
 export default function MypageScreen() {
   const insets = useSafeAreaInsets();
@@ -250,12 +251,14 @@ export default function MypageScreen() {
             onPress={() => router.push('/settings/blocked-users' as never)}
             color={C.block}
           />
-          <MenuTile
-            icon={Icon.edit}
-            label="Obsidian"
-            onPress={() => router.push('/settings/obsidian' as never)}
-            color={C.accent}
-          />
+          {OBSIDIAN_AVAILABLE && (
+            <MenuTile
+              icon={Icon.edit}
+              label="Obsidian (DEV)"
+              onPress={() => router.push('/settings/obsidian' as never)}
+              color={C.accent}
+            />
+          )}
         </View>
 
         {/* ログアウト */}
