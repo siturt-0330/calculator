@@ -3,7 +3,7 @@ import { PressableScale } from './PressableScale';
 import { Icon } from '@/constants/icons';
 import { C } from '@/design/tokens';
 import { useToastStore } from '@/stores/toastStore';
-import { saveNoteToObsidian, type ObsidianNote } from '@/lib/obsidian';
+import { saveNoteToObsidian, OBSIDIAN_AVAILABLE, type ObsidianNote } from '@/lib/obsidian';
 import { useObsidianEnabled } from '@/hooks/useObsidian';
 import type { ViewStyle } from 'react-native';
 
@@ -24,6 +24,8 @@ export function ObsidianSaveButton({ note, size = 20, color = C.accent, style, s
   const { enabled } = useObsidianEnabled();
   const [saving, setSaving] = useState(false);
   const { show } = useToastStore();
+  // 開発者専用 — production では完全に非表示
+  if (!OBSIDIAN_AVAILABLE) return null;
   if (!enabled && !showWhenDisabled) return null;
 
   const handlePress = async () => {

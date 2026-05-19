@@ -1,17 +1,30 @@
 // ============================================================
-// Obsidian 連携 (汎用)
+// Obsidian 連携 (開発者専用)
 // ============================================================
-// Obsidian は `obsidian://` URI スキームで「新規ノート作成」が呼べる。
-// 追加 dependency なしで web / iOS / Android すべて動作する。
+// 開発時 (__DEV__ true) のみ UI が露出する。production build では
+// ObsidianSaveButton は render null、mypage タイルも非表示、
+// 設定画面の Stack エントリは残るが mypage からは到達できない。
 //
-//   obsidian://new?vault=VaultName&name=NoteName&content=URI-encoded&silent=true
+// 仕組み:
+//   obsidian://new?vault=X&name=Y&content=...&silent=true
 //
-// vault 名は設定で保存しておく → 各 surface (post / community / bbs / comment) に
+// vault 名は設定で保存。各 surface (post / community / bbs / comment) に
 // 1 タップ保存ボタンを置く。
 // ============================================================
 
 import { Platform, Linking } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// 開発者専用フラグ — `expo start` 時は true、production build (eas build) では false
+// これで production users には Obsidian 関連 UI が一切表示されない
+export const OBSIDIAN_AVAILABLE: boolean = (() => {
+  // __DEV__ は React Native の global
+  try {
+    return typeof __DEV__ !== 'undefined' && __DEV__ === true;
+  } catch {
+    return false;
+  }
+})();
 
 const VAULT_KEY = 'geek:obsidian_vault';
 const ENABLED_KEY = 'geek:obsidian_enabled';
