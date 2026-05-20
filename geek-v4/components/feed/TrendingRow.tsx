@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { memo, useEffect } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
@@ -8,7 +8,7 @@ import { PressableScale } from '@/components/ui/PressableScale';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 
-export function TrendingRow() {
+function TrendingRowInner() {
   const router = useRouter();
   const qc = useQueryClient();
 
@@ -90,3 +90,5 @@ export function TrendingRow() {
     </View>
   );
 }
+
+export const TrendingRow = memo(TrendingRowInner);

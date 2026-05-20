@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, Platform } from 'react-native';
+import { PressableScale } from '@/components/ui/PressableScale';
 import { C, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 
@@ -72,8 +73,9 @@ export class ErrorBoundary extends React.Component<Props, State> {
           <Text style={[T.caption, { color: C.text3, textAlign: 'center', maxWidth: 320 }]}>
             {this.state.error.message}
           </Text>
-          <TouchableOpacity
+          <PressableScale
             onPress={reset}
+            haptic="tap"
             style={{
               marginTop: SP['4'],
               backgroundColor: C.accent,
@@ -83,7 +85,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
             }}
           >
             <Text style={[T.buttonMd, { color: '#fff' }]}>再試行</Text>
-          </TouchableOpacity>
+          </PressableScale>
         </View>
       );
     }

@@ -27,6 +27,9 @@ export function MemeReactionPicker({
   const { stamps: userStamps } = useUserStamps();
   const { mutateAsync: createStamp, isPending: creating } = useCreateUserStamp();
   const { show } = useToastStore();
+  // ローカル送信ロック: ネット往復中に再タップを即座に弾く (React Query の
+  // isPending 反映遅延 / state 反映前の二重押下を防ぐ defense-in-depth)
+  const [submitting, setSubmitting] = useState(false);
 
   // ★ ローカル「直近で押したスタンプ」を保持。サーバー反映が遅くても
   // すぐにチップが選択状態に見えるようにする (Realtime invalidate 中に
@@ -63,8 +66,10 @@ export function MemeReactionPicker({
   };
 
   const handleCreate = async () => {
+    if (submitting) return;
     const t = customText.trim();
     if (!t) return;
+    setSubmitting(true);
     try {
       const stamp = await createStamp({ text: t, isPublic: true });
       show(`「${t}」を作成しました`, 'success');
@@ -78,6 +83,8 @@ export function MemeReactionPicker({
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'スタンプの作成に失敗しました';
       show(msg, 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -178,16 +185,16 @@ export function MemeReactionPicker({
                 </PressableScale>
                 <PressableScale
                   onPress={handleCreate}
-                  disabled={!customText.trim() || creating}
+                  disabled={!customText.trim() || creating || submitting}
                   haptic="confirm"
                   style={{
                     flex: 2, paddingVertical: SP['2'],
-                    backgroundColor: customText.trim() && !creating ? C.accent : C.bg4,
+                    backgroundColor: customText.trim() && !creating && !submitting ? C.accent : C.bg4,
                     borderRadius: R.md,
                     alignItems: 'center',
                   }}
                 >
-                  {creating ? (
+                  {creating || submitting ? (
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
                     <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>作って送る</Text>

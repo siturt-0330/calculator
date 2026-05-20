@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { View, Text, useWindowDimensions, Linking, Platform, ActivityIndicator } from 'react-native';
 import { Icon } from '@/constants/icons';
 import type { Post } from '@/types/models';
@@ -36,25 +36,7 @@ function shortHost(url: string): string {
   }
 }
 
-export function AnonPostCard({
-  post,
-  liked = false,
-  concerned = false,
-  saved = false,
-  reactions = [],
-  addedTags = [],
-  poll,
-  reason,
-  onLike,
-  onConcern,
-  onComment,
-  onSave,
-  onShare,
-  onTagPress,
-  onMore,
-  onReact,
-  onAddTag,
-}: {
+type AnonPostCardProps = {
   post: Post;
   liked?: boolean;
   concerned?: boolean;
@@ -72,7 +54,27 @@ export function AnonPostCard({
   onMore: () => void;
   onReact: (meme: string) => void;
   onAddTag?: (tag: string) => Promise<void> | void;
-}) {
+};
+
+function AnonPostCardInner({
+  post,
+  liked = false,
+  concerned = false,
+  saved = false,
+  reactions = [],
+  addedTags = [],
+  poll,
+  reason,
+  onLike,
+  onConcern,
+  onComment,
+  onSave,
+  onShare,
+  onTagPress,
+  onMore,
+  onReact,
+  onAddTag,
+}: AnonPostCardProps) {
   const { width } = useWindowDimensions();
   const cardWidth = Math.min(width, 720);
   const Heart = Icon.heart;
@@ -491,3 +493,26 @@ export function AnonPostCard({
     </View>
   );
 }
+
+export const AnonPostCard = memo(AnonPostCardInner, (prev, next) => {
+  // Re-render only when something this card actually cares about changed.
+  if (prev.post !== next.post) return false;
+  if (prev.liked !== next.liked) return false;
+  if (prev.concerned !== next.concerned) return false;
+  if (prev.saved !== next.saved) return false;
+  if (prev.reactions !== next.reactions) return false;
+  if (prev.addedTags !== next.addedTags) return false;
+  if (prev.poll !== next.poll) return false;
+  if (prev.reason !== next.reason) return false;
+  // Handler refs are kept stable by the parent (handlersByPostId memoization).
+  if (prev.onLike !== next.onLike) return false;
+  if (prev.onConcern !== next.onConcern) return false;
+  if (prev.onComment !== next.onComment) return false;
+  if (prev.onSave !== next.onSave) return false;
+  if (prev.onShare !== next.onShare) return false;
+  if (prev.onTagPress !== next.onTagPress) return false;
+  if (prev.onMore !== next.onMore) return false;
+  if (prev.onReact !== next.onReact) return false;
+  if (prev.onAddTag !== next.onAddTag) return false;
+  return true; // skip re-render
+});

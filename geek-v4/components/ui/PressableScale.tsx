@@ -50,6 +50,13 @@ export function PressableScale({
 
   // delayPressIn は AnimatedPressable の型に乗ってないのでキャストして渡す
   // (実際は Pressable がサポートしている — OS デフォルトの ~130ms 遅延を消す)
+  //
+  // Note for future maintainers:
+  //   On the web target this prop is essentially a no-op — modern browsers
+  //   already use FastClick semantics (the legacy 300ms touch-delay was removed
+  //   years ago for viewport-meta="width=device-width" pages, which Expo Router
+  //   sets by default). So no additional web-specific handling is needed here;
+  //   the same `delayPressIn: 0` cast is correct on native and harmless on web.
   const extra = { delayPressIn: 0 } as Record<string, unknown>;
 
   return (

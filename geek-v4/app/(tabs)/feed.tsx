@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, RefreshControl } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -91,45 +91,93 @@ export default function FeedScreen() {
     }
   }, [addTag, showToast]);
 
-  const renderItem = useCallback(
-    ({ item }: { item: Post }) => (
-      <AnonPostCard
-        post={item}
-        liked={!!myLikes[item.id]}
-        concerned={!!myConcerns[item.id]}
-        saved={!!mySaves[item.id]}
-        reactions={reactionsByPost[item.id] ?? []}
-        addedTags={addedTagsByPost[item.id] ?? []}
-        poll={polls[item.id]}
-        reason={reasonsMap[item.id]}
-        onLike={() => {
-          void logEvent({ kind: 'post_like', tags: item.tag_names ?? [], post_id: item.id });
-          toggleLike(item.id);
-        }}
-        onConcern={() => {
-          void logEvent({ kind: 'post_concern', tags: item.tag_names ?? [], post_id: item.id });
-          toggleConcern(item.id, !!myConcerns[item.id]);
-        }}
-        onComment={() => {
-          void logEvent({ kind: 'post_view', tags: item.tag_names ?? [], post_id: item.id, dwell_ms: 0 });
-          router.push(`/post/${item.id}` as never);
-        }}
-        onSave={() => {
-          void logEvent({ kind: 'post_save', tags: item.tag_names ?? [], post_id: item.id });
-          toggleSave(item.id);
-        }}
-        onShare={() => share(`Geek の投稿 #${item.tag_names[0] ?? '雑談'}`, `/post/${item.id}`)}
-        onTagPress={(name) => {
+  // Per-post handler cache. Rebuilds when `posts` (or upstream callbacks) change,
+  // but NOT when toggles like myLikes/mySaves/reactions update — so cards whose
+  // observable props didn't change skip re-render thanks to the AnonPostCard memo.
+  const handlersByPostId = useMemo(() => {
+    const dict: Record<string, {
+      onLike: () => void;
+      onConcern: () => void;
+      onComment: () => void;
+      onSave: () => void;
+      onShare: () => void;
+      onTagPress: (tag: string) => void;
+      onMore: () => void;
+      onReact: (meme: string) => void;
+      onAddTag: (tag: string) => Promise<void> | void;
+    }> = {};
+    for (const p of posts) {
+      const id = p.id;
+      const tagNames = p.tag_names ?? [];
+      dict[id] = {
+        onLike: () => {
+          void logEvent({ kind: 'post_like', tags: tagNames, post_id: id });
+          toggleLike(id);
+        },
+        onConcern: () => {
+          void logEvent({ kind: 'post_concern', tags: tagNames, post_id: id });
+          toggleConcern(id, !!myConcerns[id]);
+        },
+        onComment: () => {
+          void logEvent({ kind: 'post_view', tags: tagNames, post_id: id, dwell_ms: 0 });
+          router.push(`/post/${id}` as never);
+        },
+        onSave: () => {
+          void logEvent({ kind: 'post_save', tags: tagNames, post_id: id });
+          toggleSave(id);
+        },
+        onShare: () => share(`Geek の投稿 #${tagNames[0] ?? '雑談'}`, `/post/${id}`),
+        onTagPress: (name: string) => {
           void logEvent({ kind: 'tag_click', tags: [name] });
           router.push(`/tag/${encodeURIComponent(name)}` as never);
-        }}
-        onMore={() => setReportPostId(item.id)}
-        onReact={(meme) => toggleReact(item.id, meme)}
-        onAddTag={(tag) => handleAddTag(item.id, tag)}
-      />
-    ),
-    [router, toggleLike, toggleConcern, toggleSave, toggleReact, share, myLikes, myConcerns, mySaves, reactionsByPost, addedTagsByPost, polls, reasonsMap, handleAddTag],
+        },
+        onMore: () => setReportPostId(id),
+        onReact: (meme: string) => toggleReact(id, meme),
+        onAddTag: (tag: string) => handleAddTag(id, tag),
+      };
+    }
+    return dict;
+  }, [posts, toggleLike, toggleConcern, toggleSave, toggleReact, share, router, handleAddTag, myConcerns]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: Post }) => {
+      const h = handlersByPostId[item.id];
+      if (!h) return null;
+      return (
+        <AnonPostCard
+          post={item}
+          liked={!!myLikes[item.id]}
+          concerned={!!myConcerns[item.id]}
+          saved={!!mySaves[item.id]}
+          reactions={reactionsByPost[item.id] ?? []}
+          addedTags={addedTagsByPost[item.id] ?? []}
+          poll={polls[item.id]}
+          reason={reasonsMap[item.id]}
+          onLike={h.onLike}
+          onConcern={h.onConcern}
+          onComment={h.onComment}
+          onSave={h.onSave}
+          onShare={h.onShare}
+          onTagPress={h.onTagPress}
+          onMore={h.onMore}
+          onReact={h.onReact}
+          onAddTag={h.onAddTag}
+        />
+      );
+    },
+    [handlersByPostId, myLikes, myConcerns, mySaves, reactionsByPost, addedTagsByPost, polls, reasonsMap],
   );
+
+  // Stable header element — recreating the inline <View> each parent render
+  // would break header memoization and force TrendingRow to remount visuals.
+  const ListHeader = useMemo(() => (
+    <View>
+      <TrendingRow />
+      {blockedCount > 0 ? (
+        <BlockedTagBanner count={blockedCount} onPress={() => router.push('/filter' as never)} />
+      ) : null}
+    </View>
+  ), [blockedCount, router]);
 
   const Bell = Icon.bell;
   const Search = Icon.search;
@@ -199,14 +247,7 @@ export default function FeedScreen() {
         renderItem={renderItem}
         keyExtractor={(item) => item.id}
         estimatedItemSize={300}
-        ListHeaderComponent={
-          <View>
-            <TrendingRow />
-            {blockedCount > 0 ? (
-              <BlockedTagBanner count={blockedCount} onPress={() => router.push('/filter' as never)} />
-            ) : null}
-          </View>
-        }
+        ListHeaderComponent={ListHeader}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.accent} />
         }
