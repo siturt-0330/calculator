@@ -16,7 +16,7 @@
 
 [build]
   base    = "geek-v4"
-  command = "bash scripts/netlify-build.sh"
+  command = "npm ci --legacy-peer-deps && npx expo export --platform web --output-dir dist"
   # publish is relative to `base` (Netlify quirk). So with base=geek-v4 and
   # dist created at geek-v4/dist, publish must be just "dist" — NOT "geek-v4/dist"
   # (the latter resolves to geek-v4/geek-v4/dist which doesn't exist).
