@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { View, Text, ScrollView, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -7,7 +7,8 @@ import type { LucideIcon } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { useNotifications } from '@/hooks/useNotifications';
 import { supabase } from '@/lib/supabase';
-import { fetchMyCommunities } from '@/lib/api/communities';
+import { fetchMyCommunities, type Community } from '@/lib/api/communities';
+import { sanitizeUrl } from '@/lib/sanitize';
 import { computeTrustBreakdown } from '@/lib/trust/score';
 import { Avatar } from '@/components/ui/Avatar';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -52,15 +53,13 @@ export default function MypageScreen() {
     enabled: !!user,
   });
 
-  const { data: communityCount = 0 } = useQuery({
-    queryKey: ['mypage-community-count', user?.id],
-    queryFn: async () => {
-      const list = await fetchMyCommunities();
-      return list.length;
-    },
+  const { data: myCommunities = [] } = useQuery<Community[]>({
+    queryKey: ['mypage-my-communities', user?.id],
+    queryFn: fetchMyCommunities,
     enabled: !!user,
-    staleTime: 60 * 1000,
+    staleTime: 60_000,
   });
+  const communityCount = myCommunities.length;
 
   const accountAge = user?.created_at
     ? Math.floor((Date.now() - new Date(user.created_at).getTime()) / (1000 * 60 * 60 * 24))
@@ -180,6 +179,9 @@ export default function MypageScreen() {
             onPress={() => router.push('/corners/calendar' as never)}
           />
         </View>
+
+        {/* ───────── セクション: マイコミュニティ ───────── */}
+        <MyCommunitiesSection communities={myCommunities} />
 
         {/* ───────── セクション: アクティビティ ───────── */}
         <Section title="アクティビティ">
@@ -343,7 +345,7 @@ function Kpi({ value, label }: { value: number; label: string }) {
           lineHeight: 30,
         }}
       >
-        {value.toLocaleString()}
+        {value.toLocaleString('ja-JP')}
       </Text>
       <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5 }]}>{label}</Text>
     </View>
@@ -384,6 +386,130 @@ function PrimaryAction({
     >
       <I size={16} color={iconColor} strokeWidth={2.4} />
       <Text style={[T.smallB, { color: textColor }]}>{label}</Text>
+    </PressableScale>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────
+// マイコミュニティ: 横スクロール — タップで /community/{id}
+// ───────────────────────────────────────────────────────────────
+function MyCommunitiesSection({ communities }: { communities: Community[] }) {
+  const router = useRouter();
+  const empty = communities.length === 0;
+
+  return (
+    <View style={{ marginTop: SP['6'] }}>
+      <Text
+        style={[
+          T.smallB,
+          {
+            color: C.text3,
+            paddingHorizontal: SP['4'],
+            paddingBottom: SP['2'],
+            letterSpacing: 1.2,
+            fontSize: 11,
+          },
+        ]}
+      >
+        {'マイコミュニティ'.toUpperCase()}
+      </Text>
+      {empty ? (
+        <View
+          style={{
+            marginHorizontal: SP['4'],
+            backgroundColor: C.bg2,
+            borderRadius: R.lg,
+            borderWidth: 1,
+            borderColor: C.border,
+            paddingVertical: SP['5'],
+            paddingHorizontal: SP['4'],
+            alignItems: 'center',
+            gap: SP['2'],
+          }}
+        >
+          <Text style={[T.body, { color: C.text2, textAlign: 'center' }]}>
+            まだ参加していません 🎯
+          </Text>
+          <PressableScale
+            onPress={() => router.push('/community/discover' as never)}
+            haptic="confirm"
+            style={{
+              paddingHorizontal: SP['4'],
+              paddingVertical: SP['2'],
+              borderRadius: R.full,
+              backgroundColor: C.accent,
+            }}
+          >
+            <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>
+              コミュニティを探す
+            </Text>
+          </PressableScale>
+        </View>
+      ) : (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: SP['4'], gap: SP['3'] }}
+        >
+          {communities.map((c) => (
+            <CommunityChip key={c.id} community={c} onPress={() => router.push(`/community/${c.id}` as never)} />
+          ))}
+          <PressableScale
+            onPress={() => router.push('/community/discover' as never)}
+            haptic="tap"
+            style={{ alignItems: 'center', gap: 6, width: 64 }}
+          >
+            <View
+              style={{
+                width: 56,
+                height: 56,
+                borderRadius: 28,
+                backgroundColor: C.bg2,
+                borderWidth: 1,
+                borderColor: C.border,
+                borderStyle: 'dashed',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Icon.plus size={22} color={C.text2} strokeWidth={2.2} />
+            </View>
+            <Text style={[T.caption, { color: C.text3, fontSize: 10 }]} numberOfLines={1}>
+              探す
+            </Text>
+          </PressableScale>
+        </ScrollView>
+      )}
+    </View>
+  );
+}
+
+function CommunityChip({ community, onPress }: { community: Community; onPress: () => void }) {
+  const safeIconUrl = community.icon_url ? sanitizeUrl(community.icon_url) : null;
+  return (
+    <PressableScale onPress={onPress} haptic="tap" style={{ alignItems: 'center', gap: 6, width: 64 }}>
+      <View
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          backgroundColor: safeIconUrl ? C.bg3 : community.icon_color,
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
+          borderWidth: 1,
+          borderColor: C.border,
+        }}
+      >
+        {safeIconUrl ? (
+          <Image source={{ uri: safeIconUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+        ) : (
+          <Text style={{ fontSize: 28 }}>{community.icon_emoji}</Text>
+        )}
+      </View>
+      <Text style={[T.caption, { color: C.text2, fontSize: 10 }]} numberOfLines={1}>
+        {community.name}
+      </Text>
     </PressableScale>
   );
 }

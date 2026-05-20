@@ -324,21 +324,34 @@ export default function BBSScreen() {
                 <View style={{ width: 4, backgroundColor: catColor }} />
                 {/* 本体 */}
                 <View style={{ flex: 1, padding: SP['3'], gap: SP['2'] }}>
-                  {/* コミュニティ紐付けバッジ (一般公開 + community_id がある場合) */}
-                  {community && (
+                  {/* コミュニティ紐付けバッジ (一般公開 + community_id がある場合)
+                      ネストされた PressableScale: 単独の tap target。outer の thread row tap
+                      は RN の responder system 上、deepest child が勝つので競合しないが、
+                      web の bubble に備えて stopPropagation も呼ぶ。 */}
+                  {community && item.community_id && (
                     <View style={{ flexDirection: 'row' }}>
-                      <View style={{
-                        flexDirection: 'row', alignItems: 'center', gap: 4,
-                        paddingHorizontal: SP['2'], paddingVertical: 2,
-                        backgroundColor: C.bg3,
-                        borderRadius: R.full,
-                        borderWidth: 1, borderColor: C.border,
-                      }}>
+                      <PressableScale
+                        onPress={(e) => {
+                          // web 環境では synthetic event に stopPropagation が乗る
+                          (e as unknown as { stopPropagation?: () => void }).stopPropagation?.();
+                          router.push(`/community/${item.community_id}` as never);
+                        }}
+                        haptic="select"
+                        scaleValue={0.96}
+                        hitSlop={6}
+                        style={{
+                          flexDirection: 'row', alignItems: 'center', gap: 4,
+                          paddingHorizontal: SP['2'], paddingVertical: 2,
+                          backgroundColor: C.bg3,
+                          borderRadius: R.full,
+                          borderWidth: 1, borderColor: C.border,
+                        }}
+                      >
                         <Text style={{ fontSize: 10 }}>{community.icon_emoji || '🏠'}</Text>
                         <Text style={[T.caption, { color: C.text2, fontSize: 10, fontWeight: '600' }]} numberOfLines={1}>
                           #{community.name}
                         </Text>
-                      </View>
+                      </PressableScale>
                     </View>
                   )}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>

@@ -36,7 +36,7 @@ import type { Post } from '@/types/models';
 export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { posts, reasonsMap, loading, refreshing, refresh, loadMore } = useFeed();
+  const { posts, reasonsMap, communitiesByPost, loading, refreshing, refresh, loadMore } = useFeed();
   const { blockedCount } = useTagFilter();
   const likedTags = useTagFilterStore((s) => s.likedTags);
   const scope = useFeedStore((s) => s.scope);
@@ -105,6 +105,7 @@ export default function FeedScreen() {
       onMore: () => void;
       onReact: (meme: string) => void;
       onAddTag: (tag: string) => Promise<void> | void;
+      onCommunityPress: (id: string) => void;
     }> = {};
     for (const p of posts) {
       const id = p.id;
@@ -134,6 +135,9 @@ export default function FeedScreen() {
         onMore: () => setReportPostId(id),
         onReact: (meme: string) => toggleReact(id, meme),
         onAddTag: (tag: string) => handleAddTag(id, tag),
+        onCommunityPress: (communityId: string) => {
+          router.push(`/community/${communityId}` as never);
+        },
       };
     }
     return dict;
@@ -153,6 +157,7 @@ export default function FeedScreen() {
           addedTags={addedTagsByPost[item.id] ?? []}
           poll={polls[item.id]}
           reason={reasonsMap[item.id]}
+          communities={communitiesByPost[item.id] ?? []}
           onLike={h.onLike}
           onConcern={h.onConcern}
           onComment={h.onComment}
@@ -162,10 +167,11 @@ export default function FeedScreen() {
           onMore={h.onMore}
           onReact={h.onReact}
           onAddTag={h.onAddTag}
+          onCommunityPress={h.onCommunityPress}
         />
       );
     },
-    [handlersByPostId, myLikes, myConcerns, mySaves, reactionsByPost, addedTagsByPost, polls, reasonsMap],
+    [handlersByPostId, myLikes, myConcerns, mySaves, reactionsByPost, addedTagsByPost, polls, reasonsMap, communitiesByPost],
   );
 
   // Stable header element — recreating the inline <View> each parent render

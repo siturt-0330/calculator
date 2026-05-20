@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchPosts } from '@/lib/api/posts';
+import { fetchPosts, fetchCommunitiesForPosts } from '@/lib/api/posts';
 import { supabase } from '@/lib/supabase';
 import { attachChannel } from '@/lib/realtime';
 import { useTagFilterStore } from '@/stores/tagFilterStore';
@@ -51,6 +51,17 @@ export function useFeed() {
   });
 
   const rawPosts: Post[] = data?.pages.flatMap((p) => p.posts) ?? [];
+
+  // 各 post に紐付いた community のメタを 1 リクエストで取得 (FlashList N+1 回避)
+  // postIds が空のうちは fetch しない (enabled で抑止)
+  const postIds = useMemo(() => rawPosts.map((p) => p.id), [rawPosts]);
+  const communitiesQ = useReactQuery({
+    queryKey: ['feed-post-communities', postIds],
+    queryFn: () => fetchCommunitiesForPosts(postIds),
+    enabled: postIds.length > 0,
+    staleTime: 60_000,
+  });
+  const communitiesByPost = communitiesQ.data ?? {};
 
   // Smart Rank: 全 sort モードで個人化スコアを適用 (mode により primary 軸の重みを切替)
   const aggregate = useSearchSignalsStore((s) => s.aggregate);
@@ -193,5 +204,5 @@ export function useFeed() {
     };
   }, [qc]);
 
-  return { posts, reasonsMap, loading: isLoading, refreshing, refresh, loadMore };
+  return { posts, reasonsMap, communitiesByPost, loading: isLoading, refreshing, refresh, loadMore };
 }

@@ -728,6 +728,38 @@ function ThreadsTab({ communityId }: { communityId: string }) {
                     </Text>
                   </View>
                 )}
+                {/* 公開範囲バッジ — community_only か public かを一目で */}
+                {t.visibility === 'community_only' ? (
+                  <View
+                    style={{
+                      paddingHorizontal: 6,
+                      paddingVertical: 2,
+                      backgroundColor: C.amber + '20',
+                      borderRadius: R.full,
+                      borderWidth: 1,
+                      borderColor: C.amber + '60',
+                    }}
+                  >
+                    <Text style={{ fontSize: 10, color: C.amber, fontWeight: '700' }}>
+                      🔒 限定
+                    </Text>
+                  </View>
+                ) : t.visibility === 'public' ? (
+                  <View
+                    style={{
+                      paddingHorizontal: 6,
+                      paddingVertical: 2,
+                      backgroundColor: C.bg3,
+                      borderRadius: R.full,
+                      borderWidth: 1,
+                      borderColor: C.border,
+                    }}
+                  >
+                    <Text style={{ fontSize: 10, color: C.text2, fontWeight: '700' }}>
+                      🌐 公開
+                    </Text>
+                  </View>
+                ) : null}
                 <View style={{ flex: 1 }} />
                 <Text style={[T.caption, { color: C.text3, fontSize: 11 }]}>
                   {formatRelative(t.last_reply_at ?? t.created_at)}

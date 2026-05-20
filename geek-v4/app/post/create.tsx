@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView, Alert, Image } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAutoTagSuggest } from '@/hooks/useAutoTagSuggest';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { Icon } from '@/constants/icons';
@@ -20,7 +20,7 @@ import { TopBar } from '@/components/nav/TopBar';
 import { useToastStore } from '@/stores/toastStore';
 import { hap } from '@/design/haptics';
 import { createPost, type PostVisibility } from '@/lib/api/posts';
-import { discoverCommunities, type Community } from '@/lib/api/communities';
+import { discoverCommunities, fetchCommunity, type Community } from '@/lib/api/communities';
 import { useDebounce } from '@/hooks/useDebounce';
 import { checkContent } from '@/lib/ai/checkContent';
 import { C, R, SP } from '@/design/tokens';
@@ -44,6 +44,7 @@ const VISIBILITY_OPTIONS: VisibilityOption[] = [
 
 export default function CreatePost() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ community_id?: string }>();
   const insets = useSafeAreaInsets();
   const { show } = useToastStore();
 
@@ -96,6 +97,30 @@ export default function CreatePost() {
       cancelled = true;
     };
   }, [debouncedCommunityQuery, showCommunityPicker]);
+
+  // ?community_id=X 付きで遷移してきた場合は、対応するコミュニティを自動選択し
+  // visibility を 'community_public' に切り替える (community 詳細の「投稿」タブ等から).
+  // mount-once だけ走らせる — 後から手動で外せるよう pre-fill 後は触らない.
+  useEffect(() => {
+    const cid = typeof params.community_id === 'string' ? params.community_id : undefined;
+    if (!cid) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const community = await fetchCommunity(cid);
+        if (cancelled || !community) return;
+        setVisibility('community_public');
+        setSelectedCommunityIds([community.id]);
+        setSelectedCommunities([community]);
+      } catch (e) {
+        console.warn('[post/create] failed to load community from deep link:', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // CW (content warning)
   type CWCat = 'none' | 'spoiler' | 'nsfw' | 'violence' | 'sensitive';
