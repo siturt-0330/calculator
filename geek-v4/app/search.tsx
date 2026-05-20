@@ -1020,7 +1020,13 @@ export default function SearchScreen() {
                         ))}
                       </View>
                     )}
-                    {reasons.length > 0 && <ReasonBadges reasons={reasons} max={4} />}
+                    {/* Reason badges: visible タグ pill と重複する "#xxx" 系は出さない (視覚的重複の解消)
+                        留めるのは positive (完全一致 / 高信頼) / personal / trend / correction 系 */}
+                    {reasons.length > 0 && (() => {
+                      const visibleTags = new Set(p.tag_names.map((t) => `#${t}`));
+                      const filtered = reasons.filter((r) => !visibleTags.has(r));
+                      return filtered.length > 0 ? <ReasonBadges reasons={filtered} max={4} /> : null;
+                    })()}
                   </PressableScale>
                 ))}
               </View>
