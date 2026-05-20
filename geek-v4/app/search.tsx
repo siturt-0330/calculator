@@ -611,49 +611,67 @@ export default function SearchScreen() {
           </View>
         )}
 
-        {/* オートコンプリート候補 */}
+        {/* オートコンプリート候補 — YouTube 風: 🕐 履歴 / 🔍 新規 + ↖ 入力欄に取り込む */}
         {autocomplete.length > 0 && q.length > 0 && (
           <View style={{
             backgroundColor: C.bg2,
             borderRadius: R.md,
             borderWidth: 1,
             borderColor: C.border,
-            paddingVertical: 4,
             overflow: 'hidden',
           }}>
-            {/* ヘッダで「クリックすると検索 + タグ画面へ」を明示 */}
-            <View style={{ paddingHorizontal: SP['3'], paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: C.border }}>
-              <Text style={[T.caption, { color: C.text3 }]}>候補のタグ — タップで検索</Text>
-            </View>
-            {autocomplete.map((name, i) => (
-              <PressableScale
-                key={name}
-                onPress={() => {
-                  recordClick(q.trim(), name);
-                  setQ(name);
-                  setDebounced(name);
-                  addHist(name);
-                }}
-                haptic="select"
-                hitSlop={4}
-                accessibilityLabel={`タグ ${name} で検索`}
-                accessibilityRole="button"
-                style={{
-                  flexDirection: 'row', alignItems: 'center', gap: SP['2'],
-                  paddingHorizontal: SP['3'], paddingVertical: SP['2'],
-                  backgroundColor: i === 0 ? C.accentBg + '40' : 'transparent',
-                }}
-              >
-                <Icon.search size={14} color={i === 0 ? C.accent : C.text3} strokeWidth={2.2} />
-                <Text style={[T.smallM, { color: C.text, flex: 1 }]}>
-                  #{name}
-                </Text>
-                {i === 0 && (
-                  <Text style={[T.caption, { color: C.accent, fontWeight: '700' }]}>Enter</Text>
-                )}
-                <Icon.chevronR size={14} color={C.text3} strokeWidth={2.2} />
-              </PressableScale>
-            ))}
+            {autocomplete.map((name) => {
+              // 過去に検索 / クリックされていれば「履歴」アイコン (🕐) で示す
+              const inHistory = history.includes(name);
+              const clickedBefore = (clickStats[q.trim()] ?? {})[name] !== undefined && clickStats[q.trim()]![name]! > 0;
+              const seen = inHistory || clickedBefore;
+              return (
+                <View
+                  key={name}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    paddingHorizontal: SP['3'],
+                    paddingVertical: SP['2'],
+                    borderBottomWidth: 1,
+                    borderBottomColor: C.border + '40',
+                  }}
+                >
+                  {/* 左: 履歴 or 検索アイコン */}
+                  {seen ? (
+                    <Icon.clock size={16} color={C.text3} strokeWidth={2} />
+                  ) : (
+                    <Icon.search size={16} color={C.text3} strokeWidth={2} />
+                  )}
+                  {/* 中: タグ名 — タップで実検索 */}
+                  <PressableScale
+                    onPress={() => {
+                      recordClick(q.trim(), name);
+                      setQ(name);
+                      setDebounced(name);
+                      addHist(name);
+                    }}
+                    haptic="select"
+                    hitSlop={4}
+                    accessibilityLabel={`${name} で検索`}
+                    accessibilityRole="button"
+                    style={{ flex: 1, paddingHorizontal: SP['2'], paddingVertical: 4 }}
+                  >
+                    <Text style={[T.smallM, { color: C.text }]}>#{name}</Text>
+                  </PressableScale>
+                  {/* 右: ↖ 入力欄に取り込む (検索はせず、編集を続ける) */}
+                  <PressableScale
+                    onPress={() => setQ(name)}
+                    haptic="tap"
+                    hitSlop={8}
+                    accessibilityLabel={`${name} を入力欄に取り込む`}
+                    style={{ padding: 4 }}
+                  >
+                    <Icon.arrowUL size={18} color={C.text3} strokeWidth={2} />
+                  </PressableScale>
+                </View>
+              );
+            })}
           </View>
         )}
 
@@ -933,11 +951,7 @@ export default function SearchScreen() {
                         {tg.member_count.toLocaleString('ja-JP')} メンバー · {tg.post_count.toLocaleString('ja-JP')} 投稿
                       </Text>
                     </View>
-                    {reasons.length > 0 && (
-                      <View style={{ maxWidth: 110 }}>
-                        <ReasonBadges reasons={reasons} max={2} size="xs" />
-                      </View>
-                    )}
+                    <ReasonBadges reasons={reasons} />
                   </PressableScale>
                 ))}
               </View>
@@ -1020,13 +1034,10 @@ export default function SearchScreen() {
                         ))}
                       </View>
                     )}
-                    {/* Reason badges: visible タグ pill と重複する "#xxx" 系は出さない (視覚的重複の解消)
-                        留めるのは positive (完全一致 / 高信頼) / personal / trend / correction 系 */}
-                    {reasons.length > 0 && (() => {
-                      const visibleTags = new Set(p.tag_names.map((t) => `#${t}`));
-                      const filtered = reasons.filter((r) => !visibleTags.has(r));
-                      return filtered.length > 0 ? <ReasonBadges reasons={filtered} max={4} /> : null;
-                    })()}
+                    {/* 履歴シグナル: 過去にクリック / 検索したことがあれば 1 つだけ
+                        subtle なバッジで「履歴あり」とだけ伝える (色付き種類別バッジは廃止) */}
+                    <ReasonBadges reasons={reasons} />
+                    {/* デバッグ用 (開発者のみ) - reasons の中身を console に */}
                   </PressableScale>
                 ))}
               </View>
