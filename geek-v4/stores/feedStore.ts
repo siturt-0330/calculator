@@ -15,7 +15,7 @@ type FeedState = {
 const KEY = 'geek:feed';
 
 export const useFeedStore = create<FeedState>((set, get) => ({
-  sort: 'hot',
+  sort: 'for-you',
   scope: 'open',
   setSort: (sort) => {
     set({ sort });
@@ -30,7 +30,7 @@ export const useFeedStore = create<FeedState>((set, get) => ({
       const raw = await AsyncStorage.getItem(KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as { sort?: SortMode; scope?: FeedScope };
-        set({ sort: parsed.sort ?? 'hot', scope: parsed.scope ?? 'open' });
+        set({ sort: parsed.sort ?? 'for-you', scope: parsed.scope ?? 'open' });
       }
     } catch {}
   },

@@ -10,6 +10,8 @@ import { useSearchClickStore } from '@/stores/searchClickStore';
 import { smartSort } from '@/lib/feed/smartRank';
 import type { Post } from '@/types/models';
 import { useQuery as useReactQuery } from '@tanstack/react-query';
+import { getEvents, computeProfile, rankFeed } from '@/lib/personalize';
+import type { FeedEvent, RankableCandidate, RankReason } from '@/lib/personalize';
 
 // React Query の persist cache は JSON 経由なので Set を直接保存できない (空の {} になる)。
 // 配列で返して使い側で Set に包む。
@@ -67,11 +69,64 @@ export function useFeed() {
   });
   const trendingTags = useMemo(() => new Set(trendingQ.data ?? []), [trendingQ.data]);
 
-  const posts: Post[] = useMemo(() => {
+  // ----------------------------------------------------------------
+  // For-You: 端末ローカルのイベントログから interest profile を組んで再ランク
+  // ----------------------------------------------------------------
+  const eventsQ = useReactQuery<FeedEvent[]>({
+    queryKey: ['feed-events'],
+    queryFn: () => getEvents(),
+    staleTime: 30_000,
+    enabled: sort === 'for-you',
+  });
+  const events = useMemo(() => eventsQ.data ?? [], [eventsQ.data]);
+  const profile = useMemo(() => computeProfile(events), [events]);
+
+  const { posts, reasonsMap }: { posts: Post[]; reasonsMap: Record<string, RankReason> } = useMemo(() => {
+    if (sort === 'for-you') {
+      // For-You は personalize 基盤で再ランク。blocked タグはクライアント側で先に除去。
+      const blockedSet = new Set(blockedTags);
+      const visiblePosts = rawPosts.filter((p) => {
+        const tags = p.tag_names ?? [];
+        for (const t of tags) if (blockedSet.has(t)) return false;
+        return true;
+      });
+
+      const candidates: RankableCandidate[] = visiblePosts.map((p) => ({
+        id: p.id,
+        tags: p.tag_names ?? [],
+        created_at: p.created_at,
+        like_count: p.likes_count ?? 0,
+        reply_count: p.comments_count ?? 0,
+        trust_score_at_post: p.trust_score_at_post ?? null,
+      }));
+      const ranked = rankFeed(candidates, profile, {
+        now: Date.now(),
+        trendingTags,
+        targetCount: visiblePosts.length,
+      });
+      const byId: Record<string, Post> = {};
+      for (const p of visiblePosts) byId[p.id] = p;
+      const ordered: Post[] = [];
+      const reasons: Record<string, RankReason> = {};
+      const pickedIds = new Set<string>();
+      for (const s of ranked) {
+        const p = byId[s.id];
+        if (!p) continue;
+        ordered.push(p);
+        reasons[s.id] = s.reason;
+        pickedIds.add(s.id);
+      }
+      // ランカーが拾い切れなかった残りは末尾に追加 (見落としを避ける)
+      for (const p of visiblePosts) {
+        if (!pickedIds.has(p.id)) ordered.push(p);
+      }
+      return { posts: ordered, reasonsMap: reasons };
+    }
+
     const likedSet = new Set(likedTags);
     const blockedSet = new Set(blockedTags);
     // 全モードで個人化を適用。mode 引数で primary 軸 (hot=バランス / new=鮮度 / top=反応量) を切り替える。
-    return smartSort(rawPosts, {
+    const sorted = smartSort(rawPosts, {
       likedTags: likedSet,
       blockedTags: blockedSet,
       tagAffinity: signals.tagFreq,
@@ -80,8 +135,9 @@ export function useFeed() {
       trendingTags,
       ctrBoosts,
     }, sort);
+    return { posts: sorted, reasonsMap: {} };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawPosts, sort, likedTags, blockedTags, signals.tagFreq, signals.recentTags, trendingTags, ctrBoosts]);
+  }, [rawPosts, sort, likedTags, blockedTags, signals.tagFreq, signals.recentTags, trendingTags, ctrBoosts, profile]);
 
   const loadMore = useCallback(() => {
     if (hasNextPage && !isFetching) fetchNextPage();
@@ -134,5 +190,5 @@ export function useFeed() {
     };
   }, [qc]);
 
-  return { posts, loading: isLoading, refreshing, refresh, loadMore };
+  return { posts, reasonsMap, loading: isLoading, refreshing, refresh, loadMore };
 }

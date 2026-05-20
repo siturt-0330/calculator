@@ -18,6 +18,7 @@ import { deepNormalize } from '@/lib/search/tokenize';
 import { findClosestK } from '@/lib/search/typoCorrect';
 import { textRelevance } from '@/lib/utils/searchAlgo';
 import { useSearchClickStore } from '@/stores/searchClickStore';
+import { logEvent } from '@/lib/personalize';
 
 type SortMode = 'recent' | 'popular' | 'relevance';
 
@@ -266,6 +267,12 @@ export default function BBSScreen() {
               <PressableScale
                 onPress={() => {
                   if (debounced) recordCtr(debounced, item.id);
+                  void logEvent({
+                    kind: 'thread_open',
+                    tags: [],
+                    category: item.category ?? undefined,
+                    thread_id: item.id,
+                  });
                   router.push(`/bbs/${item.id}` as never);
                 }}
                 haptic="tap"

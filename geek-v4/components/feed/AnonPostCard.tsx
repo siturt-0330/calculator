@@ -44,6 +44,7 @@ export function AnonPostCard({
   reactions = [],
   addedTags = [],
   poll,
+  reason,
   onLike,
   onConcern,
   onComment,
@@ -61,6 +62,7 @@ export function AnonPostCard({
   reactions?: ReactionAgg[];
   addedTags?: string[];
   poll?: Poll;
+  reason?: { text: string; kind: string };
   onLike: () => void;
   onConcern: () => void;
   onComment: () => void;
@@ -79,6 +81,7 @@ export function AnonPostCard({
   const Share = Icon.share;
   const More = Icon.more;
   const Warn = Icon.warn;
+  const Sparkles = Icon.sparkles;
 
   // ミームリアクション (props 経由で DB から取得済み)
   const [memePickerOpen, setMemePickerOpen] = useState(false);
@@ -188,6 +191,27 @@ export function AnonPostCard({
           <More size={18} color={C.text3} strokeWidth={2.2} />
         </PressableScale>
       </View>
+
+      {/* レコメンド理由チップ (for-you 並び替え時のみ) */}
+      {reason && (
+        <View style={{
+          marginHorizontal: SP['4'],
+          marginBottom: 4,
+          alignSelf: 'flex-start',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 4,
+          paddingHorizontal: 8,
+          paddingVertical: 3,
+          borderRadius: R.full,
+          backgroundColor: 'rgba(124,106,247,0.12)',
+        }}>
+          <Sparkles size={11} color={C.accent} strokeWidth={2.2} />
+          <Text style={{ fontSize: 11, color: C.accent, fontWeight: '600' }}>
+            {reason.text}
+          </Text>
+        </View>
+      )}
 
       {/* CW (content warning) ベール */}
       {isCwHidden && (
