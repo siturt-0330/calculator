@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { View, Text, FlatList } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useDebounce } from '@/hooks/useDebounce';
-import { C, SP } from '@/design/tokens';
+import { findClosestK } from '@/lib/search/typoCorrect';
+import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { SearchBar } from '@/components/ui/SearchBar';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -17,7 +18,8 @@ export default function TagSearchScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
-  const debouncedQuery = useDebounce(query, 300);
+  // 短いクエリは 100ms / 長いクエリは 150ms (体感応答性 up)
+  const debouncedQuery = useDebounce(query, query.trim().length <= 2 ? 100 : 150);
   const BackIcon = Icon.arrowL;
   const HashIcon = Icon.hash;
 
@@ -34,6 +36,26 @@ export default function TagSearchScreen() {
     },
     staleTime: 60_000,
   });
+
+  // 0 件ヒット時のもしかして候補 — 既知タグ名群からタイポ補正
+  // ヒットがある時の負担を避けるため、tags が 0 件の時だけ広めに取得
+  const { data: allTagNames = [] } = useQuery({
+    queryKey: ['all-tag-names-typo'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('tags')
+        .select('name')
+        .order('post_count', { ascending: false })
+        .limit(500);
+      return ((data ?? []) as { name: string }[]).map((t) => t.name);
+    },
+    enabled: tags.length === 0 && debouncedQuery.trim().length >= 2,
+    staleTime: 5 * 60_000,
+  });
+  const didYouMean = useMemo(() => {
+    if (tags.length > 0 || debouncedQuery.trim().length < 2) return [] as string[];
+    return findClosestK(debouncedQuery.trim(), allTagNames, 5, 0.5);
+  }, [tags.length, debouncedQuery, allTagNames]);
 
   const renderTag = ({ item }: { item: Tag }) => (
     <PressableScale
@@ -52,7 +74,7 @@ export default function TagSearchScreen() {
       <HashIcon size={18} color={C.accent} strokeWidth={2.2} />
       <View style={{ flex: 1 }}>
         <Text style={[T.bodyM, { color: C.text }]}>{item.name}</Text>
-        <Text style={[T.small, { color: C.text3 }]}>{item.post_count} 投稿</Text>
+        <Text style={[T.small, { color: C.text3 }]}>{item.post_count.toLocaleString('ja-JP')} 投稿</Text>
       </View>
     </PressableScale>
   );
@@ -94,10 +116,34 @@ export default function TagSearchScreen() {
           keyExtractor={(item) => item.id}
           renderItem={renderTag}
           ListEmptyComponent={
-            <View style={{ padding: SP['12'], alignItems: 'center' }}>
-              <Text style={[T.body, { color: C.text3 }]}>
+            <View style={{ padding: SP['12'], alignItems: 'center', gap: SP['3'] }}>
+              <Text style={[T.body, { color: C.text3, textAlign: 'center' }]}>
                 {debouncedQuery ? `「${debouncedQuery}」に一致するタグがありません` : 'タグがありません'}
               </Text>
+              {didYouMean.length > 0 && (
+                <View style={{ alignItems: 'center', gap: 6 }}>
+                  <Text style={[T.small, { color: C.text3 }]}>もしかして:</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+                    {didYouMean.map((s) => (
+                      <PressableScale
+                        key={s}
+                        onPress={() => setQuery(s)}
+                        haptic="select"
+                        style={{
+                          paddingHorizontal: SP['3'], paddingVertical: 4,
+                          backgroundColor: C.accentBg,
+                          borderRadius: R.full,
+                          borderWidth: 1, borderColor: C.accentSoft,
+                        }}
+                      >
+                        <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>
+                          #{s}
+                        </Text>
+                      </PressableScale>
+                    ))}
+                  </View>
+                </View>
+              )}
             </View>
           }
         />

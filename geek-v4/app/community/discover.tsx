@@ -32,11 +32,14 @@ export default function DiscoverCommunitiesScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // query が変わってから 350ms 後に検索
+  // query が変わってから debounce 後に検索
+  // 短いクエリ (≤2 文字) は 100ms — autocomplete を爆速に
   useEffect(() => {
+    const q = query.trim();
+    const delay = q.length <= 2 ? 100 : 150;
     const t = setTimeout(() => {
       void load();
-    }, 350);
+    }, delay);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
@@ -179,7 +182,7 @@ export default function DiscoverCommunitiesScreen() {
                   </Text>
                 )}
                 <Text style={[T.caption, { color: C.text3, marginTop: 2 }]}>
-                  メンバー {c.member_count} 人 · 投稿 {c.post_count} 件
+                  メンバー {c.member_count.toLocaleString('ja-JP')} 人 · 投稿 {c.post_count.toLocaleString('ja-JP')} 件
                 </Text>
               </View>
               <Icon.chevronR size={20} color={C.text3} strokeWidth={2} />

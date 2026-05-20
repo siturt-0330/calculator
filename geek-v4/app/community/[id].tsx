@@ -363,7 +363,7 @@ export default function CommunityDetailScreen() {
             {community.name}
           </Text>
           <Text style={[T.caption, { color: C.text3 }]}>
-            メンバー {community.member_count} 人 · 投稿 {community.post_count} 件
+            メンバー {community.member_count.toLocaleString('ja-JP')} 人 · 投稿 {community.post_count.toLocaleString('ja-JP')} 件
           </Text>
           {canEditIcon && (
             <Text style={[T.caption, { color: C.text3, marginTop: -4 }]}>

@@ -46,7 +46,7 @@ export default function CreateCommunityScreen() {
   const [tags, setTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // 類似名チェック (300ms debounce)
+  // 類似名チェック (短いクエリ 150ms / 通常 200ms debounce)
   const [similar, setSimilar] = useState<Community[]>([]);
   const [checking, setChecking] = useState(false);
   const lastQueryRef = useRef('');
@@ -58,6 +58,7 @@ export default function CreateCommunityScreen() {
     }
     lastQueryRef.current = q;
     setChecking(true);
+    const delay = q.length <= 3 ? 150 : 200;
     const t = setTimeout(async () => {
       const results = await searchByName(q, 5);
       // race condition 防止 — 最後のクエリと一致しているかチェック
@@ -65,7 +66,7 @@ export default function CreateCommunityScreen() {
         setSimilar(results);
         setChecking(false);
       }
-    }, 300);
+    }, delay);
     return () => clearTimeout(t);
   }, [name]);
 
@@ -385,7 +386,7 @@ export default function CreateCommunityScreen() {
                       {c.name}
                     </Text>
                     <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
-                      メンバー {c.member_count} 人
+                      メンバー {c.member_count.toLocaleString('ja-JP')} 人
                     </Text>
                   </View>
                   <Icon.chevronR size={16} color={C.text3} strokeWidth={2} />
