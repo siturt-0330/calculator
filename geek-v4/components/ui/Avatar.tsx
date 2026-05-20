@@ -1,7 +1,13 @@
 import { View, Text } from 'react-native';
 import { Image } from 'expo-image';
+import Animated, { ZoomIn } from 'react-native-reanimated';
 import { C, R } from '@/design/tokens';
 import { T } from '@/design/typography';
+
+// Threshold above which we add an entrance pop animation.
+// Smaller avatars (list rows, post cards) skip the animation to keep
+// large lists smooth — only "hero" avatars (mypage, profile) animate.
+const POP_THRESHOLD = 56;
 
 export function Avatar({
   size = 36,
@@ -18,8 +24,11 @@ export function Avatar({
   emoji?: string | null;
   anonymous?: boolean;
 }) {
+  const shouldPop = size >= POP_THRESHOLD;
+
+  let inner: React.ReactNode;
   if (anonymous) {
-    return (
+    inner = (
       <View
         style={{
           width: size,
@@ -35,9 +44,8 @@ export function Avatar({
         <Text style={[T.smallM, { color: C.text3, fontSize: size * 0.3 }]}>匿</Text>
       </View>
     );
-  }
-  if (emoji) {
-    return (
+  } else if (emoji) {
+    inner = (
       <View
         style={{
           width: size,
@@ -51,9 +59,8 @@ export function Avatar({
         <Text style={{ fontSize: size * 0.55 }}>{emoji}</Text>
       </View>
     );
-  }
-  if (uri) {
-    return (
+  } else if (uri) {
+    inner = (
       <Image
         source={{ uri }}
         style={{ width: size, height: size, borderRadius: R.full, backgroundColor: C.bg3 }}
@@ -61,20 +68,28 @@ export function Avatar({
         cachePolicy="memory-disk"
       />
     );
+  } else {
+    const initial = name?.charAt(0).toUpperCase() ?? '?';
+    inner = (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: R.full,
+          backgroundColor: color ?? C.accent,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Text style={[T.bodyB, { color: '#fff', fontSize: size * 0.4 }]}>{initial}</Text>
+      </View>
+    );
   }
-  const initial = name?.charAt(0).toUpperCase() ?? '?';
+
+  if (!shouldPop) return <>{inner}</>;
   return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        borderRadius: R.full,
-        backgroundColor: color ?? C.accent,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <Text style={[T.bodyB, { color: '#fff', fontSize: size * 0.4 }]}>{initial}</Text>
-    </View>
+    <Animated.View entering={ZoomIn.duration(180).springify().damping(14)}>
+      {inner}
+    </Animated.View>
   );
 }

@@ -5,6 +5,7 @@
 // - スタイルは他の secondary ボタンと揃える (glass / border)。
 
 import { View, Text, ActivityIndicator } from 'react-native';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
@@ -48,7 +49,9 @@ export function LoadMoreButton({ onPress, loading = false, hasMore }: Props) {
         }}
       >
         {loading ? (
-          <ActivityIndicator size="small" color={C.text2} />
+          <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
+            <ActivityIndicator size="small" color={C.text2} />
+          </Animated.View>
         ) : null}
         <Text style={[T.bodyM, { color: C.text }]}>さらに読み込む</Text>
       </PressableScale>
