@@ -88,7 +88,6 @@ function AnonPostCardInner({
   const Share = Icon.share;
   const More = Icon.more;
   const Warn = Icon.warn;
-  const Sparkles = Icon.sparkles;
 
   // ミームリアクション (props 経由で DB から取得済み)
   const [memePickerOpen, setMemePickerOpen] = useState(false);
@@ -147,26 +146,29 @@ function AnonPostCardInner({
     }
   };
 
+  // Twitter/Threads-style full-width row: no outer rounded card, just a
+  // hairline divider between posts. Looks more "premium feed" than a
+  // floating-card grid on tall screens.
   return (
     <View style={{
-      backgroundColor: C.bg2,
-      marginHorizontal: SP['3'],
-      marginBottom: SP['4'],
-      borderRadius: R.lg,
-      borderWidth: 1,
-      borderColor: lowTrust ? C.amber + '88' : C.border,
-      overflow: 'hidden',
+      backgroundColor: C.bg,
+      borderBottomWidth: 1,
+      borderBottomColor: lowTrust ? C.amber + '44' : C.divider,
+      paddingHorizontal: SP['4'],
+      paddingVertical: SP['4'],
       maxWidth: 720,
       alignSelf: 'center',
       width: '100%',
-      ...SHADOW.press,
     }}>
       {/* 低信頼バナー */}
       {lowTrust && (
         <View style={{
           flexDirection: 'row', alignItems: 'center', gap: SP['2'],
           paddingHorizontal: SP['3'], paddingVertical: SP['2'],
-          backgroundColor: C.amberBg, borderBottomWidth: 1, borderBottomColor: C.amber + '44',
+          backgroundColor: C.amberBg,
+          borderRadius: R.md,
+          borderWidth: 1, borderColor: C.amber + '44',
+          marginBottom: SP['2'],
         }}>
           <Warn size={14} color={C.amber} strokeWidth={2.2} />
           <Text style={[T.caption, { color: C.amber, flex: 1 }]}>
@@ -175,59 +177,32 @@ function AnonPostCardInner({
         </View>
       )}
 
-      {/* ヘッダー */}
+      {/* ヘッダー: アバター / 匿 · 時刻 / ⋯ */}
       <View style={{
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: SP['4'],
-        paddingTop: SP['3'],
-        paddingBottom: SP['2'],
         gap: SP['2'],
       }}>
-        <Avatar size={24} anonymous />
-        <TrustBadge score={post.trust_score_at_post} />
-        <PressableScale onPress={() => tagNames[0] && onTagPress(tagNames[0])} haptic="tap">
-          <Text style={[T.smallM, { color: C.accent }]}>
-            {tagNames[0] ? `#${tagNames[0]}` : '#雑談'}
-          </Text>
-        </PressableScale>
-        <PostKindBadge kind={post.kind ?? 'opinion'} size="sm" />
-        <Text style={[T.caption, { color: C.text3 }]}>· {formatRelative(post.created_at)}</Text>
-        <View style={{ flex: 1 }} />
-        <PressableScale onPress={onMore} style={{ padding: SP['1'] }}>
-          <More size={18} color={C.text3} strokeWidth={2.2} />
+        <Avatar size={36} anonymous />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, flexWrap: 'wrap' }}>
+          <Text style={[T.smallM, { color: C.text }]}>匿</Text>
+          <TrustBadge score={post.trust_score_at_post} />
+          <Text style={[T.small, { color: C.text3 }]}>· {formatRelative(post.created_at)}</Text>
+          <PostKindBadge kind={post.kind ?? 'opinion'} size="sm" />
+        </View>
+        <PressableScale onPress={onMore} hitSlop={8} style={{ padding: 2 }}>
+          <More size={20} color={C.text3} strokeWidth={2.2} />
         </PressableScale>
       </View>
 
-      {/* レコメンド理由チップ (for-you 並び替え時のみ) */}
-      {reason && (
-        <View style={{
-          marginHorizontal: SP['4'],
-          marginBottom: 4,
-          alignSelf: 'flex-start',
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 4,
-          paddingHorizontal: 8,
-          paddingVertical: 3,
-          borderRadius: R.full,
-          backgroundColor: 'rgba(124,106,247,0.12)',
-        }}>
-          <Sparkles size={11} color={C.accent} strokeWidth={2.2} />
-          <Text style={{ fontSize: 11, color: C.accent, fontWeight: '600' }}>
-            {reason.text}
-          </Text>
-        </View>
-      )}
-
-      {/* コミュニティバッジ (post が attach されているコミュニティ一覧) */}
+      {/* コミュニティピル — レコメンド理由 chip は UI 雑味の元なので非表示
+          (ランキングロジックは裏で動き続ける、表示するのが分かりづらいだけ) */}
       {communities.length > 0 && (
         <View style={{
           flexDirection: 'row',
           flexWrap: 'wrap',
           gap: 6,
-          marginHorizontal: SP['4'],
-          marginBottom: 6,
+          marginTop: SP['2'],
         }}>
           {communities.map((c) => (
             <PressableScale
@@ -240,6 +215,7 @@ function AnonPostCardInner({
                 gap: 4,
                 paddingHorizontal: 8,
                 paddingVertical: 3,
+                height: 22,
                 borderRadius: R.full,
                 backgroundColor: C.bg3,
                 borderWidth: 1,

@@ -165,6 +165,8 @@ export async function createCommunity(input: {
 }): Promise<{ data: Community | null; error: string | null }> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'ログインしてください' };
+  // セッションが古いと auth.uid() が PostgREST 側で null になる事故を防ぐ
+  await supabase.auth.refreshSession().catch(() => {});
 
   // 名前 / 説明を sanitize (HTML / script / onerror= / javascript: / 制御文字を除去)
   const safeName = sanitizeContent(input.name, { maxLength: 40 });
@@ -187,7 +189,11 @@ export async function createCommunity(input: {
     .single();
 
   if (error || !data) {
-    return { data: null, error: error?.message ?? 'コミュニティ作成に失敗しました' };
+    const msg = error?.message ?? '';
+    if (msg.includes('row-level security') || msg.includes('行レベル')) {
+      return { data: null, error: 'ログイン状態が古くなっています。一度ログアウトして入り直すか、しばらく経ってから再試行してください。' };
+    }
+    return { data: null, error: msg || 'コミュニティ作成に失敗しました' };
   }
 
   // タグを登録 (失敗しても community 自体は出来ているのでログだけ)

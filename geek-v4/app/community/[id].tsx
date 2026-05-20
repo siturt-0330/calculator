@@ -305,20 +305,43 @@ export default function CommunityDetailScreen() {
             paddingTop: SP['4'],
             paddingBottom: SP['4'],
             gap: SP['3'],
-            borderBottomWidth: 1,
-            borderBottomColor: C.border,
           }}
         >
           <View style={{ alignItems: 'center', gap: SP['3'] }}>
-            <CommunityAvatar
-              icon_url={community.icon_url}
-              icon_emoji={community.icon_emoji}
-              icon_color={community.icon_color}
-              size={community.icon_url ? 120 : 96}
-            />
-            <Text style={[T.h2, { color: C.text, textAlign: 'center', fontSize: 24 }]} numberOfLines={2}>
-              {community.name}
-            </Text>
+            <View
+              style={{
+                borderRadius: 9999,
+                borderWidth: 2,
+                borderColor: 'rgba(255,255,255,0.06)',
+                padding: 2,
+              }}
+            >
+              <CommunityAvatar
+                icon_url={community.icon_url}
+                icon_emoji={community.icon_emoji}
+                icon_color={community.icon_color}
+                size={community.icon_url ? 104 : 96}
+              />
+            </View>
+            <View style={{ alignItems: 'center', gap: SP['2'] }}>
+              <Text style={[T.h2, { color: C.text, textAlign: 'center', fontSize: 24 }]} numberOfLines={2}>
+                {community.name}
+              </Text>
+              {community.is_member && (
+                <View
+                  style={{
+                    paddingHorizontal: SP['2'],
+                    paddingVertical: 3,
+                    backgroundColor: C.accentBg,
+                    borderRadius: R.full,
+                  }}
+                >
+                  <Text style={{ color: C.accent, fontSize: 11, fontWeight: '700' }}>
+                    ✓ 参加中
+                  </Text>
+                </View>
+              )}
+            </View>
             <Text style={[T.caption, { color: C.text3 }]}>@{handle}</Text>
             <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
               コミュニティ登録数 {community.member_count.toLocaleString('ja-JP')} 人 · 投稿 {community.post_count.toLocaleString('ja-JP')} 本
@@ -370,6 +393,9 @@ export default function CommunityDetailScreen() {
           />
         </View>
 
+        {/* Subtle separator before tabs */}
+        <View style={{ height: 1, backgroundColor: C.divider }} />
+
         {/* ============================================================
             Tab bar
             ============================================================ */}
@@ -391,8 +417,6 @@ export default function CommunityDetailScreen() {
                   flex: 1,
                   alignItems: 'center',
                   paddingVertical: SP['3'],
-                  borderBottomWidth: 2,
-                  borderBottomColor: active ? C.accent : 'transparent',
                 }}
               >
                 <Text
@@ -400,13 +424,24 @@ export default function CommunityDetailScreen() {
                     T.smallM,
                     {
                       color: active ? C.text : C.text2,
-                      fontWeight: active ? '700' : '500',
+                      fontWeight: active ? '700' : '600',
                     },
                   ]}
                   numberOfLines={1}
                 >
                   {t.label}
                 </Text>
+                {active && (
+                  <View
+                    style={{
+                      height: 3,
+                      width: '60%',
+                      backgroundColor: C.accent,
+                      borderRadius: 1.5,
+                      marginTop: SP['2'],
+                    }}
+                  />
+                )}
               </Pressable>
             );
           })}
@@ -608,7 +643,18 @@ function FeedTab({
         </View>
       ) : posts.length === 0 ? (
         <View style={{ paddingVertical: SP['10'], alignItems: 'center', gap: SP['3'] }}>
-          <Icon.comment size={40} color={C.text3} strokeWidth={1.6} />
+          <View
+            style={{
+              width: 60,
+              height: 60,
+              borderRadius: 30,
+              backgroundColor: C.bg3,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Icon.community size={28} color={C.text3} strokeWidth={1.8} />
+          </View>
           <Text style={[T.body, { color: C.text2 }]}>まだ投稿がありません</Text>
           <PressableScale
             onPress={() => router.push(`/post/create?community_id=${encodeURIComponent(communityId)}` as never)}
@@ -682,7 +728,18 @@ function ThreadsTab({ communityId }: { communityId: string }) {
   if (threads.length === 0) {
     return (
       <View style={{ paddingVertical: SP['10'], paddingHorizontal: SP['4'], alignItems: 'center', gap: SP['3'] }}>
-        <Icon.bbs size={40} color={C.text3} strokeWidth={1.6} />
+        <View
+          style={{
+            width: 60,
+            height: 60,
+            borderRadius: 30,
+            backgroundColor: C.bg3,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Icon.sparkles size={28} color={C.text3} strokeWidth={1.8} />
+        </View>
         <Text style={[T.body, { color: C.text2, textAlign: 'center' }]}>スレッドがありません</Text>
         <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
           「投稿」タブからスレッドを立てよう
@@ -749,13 +806,13 @@ function ThreadsTab({ communityId }: { communityId: string }) {
                     style={{
                       paddingHorizontal: 6,
                       paddingVertical: 2,
-                      backgroundColor: C.bg3,
+                      backgroundColor: 'transparent',
                       borderRadius: R.full,
                       borderWidth: 1,
                       borderColor: C.border,
                     }}
                   >
-                    <Text style={{ fontSize: 10, color: C.text2, fontWeight: '700' }}>
+                    <Text style={{ fontSize: 10, color: C.text3, fontWeight: '700' }}>
                       🌐 公開
                     </Text>
                   </View>
