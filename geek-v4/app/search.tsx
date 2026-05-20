@@ -2,8 +2,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { View, Text, ScrollView, ActivityIndicator, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { attachChannel } from '@/lib/realtime';
+import { fetchTrendingTags } from '@/lib/api/trending';
 import { TopBar } from '@/components/nav/TopBar';
 import { BackButton } from '@/components/nav/BackButton';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -72,7 +74,7 @@ async function fetchPosts(queries: string[], tagFilters: string[]): Promise<Post
     for (const p of (data ?? []) as PostDoc[]) map.set(p.id, p);
   }
   // タグ overlap 検索
-  const tagQueries = [...queries, ...tagFilters].filter(Boolean).slice(0, 8);
+  const tagQueries = [...queries, ...tagFilters].filter(Boolean).slice(0, 12);
   if (tagQueries.length > 0) {
     const { data } = await supabase
       .from('posts').select(SELECT).overlaps('tag_names', tagQueries)
@@ -110,10 +112,14 @@ const SORT_LABELS: Record<SortMode, { label: string; emoji: string }> = {
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const qc = useQueryClient();
   const [q, setQ] = useState('');
   const [debounced, setDebounced] = useState('');
   const [category, setCategory] = useState<Category>('all');
   const [sortMode, setSortMode] = useState<SortMode>('relevance');
+  // Infinite scroll prep — cursor / nextOffset for future paged fetches.
+  // Reset on every new debounced query.
+  const [, setNextOffset] = useState<number>(0);
 
   const { nodes, hydrate: hydrateGraph } = useTagGraphStore();
   const lang = useLanguageStore((s) => s.lang);
@@ -257,6 +263,28 @@ export default function SearchScreen() {
     enabled: debounced.length > 0 && parsedQuery.keywords.length > 0,
   });
 
+  // 加速度ベースのトレンドタグ取得 (scorePost の trendingTags ctx 用)
+  const trendingAccel = useQuery({
+    queryKey: ['search-trending-accel'],
+    queryFn: () => fetchTrendingTags(20),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // isSpike === true OR acceleration > 0 のタグ名 Set
+  const trendingTagSet = useMemo(() => {
+    const s = new Set<string>();
+    for (const t of trendingAccel.data ?? []) {
+      if (t.isSpike || t.acceleration > 0) s.add(t.name);
+    }
+    return s;
+  }, [trendingAccel.data]);
+
+  // Cold-start: 好きなタグ < 3 かつ クエリ履歴 < 5
+  const coldStartMode = useMemo(
+    () => likedTags.length < 3 && history.length < 5,
+    [likedTags, history],
+  );
+
   // パーソナライゼーション + スコアリング
   const ctx = useMemo(() => ({
     likedTags: likedSet,
@@ -264,7 +292,9 @@ export default function SearchScreen() {
     recentQueries: history,
     tagAffinity: signals.tagFreq,
     recentTags: signals.recentTags,
-  }), [likedSet, blockedSet, history, signals]);
+    trendingTags: trendingTagSet,
+    coldStartMode,
+  }), [likedSet, blockedSet, history, signals, trendingTagSet, coldStartMode]);
 
   const rankedPosts = useMemo(() => {
     const scored = (postsQ.data ?? [])
@@ -351,6 +381,49 @@ export default function SearchScreen() {
   const commit = () => {
     if (debounced) addHist(debounced);
   };
+
+  // Reset pagination cursor whenever the active query changes.
+  useEffect(() => {
+    setNextOffset(0);
+  }, [debounced]);
+
+  // Realtime: subscribe to new posts whose tag_names intersect the current query.
+  // Cap = 1 channel per screen — we detach the previous channel before attaching the next.
+  useEffect(() => {
+    if (!debounced) return;
+    // 比較用に小文字化したキーワード/タグ set
+    const matchTerms = new Set<string>();
+    for (const k of parsedQuery.keywords) if (k) matchTerms.add(k.toLowerCase());
+    for (const t of parsedQuery.tags) if (t) matchTerms.add(t.toLowerCase());
+    if (matchTerms.size === 0) return;
+
+    // Channel 名は query で一意化 (前 channel は cleanup で detach されるので常に最大1)
+    const safeKey = debounced.slice(0, 64).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const channelName = `search-live:${safeKey}`;
+
+    const detach = attachChannel(channelName, (ch) =>
+      ch.on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'posts' },
+        (payload) => {
+          const row = payload.new as { tag_names?: string[] | null } | undefined;
+          const tags = row?.tag_names ?? [];
+          let hit = false;
+          for (const tag of tags) {
+            if (!tag) continue;
+            if (matchTerms.has(tag.toLowerCase())) { hit = true; break; }
+          }
+          if (hit) {
+            // 現在の検索キャッシュを無効化 — 次回 render で再フェッチされる
+            qc.invalidateQueries({ queryKey: ['search-posts-v3'] });
+          }
+        },
+      ),
+    );
+    return () => {
+      detach();
+    };
+  }, [debounced, parsedQuery, qc]);
 
   // ハイライト用のターム
   const highlightTerms = useMemo(
