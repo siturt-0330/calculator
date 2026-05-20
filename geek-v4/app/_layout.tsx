@@ -126,9 +126,18 @@ export default function RootLayout() {
     if (!ready || segments.length < 1) return;
     const inAuth = segments[0] === '(auth)';
     const inOnboarding = segments[0] === 'onboarding';
+    // パスワードリセット中は session が確立されていてもリセット画面に留まる必要がある。
+    // (recovery トークンの exchangeCodeForSession → updateUser → signOut → login へ
+    //  飛ぶフローを完走させるため、auto-redirect で feed に攫われないようガード。)
+    // typedRoutes の string literal union に reset-password がまだ含まれない
+    // (cache 生成タイミング) 場合があるので string cast で比較。
+    const inResetPassword = (segments[1] as string | undefined) === 'reset-password';
 
     if (!user) {
       if (!inAuth) router.replace('/(auth)/login');
+    } else if (inResetPassword) {
+      // ログイン状態でも reset-password 画面はそのまま表示する
+      return;
     } else if (!user.onboarded) {
       if (!inOnboarding) router.replace('/onboarding');
     } else {
@@ -206,6 +215,9 @@ export default function RootLayout() {
                   <Stack.Screen name="community/[id]" />
                   <Stack.Screen name="community/create" />
                   <Stack.Screen name="community/discover" />
+                  {/* 隠し開発者 admin panel — /admin URL 直打ちのみで到達。
+                      app 内ナビゲーションには一切リンクを生やさない。 */}
+                  <Stack.Screen name="admin" />
                   <Stack.Screen
                     name="image-cropper"
                     options={{

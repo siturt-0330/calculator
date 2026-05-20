@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react';
-import { View, Text, useWindowDimensions, Linking, Platform, ActivityIndicator, Image as RNImage } from 'react-native';
+import { View, Text, Linking, Platform, ActivityIndicator, Image as RNImage } from 'react-native';
 import { Icon } from '@/constants/icons';
 import type { Post } from '@/types/models';
 import { useLanguageStore } from '@/stores/languageStore';
@@ -80,8 +80,6 @@ function AnonPostCardInner({
   onAddTag,
   onCommunityPress,
 }: AnonPostCardProps) {
-  const { width } = useWindowDimensions();
-  const cardWidth = Math.min(width, 720);
   const Heart = Icon.heart;
   const Comment = Icon.comment;
   const Save = Icon.save;
@@ -197,7 +195,8 @@ function AnonPostCardInner({
       borderBottomWidth: 1,
       borderBottomColor: lowTrust ? C.amber + '44' : C.divider,
       paddingHorizontal: SP['4'],
-      paddingVertical: SP['4'],
+      paddingTop: SP['3'],
+      paddingBottom: SP['3'],
       maxWidth: 720,
       alignSelf: 'center',
       width: '100%',
@@ -278,7 +277,6 @@ function AnonPostCardInner({
           onPress={() => setCwRevealed(true)}
           haptic="tap"
           style={{
-            marginHorizontal: SP['4'],
             marginTop: SP['2'],
             paddingHorizontal: SP['4'],
             paddingVertical: SP['4'],
@@ -307,10 +305,11 @@ function AnonPostCardInner({
 
       {/* メディア — 自然なアスペクト比で表示 (square crop しない)
           tall portrait (5:6 等) や wide landscape も切れず全体が見える
-          複数枚は縦に積む (各画像が自身のアスペクト比を保持) */}
+          複数枚は縦に積む (各画像が自身のアスペクト比を保持)
+          外側カードの paddingHorizontal に揃え、premium feel の rounded corners */}
       {hasMedia && !isCwHidden && (
         <DoubleTapHeart onDoubleTap={onLike}>
-          <View style={{ gap: 4 }}>
+          <View style={{ gap: SP['2'], marginTop: SP['2'] }}>
             {mediaUrls.map((url, i) => {
               // ロード中は 4:3 (1.333) で仮置き → 解決後に真のアスペクト比へ差し替え
               // (1:1 だとレイアウトが大きく跳ねるので 4:3 が無難)
@@ -320,9 +319,11 @@ function AnonPostCardInner({
                 <View
                   key={url}
                   style={{
-                    width: cardWidth - 2,
+                    width: '100%',
                     aspectRatio: aspect,
                     backgroundColor: C.bg2,
+                    borderRadius: R.md,
+                    overflow: 'hidden',
                   }}
                 >
                   <ProgressiveImage
@@ -330,7 +331,7 @@ function AnonPostCardInner({
                     blurhash={blurhash}
                     width="100%"
                     height="100%"
-                    radius={0}
+                    radius={R.md}
                     lazy
                   />
                 </View>
@@ -340,7 +341,7 @@ function AnonPostCardInner({
         </DoubleTapHeart>
       )}
 
-      {/* 本文 */}
+      {/* 本文 — 外側カードの paddingHorizontal を流用 (double-padding 回避) */}
       {post.content && !isCwHidden ? (
         <View>
           <PressableScale
@@ -348,7 +349,7 @@ function AnonPostCardInner({
             onLongPress={useQuickReaction ? () => setMemePickerOpen(true) : undefined}
             haptic="tap"
           >
-            <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'], paddingBottom: SP['1'] }}>
+            <View style={{ paddingTop: SP['2'], paddingBottom: SP['1'] }}>
               {useMarkdown ? (
                 <MarkdownText
                   text={displayContent}
@@ -378,7 +379,7 @@ function AnonPostCardInner({
           </PressableScale>
           {/* 翻訳ボタン (lang ≠ ja) */}
           {canTranslate && (
-            <View style={{ flexDirection: 'row', paddingHorizontal: SP['4'], gap: SP['2'], paddingBottom: SP['1'] }}>
+            <View style={{ flexDirection: 'row', gap: SP['2'], paddingBottom: SP['1'] }}>
               {translated ? (
                 <PressableScale
                   onPress={() => setShowOriginal((v) => !v)}
@@ -430,7 +431,7 @@ function AnonPostCardInner({
           <LinkPreviewCard url={post.source_url} />
         ) : (
           <PressableScale onPress={openSource} haptic="tap" style={{
-            marginHorizontal: SP['4'], marginTop: SP['2'],
+            marginTop: SP['2'],
             paddingHorizontal: SP['3'], paddingVertical: SP['2'],
             backgroundColor: C.bg3, borderRadius: R.md,
             borderWidth: 1, borderColor: C.border,
@@ -451,7 +452,6 @@ function AnonPostCardInner({
       <View style={{
         flexDirection: 'row',
         flexWrap: 'wrap',
-        paddingHorizontal: SP['4'],
         paddingTop: SP['2'],
         gap: SP['2'],
         alignItems: 'center',
@@ -471,9 +471,8 @@ function AnonPostCardInner({
       <View style={{
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: SP['4'],
-        paddingTop: SP['3'],
-        paddingBottom: SP['3'],
+        paddingTop: SP['2'],
+        paddingBottom: 0,
         gap: SP['4'],
       }}>
         <PressableScale onPress={onLike} haptic="pop" style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}>
@@ -520,7 +519,7 @@ function AnonPostCardInner({
       {reactionsList.length > 0 && (
         <View style={{
           flexDirection: 'row', flexWrap: 'wrap', gap: 4,
-          paddingHorizontal: SP['4'], paddingBottom: SP['3'],
+          paddingTop: SP['2'],
         }}>
           {reactionsList.slice(0, 8).map((r) => (
             <PressableScale

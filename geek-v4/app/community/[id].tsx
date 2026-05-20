@@ -464,11 +464,9 @@ export default function CommunityDetailScreen() {
           </View>
         </View>
 
-        {/* Hairline separator before tabs */}
-        <View style={{ height: 1, backgroundColor: C.divider }} />
-
         {/* ============================================================
-            Tab bar
+            Tab bar — bottom border 区切り + active underline
+            (hairline 区切り line は border で兼ねる)
             ============================================================ */}
         <View
           style={{
@@ -487,7 +485,8 @@ export default function CommunityDetailScreen() {
                 style={{
                   flex: 1,
                   alignItems: 'center',
-                  paddingVertical: SP['3'],
+                  paddingTop: SP['3'],
+                  paddingBottom: 0,
                 }}
               >
                 <Text
@@ -502,17 +501,15 @@ export default function CommunityDetailScreen() {
                 >
                   {t.label}
                 </Text>
-                {active && (
-                  <View
-                    style={{
-                      height: 3,
-                      width: '60%',
-                      backgroundColor: C.accent,
-                      borderRadius: 1.5,
-                      marginTop: SP['2'],
-                    }}
-                  />
-                )}
+                <View
+                  style={{
+                    height: 3,
+                    width: '60%',
+                    backgroundColor: active ? C.accent : 'transparent',
+                    borderRadius: 1.5,
+                    marginTop: SP['2'],
+                  }}
+                />
               </Pressable>
             );
           })}
@@ -666,12 +663,13 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
 
   return (
     <View style={{ paddingVertical: SP['3'] }}>
-      {/* Filter chips */}
+      {/* Filter chips — paddingTop for breathing room from tab bar */}
       <View
         style={{
           flexDirection: 'row',
           gap: SP['2'],
           paddingHorizontal: SP['4'],
+          paddingTop: SP['3'],
           paddingBottom: SP['3'],
         }}
       >
