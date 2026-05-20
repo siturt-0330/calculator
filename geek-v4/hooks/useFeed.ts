@@ -50,13 +50,21 @@ export function useFeed() {
     staleTime: 30_000,
   });
 
-  const rawPosts: Post[] = data?.pages.flatMap((p) => p.posts) ?? [];
+  // data.pages は React Query が変更時のみ新参照を返すが、flatMap は毎回新配列を作る。
+  // 中身 (post 配列) が同じなら同じ参照を保ちたいので、pages 参照を deps にした useMemo で安定化。
+  // これで下流の useMemo (smartSort, postIds 等) が無駄に再計算されない。
+  const rawPosts: Post[] = useMemo(
+    () => data?.pages.flatMap((p) => p.posts) ?? [],
+    [data?.pages],
+  );
 
   // 各 post に紐付いた community のメタを 1 リクエストで取得 (FlashList N+1 回避)
   // postIds が空のうちは fetch しない (enabled で抑止)
-  const postIds = useMemo(() => rawPosts.map((p) => p.id), [rawPosts]);
+  // ID リストの中身が変わらない render では同じ参照を保つ (hash で安定化)
+  const postIdsHash = rawPosts.map((p) => p.id).join('|');
+  const postIds = useMemo(() => rawPosts.map((p) => p.id), [postIdsHash]); // eslint-disable-line react-hooks/exhaustive-deps
   const communitiesQ = useReactQuery({
-    queryKey: ['feed-post-communities', postIds],
+    queryKey: ['feed-post-communities', postIdsHash],
     queryFn: () => fetchCommunitiesForPosts(postIds),
     enabled: postIds.length > 0,
     staleTime: 60_000,
