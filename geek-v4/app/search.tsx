@@ -93,7 +93,21 @@ async function fetchBBS(q: string): Promise<BBSResult[]> {
     .ilike('title', `%${q}%`)
     .order('last_reply_at', { ascending: false, nullsFirst: false })
     .limit(30);
-  return (data ?? []) as BBSResult[];
+  const rows = (data ?? []) as BBSResult[];
+  // 同タイトル + 同カテゴリの重複を dedupe — seed data や bot クローンのスレッドが
+  // 何個も並ぶのを防ぐ
+  const seen = new Map<string, BBSResult>();
+  for (const r of rows) {
+    const key = `${(r.title || '').trim().toLowerCase()}|${r.category}`;
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, r);
+    } else {
+      // 返信数が多い方を残す (より「活発な方」)
+      if ((r.replies_count ?? 0) > (existing.replies_count ?? 0)) seen.set(key, r);
+    }
+  }
+  return [...seen.values()];
 }
 
 const CATEGORY_LABELS: Record<Category, { label: string; emoji: string }> = {
@@ -304,7 +318,26 @@ export default function SearchScreen() {
     if (sortMode === 'newest') scored.sort((a, b) => new Date(b.item.created_at).getTime() - new Date(a.item.created_at).getTime());
     else if (sortMode === 'popular') scored.sort((a, b) => (b.item.likes_count + b.item.comments_count) - (a.item.likes_count + a.item.comments_count));
     else scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, 50);
+
+    // 内容ベースの dedupe — 同じ content + 同じ tag セットの重複投稿を 1 つに
+    // (seed data 由来の同文重複 / botクローン投稿対策)
+    // 上位スコアを残す方針なので、ソート後に dedupe する
+    const seen = new Map<string, typeof scored[0]>();
+    for (const r of scored) {
+      // 内容の最初の 80 文字 + tags の sorted hash で de-dup key を作る
+      const contentKey = normalize(r.item.content.slice(0, 80));
+      const tagKey = (r.item.tag_names ?? []).slice().sort().join(',');
+      const key = `${contentKey}|${tagKey}`;
+      if (!seen.has(key)) seen.set(key, r);
+      else {
+        // 既存より新しいなら入れ替え (new sort 時の挙動を尊重)
+        const existing = seen.get(key)!;
+        if (sortMode === 'newest' && new Date(r.item.created_at).getTime() > new Date(existing.item.created_at).getTime()) {
+          seen.set(key, r);
+        }
+      }
+    }
+    return [...seen.values()].slice(0, 50);
   }, [postsQ.data, allVariantQueries, expandedTagSet, ctx, sortMode]);
 
   const rankedTags = useMemo(() => {
@@ -753,7 +786,7 @@ export default function SearchScreen() {
                   >
                     <Text style={[T.smallM, { color: C.text }]}>
                       #{tg.name}
-                      <Text style={[T.caption, { color: C.text3 }]}> · {tg.member_count}</Text>
+                      <Text style={[T.caption, { color: C.text3 }]}> · {tg.member_count.toLocaleString('ja-JP')}</Text>
                     </Text>
                   </PressableScale>
                 ))}
@@ -855,7 +888,7 @@ export default function SearchScreen() {
                     <View style={{ flex: 1 }}>
                       <HighlightedText text={`#${tg.name}`} terms={highlightTerms} style={T.bodyMd} />
                       <Text style={[T.caption, { color: C.text3 }]}>
-                        {tg.member_count}メンバー · {tg.post_count}投稿
+                        {tg.member_count.toLocaleString('ja-JP')} メンバー · {tg.post_count.toLocaleString('ja-JP')} 投稿
                       </Text>
                     </View>
                     {reasons.length > 0 && (
@@ -900,7 +933,7 @@ export default function SearchScreen() {
                       </View>
                     </View>
                     <Text style={[T.caption, { color: C.text3 }]}>
-                      {t.category} · {t.replies_count}返信 · {formatRelative(t.created_at)}
+                      {t.category} · {t.replies_count.toLocaleString('ja-JP')} 返信 · {formatRelative(t.created_at)}
                     </Text>
                   </PressableScale>
                 ))}
@@ -942,7 +975,7 @@ export default function SearchScreen() {
                     />
                     {p.tag_names.length > 0 && (
                       <View style={{ flexDirection: 'row', gap: SP['1'], flexWrap: 'wrap' }}>
-                        {p.tag_names.map((tg) => (
+                        {Array.from(new Set(p.tag_names)).map((tg) => (
                           <Text key={tg} style={[T.caption, { color: highlightTerms.some((h) => normalize(tg).includes(normalize(h))) ? C.accentLight : C.accent, fontWeight: highlightTerms.some((h) => normalize(tg).includes(normalize(h))) ? '700' : '400' }]}>
                             #{tg}
                           </Text>

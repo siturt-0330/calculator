@@ -205,7 +205,7 @@ export default function PostDetailScreen() {
             </View>
             <Text style={[T.body, { color: C.text, lineHeight: 24 }]}>{post.content}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'], alignItems: 'center' }}>
-              {post.tag_names.map((tag) => (
+              {Array.from(new Set(post.tag_names)).map((tag) => (
                 <TagPill key={tag} name={tag} state="normal" onPress={() => router.push(`/tag/${encodeURIComponent(tag)}` as never)} />
               ))}
               {addedTags.map((t) => (

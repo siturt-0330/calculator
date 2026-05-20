@@ -118,7 +118,7 @@ export function AnonPostCard({
   const isShowingTranslation = autoTranslate && translated && !showOriginal;
   // データ欠落でクラッシュしないよう全フィールドを安全化
   const mediaUrls = post.media_urls ?? [];
-  const tagNames = post.tag_names ?? [];
+  const tagNames = Array.from(new Set(post.tag_names ?? []));
   const likesCount = post.likes_count ?? 0;
   const commentsCount = post.comments_count ?? 0;
   const concernCount = post.concern_count ?? 0;
