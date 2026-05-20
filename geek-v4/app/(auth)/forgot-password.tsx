@@ -10,9 +10,25 @@ import { supabase } from '@/lib/supabase';
 import { useToastStore } from '@/stores/toastStore';
 import { Icon } from '@/constants/icons';
 
+// パスワードリセット完了画面の URL を組み立てる。
+//   - Web: 現在の origin + /reset-password (Netlify SPA fallback で OK)
+//   - Native: scheme://reset-password — Supabase ダッシュボードの
+//     Authentication → URL Configuration → Redirect URLs に登録が必要。
+//
+// 重要: ここの URL が Supabase ダッシュボードの "Redirect URLs" に登録されて
+// いないと、メール内のリンクは無効化される。
+function buildResetRedirectUrl(): string {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return `${window.location.origin}/reset-password`;
+  }
+  // Native: app.json の "scheme": "geek" を使う
+  return 'geek://reset-password';
+}
+
 export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
   const { show } = useToastStore();
   const insets = useSafeAreaInsets();
   const MailIcon = Icon.at;
@@ -25,12 +41,14 @@ export default function ForgotPasswordScreen() {
     }
     if (loading) return;
     setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(e);
+    const redirectTo = buildResetRedirectUrl();
+    const { error } = await supabase.auth.resetPasswordForEmail(e, { redirectTo });
     setLoading(false);
     if (error) {
       show('送信に失敗しました。時間をおいて再度お試しください。', 'error');
     } else {
       // セキュリティ上、メールが登録されているかは伝えない
+      setSent(true);
       show('もしそのメールが登録済みなら、リセットメールが届きます。', 'success');
     }
   };
@@ -59,7 +77,10 @@ export default function ForgotPasswordScreen() {
           label="メールアドレス"
           icon={MailIcon}
           value={email}
-          onChangeText={setEmail}
+          onChangeText={(t) => {
+            setEmail(t);
+            if (sent) setSent(false);
+          }}
           placeholder="you@example.com"
           keyboardType="email-address"
           autoCapitalize="none"
@@ -68,7 +89,13 @@ export default function ForgotPasswordScreen() {
           keyboardAppearance="dark"
           selectionColor={C.accent}
         />
-        <Button label="送信" onPress={handleReset} loading={loading} />
+        <Button label={sent ? '再送信' : '送信'} onPress={handleReset} loading={loading} />
+        {sent && (
+          <Text style={[T.small, { color: C.text3, textAlign: 'center', lineHeight: 18 }]}>
+            メールが届かない場合は迷惑メールフォルダもご確認ください。{'\n'}
+            リンクは 1 時間で期限切れになります。
+          </Text>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
