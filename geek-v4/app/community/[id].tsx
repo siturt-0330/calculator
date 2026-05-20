@@ -1,47 +1,91 @@
-import { View, Text, ScrollView, RefreshControl, KeyboardAvoidingView, Platform, Image, Pressable, ActivityIndicator } from 'react-native';
-import { useState, useEffect, useCallback } from 'react';
+// ============================================================
+// Community detail — YouTube channel-style layout
+// ============================================================
+// 5 tabs:
+//   ホーム  → みんなの投稿集 (AnonPostCard feed of community posts)
+//   動画    → 掲示板         (BBS threads for this community)
+//   ショート → 聖地           (community spots — list, map later)
+//   ライブ  → カレンダー     (community events grouped by month)
+//   投稿    → /post/create   (routes; immediately resets to feed)
+// ============================================================
+
+import {
+  View,
+  Text,
+  ScrollView,
+  RefreshControl,
+  Image,
+  Pressable,
+  FlatList,
+  type ListRenderItem,
+} from 'react-native';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as ImagePicker from 'expo-image-picker';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
-import { Input } from '@/components/ui/Input';
-import { Button } from '@/components/ui/Button';
+import { Spinner } from '@/components/ui/Spinner';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { BackButton } from '@/components/nav/BackButton';
 import { Icon } from '@/constants/icons';
+import { AnonPostCard } from '@/components/feed/AnonPostCard';
 import {
   fetchCommunity,
-  fetchCommunityPosts,
   joinCommunity,
   requestJoinCommunity,
   leaveCommunity,
-  createCommunityPost,
-  updateCommunity,
-  uploadCommunityIcon,
+  fetchCommunitySpots,
+  fetchCommunityEvents,
   type CommunityWithMembership,
-  type CommunityPostWithCommunity,
+  type CommunitySpot,
+  type CommunityEvent,
 } from '@/lib/api/communities';
-import { useAuthStore } from '@/stores/authStore';
+import { fetchCommunityPosts } from '@/lib/api/posts';
+import { fetchCommunityThreads } from '@/lib/api/bbs';
 import { useToastStore } from '@/stores/toastStore';
+import { useLike, useLikes } from '@/hooks/useLike';
+import { useConcern, useConcerns } from '@/hooks/useConcern';
+import { useSave, useSaves } from '@/hooks/useSave';
+import { useShare } from '@/hooks/useShare';
+import { useReactions, useReactionToggle } from '@/hooks/useReactions';
+import { useAddedTags, useAddTag } from '@/hooks/useAddedTags';
+import { usePolls } from '@/hooks/usePolls';
 import { sanitizeContent, sanitizeUrl } from '@/lib/sanitize';
-import { ObsidianSaveButton } from '@/components/ui/ObsidianSaveButton';
-import { communityPostToObsidianNote, communityToObsidianNote } from '@/hooks/useObsidian';
+import { formatRelative } from '@/lib/utils/date';
+import type { Post, BBSThread } from '@/types/models';
 
-function timeAgo(iso: string): string {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return '';
-  const diff = Math.max(0, Date.now() - t) / 1000;
-  if (diff < 60) return 'たった今';
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 時間前`;
-  if (diff < 7 * 86400) return `${Math.floor(diff / 86400)} 日前`;
-  return new Date(iso).toLocaleDateString('ja-JP');
+// ============================================================
+// Types
+// ============================================================
+type TabKey = 'feed' | 'threads' | 'spots' | 'events' | 'compose';
+type FeedSort = 'new' | 'top' | 'old';
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: 'feed', label: 'みんなの投稿集' },
+  { key: 'threads', label: '掲示板' },
+  { key: 'spots', label: '聖地' },
+  { key: 'events', label: 'カレンダー' },
+  { key: 'compose', label: '投稿' },
+];
+
+const CATEGORY_COLORS: Record<string, string> = {
+  '雑談': '#22D3A4', 'アニメ': '#FF6B7A', 'ゲーム': '#7CB1FF',
+  'マンガ': '#F472B6', '音楽': '#FCD34D', 'アイドル': '#FF8C30',
+  'Vtuber': '#A78BFA', '推し活': '#EC4899', 'グルメ': '#84CC16',
+  'コスプレ': '#06B6D4', 'ニュース': '#94A3B8',
+};
+
+// ============================================================
+// Helpers
+// ============================================================
+function deriveHandle(community: CommunityWithMembership): string {
+  // ASCII 英数字に絞り込めるならそれを優先 — 残らなければ id 先頭 8 文字を fallback
+  const ascii = community.name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  if (ascii.length >= 2) return ascii.slice(0, 24);
+  return community.id.slice(0, 8);
 }
 
-import { prepareImageUpload } from '@/lib/image';
-
-// Avatar component — image_url 優先、なければ emoji フォールバック
 function CommunityAvatar({
   icon_url,
   icon_emoji,
@@ -53,7 +97,6 @@ function CommunityAvatar({
   icon_color: string;
   size: number;
 }) {
-  // icon_url を sanitize — http/https 以外を弾く
   const safeIconUrl = icon_url ? sanitizeUrl(icon_url) : null;
   return (
     <View
@@ -76,52 +119,65 @@ function CommunityAvatar({
   );
 }
 
+// ============================================================
+// Main screen
+// ============================================================
 export default function CommunityDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams();
   const id = typeof params.id === 'string' ? params.id : '';
-  const { user } = useAuthStore();
   const { show } = useToastStore();
+  const qc = useQueryClient();
 
-  const [community, setCommunity] = useState<CommunityWithMembership | null>(null);
-  const [posts, setPosts] = useState<CommunityPostWithCommunity[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [postBody, setPostBody] = useState('');
-  const [posting, setPosting] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabKey>('feed');
+  const [feedSort, setFeedSort] = useState<FeedSort>('new');
+  const [descExpanded, setDescExpanded] = useState(false);
   const [joining, setJoining] = useState(false);
-  const [iconUploading, setIconUploading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async () => {
-    if (!id) return;
-    const [c, p] = await Promise.all([fetchCommunity(id), fetchCommunityPosts(id, 40)]);
-    setCommunity(c);
-    setPosts(p);
-  }, [id]);
+  // -----------------------------------------------------------
+  // Community core fetch (header)
+  // -----------------------------------------------------------
+  const { data: community, isLoading: communityLoading, refetch: refetchCommunity } = useQuery({
+    queryKey: ['community', id],
+    queryFn: () => fetchCommunity(id),
+    enabled: id.length > 0,
+    staleTime: 30_000,
+  });
 
+  // -----------------------------------------------------------
+  // Tab "compose" → route to post create + reset
+  // -----------------------------------------------------------
   useEffect(() => {
-    setLoading(true);
-    load().finally(() => setLoading(false));
-  }, [load]);
+    if (activeTab !== 'compose') return;
+    router.push(`/post/create?community_id=${encodeURIComponent(id)}` as never);
+    // Reset back to feed so the tab indicator returns to ホーム
+    setActiveTab('feed');
+  }, [activeTab, id, router]);
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
-  };
-
-  const onJoin = async () => {
+  // -----------------------------------------------------------
+  // Join / Leave
+  // -----------------------------------------------------------
+  const onJoinLeave = async () => {
     if (!community || joining) return;
     setJoining(true);
-    if (community.visibility === 'request') {
+    if (community.is_member) {
+      const { error } = await leaveCommunity(community.id);
+      setJoining(false);
+      if (error) {
+        show(error, 'error');
+        return;
+      }
+      show('登録を解除しました', 'success');
+    } else if (community.visibility === 'request') {
       const { error } = await requestJoinCommunity(community.id);
       setJoining(false);
       if (error) {
         show(error, 'error');
         return;
       }
-      show('参加申請を送信しました。承認をお待ちください。', 'success');
+      show('参加申請を送信しました', 'success');
     } else {
       const { error } = await joinCommunity(community.id);
       setJoining(false);
@@ -129,110 +185,33 @@ export default function CommunityDetailScreen() {
         show(error, 'error');
         return;
       }
-      show('参加しました！', 'success');
-      void load();
+      show('登録しました', 'success');
     }
+    void qc.invalidateQueries({ queryKey: ['community', id] });
   };
 
-  const onLeave = async () => {
-    if (!community) return;
-    setJoining(true);
-    const { error } = await leaveCommunity(community.id);
-    setJoining(false);
-    if (error) {
-      show(error, 'error');
-      return;
-    }
-    show('退出しました', 'success');
-    void load();
+  // -----------------------------------------------------------
+  // Refresh (pull-to-refresh on the active tab's data + header)
+  // -----------------------------------------------------------
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([
+      refetchCommunity(),
+      qc.invalidateQueries({ queryKey: ['community', id, 'feed'] }),
+      qc.invalidateQueries({ queryKey: ['community', id, 'threads'] }),
+      qc.invalidateQueries({ queryKey: ['community', id, 'spots'] }),
+      qc.invalidateQueries({ queryKey: ['community', id, 'events'] }),
+    ]);
+    setRefreshing(false);
   };
 
-  const onSubmitPost = async () => {
-    if (!community || posting) return;
-    const body = postBody.trim();
-    if (body.length === 0) return;
-    if (body.length > 2000) {
-      show('2000 文字以内にしてください', 'warn');
-      return;
-    }
-    setPosting(true);
-    const { error } = await createCommunityPost({ community_id: community.id, body });
-    setPosting(false);
-    if (error) {
-      show(error, 'error');
-      return;
-    }
-    setPostBody('');
-    void load();
-  };
-
-  const onChangeIcon = async () => {
-    if (!community || iconUploading) return;
-    setIconUploading(true);
-    try {
-      if (Platform.OS !== 'web') {
-        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!perm.granted) {
-          show('写真へのアクセス権限が必要です', 'warn');
-          setIconUploading(false);
-          return;
-        }
-      }
-      const r = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'images',
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.85,
-      });
-      if (r.canceled || !r.assets[0]) {
-        setIconUploading(false);
-        return;
-      }
-      const asset = r.assets[0];
-      let prepared;
-      try {
-        prepared = await prepareImageUpload(asset.uri, {
-          maxSizeBytes: 5 * 1024 * 1024,
-          maxWidth: 512,
-          maxHeight: 512,
-          quality: 0.85,
-        });
-      } catch (e) {
-        show(e instanceof Error ? e.message : '画像処理に失敗しました', 'warn');
-        setIconUploading(false);
-        return;
-      }
-      const { url, error: upErr } = await uploadCommunityIcon(
-        community.id,
-        prepared.blob,
-        prepared.mime,
-      );
-      if (upErr || !url) {
-        show('アップロードに失敗しました', 'error');
-        setIconUploading(false);
-        return;
-      }
-      // Optimistic + DB
-      setCommunity({ ...community, icon_url: url });
-      const { error: updErr } = await updateCommunity(community.id, { icon_url: url });
-      if (updErr) {
-        show('保存に失敗しました: ' + updErr, 'error');
-        void load();
-      } else {
-        show('アイコンを変更しました', 'success');
-      }
-    } catch (e) {
-      console.warn('[community/detail] icon change failed:', e);
-      show('画像の取得に失敗しました', 'error');
-    } finally {
-      setIconUploading(false);
-    }
-  };
-
-  if (loading) {
+  // -----------------------------------------------------------
+  // Loading / missing
+  // -----------------------------------------------------------
+  if (communityLoading) {
     return (
       <View style={{ flex: 1, backgroundColor: C.bg, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator color={C.accent} />
+        <Spinner size="large" />
       </View>
     );
   }
@@ -260,24 +239,16 @@ export default function CommunityDetailScreen() {
     );
   }
 
-  const canPost = community.is_member;
-  const canEditIcon = community.is_member;
+  const handle = deriveHandle(community);
+  const safeDesc = community.description.length > 0 ? sanitizeContent(community.description, { maxLength: 500 }) : '';
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={{ flex: 1, backgroundColor: C.bg }}
-    >
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScrollView
-        contentContainerStyle={{
-          paddingBottom: insets.bottom + SP['20'],
-        }}
-        refreshControl={
-          <RefreshControl tintColor={C.text2} refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingBottom: insets.bottom + SP['20'] }}
+        refreshControl={<RefreshControl tintColor={C.text2} refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* Header bar */}
+        {/* Top nav bar */}
         <View
           style={{
             paddingTop: insets.top + SP['2'],
@@ -324,212 +295,716 @@ export default function CommunityDetailScreen() {
           )}
         </View>
 
-        {/* アイコン + 名前 */}
-        <View style={{ alignItems: 'center', gap: SP['3'], paddingHorizontal: SP['4'], paddingVertical: SP['2'] }}>
-          <Pressable
-            onPress={canEditIcon ? onChangeIcon : undefined}
-            disabled={!canEditIcon || iconUploading}
-            style={{ position: 'relative' }}
-            hitSlop={8}
-          >
+        {/* ============================================================
+            Channel header (YouTube-style)
+            ============================================================ */}
+        <View
+          style={{
+            backgroundColor: C.bg2,
+            paddingHorizontal: SP['4'],
+            paddingTop: SP['4'],
+            paddingBottom: SP['4'],
+            gap: SP['3'],
+            borderBottomWidth: 1,
+            borderBottomColor: C.border,
+          }}
+        >
+          <View style={{ alignItems: 'center', gap: SP['3'] }}>
             <CommunityAvatar
               icon_url={community.icon_url}
               icon_emoji={community.icon_emoji}
               icon_color={community.icon_color}
-              size={104}
+              size={community.icon_url ? 120 : 96}
             />
-            {canEditIcon && (
-              <View
-                style={{
-                  position: 'absolute',
-                  bottom: -2,
-                  right: -2,
-                  backgroundColor: C.accent,
-                  borderRadius: 16,
-                  padding: 6,
-                  borderWidth: 3,
-                  borderColor: C.bg,
-                }}
-              >
-                {iconUploading ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Icon.image size={14} color="#fff" strokeWidth={2.4} />
-                )}
-              </View>
-            )}
-          </Pressable>
-          <Text style={[T.h2, { color: C.text, textAlign: 'center' }]} numberOfLines={2}>
-            {community.name}
-          </Text>
-          <Text style={[T.caption, { color: C.text3 }]}>
-            メンバー {community.member_count.toLocaleString('ja-JP')} 人 · 投稿 {community.post_count.toLocaleString('ja-JP')} 件
-          </Text>
-          {canEditIcon && (
-            <Text style={[T.caption, { color: C.text3, marginTop: -4 }]}>
-              アイコンをタップして変更
+            <Text style={[T.h2, { color: C.text, textAlign: 'center', fontSize: 24 }]} numberOfLines={2}>
+              {community.name}
             </Text>
+            <Text style={[T.caption, { color: C.text3 }]}>@{handle}</Text>
+            <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
+              コミュニティ登録数 {community.member_count.toLocaleString('ja-JP')} 人 · 投稿 {community.post_count.toLocaleString('ja-JP')} 本
+            </Text>
+          </View>
+
+          {/* Description (collapsible) */}
+          {safeDesc.length > 0 && (
+            <Pressable onPress={() => setDescExpanded((v) => !v)}>
+              <Text
+                style={[T.body, { color: C.text2 }]}
+                numberOfLines={descExpanded ? undefined : 2}
+              >
+                {safeDesc}
+              </Text>
+              {safeDesc.length > 80 && (
+                <Text style={[T.caption, { color: C.text3, marginTop: 4, fontWeight: '600' }]}>
+                  {descExpanded ? '閉じる' : '...さらに表示'}
+                </Text>
+              )}
+            </Pressable>
           )}
-          {/* コミュニティ自体を Obsidian に保存 (説明 / タグなどメタ情報) */}
-          <ObsidianSaveButton
-            note={communityToObsidianNote(community)}
-            size={18}
-            style={{ marginTop: SP['1'] }}
+
+          {/* Tags */}
+          {community.tags.length > 0 && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['1'] }}>
+              {community.tags.map((tg) => (
+                <View
+                  key={tg}
+                  style={{
+                    paddingHorizontal: SP['2'],
+                    paddingVertical: 4,
+                    backgroundColor: C.accentBg,
+                    borderRadius: R.full,
+                  }}
+                >
+                  <Text style={[T.caption, { color: C.accent }]}>#{tg}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Subscribe button */}
+          <SubscribeButton
+            isMember={community.is_member}
+            isRequestVisibility={community.visibility === 'request'}
+            loading={joining}
+            onPress={onJoinLeave}
           />
         </View>
 
-        {/* 説明 */}
-        {community.description.length > 0 && (
-          <View
+        {/* ============================================================
+            Tab bar
+            ============================================================ */}
+        <View
+          style={{
+            flexDirection: 'row',
+            borderBottomWidth: 1,
+            borderBottomColor: C.border,
+            backgroundColor: C.bg,
+          }}
+        >
+          {TABS.map((t) => {
+            const active = activeTab === t.key;
+            return (
+              <Pressable
+                key={t.key}
+                onPress={() => setActiveTab(t.key)}
+                style={{
+                  flex: 1,
+                  alignItems: 'center',
+                  paddingVertical: SP['3'],
+                  borderBottomWidth: 2,
+                  borderBottomColor: active ? C.accent : 'transparent',
+                }}
+              >
+                <Text
+                  style={[
+                    T.smallM,
+                    {
+                      color: active ? C.text : C.text2,
+                      fontWeight: active ? '700' : '500',
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {t.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {/* ============================================================
+            Tab content
+            ============================================================ */}
+        {activeTab === 'feed' && (
+          <FeedTab communityId={id} sort={feedSort} onSortChange={setFeedSort} />
+        )}
+        {activeTab === 'threads' && <ThreadsTab communityId={id} />}
+        {activeTab === 'spots' && (
+          <SpotsTab communityId={id} canCreate={community.is_member} />
+        )}
+        {activeTab === 'events' && (
+          <EventsTab communityId={id} canCreate={community.is_member} />
+        )}
+        {/* compose tab navigates away in the effect above */}
+      </ScrollView>
+    </View>
+  );
+}
+
+// ============================================================
+// Subscribe button
+// ============================================================
+function SubscribeButton({
+  isMember,
+  isRequestVisibility,
+  loading,
+  onPress,
+}: {
+  isMember: boolean;
+  isRequestVisibility: boolean;
+  loading: boolean;
+  onPress: () => void;
+}) {
+  if (isMember) {
+    return (
+      <PressableScale
+        onPress={onPress}
+        haptic="tap"
+        disabled={loading}
+        style={{
+          alignSelf: 'stretch',
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: SP['2'],
+          backgroundColor: C.bg3,
+          borderRadius: R.full,
+          borderWidth: 1,
+          borderColor: C.border,
+          paddingVertical: SP['3'],
+          opacity: loading ? 0.5 : 1,
+        }}
+      >
+        <Icon.bell size={16} color={C.text} strokeWidth={2.2} />
+        <Text style={[T.bodyB, { color: C.text }]}>登録済み</Text>
+        <Icon.chevronD size={14} color={C.text2} strokeWidth={2.2} />
+      </PressableScale>
+    );
+  }
+  return (
+    <PressableScale
+      onPress={onPress}
+      haptic="confirm"
+      disabled={loading}
+      style={{
+        alignSelf: 'stretch',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: C.accent,
+        borderRadius: R.full,
+        paddingVertical: SP['3'],
+        opacity: loading ? 0.5 : 1,
+      }}
+    >
+      <Text style={[T.bodyB, { color: '#fff' }]}>
+        {isRequestVisibility ? '参加を申請する' : '登録する'}
+      </Text>
+    </PressableScale>
+  );
+}
+
+// ============================================================
+// Tab: みんなの投稿集 (community posts feed)
+// ============================================================
+function FeedTab({
+  communityId,
+  sort,
+  onSortChange,
+}: {
+  communityId: string;
+  sort: FeedSort;
+  onSortChange: (s: FeedSort) => void;
+}) {
+  const router = useRouter();
+  const { show: showToast } = useToastStore();
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['community', communityId, 'feed', sort],
+    queryFn: async () => {
+      // map our 'old' to ascending — fetchCommunityPosts only supports 'new'|'top'|'hot'|'for-you'
+      // we hack 'old' by fetching 'new' and reversing client-side
+      const mapped = sort === 'top' ? 'top' : 'new';
+      const r = await fetchCommunityPosts({ community_id: communityId, sort: mapped, limit: 40 });
+      const posts = sort === 'old' ? [...r.posts].reverse() : r.posts;
+      return posts;
+    },
+    enabled: communityId.length > 0,
+    staleTime: 20_000,
+  });
+
+  useEffect(() => {
+    if (isError) showToast('投稿の取得に失敗しました', 'error');
+  }, [isError, showToast]);
+
+  const posts: Post[] = data ?? [];
+  const postIds = useMemo(() => posts.map((p) => p.id), [posts]);
+
+  const { toggle: toggleLike } = useLike();
+  const { toggle: toggleConcern } = useConcern();
+  const { toggle: toggleSave } = useSave();
+  const { toggle: toggleReact } = useReactionToggle();
+  const { share } = useShare();
+  const { addTag } = useAddTag();
+
+  const { data: myLikes = {} } = useLikes(postIds);
+  const { data: myConcerns = {} } = useConcerns(postIds);
+  const { data: mySaves = {} } = useSaves(postIds);
+  const { data: reactionsByPost = {} } = useReactions(postIds);
+  const { data: addedTagsByPost = {} } = useAddedTags(postIds);
+  const { polls } = usePolls(postIds);
+
+  const handleAddTag = useCallback(
+    async (postId: string, tag: string) => {
+      try {
+        await addTag(postId, tag);
+        showToast(`#${tag} を追加しました`, 'success');
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : '';
+        if (msg.includes('duplicate')) showToast('そのタグは既に追加されています', 'warn');
+        else showToast('追加に失敗しました', 'error');
+      }
+    },
+    [addTag, showToast],
+  );
+
+  return (
+    <View style={{ paddingVertical: SP['3'] }}>
+      {/* Filter chips */}
+      <View
+        style={{
+          flexDirection: 'row',
+          gap: SP['2'],
+          paddingHorizontal: SP['4'],
+          paddingBottom: SP['3'],
+        }}
+      >
+        {(
+          [
+            { v: 'new', label: '新しい順' },
+            { v: 'top', label: '人気順' },
+            { v: 'old', label: '古い順' },
+          ] as const
+        ).map((opt) => {
+          const active = sort === opt.v;
+          return (
+            <PressableScale
+              key={opt.v}
+              onPress={() => onSortChange(opt.v)}
+              haptic="tap"
+              style={{
+                paddingHorizontal: SP['3'],
+                paddingVertical: 6,
+                backgroundColor: active ? C.text : C.bg2,
+                borderRadius: R.full,
+                borderWidth: 1,
+                borderColor: active ? C.text : C.border,
+              }}
+            >
+              <Text
+                style={[
+                  T.caption,
+                  { color: active ? C.bg : C.text2, fontWeight: '700' },
+                ]}
+              >
+                {opt.label}
+              </Text>
+            </PressableScale>
+          );
+        })}
+      </View>
+
+      {isLoading ? (
+        <View style={{ paddingVertical: SP['10'], alignItems: 'center' }}>
+          <Spinner size="large" />
+        </View>
+      ) : posts.length === 0 ? (
+        <View style={{ paddingVertical: SP['10'], alignItems: 'center', gap: SP['3'] }}>
+          <Icon.comment size={40} color={C.text3} strokeWidth={1.6} />
+          <Text style={[T.body, { color: C.text2 }]}>まだ投稿がありません</Text>
+          <PressableScale
+            onPress={() => router.push(`/post/create?community_id=${encodeURIComponent(communityId)}` as never)}
+            haptic="confirm"
             style={{
-              marginHorizontal: SP['4'],
-              marginTop: SP['3'],
-              padding: SP['3'],
-              backgroundColor: C.bg2,
-              borderRadius: R.md,
-              borderWidth: 1,
-              borderColor: C.border,
+              paddingHorizontal: SP['4'],
+              paddingVertical: SP['2'],
+              backgroundColor: C.accent,
+              borderRadius: R.full,
             }}
           >
-            <Text style={[T.body, { color: C.text2 }]}>
-              {sanitizeContent(community.description, { maxLength: 500 })}
+            <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>最初の一投をしよう</Text>
+          </PressableScale>
+        </View>
+      ) : (
+        <View>
+          {posts.map((p) => (
+            <AnonPostCard
+              key={p.id}
+              post={p}
+              liked={!!myLikes[p.id]}
+              concerned={!!myConcerns[p.id]}
+              saved={!!mySaves[p.id]}
+              reactions={reactionsByPost[p.id] ?? []}
+              addedTags={addedTagsByPost[p.id] ?? []}
+              poll={polls[p.id]}
+              onLike={() => toggleLike(p.id)}
+              onConcern={() => toggleConcern(p.id, !!myConcerns[p.id])}
+              onComment={() => router.push(`/post/${p.id}` as never)}
+              onSave={() => toggleSave(p.id)}
+              onShare={() => share(`Geek の投稿 #${p.tag_names[0] ?? '雑談'}`, `/post/${p.id}`)}
+              onTagPress={(name) => router.push(`/tag/${encodeURIComponent(name)}` as never)}
+              onMore={() => {/* no-op — could add report flow later */}}
+              onReact={(meme) => toggleReact(p.id, meme)}
+              onAddTag={(tag) => handleAddTag(p.id, tag)}
+            />
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ============================================================
+// Tab: 掲示板 (BBS threads)
+// ============================================================
+function ThreadsTab({ communityId }: { communityId: string }) {
+  const router = useRouter();
+  const { show: showToast } = useToastStore();
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['community', communityId, 'threads'],
+    queryFn: () => fetchCommunityThreads(communityId, { sort: 'new' }),
+    enabled: communityId.length > 0,
+    staleTime: 20_000,
+  });
+
+  useEffect(() => {
+    if (isError) showToast('スレッドの取得に失敗しました', 'error');
+  }, [isError, showToast]);
+
+  const threads: BBSThread[] = data ?? [];
+
+  if (isLoading) {
+    return (
+      <View style={{ paddingVertical: SP['10'], alignItems: 'center' }}>
+        <Spinner size="large" />
+      </View>
+    );
+  }
+
+  if (threads.length === 0) {
+    return (
+      <View style={{ paddingVertical: SP['10'], paddingHorizontal: SP['4'], alignItems: 'center', gap: SP['3'] }}>
+        <Icon.bbs size={40} color={C.text3} strokeWidth={1.6} />
+        <Text style={[T.body, { color: C.text2, textAlign: 'center' }]}>スレッドがありません</Text>
+        <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
+          「投稿」タブからスレッドを立てよう
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ paddingTop: SP['3'], paddingHorizontal: SP['4'], gap: SP['3'] }}>
+      {threads.map((t) => {
+        const catColor = t.category ? (CATEGORY_COLORS[t.category] ?? C.accent) : C.accent;
+        return (
+          <PressableScale
+            key={t.id}
+            onPress={() => router.push(`/bbs/${t.id}` as never)}
+            haptic="tap"
+            style={{
+              flexDirection: 'row',
+              borderRadius: R.lg,
+              backgroundColor: C.bg2,
+              borderWidth: 1,
+              borderColor: C.border,
+              overflow: 'hidden',
+            }}
+          >
+            <View style={{ width: 4, backgroundColor: catColor }} />
+            <View style={{ flex: 1, padding: SP['3'], gap: SP['2'] }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+                {t.category && (
+                  <View
+                    style={{
+                      paddingHorizontal: SP['2'],
+                      paddingVertical: 2,
+                      backgroundColor: catColor + '22',
+                      borderRadius: R.sm,
+                      borderWidth: 1,
+                      borderColor: catColor + '55',
+                    }}
+                  >
+                    <Text style={[T.caption, { color: catColor, fontWeight: '700', fontSize: 10 }]}>
+                      {t.category}
+                    </Text>
+                  </View>
+                )}
+                <View style={{ flex: 1 }} />
+                <Text style={[T.caption, { color: C.text3, fontSize: 11 }]}>
+                  {formatRelative(t.last_reply_at ?? t.created_at)}
+                </Text>
+              </View>
+              <Text style={[T.h4, { color: C.text, fontWeight: '700' }]} numberOfLines={2}>
+                {t.title}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: SP['3'], alignItems: 'center' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Icon.comment size={13} color={C.text3} strokeWidth={2.2} />
+                  <Text style={[T.small, { color: C.text3, fontWeight: '600' }]}>
+                    {t.replies_count.toLocaleString('ja-JP')}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </PressableScale>
+        );
+      })}
+    </View>
+  );
+}
+
+// ============================================================
+// Tab: 聖地 (community spots)
+// ============================================================
+function SpotsTab({ communityId, canCreate }: { communityId: string; canCreate: boolean }) {
+  const router = useRouter();
+  const { show: showToast } = useToastStore();
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['community', communityId, 'spots'],
+    queryFn: () => fetchCommunitySpots(communityId),
+    enabled: communityId.length > 0,
+    staleTime: 30_000,
+  });
+
+  useEffect(() => {
+    if (isError) showToast('聖地の取得に失敗しました', 'error');
+  }, [isError, showToast]);
+
+  const spots: CommunitySpot[] = data ?? [];
+
+  const renderItem: ListRenderItem<CommunitySpot> = ({ item }) => {
+    const safePhoto = item.photo_url ? sanitizeUrl(item.photo_url) : null;
+    return (
+      <View
+        style={{
+          flexDirection: 'row',
+          gap: SP['3'],
+          padding: SP['3'],
+          backgroundColor: C.bg2,
+          borderRadius: R.lg,
+          borderWidth: 1,
+          borderColor: C.border,
+        }}
+      >
+        <View
+          style={{
+            width: 80,
+            height: 80,
+            borderRadius: R.md,
+            backgroundColor: C.bg3,
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+          }}
+        >
+          {safePhoto ? (
+            <Image source={{ uri: safePhoto }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+          ) : (
+            <Text style={{ fontSize: 28 }}>📍</Text>
+          )}
+        </View>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text style={[T.bodyB, { color: C.text }]} numberOfLines={1}>
+            {item.name}
+          </Text>
+          {item.description.length > 0 && (
+            <Text style={[T.small, { color: C.text2 }]} numberOfLines={2}>
+              {item.description}
+            </Text>
+          )}
+          <Text style={[T.mono, { color: C.text3, fontSize: 10 }]} numberOfLines={1}>
+            {item.lat.toFixed(5)}, {item.lon.toFixed(5)}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
+  return (
+    <View style={{ paddingTop: SP['3'], paddingHorizontal: SP['4'], gap: SP['3'] }}>
+      {canCreate && (
+        <PressableScale
+          onPress={() => router.push(`/community/${communityId}/spot/create` as never)}
+          haptic="confirm"
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            paddingVertical: SP['2'],
+            backgroundColor: C.accentBg,
+            borderRadius: R.full,
+            borderWidth: 1,
+            borderColor: C.accentSoft,
+          }}
+        >
+          <Icon.plus size={16} color={C.accent} strokeWidth={2.4} />
+          <Text style={[T.smallM, { color: C.accent, fontWeight: '700' }]}>聖地を追加</Text>
+        </PressableScale>
+      )}
+      {isLoading ? (
+        <View style={{ paddingVertical: SP['8'], alignItems: 'center' }}>
+          <Spinner size="large" />
+        </View>
+      ) : spots.length === 0 ? (
+        <View style={{ paddingVertical: SP['8'], alignItems: 'center', gap: SP['2'] }}>
+          <Icon.map size={40} color={C.text3} strokeWidth={1.6} />
+          <Text style={[T.body, { color: C.text2, textAlign: 'center' }]}>
+            聖地がまだありません
+          </Text>
+          <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
+            メンバーが投稿した聖地がここに集まります
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={spots}
+          keyExtractor={(it) => it.id}
+          renderItem={renderItem}
+          ItemSeparatorComponent={() => <View style={{ height: SP['2'] }} />}
+          scrollEnabled={false}
+        />
+      )}
+    </View>
+  );
+}
+
+// ============================================================
+// Tab: カレンダー (community events)
+// ============================================================
+function EventsTab({ communityId, canCreate }: { communityId: string; canCreate: boolean }) {
+  const router = useRouter();
+  const { show: showToast } = useToastStore();
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['community', communityId, 'events'],
+    queryFn: () => fetchCommunityEvents(communityId, { upcomingOnly: false }),
+    enabled: communityId.length > 0,
+    staleTime: 30_000,
+  });
+
+  useEffect(() => {
+    if (isError) showToast('イベントの取得に失敗しました', 'error');
+  }, [isError, showToast]);
+
+  const events: CommunityEvent[] = data ?? [];
+
+  // Group by YYYY 年 MM 月
+  const grouped = useMemo(() => {
+    const map = new Map<string, CommunityEvent[]>();
+    for (const ev of events) {
+      const d = new Date(ev.starts_at);
+      if (Number.isNaN(d.getTime())) continue;
+      const key = `${d.getFullYear()} 年 ${(d.getMonth() + 1).toString().padStart(2, '0')} 月`;
+      const arr = map.get(key) ?? [];
+      arr.push(ev);
+      map.set(key, arr);
+    }
+    return Array.from(map.entries());
+  }, [events]);
+
+  return (
+    <View style={{ paddingTop: SP['3'], paddingHorizontal: SP['4'], gap: SP['3'] }}>
+      {canCreate && (
+        <PressableScale
+          onPress={() => router.push(`/community/${communityId}/event/create` as never)}
+          haptic="confirm"
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            paddingVertical: SP['2'],
+            backgroundColor: C.accentBg,
+            borderRadius: R.full,
+            borderWidth: 1,
+            borderColor: C.accentSoft,
+          }}
+        >
+          <Icon.plus size={16} color={C.accent} strokeWidth={2.4} />
+          <Text style={[T.smallM, { color: C.accent, fontWeight: '700' }]}>イベントを追加</Text>
+        </PressableScale>
+      )}
+      {isLoading ? (
+        <View style={{ paddingVertical: SP['8'], alignItems: 'center' }}>
+          <Spinner size="large" />
+        </View>
+      ) : events.length === 0 ? (
+        <View style={{ paddingVertical: SP['8'], alignItems: 'center', gap: SP['2'] }}>
+          <Icon.calendar size={40} color={C.text3} strokeWidth={1.6} />
+          <Text style={[T.body, { color: C.text2, textAlign: 'center' }]}>
+            イベントがまだありません
+          </Text>
+          <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
+            配信・オフ会・誕生日など何でも！
+          </Text>
+        </View>
+      ) : (
+        grouped.map(([monthLabel, monthEvents]) => (
+          <View key={monthLabel} style={{ gap: SP['2'] }}>
+            <Text style={[T.smallB, { color: C.text2, marginTop: SP['2'] }]}>{monthLabel}</Text>
+            {monthEvents.map((ev) => (
+              <EventRow key={ev.id} event={ev} />
+            ))}
+          </View>
+        ))
+      )}
+    </View>
+  );
+}
+
+function EventRow({ event }: { event: CommunityEvent }) {
+  const d = new Date(event.starts_at);
+  const valid = !Number.isNaN(d.getTime());
+  const day = valid ? d.getDate() : '?';
+  const weekday = valid
+    ? ['日', '月', '火', '水', '木', '金', '土'][d.getDay()] ?? ''
+    : '';
+  const time = valid
+    ? `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+    : '';
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        gap: SP['3'],
+        padding: SP['3'],
+        backgroundColor: C.bg2,
+        borderRadius: R.lg,
+        borderWidth: 1,
+        borderColor: C.border,
+      }}
+    >
+      <View
+        style={{
+          width: 56,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: C.bg3,
+          borderRadius: R.md,
+          paddingVertical: SP['2'],
+        }}
+      >
+        <Text style={[T.numLg, { color: C.text }]}>{day}</Text>
+        <Text style={[T.caption, { color: C.text3 }]}>{weekday}</Text>
+      </View>
+      <View style={{ flex: 1, gap: 4 }}>
+        <Text style={[T.bodyB, { color: C.text }]} numberOfLines={2}>
+          {event.title}
+        </Text>
+        <Text style={[T.caption, { color: C.text3 }]}>{time}</Text>
+        {event.location_text && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Icon.map size={12} color={C.text3} strokeWidth={2.2} />
+            <Text style={[T.small, { color: C.text2 }]} numberOfLines={1}>
+              {event.location_text}
             </Text>
           </View>
         )}
-
-        {/* タグ */}
-        {community.tags.length > 0 && (
-          <View
-            style={{
-              marginHorizontal: SP['4'],
-              marginTop: SP['3'],
-              flexDirection: 'row',
-              flexWrap: 'wrap',
-              gap: SP['1'],
-            }}
-          >
-            {community.tags.map((t) => (
-              <View
-                key={t}
-                style={{
-                  paddingHorizontal: SP['2'],
-                  paddingVertical: 4,
-                  backgroundColor: C.accentBg,
-                  borderRadius: R.full,
-                }}
-              >
-                <Text style={[T.caption, { color: C.accent }]}>#{t}</Text>
-              </View>
-            ))}
-          </View>
+        {event.description.length > 0 && (
+          <Text style={[T.small, { color: C.text2 }]} numberOfLines={3}>
+            {event.description}
+          </Text>
         )}
-
-        {/* Join / Leave */}
-        <View style={{ paddingHorizontal: SP['4'], marginTop: SP['4'] }}>
-          {community.is_member ? (
-            <Button label="退出する" variant="ghost" onPress={onLeave} loading={joining} />
-          ) : community.visibility === 'request' ? (
-            <Button
-              label="参加を申請する"
-              onPress={onJoin}
-              loading={joining}
-              variant="secondary"
-            />
-          ) : (
-            <Button label="参加する" onPress={onJoin} loading={joining} haptic="confirm" />
-          )}
-        </View>
-
-        {/* 区切り */}
-        <View style={{ height: 8, backgroundColor: C.bg2, marginTop: SP['4'] }} />
-
-        {/* 投稿入力 (member のみ) */}
-        {canPost && (
-          <View style={{ padding: SP['4'], gap: SP['2'], borderBottomWidth: 8, borderBottomColor: C.bg2 }}>
-            <Text style={[T.smallM, { color: C.text2 }]}>投稿する</Text>
-            <Input
-              value={postBody}
-              onChangeText={setPostBody}
-              placeholder="このコミュニティで共有したいことを書こう…"
-              multiline
-              numberOfLines={3}
-              maxLength={2000}
-              keyboardAppearance="dark"
-              selectionColor={C.accent}
-              style={{ minHeight: 64, textAlignVertical: 'top' }}
-            />
-            <View style={{ alignSelf: 'flex-end' }}>
-              <Button
-                label="投稿"
-                onPress={onSubmitPost}
-                loading={posting}
-                disabled={posting || postBody.trim().length === 0}
-                size="sm"
-              />
-            </View>
-          </View>
-        )}
-
-        {/* 投稿一覧 */}
-        <View style={{ padding: SP['4'], gap: SP['3'] }}>
-          {posts.length === 0 ? (
-            <View style={{ alignItems: 'center', padding: SP['10'], gap: SP['2'] }}>
-              <Icon.comment size={40} color={C.text3} strokeWidth={1.6} />
-              <Text style={[T.body, { color: C.text2 }]}>まだ投稿がありません</Text>
-              {canPost && (
-                <Text style={[T.caption, { color: C.text3 }]}>最初の投稿をしてみよう。</Text>
-              )}
-            </View>
-          ) : (
-            posts.map((p) => (
-              <View
-                key={p.id}
-                style={{
-                  padding: SP['3'],
-                  backgroundColor: C.bg2,
-                  borderRadius: R.lg,
-                  borderWidth: 1,
-                  borderColor: C.border,
-                  gap: SP['2'],
-                }}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-                  <View
-                    style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 14,
-                      backgroundColor: C.bg3,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Icon.mypage size={14} color={C.text3} strokeWidth={2} />
-                  </View>
-                  <Text style={[T.small, { color: C.text2, fontWeight: '600', flex: 1 }]} numberOfLines={1}>
-                    {p.author_nickname ?? '匿名'}
-                  </Text>
-                  <Text style={[T.caption, { color: C.text3 }]}>{timeAgo(p.created_at)}</Text>
-                  <ObsidianSaveButton note={communityPostToObsidianNote(p)} size={16} />
-                </View>
-                <Text style={[T.body, { color: C.text }]}>{p.body}</Text>
-                {p.image_url && (
-                  <Image
-                    source={{ uri: p.image_url }}
-                    style={{
-                      width: '100%',
-                      aspectRatio: 16 / 9,
-                      borderRadius: R.md,
-                      backgroundColor: C.bg3,
-                    }}
-                    resizeMode="cover"
-                  />
-                )}
-              </View>
-            ))
-          )}
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </View>
+    </View>
   );
 }

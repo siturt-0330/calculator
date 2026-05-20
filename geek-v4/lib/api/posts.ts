@@ -1,7 +1,15 @@
 import { supabase } from '@/lib/supabase';
-import type { Post } from '@/types/models';
+import type { Post, PostVisibility } from '@/types/models';
 
+export type { PostVisibility } from '@/types/models';
 export type SortMode = 'for-you' | 'hot' | 'new' | 'top';
+
+// posts SELECT で取得するカラム一覧 (一箇所でメンテ可能)
+const POSTS_SELECT_COLS =
+  'id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, created_at';
+
+// UUID 形式チェック (壊れた URL や古い ID 対策) — fetchPostById と fetchCommunityPosts で使う
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type FetchPostsOpts = {
   sort?: SortMode;
@@ -10,6 +18,9 @@ type FetchPostsOpts = {
   cursor?: string;
   limit?: number;
   filterTags?: string[];
+  // home フィード (default true) — visibility が 'public' / 'community_public' の post だけ表示
+  // (private は本人以外、community_only はコミュニティ詳細でのみ)
+  home?: boolean;
 };
 
 export async function fetchPosts({
@@ -18,6 +29,7 @@ export async function fetchPosts({
   cursor,
   limit = 20,
   filterTags,
+  home = true,
 }: FetchPostsOpts): Promise<{ posts: Post[]; nextCursor: string | null }> {
   // 'for-you' は内部的に 'hot' と同じ広い候補プールを取りつつ、クライアント側で
   // パーソナライズ再ランクするので、候補数を 1.5x にしてランカー側に余白を与える。
@@ -27,10 +39,17 @@ export async function fetchPosts({
 
   let query = supabase
     .from('posts')
-    .select('id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, created_at')
+    .select(POSTS_SELECT_COLS)
     .eq('is_anonymous', true)
     .eq('is_public', true)
     .limit(effectiveLimit);
+
+  // ホームフィード: visibility が public / community_public のもののみ
+  // (private は本人専用、community_only はコミュニティ詳細でしか出さない)
+  // 既存 posts (visibility カラムが NULL の可能性ゼロ — default 'public' で backfill 済)
+  if (home) {
+    query = query.in('visibility', ['public', 'community_public']);
+  }
 
   // PostgREST の URL 長さ制限 (≒8KB) 対策:
   // サーバー側で除外できるのは先頭 80 個まで。残りはクライアント側で smartSort
@@ -127,6 +146,8 @@ export async function createPost({
   contentWarning = null,
   cwCategory = null,
   poll,
+  visibility = 'public',
+  community_ids = [],
 }: {
   content: string;
   mediaUris: string[];
@@ -138,6 +159,10 @@ export async function createPost({
   contentWarning?: string | null;
   cwCategory?: 'spoiler' | 'nsfw' | 'violence' | 'sensitive' | null;
   poll?: { question: string; options: string[]; multiSelect?: boolean; expiresInHours?: number };
+  // 4-way visibility (default 'public' — 既存挙動)
+  visibility?: PostVisibility;
+  // visibility が community_only / community_public の時に attach する community 一覧
+  community_ids?: string[];
 }): Promise<void> {
   // Rate limit (client-side, defense-in-depth)
   const rl = checkRate('post');
@@ -164,8 +189,29 @@ export async function createPost({
     is_public: isPublic,
     content_warning: safeContentWarning,
     cw_category: cwCategory,
+    visibility,
   }).select('id').single();
   if (error) throw error;
+
+  const postId = (post as { id: string }).id;
+
+  // community attach (post insert 成功後 — RLS が author を見るため順序が重要)
+  // 重複排除 + 空文字弾き
+  if (
+    community_ids.length > 0 &&
+    (visibility === 'community_only' || visibility === 'community_public')
+  ) {
+    const uniqueIds = Array.from(new Set(community_ids.filter((c) => c && c.length > 0)));
+    if (uniqueIds.length > 0) {
+      const rows = uniqueIds.map((community_id) => ({ post_id: postId, community_id }));
+      const { error: attachErr } = await supabase.from('post_communities').insert(rows);
+      if (attachErr) {
+        // 致命的ではない (post 自体は成功) — ログだけ残してユーザーには知らせる
+        console.warn('[createPost] community attach failed:', attachErr.message);
+        throw new Error('コミュニティへの紐付けに失敗しました');
+      }
+    }
+  }
 
   // Poll を作成
   if (poll && poll.options.filter((o) => o.trim()).length >= 2) {
@@ -173,7 +219,7 @@ export async function createPost({
       ? new Date(Date.now() + poll.expiresInHours * 3600 * 1000).toISOString()
       : null;
     const { data: pollRow, error: pollErr } = await supabase.from('polls').insert({
-      post_id: (post as { id: string }).id,
+      post_id: postId,
       question: poll.question.trim(),
       expires_at: expiresAt,
       multi_select: !!poll.multiSelect,
@@ -188,14 +234,89 @@ export async function createPost({
   }
 }
 
-// UUID 形式チェック (壊れた URL や古い ID 対策)
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// ============================================================
+// 指定コミュニティの posts (visibility=community_only/community_public で attach されているもの)
+// post_communities → posts の join + cursor pagination
+// ============================================================
+export async function fetchCommunityPosts({
+  community_id,
+  sort = 'new',
+  cursor,
+  limit = 30,
+}: {
+  community_id: string;
+  sort?: SortMode;
+  cursor?: string;
+  limit?: number;
+}): Promise<{ posts: Post[]; nextCursor: string | null }> {
+  if (!community_id || !UUID_RE.test(community_id)) {
+    return { posts: [], nextCursor: null };
+  }
+
+  // post_communities から post_id 一覧を取得 (新しい attach 順)
+  // limit は 1 ページ分 — sort=hot/top の場合は post 側で並び替えるので余分に取らない
+  let pcQuery = supabase
+    .from('post_communities')
+    .select('post_id, created_at')
+    .eq('community_id', community_id)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  // cursor (new sort 時のみ意味あり — attach 時刻)
+  const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+  if (sort === 'new' && cursor && ISO_RE.test(cursor)) {
+    pcQuery = pcQuery.lt('created_at', cursor);
+  }
+
+  const { data: pcRows, error: pcErr } = await pcQuery;
+  if (pcErr) {
+    console.warn('[fetchCommunityPosts] junction fetch failed:', pcErr.message);
+    return { posts: [], nextCursor: null };
+  }
+  const rows = (pcRows ?? []) as { post_id: string; created_at: string }[];
+  if (rows.length === 0) return { posts: [], nextCursor: null };
+
+  const postIds = rows.map((r) => r.post_id);
+  let postsQuery = supabase
+    .from('posts')
+    .select(POSTS_SELECT_COLS)
+    .in('id', postIds);
+
+  if (sort === 'top') {
+    postsQuery = postsQuery
+      .order('likes_count', { ascending: false })
+      .order('created_at', { ascending: false });
+  } else if (sort === 'hot') {
+    postsQuery = postsQuery
+      .order('likes_count', { ascending: false })
+      .order('created_at', { ascending: false });
+  } else {
+    // new または for-you (for-you はクライアント側ランカー前提で時系列を渡す)
+    postsQuery = postsQuery.order('created_at', { ascending: false });
+  }
+
+  const { data, error } = await postsQuery;
+  if (error) {
+    console.warn('[fetchCommunityPosts] posts fetch failed:', error.message);
+    return { posts: [], nextCursor: null };
+  }
+  const posts = (data ?? []) as Post[];
+
+  // nextCursor: new sort 時のみ attach 時刻ベースで返す
+  let nextCursor: string | null = null;
+  if (sort === 'new' && rows.length === limit) {
+    const last = rows[rows.length - 1];
+    if (last) nextCursor = last.created_at;
+  }
+
+  return { posts, nextCursor };
+}
 
 export async function fetchPostById(id: string): Promise<Post | null> {
   if (!id || !UUID_RE.test(id)) return null;
   const { data, error } = await supabase
     .from('posts')
-    .select('id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, created_at')
+    .select(POSTS_SELECT_COLS)
     .eq('id', id)
     .maybeSingle();
   if (error) {

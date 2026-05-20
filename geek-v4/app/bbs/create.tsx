@@ -1,29 +1,91 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createThread } from '@/lib/api/bbs';
+import { discoverCommunities, type Community } from '@/lib/api/communities';
+import type { ThreadVisibility } from '@/types/models';
 import { C, SP, R } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { Button } from '@/components/ui/Button';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { Icon } from '@/constants/icons';
 import { notify, Haptics } from '@/lib/haptics';
+import { useToastStore } from '@/stores/toastStore';
 
 export default function BBSCreateScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
+  const { show } = useToastStore();
+  // ?community_id=X で deep link されたら community 限定で preselect する
+  const params = useLocalSearchParams<{ community_id?: string }>();
+  const initialCommunityId = typeof params.community_id === 'string' ? params.community_id : null;
+
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('');
   const [error, setError] = useState('');
+  // 公開設定
+  const [visibility, setVisibility] = useState<ThreadVisibility>(
+    initialCommunityId ? 'community_only' : 'public',
+  );
+  const [selectedCommunityId, setSelectedCommunityId] = useState<string | null>(initialCommunityId);
+  // public でも「コミュニティに紐付けたい」場合のトグル
+  const [attachToCommunity, setAttachToCommunity] = useState<boolean>(!!initialCommunityId);
+  // コミュニティ検索
+  const [communityQuery, setCommunityQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+
   const BackIcon = Icon.arrowL;
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(communityQuery.trim()), 150);
+    return () => clearTimeout(t);
+  }, [communityQuery]);
+
+  // コミュニティ検索 (visibility=community_only または attachToCommunity の時だけ)
+  const showCommunityPicker = visibility === 'community_only' || attachToCommunity;
+  const communitiesQ = useQuery<Community[]>({
+    queryKey: ['discover-communities', debouncedQuery],
+    queryFn: () => discoverCommunities({ query: debouncedQuery || undefined, limit: 12 }),
+    enabled: showCommunityPicker,
+    staleTime: 30_000,
+  });
+
+  // 選択中のコミュニティが検索結果に出ないケース (deep link 等) を補うため別フェッチ
+  const selectedCommunityQ = useQuery<Community | null>({
+    queryKey: ['community-by-id', selectedCommunityId],
+    queryFn: async () => {
+      if (!selectedCommunityId) return null;
+      const list = await discoverCommunities({ query: undefined, limit: 30 });
+      return list.find((c) => c.id === selectedCommunityId) ?? null;
+    },
+    enabled: !!selectedCommunityId && showCommunityPicker,
+    staleTime: 60_000,
+  });
+
+  // 表示用のコミュニティ一覧 — 選択中のものは常に先頭に固定
+  const displayCommunities = useMemo<Community[]>(() => {
+    const list = communitiesQ.data ?? [];
+    if (!selectedCommunityId) return list;
+    const sel = selectedCommunityQ.data;
+    if (!sel) return list;
+    const others = list.filter((c) => c.id !== selectedCommunityId);
+    return [sel, ...others];
+  }, [communitiesQ.data, selectedCommunityQ.data, selectedCommunityId]);
+
   const { mutateAsync, isPending } = useMutation({
-    mutationFn: () => createThread(title.trim(), category.trim() || '雑談'),
+    mutationFn: () =>
+      createThread(title.trim(), category.trim() || '雑談', {
+        community_id: selectedCommunityId ?? undefined,
+        visibility,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bbs-threads'] });
+      if (selectedCommunityId) {
+        qc.invalidateQueries({ queryKey: ['community-threads', selectedCommunityId] });
+      }
       notify(Haptics.NotificationFeedbackType.Success);
       router.back();
     },
@@ -41,6 +103,11 @@ export default function BBSCreateScreen() {
     }
     if (title.trim().length > 50) {
       setError('タイトルは50文字以内で入力してください。');
+      return;
+    }
+    if (visibility === 'community_only' && !selectedCommunityId) {
+      show('コミュニティを選んでください', 'warn');
+      notify(Haptics.NotificationFeedbackType.Warning);
       return;
     }
     await mutateAsync();
@@ -155,6 +222,199 @@ export default function BBSCreateScreen() {
               );
             })}
           </View>
+        </View>
+
+        {/* 公開設定 */}
+        <View style={{ gap: SP['2'] }}>
+          <Text style={[T.smallM, { color: C.text2 }]}>公開設定</Text>
+          <View style={{ flexDirection: 'row', gap: SP['2'] }}>
+            <PressableScale
+              onPress={() => {
+                setVisibility('public');
+                // public に戻したら attach は維持 (オプションとして残す)
+              }}
+              haptic="select"
+              style={{
+                flex: 1,
+                paddingHorizontal: SP['3'], paddingVertical: SP['3'],
+                borderRadius: R.md,
+                backgroundColor: visibility === 'public' ? C.accentBg : C.bg3,
+                borderWidth: 1.5,
+                borderColor: visibility === 'public' ? C.accent : C.border,
+                alignItems: 'center', gap: 2,
+              }}
+            >
+              <Text style={[T.smallM, { color: visibility === 'public' ? C.accentLight : C.text }]}>
+                🌐 一般公開
+              </Text>
+              <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
+                全員が見える / 掲示板リストにも出る
+              </Text>
+            </PressableScale>
+            <PressableScale
+              onPress={() => {
+                setVisibility('community_only');
+                setAttachToCommunity(true);
+              }}
+              haptic="select"
+              style={{
+                flex: 1,
+                paddingHorizontal: SP['3'], paddingVertical: SP['3'],
+                borderRadius: R.md,
+                backgroundColor: visibility === 'community_only' ? C.accentBg : C.bg3,
+                borderWidth: 1.5,
+                borderColor: visibility === 'community_only' ? C.accent : C.border,
+                alignItems: 'center', gap: 2,
+              }}
+            >
+              <Text style={[T.smallM, { color: visibility === 'community_only' ? C.accentLight : C.text }]}>
+                🔒 コミュニティ限定
+              </Text>
+              <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
+                選んだコミュニティのメンバーだけ閲覧可
+              </Text>
+            </PressableScale>
+          </View>
+        </View>
+
+        {/* コミュニティ紐付け (public 時は optional チェック、community_only 時は必須) */}
+        <View style={{ gap: SP['2'] }}>
+          {visibility === 'public' ? (
+            <PressableScale
+              onPress={() => setAttachToCommunity((v) => !v)}
+              haptic="select"
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: SP['2'],
+                paddingHorizontal: SP['3'], paddingVertical: SP['3'],
+                borderRadius: R.md,
+                backgroundColor: attachToCommunity ? C.accentBg : C.bg3,
+                borderWidth: 1, borderColor: attachToCommunity ? C.accentSoft : C.border,
+              }}
+            >
+              <View style={{
+                width: 18, height: 18, borderRadius: 4,
+                borderWidth: 1.5,
+                borderColor: attachToCommunity ? C.accent : C.border2,
+                backgroundColor: attachToCommunity ? C.accent : 'transparent',
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                {attachToCommunity && (
+                  <Text style={{ color: '#fff', fontSize: 11, fontWeight: '900' }}>✓</Text>
+                )}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[T.smallM, { color: C.text }]}>コミュニティに紐付ける</Text>
+                <Text style={[T.caption, { color: C.text3 }]}>
+                  掲示板リストとコミュニティ内の両方に表示されます
+                </Text>
+              </View>
+            </PressableScale>
+          ) : (
+            <View style={{
+              paddingHorizontal: SP['3'], paddingVertical: SP['2'],
+              borderRadius: R.md,
+              backgroundColor: C.accentBg,
+              borderWidth: 1, borderColor: C.accentSoft,
+            }}>
+              <Text style={[T.caption, { color: C.accentLight }]}>
+                コミュニティを選択してください (必須)
+              </Text>
+            </View>
+          )}
+
+          {showCommunityPicker && (
+            <View style={{ gap: SP['2'] }}>
+              <View style={{
+                flexDirection: 'row', alignItems: 'center', gap: SP['2'],
+                paddingHorizontal: SP['3'], paddingVertical: SP['2'],
+                backgroundColor: C.bg3,
+                borderRadius: R.full,
+                borderWidth: 1, borderColor: C.border,
+              }}>
+                <Icon.search size={16} color={C.text3} strokeWidth={2.2} />
+                <TextInput
+                  value={communityQuery}
+                  onChangeText={setCommunityQuery}
+                  placeholder="コミュニティを検索"
+                  placeholderTextColor={C.text3}
+                  keyboardAppearance="dark"
+                  selectionColor={C.accent}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  style={[T.body, { flex: 1, color: C.text, paddingVertical: 0 }]}
+                />
+                {communityQuery.length > 0 && (
+                  <PressableScale onPress={() => setCommunityQuery('')} haptic="tap">
+                    <Icon.close size={14} color={C.text3} strokeWidth={2.2} />
+                  </PressableScale>
+                )}
+              </View>
+
+              <View style={{ gap: 6 }}>
+                {communitiesQ.isLoading && displayCommunities.length === 0 ? (
+                  <Text style={[T.caption, { color: C.text3, paddingHorizontal: SP['2'] }]}>
+                    読み込み中…
+                  </Text>
+                ) : displayCommunities.length === 0 ? (
+                  <Text style={[T.caption, { color: C.text3, paddingHorizontal: SP['2'] }]}>
+                    一致するコミュニティがありません
+                  </Text>
+                ) : (
+                  displayCommunities.map((c) => {
+                    const selected = c.id === selectedCommunityId;
+                    return (
+                      <PressableScale
+                        key={c.id}
+                        onPress={() => {
+                          if (selected) {
+                            // 同じものをタップ → 解除 (community_only 時は何もしない — 必須)
+                            if (visibility === 'community_only') return;
+                            setSelectedCommunityId(null);
+                          } else {
+                            setSelectedCommunityId(c.id);
+                          }
+                        }}
+                        haptic="select"
+                        style={{
+                          flexDirection: 'row', alignItems: 'center', gap: SP['3'],
+                          paddingHorizontal: SP['3'], paddingVertical: SP['2'],
+                          borderRadius: R.md,
+                          backgroundColor: selected ? C.accentBg : C.bg3,
+                          borderWidth: 1.5,
+                          borderColor: selected ? C.accent : C.border,
+                        }}
+                      >
+                        <View style={{
+                          width: 32, height: 32, borderRadius: 8,
+                          backgroundColor: c.icon_color || C.bg4,
+                          alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          <Text style={{ fontSize: 18 }}>{c.icon_emoji || '🏠'}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[T.smallM, { color: C.text }]} numberOfLines={1}>
+                            {c.name}
+                          </Text>
+                          <Text style={[T.caption, { color: C.text3 }]}>
+                            {c.member_count.toLocaleString('ja-JP')}人のメンバー
+                          </Text>
+                        </View>
+                        {selected && (
+                          <View style={{
+                            width: 20, height: 20, borderRadius: 10,
+                            backgroundColor: C.accent,
+                            alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '900' }}>✓</Text>
+                          </View>
+                        )}
+                      </PressableScale>
+                    );
+                  })
+                )}
+              </View>
+            </View>
+          )}
         </View>
 
         {error ? (

@@ -4,6 +4,8 @@ export type ConcernReason = 'misinfo' | 'unverified' | 'spam' | 'rude' | 'scam' 
 
 export type CWCategory = 'spoiler' | 'nsfw' | 'violence' | 'sensitive' | null;
 
+export type PostVisibility = 'private' | 'public' | 'community_only' | 'community_public';
+
 export type Post = {
   id: string;
   content: string;
@@ -22,6 +24,7 @@ export type Post = {
   is_anonymous: boolean;
   content_warning?: string | null;
   cw_category?: CWCategory;
+  visibility?: PostVisibility;
   created_at: string;
 };
 
@@ -40,6 +43,8 @@ export type Tag = {
   post_count: number;
 };
 
+export type ThreadVisibility = 'public' | 'community_only';
+
 export type BBSThread = {
   id: string;
   title: string;
@@ -47,6 +52,9 @@ export type BBSThread = {
   replies_count: number;
   last_reply_at: string | null;
   created_at: string;
+  // Migration 0023 で追加 — null は通常の全体 BBS スレッド
+  community_id?: string | null;
+  visibility?: ThreadVisibility;
 };
 
 export type BBSReply = {

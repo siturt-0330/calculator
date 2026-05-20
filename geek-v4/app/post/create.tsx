@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, Alert } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { View, Text, ScrollView, Alert, Image } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAutoTagSuggest } from '@/hooks/useAutoTagSuggest';
 import { useRouter } from 'expo-router';
@@ -19,12 +19,28 @@ import { BackButton } from '@/components/nav/BackButton';
 import { TopBar } from '@/components/nav/TopBar';
 import { useToastStore } from '@/stores/toastStore';
 import { hap } from '@/design/haptics';
-import { createPost } from '@/lib/api/posts';
+import { createPost, type PostVisibility } from '@/lib/api/posts';
+import { discoverCommunities, type Community } from '@/lib/api/communities';
+import { useDebounce } from '@/hooks/useDebounce';
 import { checkContent } from '@/lib/ai/checkContent';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { POST_KIND_META } from '@/components/feed/PostKindBadge';
 import type { PostKind } from '@/types/models';
+
+type VisibilityOption = {
+  value: PostVisibility;
+  emoji: string;
+  label: string;
+  desc: string;
+};
+
+const VISIBILITY_OPTIONS: VisibilityOption[] = [
+  { value: 'private',          emoji: '🔒', label: '自分だけ',                              desc: '下書きとしてあなただけ見える' },
+  { value: 'public',           emoji: '🌐', label: '一般公開',                              desc: 'コミュニティには載せず、ホームに公開' },
+  { value: 'community_only',   emoji: '👥', label: '指定コミュニティのメンバーだけ',        desc: '選んだコミュニティ内の人だけ閲覧可' },
+  { value: 'community_public', emoji: '📣', label: '全員に公開 (コミュニティにも掲載)',     desc: 'ホームにも、コミュニティにも掲載' },
+];
 
 export default function CreatePost() {
   const router = useRouter();
@@ -38,8 +54,49 @@ export default function CreatePost() {
   const [anonymous, setAnonymous] = useState(true);
   const [kind, setKind] = useState<PostKind>('opinion');
   const [sourceUrl, setSourceUrl] = useState('');
-  const [isPublic, setIsPublic] = useState(true);
   const [posting, setPosting] = useState(false);
+
+  // 4-way visibility selector (default 'public' — same as 既存 isPublic=true)
+  const [visibility, setVisibility] = useState<PostVisibility>('public');
+
+  // Community multi-picker (only used when visibility is community_only / community_public)
+  const [communityQuery, setCommunityQuery] = useState('');
+  const debouncedCommunityQuery = useDebounce(communityQuery, 150);
+  const [communityResults, setCommunityResults] = useState<Community[]>([]);
+  const [communityLoading, setCommunityLoading] = useState(false);
+  const [selectedCommunityIds, setSelectedCommunityIds] = useState<string[]>([]);
+  const [selectedCommunities, setSelectedCommunities] = useState<Community[]>([]);
+
+  const showCommunityPicker = visibility === 'community_only' || visibility === 'community_public';
+
+  // visibility が community 系でなくなったら選択をクリア
+  useEffect(() => {
+    if (!showCommunityPicker) {
+      setSelectedCommunityIds([]);
+      setSelectedCommunities([]);
+      setCommunityQuery('');
+      setCommunityResults([]);
+    }
+  }, [showCommunityPicker]);
+
+  // コミュニティ検索 — picker が開いている時のみ走らせる
+  useEffect(() => {
+    if (!showCommunityPicker) return;
+    let cancelled = false;
+    setCommunityLoading(true);
+    void discoverCommunities({ query: debouncedCommunityQuery.trim() || undefined, limit: 20 })
+      .then((data) => {
+        if (cancelled) return;
+        setCommunityResults(data);
+      })
+      .finally(() => {
+        if (!cancelled) setCommunityLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedCommunityQuery, showCommunityPicker]);
+
   // CW (content warning)
   type CWCat = 'none' | 'spoiler' | 'nsfw' | 'violence' | 'sensitive';
   const [cwCategory, setCwCategory] = useState<CWCat>('none');
@@ -70,7 +127,7 @@ export default function CreatePost() {
       try {
         const d = JSON.parse(raw) as {
           content?: string; tags?: string[]; sourceUrl?: string;
-          kind?: PostKind; anonymous?: boolean; isPublic?: boolean;
+          kind?: PostKind; anonymous?: boolean; visibility?: PostVisibility;
         };
         const hasContent = (d.content && d.content.trim().length > 0) || (d.tags && d.tags.length > 0) || (d.sourceUrl && d.sourceUrl.length > 0);
         if (!hasContent) return;
@@ -79,13 +136,15 @@ export default function CreatePost() {
         setSourceUrl(d.sourceUrl ?? '');
         setKind((d.kind ?? 'opinion') as PostKind);
         setAnonymous(d.anonymous ?? true);
-        setIsPublic(d.isPublic ?? true);
+        setVisibility((d.visibility ?? 'public') as PostVisibility);
         show('下書きを復元しました', 'info', { undoLabel: '破棄', onUndo: () => {
           setContent(''); setTags([]); setSourceUrl('');
-          setKind('opinion'); setAnonymous(true); setIsPublic(true);
+          setKind('opinion'); setAnonymous(true); setVisibility('public');
           void AsyncStorage.removeItem(DRAFT_KEY);
         }});
-      } catch {}
+      } catch {
+        // ignore — 壊れた draft は無視
+      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -98,11 +157,11 @@ export default function CreatePost() {
         return;
       }
       void AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({
-        content, tags, sourceUrl, kind, anonymous, isPublic,
+        content, tags, sourceUrl, kind, anonymous, visibility,
       }));
     }, 500);
     return () => clearTimeout(t);
-  }, [content, tags, sourceUrl, kind, anonymous, isPublic]);
+  }, [content, tags, sourceUrl, kind, anonymous, visibility]);
 
   const pickImage = async () => {
     const r = await ImagePicker.launchImageLibraryAsync({
@@ -130,6 +189,24 @@ export default function CreatePost() {
     hap.select();
   };
 
+  const toggleCommunity = (c: Community) => {
+    if (selectedCommunityIds.includes(c.id)) {
+      setSelectedCommunityIds(selectedCommunityIds.filter((id) => id !== c.id));
+      setSelectedCommunities(selectedCommunities.filter((x) => x.id !== c.id));
+      hap.select();
+    } else {
+      setSelectedCommunityIds([...selectedCommunityIds, c.id]);
+      setSelectedCommunities([...selectedCommunities, c]);
+      hap.confirm();
+    }
+  };
+
+  const removeSelectedCommunity = (id: string) => {
+    setSelectedCommunityIds(selectedCommunityIds.filter((x) => x !== id));
+    setSelectedCommunities(selectedCommunities.filter((x) => x.id !== id));
+    hap.select();
+  };
+
   const onPost = async () => {
     if (images.length === 0 && !content.trim()) {
       show('画像かテキストを入力してください。', 'warn');
@@ -145,6 +222,13 @@ export default function CreatePost() {
     }
     if (sourceUrl && !/^https?:\/\//.test(sourceUrl.trim())) {
       show('出典URLは http:// または https:// で始めてください。', 'warn');
+      return;
+    }
+    if (
+      (visibility === 'community_only' || visibility === 'community_public') &&
+      selectedCommunityIds.length < 1
+    ) {
+      show('コミュニティを1つ以上選んでください', 'warn');
       return;
     }
 
@@ -165,6 +249,10 @@ export default function CreatePost() {
             expiresInHours: pollHours ?? undefined,
           }
         : undefined;
+      // visibility → isPublic 互換マッピング:
+      //   private             → isPublic: false (本人だけ)
+      //   public / community_* → isPublic: true (既存挙動)
+      const isPublic = visibility !== 'private';
       await createPost({
         content,
         mediaUris: images,
@@ -176,6 +264,10 @@ export default function CreatePost() {
         contentWarning: cwCategory !== 'none' ? (cwText.trim() || null) : null,
         cwCategory: cwCategory !== 'none' ? cwCategory : null,
         poll: pollPayload,
+        visibility,
+        community_ids: (visibility === 'community_only' || visibility === 'community_public')
+          ? selectedCommunityIds
+          : [],
       });
       hap.success();
       show('投稿しました', 'success');
@@ -204,7 +296,7 @@ export default function CreatePost() {
   const X = Icon.close;
   const Cam = Icon.image;
   const Hash = Icon.hash;
-  const Lock = Icon.lock;
+  const CommunityIcon = Icon.community;
 
   return (
     <KeyboardAware>
@@ -217,7 +309,7 @@ export default function CreatePost() {
               label="投稿"
               onPress={onPost}
               loading={posting}
-              disabled={posting || tags.length === 0}
+              disabled={posting || tags.length === 0 || !content.trim()}
               size="sm"
               fullWidth={false}
             />
@@ -315,6 +407,7 @@ export default function CreatePost() {
             value={content}
             onChangeText={setContent}
             maxLength={2000}
+            autoFocus
           />
 
           {/* 出典URL */}
@@ -566,51 +659,202 @@ export default function CreatePost() {
             )}
           </View>
 
-          {/* 公開範囲 */}
+          {/* 公開範囲 — 4-way audience selector */}
           <View style={{ gap: SP['2'] }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-              <Lock size={14} color={C.text2} strokeWidth={2.2} />
-              <Text style={[T.smallM, { color: C.text2 }]}>公開範囲</Text>
-            </View>
-            <View style={{ flexDirection: 'row', gap: SP['2'] }}>
-              <PressableScale
-                onPress={() => setIsPublic(true)}
-                haptic="select"
-                style={{
-                  flex: 1,
-                  paddingHorizontal: SP['3'], paddingVertical: SP['3'],
-                  borderRadius: R.md,
-                  backgroundColor: isPublic ? C.accentBg : C.bg3,
-                  borderWidth: 1.5,
-                  borderColor: isPublic ? C.accent : C.border,
-                  alignItems: 'center', gap: 2,
-                }}
-              >
-                <Text style={[T.smallM, { color: isPublic ? C.accentLight : C.text }]}>
-                  🌐 誰でも閲覧可能
-                </Text>
-                <Text style={[T.caption, { color: C.text3 }]}>フィードに表示される</Text>
-              </PressableScale>
-              <PressableScale
-                onPress={() => setIsPublic(false)}
-                haptic="select"
-                style={{
-                  flex: 1,
-                  paddingHorizontal: SP['3'], paddingVertical: SP['3'],
-                  borderRadius: R.md,
-                  backgroundColor: !isPublic ? C.accentBg : C.bg3,
-                  borderWidth: 1.5,
-                  borderColor: !isPublic ? C.accent : C.border,
-                  alignItems: 'center', gap: 2,
-                }}
-              >
-                <Text style={[T.smallM, { color: !isPublic ? C.accentLight : C.text }]}>
-                  🔒 自分だけ
-                </Text>
-                <Text style={[T.caption, { color: C.text3 }]}>下書き・メモ用</Text>
-              </PressableScale>
+            <Text style={[T.smallM, { color: C.text2 }]}>公開範囲</Text>
+            <View style={{ gap: SP['2'] }}>
+              {VISIBILITY_OPTIONS.map((opt) => {
+                const active = visibility === opt.value;
+                return (
+                  <PressableScale
+                    key={opt.value}
+                    onPress={() => setVisibility(opt.value)}
+                    haptic="select"
+                    scaleValue={0.985}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: SP['3'],
+                      paddingHorizontal: SP['3'],
+                      paddingVertical: SP['3'],
+                      borderRadius: R.lg,
+                      backgroundColor: active ? C.accent + '15' : C.bg2,
+                      borderWidth: 1.5,
+                      borderColor: active ? C.accent : C.border,
+                    }}
+                  >
+                    <Text style={{ fontSize: 26, width: 32, textAlign: 'center' }}>{opt.emoji}</Text>
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={[T.bodyB, { color: active ? C.accentLight : C.text }]} numberOfLines={1}>
+                        {opt.label}
+                      </Text>
+                      <Text style={[T.caption, { color: C.text3 }]} numberOfLines={2}>
+                        {opt.desc}
+                      </Text>
+                    </View>
+                    {active && (
+                      <View style={{
+                        width: 22, height: 22, borderRadius: 11,
+                        backgroundColor: C.accent,
+                        alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <Icon.ok size={14} color="#fff" strokeWidth={2.8} />
+                      </View>
+                    )}
+                  </PressableScale>
+                );
+              })}
             </View>
           </View>
+
+          {/* コミュニティを選ぶ (multi-picker) — visibility が community 系のときだけ */}
+          {showCommunityPicker && (
+            <View style={{ gap: SP['2'] }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+                <CommunityIcon size={14} color={C.text2} strokeWidth={2.2} />
+                <Text style={[T.smallM, { color: C.text2, flex: 1 }]}>
+                  コミュニティを選ぶ (複数選択可)
+                </Text>
+                {selectedCommunityIds.length > 0 && (
+                  <Text style={[T.caption, { color: C.accent, fontWeight: '700' }]}>
+                    {selectedCommunityIds.length} 件選択中
+                  </Text>
+                )}
+              </View>
+
+              {/* 選択済みコミュニティ pills */}
+              {selectedCommunities.length > 0 && (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
+                  {selectedCommunities.map((c) => (
+                    <PressableScale
+                      key={c.id}
+                      onPress={() => removeSelectedCommunity(c.id)}
+                      haptic="warn"
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        paddingHorizontal: SP['3'],
+                        paddingVertical: 6,
+                        borderRadius: R.full,
+                        backgroundColor: C.accent + '20',
+                        borderWidth: 1,
+                        borderColor: C.accent,
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: 18, height: 18, borderRadius: 9,
+                          backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
+                          alignItems: 'center', justifyContent: 'center',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        {c.icon_url ? (
+                          <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                        ) : (
+                          <Text style={{ fontSize: 11 }}>{c.icon_emoji}</Text>
+                        )}
+                      </View>
+                      <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]} numberOfLines={1}>
+                        {c.name}
+                      </Text>
+                      <X size={12} color={C.accentLight} strokeWidth={2.6} />
+                    </PressableScale>
+                  ))}
+                </View>
+              )}
+
+              {/* 検索 input */}
+              <Input
+                placeholder="コミュニティを検索"
+                value={communityQuery}
+                onChangeText={setCommunityQuery}
+                icon={Icon.search}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+
+              {/* 検索結果 */}
+              <View style={{
+                backgroundColor: C.bg2,
+                borderRadius: R.lg,
+                borderWidth: 1,
+                borderColor: C.border,
+                overflow: 'hidden',
+              }}>
+                {communityLoading && communityResults.length === 0 ? (
+                  <View style={{ padding: SP['4'], alignItems: 'center' }}>
+                    <Text style={[T.caption, { color: C.text3 }]}>検索中…</Text>
+                  </View>
+                ) : communityResults.length === 0 ? (
+                  <View style={{ padding: SP['4'], alignItems: 'center', gap: 4 }}>
+                    <Text style={[T.caption, { color: C.text3 }]}>
+                      {communityQuery.trim()
+                        ? '一致するコミュニティが見つかりません'
+                        : 'コミュニティ名で検索してください'}
+                    </Text>
+                  </View>
+                ) : (
+                  communityResults.map((c, idx) => {
+                    const isSelected = selectedCommunityIds.includes(c.id);
+                    return (
+                      <PressableScale
+                        key={c.id}
+                        onPress={() => toggleCommunity(c)}
+                        haptic="tap"
+                        scaleValue={0.99}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: SP['3'],
+                          paddingHorizontal: SP['3'],
+                          paddingVertical: SP['3'],
+                          backgroundColor: isSelected ? C.accent + '15' : 'transparent',
+                          borderTopWidth: idx === 0 ? 0 : 1,
+                          borderTopColor: C.divider,
+                        }}
+                      >
+                        <View
+                          style={{
+                            width: 36, height: 36, borderRadius: 18,
+                            backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
+                            alignItems: 'center', justifyContent: 'center',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          {c.icon_url ? (
+                            <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                          ) : (
+                            <Text style={{ fontSize: 18 }}>{c.icon_emoji}</Text>
+                          )}
+                        </View>
+                        <View style={{ flex: 1, gap: 1 }}>
+                          <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
+                            {c.name}
+                          </Text>
+                          <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
+                            メンバー {c.member_count.toLocaleString('ja-JP')} 人
+                          </Text>
+                        </View>
+                        <View
+                          style={{
+                            width: 22, height: 22, borderRadius: 11,
+                            borderWidth: isSelected ? 0 : 1.5,
+                            borderColor: C.border2,
+                            backgroundColor: isSelected ? C.accent : 'transparent',
+                            alignItems: 'center', justifyContent: 'center',
+                          }}
+                        >
+                          {isSelected && <Icon.ok size={14} color="#fff" strokeWidth={2.8} />}
+                        </View>
+                      </PressableScale>
+                    );
+                  })
+                )}
+              </View>
+            </View>
+          )}
 
           {/* 匿名トグル */}
           <View

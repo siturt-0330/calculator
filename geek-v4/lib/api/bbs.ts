@@ -1,7 +1,14 @@
 import { supabase } from '@/lib/supabase';
-import type { BBSThread, BBSReply, Comment } from '@/types/models';
+import type { BBSThread, BBSReply, Comment, ThreadVisibility } from '@/types/models';
 import { sanitizeContent } from '@/lib/sanitize';
 import { checkRate, rateLimitMessage } from '@/lib/rateLimit';
+
+export type { ThreadVisibility } from '@/types/models';
+
+// bbs_threads SELECT で取得するカラム一覧 (一箇所でメンテ可能)
+// migration 0023 で community_id + visibility を追加
+const BBS_THREAD_SELECT_COLS =
+  'id, title, category, replies_count, last_reply_at, created_at, community_id, visibility';
 
 // シードデータが残してしまった "[v3] " などの内部マーカープレフィックスは
 // ユーザーに見せたくないので、クライアント側で読み出し時に必ず除去する。
@@ -19,7 +26,7 @@ export async function fetchThread(id: string): Promise<BBSThread | null> {
   if (!uuidRe.test(id)) return null;
   const { data, error } = await supabase
     .from('bbs_threads')
-    .select('id, title, category, replies_count, last_reply_at, created_at')
+    .select(BBS_THREAD_SELECT_COLS)
     .eq('id', id)
     .maybeSingle();
   if (error) {
@@ -30,17 +37,58 @@ export async function fetchThread(id: string): Promise<BBSThread | null> {
   return { ...data, title: cleanTitle(data.title) } as BBSThread;
 }
 
+// ホーム BBS フィード — visibility='public' のスレッドのみ
+// (community_id があっても visibility=public なら出る = community_public 相当の挙動)
+// community_only は community 詳細の BBS タブでのみ表示
 export async function fetchThreads(): Promise<BBSThread[]> {
   const { data, error } = await supabase
     .from('bbs_threads')
-    .select('id, title, category, replies_count, last_reply_at, created_at')
+    .select(BBS_THREAD_SELECT_COLS)
+    .eq('visibility', 'public')
     .order('last_reply_at', { ascending: false, nullsFirst: false })
     .limit(50);
   if (error) throw error;
   return (data ?? []).map((t: { title: string }) => ({ ...t, title: cleanTitle(t.title) })) as BBSThread[];
 }
 
-export async function createThread(title: string, category: string): Promise<BBSThread> {
+// 特定コミュニティの BBS スレッド一覧 (community 詳細の BBS タブ用)
+// visibility 問わず全件返す — RLS 側で member/非 member 制御
+export async function fetchCommunityThreads(
+  community_id: string,
+  opts: { sort?: 'new' | 'hot' } = {},
+): Promise<BBSThread[]> {
+  const { sort = 'new' } = opts;
+  let query = supabase
+    .from('bbs_threads')
+    .select(BBS_THREAD_SELECT_COLS)
+    .eq('community_id', community_id)
+    .limit(100);
+
+  if (sort === 'hot') {
+    // hot: 返信数が多い順 → 新しい順
+    query = query
+      .order('replies_count', { ascending: false })
+      .order('last_reply_at', { ascending: false, nullsFirst: false });
+  } else {
+    // new: 最終返信時刻が新しい順 (返信ゼロは作成時刻にフォールバック)
+    query = query.order('last_reply_at', { ascending: false, nullsFirst: false });
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.warn('[fetchCommunityThreads] error:', error.message);
+    return [];
+  }
+  return (data ?? []).map((t: { title: string }) => ({ ...t, title: cleanTitle(t.title) })) as BBSThread[];
+}
+
+// 既存呼び出し互換のため createThread はそのままシグネチャ維持しつつ
+// optional な community_id / visibility を受け付けられる overload を提供
+export async function createThread(
+  title: string,
+  category: string,
+  opts?: { community_id?: string; visibility?: ThreadVisibility },
+): Promise<BBSThread> {
   const rl = checkRate('bbs_thread');
   if (!rl.ok) throw new Error(rateLimitMessage('bbs_thread', rl.retryAfterMs));
   const { data: { user } } = await supabase.auth.getUser();
@@ -48,10 +96,24 @@ export async function createThread(title: string, category: string): Promise<BBS
   // タイトルも sanitize (XSS 対策 + 内部マーカー除去)
   const safeTitle = sanitizeContent(title, { maxLength: 80 });
   if (safeTitle.length < 2) throw new Error('タイトルは 2 文字以上にしてください');
+
+  // community_only は community_id 必須 — そうでないと誰にも見えなくなる
+  const visibility: ThreadVisibility = opts?.visibility ?? 'public';
+  const community_id = opts?.community_id ?? null;
+  if (visibility === 'community_only' && !community_id) {
+    throw new Error('コミュニティ限定スレッドにはコミュニティ ID が必要です');
+  }
+
   const { data, error } = await supabase
     .from('bbs_threads')
-    .insert({ title: safeTitle, category, author_id: user.id })
-    .select('id, title, category, replies_count, last_reply_at, created_at')
+    .insert({
+      title: safeTitle,
+      category,
+      author_id: user.id,
+      community_id,
+      visibility,
+    })
+    .select(BBS_THREAD_SELECT_COLS)
     .single();
   if (error) throw error;
   return data as BBSThread;
