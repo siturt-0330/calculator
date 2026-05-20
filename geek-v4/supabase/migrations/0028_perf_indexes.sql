@@ -125,9 +125,18 @@ create index if not exists concerns_post_user_idx
   on public.concerns (post_id, user_id);
 
 -- is_private=false の concern_count 集計を高速化 (0010 で trigger 内 count(*))
-create index if not exists concerns_post_public_idx
-  on public.concerns (post_id)
-  where is_private = false;
+-- 0010 migration が未適用の DB では is_private 列が無いため、列の存在を確認してから作成する
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'concerns'
+      and column_name = 'is_private'
+  ) then
+    execute 'create index if not exists concerns_post_public_idx on public.concerns (post_id) where is_private = false';
+  end if;
+end $$;
 
 -- ============================================================
 -- post_reactions: post_id でまとめて lookup
