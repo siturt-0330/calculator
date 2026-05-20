@@ -1,8 +1,9 @@
 import { View, Text, ScrollView, KeyboardAvoidingView, Platform, Image, ActivityIndicator } from 'react-native';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import { useQuery } from '@tanstack/react-query';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { Button } from '@/components/ui/Button';
@@ -19,6 +20,9 @@ import {
   type Community,
 } from '@/lib/api/communities';
 import { useToastStore } from '@/stores/toastStore';
+import { supabase } from '@/lib/supabase';
+import { useDebounce } from '@/hooks/useDebounce';
+import { deepNormalize } from '@/lib/search/tokenize';
 
 type VisibilityOption = {
   value: Visibility | 'request' | 'invite';
@@ -45,6 +49,47 @@ export default function CreateCommunityScreen() {
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // タグ補完: query が短いときは早めに反応 (100ms)、長くなったら 150ms debounce
+  const debouncedTagQuery = useDebounce(tagInput, tagInput.trim().length <= 2 ? 100 : 150);
+
+  // tags テーブルから ilike '%query%' + post_count 降順で取得
+  const { data: tagSuggestions = [] } = useQuery({
+    queryKey: ['community-create-tag-suggestions', debouncedTagQuery.trim()],
+    queryFn: async () => {
+      const q = debouncedTagQuery.trim().replace(/^#/, '');
+      if (!q) return [];
+      // ilike は post_count 降順だが、deepNormalize の同義を逃すので
+      // 50 件取って client 側で deepNormalize 一致を優先表示する.
+      const { data } = await supabase
+        .from('tags')
+        .select('name, post_count')
+        .ilike('name', `%${q}%`)
+        .order('post_count', { ascending: false })
+        .limit(50);
+      const rows = (data ?? []) as { name: string; post_count: number }[];
+      // ひらがな / カタカナ / 半角 などの違いで ilike では落ちる候補も拾う
+      // (ilike 結果 50 件のうち、deepNormalize で部分一致するもののみ採用)
+      const nq = deepNormalize(q);
+      const matched = rows.filter((r) => deepNormalize(r.name).includes(nq));
+      return matched.slice(0, 8);
+    },
+    staleTime: 30_000,
+    enabled: debouncedTagQuery.trim().length > 0,
+  });
+
+  // タグ追加候補に「新しいタグ "#{query}" を作る」を出すかどうか
+  // - 入力されていて
+  // - 候補に同名 (deepNormalize 一致) が無い
+  // - 既に選択済みに無い
+  const showCreateNewTag = useMemo(() => {
+    const q = debouncedTagQuery.trim().replace(/^#/, '');
+    if (!q) return false;
+    const nq = deepNormalize(q);
+    if (tags.some((t) => deepNormalize(t) === nq)) return false;
+    if (tagSuggestions.some((s) => deepNormalize(s.name) === nq)) return false;
+    return true;
+  }, [debouncedTagQuery, tagSuggestions, tags]);
 
   // 類似名チェック (短いクエリ 150ms / 通常 200ms debounce)
   const [similar, setSimilar] = useState<Community[]>([]);
@@ -144,16 +189,24 @@ export default function CreateCommunityScreen() {
     setLocalIconBlob(null);
   };
 
-  const addTag = () => {
-    const t = tagInput.trim().replace(/^#/, '');
-    if (!t || tags.includes(t)) return;
+  const addTagByName = (raw: string) => {
+    const t = raw.trim().replace(/^#/, '');
+    if (!t) return;
+    // deepNormalize 一致のものは既存とみなす (例: 「ポケモン」と「ぽけもん」)
+    const nq = deepNormalize(t);
+    if (tags.some((x) => deepNormalize(x) === nq)) {
+      setTagInput('');
+      return;
+    }
     if (tags.length >= 10) {
-      show('タグは 10 個までです', 'warn');
+      show('タグは最大 10 個まで', 'warn');
       return;
     }
     setTags([...tags, t]);
     setTagInput('');
   };
+
+  const addTag = () => addTagByName(tagInput);
 
   const removeTag = (t: string) => setTags(tags.filter((x) => x !== t));
 
@@ -412,40 +465,16 @@ export default function CreateCommunityScreen() {
           />
         </View>
 
-        {/* タグ */}
+        {/* タグ — autocomplete */}
         <View style={{ gap: SP['2'] }}>
-          <Text style={[T.smallM, { color: C.text2 }]}>タグ (最大 10 個)</Text>
-          <View style={{ flexDirection: 'row', gap: SP['2'] }}>
-            <View style={{ flex: 1 }}>
-              <Input
-                icon={Icon.hash}
-                value={tagInput}
-                onChangeText={setTagInput}
-                onSubmitEditing={addTag}
-                placeholder="例: 就活 / 関西 / プログラミング"
-                returnKeyType="done"
-                keyboardAppearance="dark"
-                selectionColor={C.accent}
-              />
-            </View>
-            <PressableScale
-              onPress={addTag}
-              haptic="tap"
-              hitSlop={6}
-              disabled={!tagInput.trim()}
-              style={{
-                paddingHorizontal: SP['4'],
-                height: 44,
-                backgroundColor: tagInput.trim() ? C.accent : C.bg3,
-                borderRadius: R.md,
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: tagInput.trim() ? 1 : 0.5,
-              }}
-            >
-              <Icon.plus size={18} color="#fff" strokeWidth={2.6} />
-            </PressableScale>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}>
+            <Text style={[T.smallM, { color: C.text2, flex: 1 }]}>タグ (最大 10 個)</Text>
+            {tags.length > 0 && (
+              <Text style={[T.caption, { color: C.text3 }]}>{tags.length} / 10</Text>
+            )}
           </View>
+
+          {/* 選択済み pills (上に表示) */}
           {tags.length > 0 && (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['1'] }}>
               {tags.map((t) => (
@@ -459,18 +488,108 @@ export default function CreateCommunityScreen() {
                     alignItems: 'center',
                     gap: 4,
                     paddingHorizontal: SP['3'],
-                    paddingVertical: SP['1'],
+                    paddingVertical: 4,
                     backgroundColor: C.accentBg,
                     borderRadius: R.full,
                     borderWidth: 1,
-                    borderColor: C.accent + '55',
+                    borderColor: C.accentSoft,
                   }}
                 >
-                  <Text style={[T.caption, { color: C.accent, fontWeight: '600' }]}>#{t}</Text>
-                  <Icon.close size={12} color={C.accent} strokeWidth={2.5} />
+                  <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>
+                    #{t}
+                  </Text>
+                  <Icon.close size={12} color={C.accentLight} strokeWidth={2.5} />
                 </PressableScale>
               ))}
             </View>
+          )}
+
+          {/* 検索 input */}
+          <Input
+            icon={Icon.hash}
+            value={tagInput}
+            onChangeText={setTagInput}
+            onSubmitEditing={addTag}
+            placeholder="タグを検索 (アニメ、ゲーム…)"
+            returnKeyType="done"
+            keyboardAppearance="dark"
+            selectionColor={C.accent}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+
+          {/* サジェスト一覧 (input が空でない時のみ) */}
+          {tagInput.trim().length > 0 && (tagSuggestions.length > 0 || showCreateNewTag) && (
+            <View
+              style={{
+                backgroundColor: C.bg2,
+                borderRadius: R.lg,
+                borderWidth: 1,
+                borderColor: C.border,
+                overflow: 'hidden',
+              }}
+            >
+              {tagSuggestions.map((s, idx) => {
+                const isLast = idx === tagSuggestions.length - 1 && !showCreateNewTag;
+                return (
+                  <PressableScale
+                    key={s.name}
+                    onPress={() => addTagByName(s.name)}
+                    haptic="tap"
+                    scaleValue={0.99}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: SP['2'],
+                      paddingHorizontal: SP['3'],
+                      paddingVertical: SP['2'],
+                      borderBottomWidth: isLast ? 0 : 1,
+                      borderBottomColor: C.divider,
+                    }}
+                  >
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
+                        # {s.name}
+                      </Text>
+                      <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
+                        {s.post_count.toLocaleString('ja-JP')} 投稿
+                      </Text>
+                    </View>
+                    <Icon.plus size={16} color={C.text3} strokeWidth={2.4} />
+                  </PressableScale>
+                );
+              })}
+
+              {/* 「新しいタグを作る」行 */}
+              {showCreateNewTag && (
+                <PressableScale
+                  onPress={() => addTagByName(tagInput)}
+                  haptic="confirm"
+                  scaleValue={0.99}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: SP['2'],
+                    paddingHorizontal: SP['3'],
+                    paddingVertical: SP['2'],
+                    borderTopWidth: tagSuggestions.length > 0 ? 1 : 0,
+                    borderTopColor: C.divider,
+                  }}
+                >
+                  <Icon.plus size={16} color={C.accent} strokeWidth={2.6} />
+                  <Text style={[T.bodyMd, { color: C.accent, fontWeight: '700', flex: 1 }]} numberOfLines={1}>
+                    新しいタグ &quot;#{tagInput.trim().replace(/^#/, '')}&quot; を作る
+                  </Text>
+                </PressableScale>
+              )}
+            </View>
+          )}
+
+          {/* 補助文言 */}
+          {tags.length === 0 && tagInput.trim().length === 0 && (
+            <Text style={[T.caption, { color: C.text3 }]}>
+              関連するタグを追加すると検索で見つかりやすくなります
+            </Text>
           )}
         </View>
 

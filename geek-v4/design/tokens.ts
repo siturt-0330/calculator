@@ -1,9 +1,10 @@
 export const C = {
   bg:   '#0a0a0a',
-  bg2:  '#141414',
+  bg2:  '#161618',
   bg3:  '#1c1c1c',
   bg4:  '#242424',
   bg5:  '#2c2c2c',
+  surfaceHi: '#1a1a1d',
   glass:        'rgba(255,255,255,0.06)',
   glassStrong:  'rgba(255,255,255,0.12)',
   glassBorder:  'rgba(255,255,255,0.10)',
@@ -14,7 +15,7 @@ export const C = {
   text4:  '#52525b',
   border:  '#27272a',
   border2: '#3f3f46',
-  divider: 'rgba(255,255,255,0.06)',
+  divider: '#1f1f22',
   accent:       '#7C6AF7',
   accentDeep:   '#5E4FE0',
   accentLight:  '#9F96F9',
@@ -112,4 +113,35 @@ export const SIZE = {
   buttonSm:     36,
   buttonMd:     48,
   buttonLg:     56,
+} as const;
+
+// Refined elevation tokens for the premium card/CTA look.
+// Defined here in `tokens.ts` (alongside C / SP / R) so call sites can
+// pull a single import: `import { C, SP, SHADOW } from '@/design/tokens'`.
+// (The legacy `design/shadows.ts` re-exports a Platform-split variant —
+//  both stay in sync; new code should prefer the tokens here.)
+export const SHADOW = {
+  card: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  // Subtle "lift" for interactive press states
+  cardPress: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.28,
+    shadowRadius: 18,
+    elevation: 10,
+  },
+  // Soft accent glow for primary CTAs / focus rings
+  accentGlow: {
+    shadowColor: '#7C6AF7',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.32,
+    shadowRadius: 14,
+    elevation: 4,
+  },
 } as const;
