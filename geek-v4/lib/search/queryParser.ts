@@ -25,12 +25,18 @@ export type ParsedQuery = {
   raw: string;
 };
 
-const OPERATOR_REGEX = /\b(tag|from|has|before|after|score|kind):([^\s"]+)/gi;
-const PHRASE_REGEX = /"([^"]+)"/g;
-const NEG_REGEX = /(?:^|\s)-(\S+)/g;
+// DoS 防止: 各 operator 値 / phrase / negation token に長さ制限を入れる
+//   - OPERATOR_REGEX: 値部分を最大 80 文字に
+//   - PHRASE_REGEX: ネスト引用符の問題を避けるため escape も許可
+//   - NEG_REGEX: token 最大 80 文字に
+const OPERATOR_REGEX = /\b(tag|from|has|before|after|score|kind):([^\s"]{1,80})/gi;
+const PHRASE_REGEX = /"((?:[^"\\]|\\.){0,200})"/g;
+const NEG_REGEX = /(?:^|\s)-(\S{1,80})/g;
+// クエリ全体の最大長 — これ以上は ReDoS / メモリ食いつぶし対策で truncate
+const MAX_QUERY_LEN = 500;
 
 export function parseQuery(raw: string): ParsedQuery {
-  let work = raw.trim();
+  let work = raw.trim().slice(0, MAX_QUERY_LEN);
   const phrases: string[] = [];
   const excludes: string[] = [];
   const tags: string[] = [];

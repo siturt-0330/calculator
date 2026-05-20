@@ -252,7 +252,10 @@ const MAX_QUERY_LEN = 80;
 
 // 1つのクエリから全 variant を生成 (重要度順: 同義語 → 記号読み → 表記ゆらぎ)
 export function generateVariants(query: string): string[] {
-  const original = query.trim().slice(0, MAX_QUERY_LEN);
+  // メモリ食い対策: 3 連続以上の同じ文字を 2 文字に圧縮 ("ああああ..." → "ああ")
+  // romajiToHiragana 等で爆発するのを防ぐ
+  const deduped = query.replace(/(.)\1{2,}/g, '$1$1');
+  const original = deduped.trim().slice(0, MAX_QUERY_LEN);
   if (!original) return [];
   const ordered: string[] = [];
   const seen = new Set<string>();
