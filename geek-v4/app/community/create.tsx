@@ -32,6 +32,7 @@ type VisibilityOption = {
 };
 
 import { prepareImageUpload } from '@/lib/image';
+import { openCropper } from '@/lib/imageCropper';
 
 export default function CreateCommunityScreen() {
   const insets = useSafeAreaInsets();
@@ -150,19 +151,25 @@ export default function CreateCommunityScreen() {
       }
       const r = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: 'images',
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.85,
+        // allowsEditing は使わない — 自前 circular cropper で UX を統一
+        quality: 1,
       });
       if (r.canceled || !r.assets[0]) {
         setIconLoading(false);
         return;
       }
       const asset = r.assets[0];
+      // 自前の circular cropper を開いて切り抜く
+      // 注: openCropper 中は loading state を一度解除しないと
+      //     UI 上 spinner が出っぱなしになるので setIconLoading(false) する
+      setIconLoading(false);
+      const croppedUri = await openCropper(asset.uri);
+      if (!croppedUri) return; // cancelled
+      setIconLoading(true);
       // prepareImageUpload: EXIF 除去 + magic byte 検証 + size check (5MB)
       let prepared;
       try {
-        prepared = await prepareImageUpload(asset.uri, {
+        prepared = await prepareImageUpload(croppedUri, {
           maxSizeBytes: 5 * 1024 * 1024,
           maxWidth: 512, // アイコンなので大きすぎないように
           maxHeight: 512,
@@ -173,7 +180,7 @@ export default function CreateCommunityScreen() {
         setIconLoading(false);
         return;
       }
-      setLocalIconUri(asset.uri);
+      setLocalIconUri(croppedUri);
       setLocalIconBlob(prepared.blob);
       setLocalIconMime(prepared.mime);
     } catch (e) {

@@ -1,5 +1,5 @@
-import { memo, useState } from 'react';
-import { View, Text, useWindowDimensions, Linking, Platform, ActivityIndicator } from 'react-native';
+import { memo, useEffect, useState } from 'react';
+import { View, Text, useWindowDimensions, Linking, Platform, ActivityIndicator, Image as RNImage } from 'react-native';
 import { Icon } from '@/constants/icons';
 import type { Post } from '@/types/models';
 import { useLanguageStore } from '@/stores/languageStore';
@@ -119,15 +119,57 @@ function AnonPostCardInner({
     setTranslating(false);
   };
 
-  // 自動翻訳 (auto-translate ON 時)
-  if (autoTranslate && canTranslate && !translated && !translating) {
-    void doTranslate();
-  }
+  // 自動翻訳 (auto-translate ON 時) — render 中に setState を起こさないよう
+  // useEffect 内で発火させる。以前はトップレベルで doTranslate() を呼んでいて
+  // setTranslating(true) が render 中に走り、毎回フィードスクロール時に多重 render を誘発していた。
+  useEffect(() => {
+    if (autoTranslate && canTranslate && !translated && !translating) {
+      void doTranslate();
+    }
+    // doTranslate は新規 closure なので意図的に省く。translated/translating の遷移だけで再評価する。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoTranslate, canTranslate, translated, translating]);
   const displayContent = (autoTranslate && translated && !showOriginal) ? translated : post.content;
   const isShowingTranslation = autoTranslate && translated && !showOriginal;
   // データ欠落でクラッシュしないよう全フィールドを安全化
   const mediaUrls = post.media_urls ?? [];
+  const mediaBlurhashes = post.media_blurhashes ?? [];
   const tagNames = Array.from(new Set(post.tag_names ?? []));
+
+  // 画像の自然なアスペクト比を解決 — Image.getSize は web/native 両対応
+  // tall portrait や wide landscape を square に潰さないよう、各 URI ごとに記録
+  // 0.5 (極端な縦長) 〜 2.0 (極端な横長) でクランプして UI 暴走を防ぐ
+  const [imgAspects, setImgAspects] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (mediaUrls.length === 0) return;
+    let alive = true;
+    for (const url of mediaUrls) {
+      if (!url) continue;
+      // 既に解決済みのものは再取得しない (state を closure 経由で参照)
+      setImgAspects((prev) => {
+        if (prev[url] !== undefined) return prev;
+        RNImage.getSize(
+          url,
+          (w, h) => {
+            if (!alive || h <= 0 || w <= 0) return;
+            const ratio = Math.max(0.5, Math.min(2.0, w / h));
+            setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: ratio }));
+          },
+          () => {
+            if (!alive) return;
+            // 失敗時は 1:1 で fallback
+            setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: 1 }));
+          },
+        );
+        return prev;
+      });
+    }
+    return () => {
+      alive = false;
+    };
+    // mediaUrls は post から派生する配列 ref なので毎 render 新規 — join して安定化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaUrls.join('|')]);
   const likesCount = post.likes_count ?? 0;
   const commentsCount = post.comments_count ?? 0;
   const concernCount = post.concern_count ?? 0;
@@ -263,16 +305,38 @@ function AnonPostCardInner({
         </PressableScale>
       )}
 
-      {/* メディア */}
+      {/* メディア — 自然なアスペクト比で表示 (square crop しない)
+          tall portrait (5:6 等) や wide landscape も切れず全体が見える
+          複数枚は縦に積む (各画像が自身のアスペクト比を保持) */}
       {hasMedia && !isCwHidden && (
         <DoubleTapHeart onDoubleTap={onLike}>
-          <ProgressiveImage
-            uri={mediaUrls[0] ?? ''}
-            width={cardWidth - 2}
-            height={cardWidth - 2}
-            radius={0}
-            lazy
-          />
+          <View style={{ gap: 4 }}>
+            {mediaUrls.map((url, i) => {
+              // ロード中は 4:3 (1.333) で仮置き → 解決後に真のアスペクト比へ差し替え
+              // (1:1 だとレイアウトが大きく跳ねるので 4:3 が無難)
+              const aspect = imgAspects[url] ?? 1.333;
+              const blurhash = mediaBlurhashes[i];
+              return (
+                <View
+                  key={url}
+                  style={{
+                    width: cardWidth - 2,
+                    aspectRatio: aspect,
+                    backgroundColor: C.bg2,
+                  }}
+                >
+                  <ProgressiveImage
+                    uri={url}
+                    blurhash={blurhash}
+                    width="100%"
+                    height="100%"
+                    radius={0}
+                    lazy
+                  />
+                </View>
+              );
+            })}
+          </View>
         </DoubleTapHeart>
       )}
 

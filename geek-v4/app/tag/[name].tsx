@@ -97,7 +97,9 @@ export default function TagDetailScreen() {
       ctrBoosts: ctrBoostsT,
     });
   }, [rawPostsT, blockedTags, signalsT.tagFreq, signalsT.recentTags, ctrBoostsT]);
-  const postIds = posts.map((p) => p.id);
+  // postIds は中身が同じ render で同じ参照を保つ (hash で安定化)
+  const postIdsHash = posts.map((p) => p.id).join('|');
+  const postIds = useMemo(() => posts.map((p) => p.id), [postIdsHash]); // eslint-disable-line react-hooks/exhaustive-deps
   const { data: myLikes = {} } = useLikes(postIds);
   const { data: myConcerns = {} } = useConcerns(postIds);
   const { data: reactionsByPost } = useReactions(postIds);

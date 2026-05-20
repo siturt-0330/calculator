@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { NgramIndex } from '@/lib/search/ngramIndex';
@@ -101,38 +101,50 @@ export function useTagSearchV3() {
 
   const trendingTags = useMemo(() => new Set(trendingQ.data ?? []), [trendingQ.data]);
 
-  const search = (query: string, limit = 12): V3Result[] => {
-    const clickBoosts = getBoosts(query);
-    const ctx: SearchV3Context = {
-      ngramIndex,
-      embeddings,
-      nodes,
-      cooccur,
-      tagPopularity,
-      likedTags,
-      blockedTags,
-      tagAffinity: signals.tagFreq,
-      trendingTags,
-      clickBoosts,
-    };
-    return searchTagsV3(query, ctx, { limit, diversify: true });
-  };
+  // search / predict / completions は呼び出し側で useMemo deps として使われるので
+  // 参照を安定させる。以前は毎 render で新ハンドラを作成 → autocomplete useMemo が
+  // キーストロークごとに無条件で再評価されていた (debounce 効かず)
+  const search = useCallback(
+    (query: string, limit = 12): V3Result[] => {
+      const clickBoosts = getBoosts(query);
+      const ctx: SearchV3Context = {
+        ngramIndex,
+        embeddings,
+        nodes,
+        cooccur,
+        tagPopularity,
+        likedTags,
+        blockedTags,
+        tagAffinity: signals.tagFreq,
+        trendingTags,
+        clickBoosts,
+      };
+      return searchTagsV3(query, ctx, { limit, diversify: true });
+    },
+    [ngramIndex, embeddings, nodes, cooccur, tagPopularity, likedTags, blockedTags, signals.tagFreq, trendingTags, getBoosts],
+  );
 
   // Predict: Trie ベースの prefix completion (人気度順)
-  const predict = (query: string): string | null => {
-    if (!query) return null;
-    const completions = trie.completions(query, 1);
-    if (completions.length === 0) return null;
-    const top = completions[0]!.tag;
-    if (top.toLowerCase() === query.toLowerCase()) return null;
-    return top;
-  };
+  const predict = useCallback(
+    (query: string): string | null => {
+      if (!query) return null;
+      const completions = trie.completions(query, 1);
+      if (completions.length === 0) return null;
+      const top = completions[0]!.tag;
+      if (top.toLowerCase() === query.toLowerCase()) return null;
+      return top;
+    },
+    [trie],
+  );
 
   // 上位 K の prefix 候補
-  const completions = (query: string, k = 5): string[] => {
-    if (!query) return [];
-    return trie.completions(query, k).map((c) => c.tag).filter((t) => t.toLowerCase() !== query.toLowerCase());
-  };
+  const completions = useCallback(
+    (query: string, k = 5): string[] => {
+      if (!query) return [];
+      return trie.completions(query, k).map((c) => c.tag).filter((t) => t.toLowerCase() !== query.toLowerCase());
+    },
+    [trie],
+  );
 
   // Context は外部からも参照可能に
   const ctx: SearchV3Context = useMemo(() => ({

@@ -19,7 +19,7 @@ import {
   FlatList,
   type ListRenderItem,
 } from 'react-native';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -54,6 +54,8 @@ import { usePolls } from '@/hooks/usePolls';
 import { sanitizeContent, sanitizeUrl } from '@/lib/sanitize';
 import { formatRelative } from '@/lib/utils/date';
 import type { Post, BBSThread } from '@/types/models';
+import type { ReactionAgg } from '@/lib/api/reactions';
+import type { Poll } from '@/lib/api/polls';
 
 // ============================================================
 // Types
@@ -131,7 +133,8 @@ export default function CommunityDetailScreen() {
   const qc = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<TabKey>('feed');
-  const [feedSort, setFeedSort] = useState<FeedSort>('new');
+  // NOTE: feedSort lives inside FeedTab so changing the sort does not
+  // re-render sibling tabs.
   const [descExpanded, setDescExpanded] = useState(false);
   const [joining, setJoining] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -448,18 +451,22 @@ export default function CommunityDetailScreen() {
         </View>
 
         {/* ============================================================
-            Tab content
+            Tab content — all tabs rendered, only the active one is
+            visible. This avoids unmount/remount + refetch on every
+            tab switch (the heaviest source of jank).
             ============================================================ */}
-        {activeTab === 'feed' && (
-          <FeedTab communityId={id} sort={feedSort} onSortChange={setFeedSort} />
-        )}
-        {activeTab === 'threads' && <ThreadsTab communityId={id} />}
-        {activeTab === 'spots' && (
+        <View style={{ display: activeTab === 'feed' ? 'flex' : 'none' }}>
+          <FeedTab communityId={id} />
+        </View>
+        <View style={{ display: activeTab === 'threads' ? 'flex' : 'none' }}>
+          <ThreadsTab communityId={id} />
+        </View>
+        <View style={{ display: activeTab === 'spots' ? 'flex' : 'none' }}>
           <SpotsTab communityId={id} canCreate={community.is_member} />
-        )}
-        {activeTab === 'events' && (
+        </View>
+        <View style={{ display: activeTab === 'events' ? 'flex' : 'none' }}>
           <EventsTab communityId={id} canCreate={community.is_member} />
-        )}
+        </View>
         {/* compose tab navigates away in the effect above */}
       </ScrollView>
     </View>
@@ -531,15 +538,12 @@ function SubscribeButton({
 // ============================================================
 // Tab: みんなの投稿集 (community posts feed)
 // ============================================================
-function FeedTab({
-  communityId,
-  sort,
-  onSortChange,
-}: {
+type FeedTabProps = {
   communityId: string;
-  sort: FeedSort;
-  onSortChange: (s: FeedSort) => void;
-}) {
+};
+const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
+  const [sort, setSort] = useState<FeedSort>('new');
+  const onSortChange = useCallback((s: FeedSort) => setSort(s), []);
   const router = useRouter();
   const { show: showToast } = useToastStore();
   const { data, isLoading, isError } = useQuery({
@@ -672,7 +676,7 @@ function FeedTab({
       ) : (
         <View>
           {posts.map((p) => (
-            <AnonPostCard
+            <FeedPostRow
               key={p.id}
               post={p}
               liked={!!myLikes[p.id]}
@@ -681,27 +685,116 @@ function FeedTab({
               reactions={reactionsByPost[p.id] ?? []}
               addedTags={addedTagsByPost[p.id] ?? []}
               poll={polls[p.id]}
-              onLike={() => toggleLike(p.id)}
-              onConcern={() => toggleConcern(p.id, !!myConcerns[p.id])}
-              onComment={() => router.push(`/post/${p.id}` as never)}
-              onSave={() => toggleSave(p.id)}
-              onShare={() => share(`Geek の投稿 #${p.tag_names[0] ?? '雑談'}`, `/post/${p.id}`)}
-              onTagPress={(name) => router.push(`/tag/${encodeURIComponent(name)}` as never)}
-              onMore={() => {/* no-op — could add report flow later */}}
-              onReact={(meme) => toggleReact(p.id, meme)}
-              onAddTag={(tag) => handleAddTag(p.id, tag)}
+              toggleLike={toggleLike}
+              toggleConcern={toggleConcern}
+              toggleSave={toggleSave}
+              toggleReact={toggleReact}
+              share={share}
+              router={router}
+              handleAddTag={handleAddTag}
             />
           ))}
         </View>
       )}
     </View>
   );
-}
+});
+
+// ------------------------------------------------------------
+// Memoized row — prevents recreating callbacks per AnonPostCard
+// on every FeedTab render. Identity-stable handlers come from the
+// parent via props, and per-row closures are isolated here so a
+// single post's state change won't re-render the others.
+// ------------------------------------------------------------
+type FeedPostRowProps = {
+  post: Post;
+  liked: boolean;
+  concerned: boolean;
+  saved: boolean;
+  reactions: ReactionAgg[];
+  addedTags: string[];
+  poll: Poll | undefined;
+  toggleLike: (id: string) => void;
+  toggleConcern: (id: string, current: boolean) => void;
+  toggleSave: (id: string) => void;
+  toggleReact: (id: string, meme: string) => void;
+  share: (title: string, path: string) => Promise<void>;
+  router: ReturnType<typeof useRouter>;
+  handleAddTag: (postId: string, tag: string) => Promise<void>;
+};
+const FeedPostRow = memo(function FeedPostRow({
+  post,
+  liked,
+  concerned,
+  saved,
+  reactions,
+  addedTags,
+  poll,
+  toggleLike,
+  toggleConcern,
+  toggleSave,
+  toggleReact,
+  share,
+  router,
+  handleAddTag,
+}: FeedPostRowProps) {
+  const onLike = useCallback(() => toggleLike(post.id), [toggleLike, post.id]);
+  const onConcern = useCallback(
+    () => toggleConcern(post.id, concerned),
+    [toggleConcern, post.id, concerned],
+  );
+  const onComment = useCallback(
+    () => router.push(`/post/${post.id}` as never),
+    [router, post.id],
+  );
+  const onSave = useCallback(() => toggleSave(post.id), [toggleSave, post.id]);
+  const onShare = useCallback(
+    () => share(`Geek の投稿 #${post.tag_names[0] ?? '雑談'}`, `/post/${post.id}`),
+    [share, post.id, post.tag_names],
+  );
+  const onTagPress = useCallback(
+    (name: string) => router.push(`/tag/${encodeURIComponent(name)}` as never),
+    [router],
+  );
+  const onMore = useCallback(() => {
+    /* no-op — could add report flow later */
+  }, []);
+  const onReact = useCallback(
+    (meme: string) => toggleReact(post.id, meme),
+    [toggleReact, post.id],
+  );
+  const onAddTag = useCallback(
+    (tag: string) => {
+      void handleAddTag(post.id, tag);
+    },
+    [handleAddTag, post.id],
+  );
+  return (
+    <AnonPostCard
+      post={post}
+      liked={liked}
+      concerned={concerned}
+      saved={saved}
+      reactions={reactions}
+      addedTags={addedTags}
+      poll={poll}
+      onLike={onLike}
+      onConcern={onConcern}
+      onComment={onComment}
+      onSave={onSave}
+      onShare={onShare}
+      onTagPress={onTagPress}
+      onMore={onMore}
+      onReact={onReact}
+      onAddTag={onAddTag}
+    />
+  );
+});
 
 // ============================================================
 // Tab: 掲示板 (BBS threads)
 // ============================================================
-function ThreadsTab({ communityId }: { communityId: string }) {
+const ThreadsTab = memo(function ThreadsTab({ communityId }: { communityId: string }) {
   const router = useRouter();
   const { show: showToast } = useToastStore();
   const { data, isLoading, isError } = useQuery({
@@ -839,12 +932,12 @@ function ThreadsTab({ communityId }: { communityId: string }) {
       })}
     </View>
   );
-}
+});
 
 // ============================================================
 // Tab: 聖地 (community spots)
 // ============================================================
-function SpotsTab({ communityId, canCreate }: { communityId: string; canCreate: boolean }) {
+const SpotsTab = memo(function SpotsTab({ communityId, canCreate }: { communityId: string; canCreate: boolean }) {
   const router = useRouter();
   const { show: showToast } = useToastStore();
   const { data, isLoading, isError } = useQuery({
@@ -955,12 +1048,12 @@ function SpotsTab({ communityId, canCreate }: { communityId: string; canCreate: 
       )}
     </View>
   );
-}
+});
 
 // ============================================================
 // Tab: カレンダー (community events)
 // ============================================================
-function EventsTab({ communityId, canCreate }: { communityId: string; canCreate: boolean }) {
+const EventsTab = memo(function EventsTab({ communityId, canCreate }: { communityId: string; canCreate: boolean }) {
   const router = useRouter();
   const { show: showToast } = useToastStore();
   const { data, isLoading, isError } = useQuery({
@@ -1038,7 +1131,7 @@ function EventsTab({ communityId, canCreate }: { communityId: string; canCreate:
       )}
     </View>
   );
-}
+});
 
 function EventRow({ event }: { event: CommunityEvent }) {
   const d = new Date(event.starts_at);

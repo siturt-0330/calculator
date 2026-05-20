@@ -70,7 +70,12 @@ export default function FeedScreen() {
     void hydrateFeed();
   }, [hydrateFeed]);
 
-  const postIds = posts.map((p) => p.id);
+  // posts は毎 render で新しい配列参照になる (data?.pages.flatMap 経由)。
+  // ID リストの中身が変わらない限り再計算したくないので、id を join したハッシュで
+  // 安定化する。これで下流の useQuery/useMemo が ID 集合が同じ render では
+  // 再評価されない。
+  const postIdsHash = posts.map((p) => p.id).join('|');
+  const postIds = useMemo(() => posts.map((p) => p.id), [postIdsHash]); // eslint-disable-line react-hooks/exhaustive-deps
   const { data: myLikes = {} } = useLikes(postIds);
   const { data: myConcerns = {} } = useConcerns(postIds);
   const { data: mySaves = {} } = useSaves(postIds);

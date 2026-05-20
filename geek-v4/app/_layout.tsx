@@ -206,6 +206,13 @@ export default function RootLayout() {
                   <Stack.Screen name="community/[id]" />
                   <Stack.Screen name="community/create" />
                   <Stack.Screen name="community/discover" />
+                  <Stack.Screen
+                    name="image-cropper"
+                    options={{
+                      presentation: 'modal',
+                      animation: 'slide_from_bottom',
+                    }}
+                  />
                   <Stack.Screen name="settings/obsidian" />
                   <Stack.Screen name="settings/terms" />
                   <Stack.Screen name="settings/privacy-policy" />

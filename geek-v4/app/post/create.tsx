@@ -500,14 +500,44 @@ export default function CreatePost() {
               </View>
             )}
 
-            <Input
-              placeholder="タグを追加（例: ポケモン）"
-              value={tagInput}
-              onChangeText={setTagInput}
-              onSubmitEditing={addTag}
-              returnKeyType="done"
-              icon={Hash}
-            />
+            {/* mobile では「+ 追加」ボタンが無いと「return key を押せばいい」 が分からない
+                ので、Input 横に常時可視の追加ボタンを置く */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+              <View style={{ flex: 1 }}>
+                <Input
+                  placeholder="タグを追加（例: ポケモン）"
+                  value={tagInput}
+                  onChangeText={setTagInput}
+                  onSubmitEditing={addTag}
+                  returnKeyType="done"
+                  icon={Hash}
+                />
+              </View>
+              <PressableScale
+                onPress={addTag}
+                haptic="select"
+                disabled={!tagInput.trim() || tags.length >= 5}
+                style={{
+                  paddingHorizontal: SP['4'],
+                  paddingVertical: SP['3'],
+                  borderRadius: R.lg,
+                  backgroundColor: tagInput.trim() && tags.length < 5 ? C.accent : C.bg3,
+                  borderWidth: 1,
+                  borderColor: tagInput.trim() && tags.length < 5 ? C.accent : C.border,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                <Text style={{
+                  color: tagInput.trim() && tags.length < 5 ? '#fff' : C.text3,
+                  fontWeight: '700',
+                  fontSize: 14,
+                }}>
+                  + 追加
+                </Text>
+              </PressableScale>
+            </View>
             {/* 入力中のリアルタイム類似タグ提案 */}
             {tags.length < 5 && (
               <TagInputSuggestions

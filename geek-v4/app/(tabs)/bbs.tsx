@@ -100,23 +100,46 @@ export default function BBSScreen() {
   });
   const communityMeta = communityMetaQ.data ?? {};
 
+  // スレッドごとの normalize 済みハイスタック / カテゴリを一度だけ計算してキャッシュ。
+  // 以前は filter() / score() の中で各 thread × 各 variant ごとに deepNormalize を回しており
+  // 1 キーストロークごとに 数千〜数万回 走っていた (debounce 後も再計算)。
+  // threads が変わった時だけ作り直し、search 中は変えない。
+  const threadDocs = useMemo(
+    () => threads.map((t) => ({
+      thread: t,
+      haystackDeep: deepNormalize(t.title + ' ' + (t.category ?? '')),
+      categoryDeep: t.category ? deepNormalize(t.category) : '',
+      lastReplyMs: new Date(t.last_reply_at ?? t.created_at).getTime(),
+    })),
+    [threads],
+  );
+
+  // variant ごとに normalize 結果も pre-compute (filter ループの内側で 1 度だけ実行)
+  const normalizedVariants = useMemo(
+    () => variants.map((v) => deepNormalize(v)),
+    [variants],
+  );
+  const normalizedExcludes = useMemo(
+    () => parsedQuery.excludes.map((ex) => deepNormalize(ex)),
+    [parsedQuery.excludes],
+  );
+
   const filtered = useMemo(() => {
-    let result = threads;
+    const now = Date.now();
+    let result = threadDocs;
     if (category !== 'すべて') {
-      result = result.filter((t) => t.category === category);
+      result = result.filter((d) => d.thread.category === category);
     }
-    if (debounced.length > 0 && variants.length > 0) {
-      result = result.filter((t) => {
-        // deepNormalize で「ラーメン」「らあめん」「ラァメン」等のゆらぎを吸収
-        const haystackDeep = deepNormalize(t.title + ' ' + (t.category ?? ''));
-        return variants.some((v) => haystackDeep.includes(deepNormalize(v)));
-      });
+    if (debounced.length > 0 && normalizedVariants.length > 0) {
+      result = result.filter((d) =>
+        normalizedVariants.some((nv) => d.haystackDeep.includes(nv)),
+      );
     }
-    for (const ex of parsedQuery.excludes) {
-      const n = deepNormalize(ex);
-      result = result.filter((t) => !deepNormalize(t.title + ' ' + (t.category ?? '')).includes(n));
+    for (const nx of normalizedExcludes) {
+      result = result.filter((d) => !d.haystackDeep.includes(nx));
     }
-    const scored = result.map((t) => {
+    const scored = result.map((d) => {
+      const t = d.thread;
       let score = 0;
       if (debounced) {
         let maxRel = 0;
@@ -125,12 +148,11 @@ export default function BBSScreen() {
           if (r > maxRel) maxRel = r;
         }
         score += maxRel;
-        if (t.category && variants.some((v) => deepNormalize(t.category!).includes(deepNormalize(v)))) score += 30;
+        if (d.categoryDeep && normalizedVariants.some((nv) => d.categoryDeep.includes(nv))) score += 30;
       }
       score += Math.log(1 + t.replies_count) * 3;
-      const ageH = (Date.now() - new Date(t.last_reply_at ?? t.created_at).getTime()) / 3600000;
+      const ageH = (now - d.lastReplyMs) / 3600000;
       score += 10 * Math.exp(-ageH / 168);
-      // CTR boost: 過去にこのクエリで開いたスレッドを優遇
       const ctrBoost = ctrBoosts[t.id] ?? 0;
       if (ctrBoost > 0) score += Math.min(100, ctrBoost * 15);
       return { item: t, score };
@@ -146,7 +168,7 @@ export default function BBSScreen() {
       scored.sort((a, b) => b.score - a.score);
     }
     return scored;
-  }, [threads, debounced, variants, category, sort, parsedQuery]);
+  }, [threadDocs, debounced, variants, normalizedVariants, normalizedExcludes, category, sort, ctrBoosts]);
 
   const highlightTerms = useMemo(
     () => [...parsedQuery.keywords, ...parsedQuery.phrases].filter((s) => s.length > 0),
@@ -290,6 +312,12 @@ export default function BBSScreen() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.accent} />
         }
+        // 長いリストでオフスクリーンの subview を unmount し、メモリ・描画コストを下げる。
+        // FlatList の windowSize / maxToRenderPerBatch も控えめにしてフレーム drop を抑える。
+        removeClippedSubviews
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={11}
         contentContainerStyle={{
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
           alignItems: 'center',
