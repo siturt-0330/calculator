@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { View, Text, FlatList, ScrollView, TextInput, useWindowDimensions, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQuery } from '@tanstack/react-query';
 import { useBBS } from '@/hooks/useBBS';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -19,6 +20,7 @@ import { findClosestK } from '@/lib/search/typoCorrect';
 import { textRelevance } from '@/lib/utils/searchAlgo';
 import { useSearchClickStore } from '@/stores/searchClickStore';
 import { logEvent } from '@/lib/personalize';
+import { supabase } from '@/lib/supabase';
 
 type SortMode = 'recent' | 'popular' | 'relevance';
 
@@ -65,6 +67,38 @@ export default function BBSScreen() {
   const getCtrBoosts = useSearchClickStore((s) => s.getBoosts);
   const recordCtr = useSearchClickStore((s) => s.record);
   const ctrBoosts = useMemo(() => getCtrBoosts(debounced), [debounced, getCtrBoosts]);
+
+  // コミュニティ紐付け済みスレッドのために、表示中スレッドの community_id 一覧を集めて
+  // 名前/アイコンを一括 lookup する (大量にあっても 1 リクエスト)
+  const communityIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const t of threads) {
+      if (t.community_id) ids.add(t.community_id);
+    }
+    return Array.from(ids).sort();
+  }, [threads]);
+  const communityMetaQ = useQuery({
+    queryKey: ['bbs-thread-communities', communityIds],
+    queryFn: async () => {
+      if (communityIds.length === 0) return {} as Record<string, { name: string; icon_emoji: string }>;
+      const { data, error } = await supabase
+        .from('communities')
+        .select('id, name, icon_emoji')
+        .in('id', communityIds);
+      if (error) {
+        console.warn('[bbs] community meta fetch failed:', error.message);
+        return {} as Record<string, { name: string; icon_emoji: string }>;
+      }
+      const map: Record<string, { name: string; icon_emoji: string }> = {};
+      for (const c of (data ?? []) as Array<{ id: string; name: string; icon_emoji: string }>) {
+        map[c.id] = { name: c.name, icon_emoji: c.icon_emoji };
+      }
+      return map;
+    },
+    enabled: communityIds.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+  const communityMeta = communityMetaQ.data ?? {};
 
   const filtered = useMemo(() => {
     let result = threads;
@@ -262,6 +296,7 @@ export default function BBSScreen() {
         }}
         renderItem={({ item: { item } }) => {
           const catColor = item.category ? (CATEGORY_COLORS[item.category] ?? C.accent) : C.accent;
+          const community = item.community_id ? communityMeta[item.community_id] : undefined;
           return (
             <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'], paddingBottom: SP['3'] }}>
               <PressableScale
@@ -289,6 +324,23 @@ export default function BBSScreen() {
                 <View style={{ width: 4, backgroundColor: catColor }} />
                 {/* 本体 */}
                 <View style={{ flex: 1, padding: SP['3'], gap: SP['2'] }}>
+                  {/* コミュニティ紐付けバッジ (一般公開 + community_id がある場合) */}
+                  {community && (
+                    <View style={{ flexDirection: 'row' }}>
+                      <View style={{
+                        flexDirection: 'row', alignItems: 'center', gap: 4,
+                        paddingHorizontal: SP['2'], paddingVertical: 2,
+                        backgroundColor: C.bg3,
+                        borderRadius: R.full,
+                        borderWidth: 1, borderColor: C.border,
+                      }}>
+                        <Text style={{ fontSize: 10 }}>{community.icon_emoji || '🏠'}</Text>
+                        <Text style={[T.caption, { color: C.text2, fontSize: 10, fontWeight: '600' }]} numberOfLines={1}>
+                          #{community.name}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
                     {item.category && (
                       <View style={{

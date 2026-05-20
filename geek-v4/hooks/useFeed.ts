@@ -38,10 +38,13 @@ export function useFeed() {
 
   const filterTags = scope === 'closed' && likedTags.length > 0 ? likedTags : undefined;
 
+  // ホームフィード — fetchPosts は home=true (デフォルト) で
+  // visibility IN ('public', 'community_public') の post だけ返す。
+  // private / community_only はサーバー側で弾かれる。
   const { data, isLoading, isFetching, fetchNextPage, hasNextPage, refetch } = useInfiniteQuery({
     queryKey: ['feed', sort, scope, likedTags, blockedTags],
     queryFn: ({ pageParam }) =>
-      fetchPosts({ sort, likedTags, blockedTags, filterTags, cursor: pageParam as string | undefined }),
+      fetchPosts({ sort, likedTags, blockedTags, filterTags, cursor: pageParam as string | undefined, home: true }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 30_000,
