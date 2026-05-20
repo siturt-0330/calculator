@@ -260,6 +260,7 @@ export async function searchByName(query: string, limit = 20): Promise<Community
 
 // ============================================================
 // コミュニティ検索 (discover) — invite は除外
+// variants で「ポケモン / pokemon / ぽけもん / pkmn」等の表記ゆらぎを吸収
 // ============================================================
 export async function discoverCommunities(opts: {
   query?: string;
@@ -273,9 +274,18 @@ export async function discoverCommunities(opts: {
     .order('member_count', { ascending: false })
     .limit(opts.limit ?? 30);
 
-  if (opts.query && opts.query.trim().length > 0) {
-    // ilike 部分一致
-    q = q.ilike('name', `%${opts.query.trim()}%`);
+  const queryStr = opts.query?.trim();
+  if (queryStr && queryStr.length > 0) {
+    // バリエーション (大文字/半角/カタカナ/同義語) で or-ilike — URL 肥大化を避けて 6 種に制限
+    const variants = generateVariants(queryStr).slice(0, 6);
+    const orClauses = variants
+      .filter((v) => v.length >= 1)
+      .map((v) => `name.ilike.%${v.replace(/[\\,()]/g, '')}%`);
+    if (orClauses.length > 0) {
+      q = q.or(orClauses.join(','));
+    } else {
+      q = q.ilike('name', `%${queryStr}%`);
+    }
   }
   // tag フィルタ
   if (opts.tag) {

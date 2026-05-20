@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { View, Text } from 'react-native';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { similarity as damerauSimilarity } from '@/lib/search/typoCorrect';
-import { normalize } from '@/lib/search/tokenize';
+import { deepNormalize } from '@/lib/search/tokenize';
 import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 
@@ -29,9 +29,10 @@ export function MentionAutocomplete({
   const matches = useMemo(() => {
     if (token === null) return [];
     if (token.length === 0) return candidates.slice(0, 5);
-    const qn = normalize(token);
+    // deepNormalize で「マリン」「まりん」「Marine」を同一視
+    const qn = deepNormalize(token);
     const scored = candidates.map((c) => {
-      const ln = normalize(c.label);
+      const ln = deepNormalize(c.label);
       let score = 0;
       if (ln === qn) score = 100;
       else if (ln.startsWith(qn)) score = 80;

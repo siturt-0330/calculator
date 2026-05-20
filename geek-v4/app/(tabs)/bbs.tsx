@@ -14,7 +14,8 @@ import { TABBAR } from '@/design/tabbar';
 import { formatRelative } from '@/lib/utils/date';
 import { parseQuery } from '@/lib/search/queryParser';
 import { generateVariants } from '@/lib/search/variants';
-import { normalize } from '@/lib/search/tokenize';
+import { deepNormalize } from '@/lib/search/tokenize';
+import { findClosestK } from '@/lib/search/typoCorrect';
 import { textRelevance } from '@/lib/utils/searchAlgo';
 import { useSearchClickStore } from '@/stores/searchClickStore';
 
@@ -41,7 +42,10 @@ export default function BBSScreen() {
   const [sort, setSort] = useState<SortMode>('recent');
 
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(search.trim()), 200);
+    // 短いクエリは早く応答 (autocomplete のテンポを上げる)
+    const trimmed = search.trim();
+    const delay = trimmed.length <= 2 ? 100 : 150;
+    const t = setTimeout(() => setDebounced(trimmed), delay);
     return () => clearTimeout(t);
   }, [search]);
 
@@ -68,13 +72,14 @@ export default function BBSScreen() {
     }
     if (debounced.length > 0 && variants.length > 0) {
       result = result.filter((t) => {
-        const haystack = normalize(t.title + ' ' + (t.category ?? ''));
-        return variants.some((v) => haystack.includes(normalize(v)));
+        // deepNormalize で「ラーメン」「らあめん」「ラァメン」等のゆらぎを吸収
+        const haystackDeep = deepNormalize(t.title + ' ' + (t.category ?? ''));
+        return variants.some((v) => haystackDeep.includes(deepNormalize(v)));
       });
     }
     for (const ex of parsedQuery.excludes) {
-      const n = normalize(ex);
-      result = result.filter((t) => !normalize(t.title + ' ' + (t.category ?? '')).includes(n));
+      const n = deepNormalize(ex);
+      result = result.filter((t) => !deepNormalize(t.title + ' ' + (t.category ?? '')).includes(n));
     }
     const scored = result.map((t) => {
       let score = 0;
@@ -85,7 +90,7 @@ export default function BBSScreen() {
           if (r > maxRel) maxRel = r;
         }
         score += maxRel;
-        if (t.category && variants.some((v) => normalize(t.category!).includes(normalize(v)))) score += 30;
+        if (t.category && variants.some((v) => deepNormalize(t.category!).includes(deepNormalize(v)))) score += 30;
       }
       score += Math.log(1 + t.replies_count) * 3;
       const ageH = (Date.now() - new Date(t.last_reply_at ?? t.created_at).getTime()) / 3600000;
@@ -112,6 +117,16 @@ export default function BBSScreen() {
     () => [...parsedQuery.keywords, ...parsedQuery.phrases].filter((s) => s.length > 0),
     [parsedQuery],
   );
+
+  // 0 件ヒット時のもしかして候補 — スレッドタイトル群からタイポ補正
+  const didYouMean = useMemo(() => {
+    if (filtered.length > 0) return [] as string[];
+    if (debounced.length < 2) return [];
+    const kw = parsedQuery.keywords[0];
+    if (!kw) return [];
+    const titles = Array.from(new Set(threads.map((t) => t.title)));
+    return findClosestK(kw, titles, 3, 0.5);
+  }, [filtered.length, debounced, parsedQuery.keywords, threads]);
 
   const showResults = debounced.length > 0;
 
@@ -229,7 +244,7 @@ export default function BBSScreen() {
             );
           })}
           <View style={{ flex: 1 }} />
-          <Text style={[T.caption, { color: C.text3 }]}>{filtered.length}件</Text>
+          <Text style={[T.caption, { color: C.text3 }]}>{filtered.length.toLocaleString('ja-JP')}件</Text>
         </View>
       </View>
 
@@ -301,7 +316,7 @@ export default function BBSScreen() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                       <Icon.comment size={13} color={C.text3} strokeWidth={2.2} />
                       <Text style={[T.small, { color: C.text3, fontWeight: '600' }]}>
-                        {item.replies_count}
+                        {item.replies_count.toLocaleString('ja-JP')}
                       </Text>
                     </View>
                     {item.replies_count > 10 && (
@@ -340,9 +355,34 @@ export default function BBSScreen() {
                   <Text style={[T.h4, { color: C.text, textAlign: 'center' }]}>
                     「{debounced}」に一致するスレッドはありません
                   </Text>
-                  <Text style={[T.small, { color: C.text3, textAlign: 'center' }]}>
-                    別のキーワードやカテゴリを試してください
-                  </Text>
+                  {didYouMean.length > 0 ? (
+                    <View style={{ alignItems: 'center', gap: 6 }}>
+                      <Text style={[T.small, { color: C.text3 }]}>もしかして:</Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+                        {didYouMean.map((s) => (
+                          <PressableScale
+                            key={s}
+                            onPress={() => setSearch(s)}
+                            haptic="select"
+                            style={{
+                              paddingHorizontal: SP['3'], paddingVertical: 4,
+                              backgroundColor: C.accentBg,
+                              borderRadius: R.full,
+                              borderWidth: 1, borderColor: C.accentSoft,
+                            }}
+                          >
+                            <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]} numberOfLines={1}>
+                              {s}
+                            </Text>
+                          </PressableScale>
+                        ))}
+                      </View>
+                    </View>
+                  ) : (
+                    <Text style={[T.small, { color: C.text3, textAlign: 'center' }]}>
+                      別のキーワードやカテゴリを試してください
+                    </Text>
+                  )}
                   <PressableScale
                     onPress={() => router.push('/bbs/create' as never)}
                     haptic="confirm"
