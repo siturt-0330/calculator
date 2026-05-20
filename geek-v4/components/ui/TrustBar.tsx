@@ -1,27 +1,47 @@
 import { View, Text } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { C, R, SP } from '@/design/tokens';
+import { C, R, SP, GRAD } from '@/design/tokens';
 import { T } from '@/design/typography';
-import { GRAD } from '@/design/tokens';
+import type { TrustTier } from '@/lib/trust/score';
 
-export function TrustBar({ score, compact }: { score: number; compact?: boolean }) {
+type Props = {
+  score: number;
+  compact?: boolean;
+  tier?: TrustTier;
+};
+
+export function TrustBar({ score, compact, tier }: Props) {
+  const pct = Math.min(Math.max(score, 0), 100);
   if (compact) {
     return (
       <View
         style={{ height: 4, borderRadius: R.full, backgroundColor: C.bg3, overflow: 'hidden', width: 80 }}
       >
-        <LinearGradient
-          colors={[...GRAD.trust]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: `${Math.min(score, 100)}%`,
-          }}
-        />
+        {tier ? (
+          <View
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: `${pct}%`,
+              backgroundColor: tier.color,
+            }}
+          />
+        ) : (
+          <LinearGradient
+            colors={[...GRAD.trust]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: `${pct}%`,
+            }}
+          />
+        )}
       </View>
     );
   }
@@ -34,19 +54,33 @@ export function TrustBar({ score, compact }: { score: number; compact?: boolean 
       <View
         style={{ height: 6, borderRadius: R.full, backgroundColor: C.bg3, overflow: 'hidden' }}
       >
-        <LinearGradient
-          colors={[...GRAD.trust]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: `${Math.min(score, 100)}%`,
-            borderRadius: R.full,
-          }}
-        />
+        {tier ? (
+          <View
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: `${pct}%`,
+              backgroundColor: tier.color,
+              borderRadius: R.full,
+            }}
+          />
+        ) : (
+          <LinearGradient
+            colors={[...GRAD.trust]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: `${pct}%`,
+              borderRadius: R.full,
+            }}
+          />
+        )}
       </View>
     </View>
   );
