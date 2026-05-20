@@ -5,10 +5,10 @@
 import { View, Text } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, SP } from '../../../../design/tokens';
-import { T } from '../../../../design/typography';
-import { BackButton } from '../../../../components/nav/BackButton';
-import { Icon } from '../../../../constants/icons';
+import { C, SP } from '../../../../../design/tokens';
+import { T } from '../../../../../design/typography';
+import { BackButton } from '../../../../../components/nav/BackButton';
+import { Icon } from '../../../../../constants/icons';
 
 export default function CreateEventScreen() {
   const insets = useSafeAreaInsets();

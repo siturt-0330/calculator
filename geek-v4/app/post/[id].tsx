@@ -49,18 +49,25 @@ export default function PostDetailScreen() {
     queryKey: ['post', id],
     queryFn: () => fetchPostById(id),
     enabled: !!id,
+    // 投稿本文は immutable に近い (counter のみ Realtime で invalidate される)
+    // 同じ投稿を 30 秒以内に再オープン → 再 fetch しない
+    staleTime: 60_000,
   });
 
   const { data: replies = [], isLoading: repliesLoading, refetch, isRefetching } = useQuery({
     queryKey: ['post-comments', id],
     queryFn: () => fetchComments(id),
     enabled: !!id,
+    // Realtime で INSERT 即時 invalidate される — 通常時の polling は抑える
+    staleTime: 30_000,
   });
 
   const { data: addedTags = [] } = useQuery({
     queryKey: ['post-added-tags', id],
     queryFn: () => fetchPostAddedTags(id),
     enabled: !!id,
+    // タグ追加は明示 invalidate される — それ以外は 2 分信用
+    staleTime: 2 * 60_000,
   });
 
   // 似た投稿

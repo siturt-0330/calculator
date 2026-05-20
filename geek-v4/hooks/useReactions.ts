@@ -23,10 +23,19 @@ export function useReactions(postIds: string[]) {
 
   useEffect(() => {
     if (postIds.length === 0) return;
+    // server-side filter: 現在表示中の post_id のみ受け取る (上限 30件)
+    // 全 post_reactions の UPDATE を受け取ると、画面に出てない投稿の反応まで毎回
+    // 配信されて fanout がスケールしない。
+    const serverIds = postIds.slice(0, 30);
     return attachChannel(`reactions:${sortedKey.slice(0, 64)}`, (ch) =>
       ch.on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'post_reactions' },
+        {
+          event: '*',
+          schema: 'public',
+          table: 'post_reactions',
+          filter: `post_id=in.(${serverIds.join(',')})`,
+        },
         (payload) => {
           const row = (payload.new ?? payload.old) as { post_id?: string } | null;
           if (!row?.post_id) return;

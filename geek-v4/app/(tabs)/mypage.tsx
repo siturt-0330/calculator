@@ -51,6 +51,8 @@ export default function MypageScreen() {
       return data as MypageStats | null;
     },
     enabled: !!user,
+    // 自分の集計値はほぼ stale OK — 1 分は再 fetch しない
+    staleTime: 60_000,
   });
 
   const { data: myCommunities = [] } = useQuery<Community[]>({

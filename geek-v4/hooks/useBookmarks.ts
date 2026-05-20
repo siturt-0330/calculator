@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { attachChannel } from '../lib/realtime';
+import { useAuthStore } from '../stores/authStore';
 import {
   fetchMyCollections, createCollection, deleteCollection, saveToCollection,
   fetchPostsInCollection, type BookmarkCollection,
@@ -10,17 +11,26 @@ const COL_KEY = ['bookmark-collections'];
 
 export function useCollections() {
   const qc = useQueryClient();
+  const userId = useAuthStore((s) => s.user?.id);
   const q = useQuery({
     queryKey: COL_KEY,
     queryFn: fetchMyCollections,
     staleTime: 60_000,
   });
   useEffect(() => {
-    return attachChannel('bookmark-collections-watch', (ch) =>
-      ch.on('postgres_changes', { event: '*', schema: 'public', table: 'bookmark_collections' },
+    // 自分のコレクション変更のみ受信 (公開コレクションでも他人の編集を realtime する必要なし)
+    // user_id を絞らないと全ユーザーの bookmark 操作が全クライアントに fanout される。
+    if (!userId) return;
+    return attachChannel(`bookmark-collections-watch:${userId}`, (ch) =>
+      ch.on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'bookmark_collections',
+        filter: `user_id=eq.${userId}`,
+      },
         () => qc.invalidateQueries({ queryKey: COL_KEY })),
     );
-  }, [qc]);
+  }, [qc, userId]);
   return { collections: (q.data ?? []) as BookmarkCollection[], isLoading: q.isLoading };
 }
 

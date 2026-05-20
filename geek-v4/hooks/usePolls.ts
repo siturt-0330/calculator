@@ -22,19 +22,33 @@ export function usePolls(postIds: string[]) {
     const polls = (q.data ?? {}) as Record<string, Poll>;
     const myPollIds = new Set(Object.values(polls).map((p) => p.id));
     const myPostIds = new Set(postIds);
+    // server-side filter で fanout を抑える
+    // poll_id が空 (まだ poll データを fetch してない初回 render) の時は subscribe しない
+    if (myPollIds.size === 0) return;
+    const serverPollIds = [...myPollIds].slice(0, 30);
+    const serverPostIds = postIds.slice(0, 30);
 
     return attachChannel(`polls:${sortedKey.slice(0, 64)}`, (ch) =>
-      ch.on('postgres_changes', { event: '*', schema: 'public', table: 'poll_votes' }, (payload) => {
+      ch.on('postgres_changes', {
+        event: '*', schema: 'public', table: 'poll_votes',
+        filter: `poll_id=in.(${serverPollIds.join(',')})`,
+      }, (payload) => {
         const row = (payload.new ?? payload.old) as { poll_id?: string } | null;
         if (row?.poll_id && myPollIds.has(row.poll_id)) {
           qc.invalidateQueries({ queryKey: [KEY_PREFIX, sortedKey] });
         }
-      }).on('postgres_changes', { event: '*', schema: 'public', table: 'poll_options' }, (payload) => {
+      }).on('postgres_changes', {
+        event: '*', schema: 'public', table: 'poll_options',
+        filter: `poll_id=in.(${serverPollIds.join(',')})`,
+      }, (payload) => {
         const row = (payload.new ?? payload.old) as { poll_id?: string } | null;
         if (row?.poll_id && myPollIds.has(row.poll_id)) {
           qc.invalidateQueries({ queryKey: [KEY_PREFIX, sortedKey] });
         }
-      }).on('postgres_changes', { event: '*', schema: 'public', table: 'polls' }, (payload) => {
+      }).on('postgres_changes', {
+        event: '*', schema: 'public', table: 'polls',
+        filter: `post_id=in.(${serverPostIds.join(',')})`,
+      }, (payload) => {
         const row = (payload.new ?? payload.old) as { post_id?: string } | null;
         if (row?.post_id && myPostIds.has(row.post_id)) {
           qc.invalidateQueries({ queryKey: [KEY_PREFIX, sortedKey] });

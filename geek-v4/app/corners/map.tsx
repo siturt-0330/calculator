@@ -180,8 +180,17 @@ export default function MapScreen() {
   const [loadingLoc, setLoadingLoc] = useState(false);
   const [search, setSearch] = useState('');
 
-  const events = useQuery({ queryKey: ['map-events'], queryFn: fetchEventLocations });
-  const spots = useQuery({ queryKey: ['map-spots'], queryFn: fetchTourismSpots });
+  // map location データはほぼ静的 — 5 分は信用して network roundtrip を削減
+  const events = useQuery({
+    queryKey: ['map-events'],
+    queryFn: fetchEventLocations,
+    staleTime: 5 * 60_000,
+  });
+  const spots = useQuery({
+    queryKey: ['map-spots'],
+    queryFn: fetchTourismSpots,
+    staleTime: 5 * 60_000,
+  });
 
   const items: MapLocation[] = useMemo(() => {
     const ev = events.data ?? [];
