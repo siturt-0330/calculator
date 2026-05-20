@@ -33,6 +33,7 @@ import { useTagSearchV3 } from '@/hooks/useTagSearchV3';
 import { useSearchClickStore } from '@/stores/searchClickStore';
 import { generateRelatedQueries } from '@/lib/search/relatedSearches';
 import { expandWithTagGraph } from '@/lib/utils/searchAlgo';
+import { ReasonBadges } from '@/components/search/ReasonBadge';
 
 type BBSResult = { id: string; title: string; category: string; replies_count: number; created_at: string };
 type Category = 'all' | 'posts' | 'tags' | 'bbs';
@@ -533,21 +534,30 @@ export default function SearchScreen() {
           )}
         </View>
 
-        {/* 保存ボタン (検索中) */}
+        {/* 保存ボタン (検索中) — アイコン付きで意図を明確化 */}
         {debounced.trim().length > 0 && (
           <PressableScale
             onPress={saveCurrentQuery}
             haptic="confirm"
             disabled={isCurrentSaved}
+            hitSlop={6}
+            accessibilityLabel={isCurrentSaved ? '保存済みの検索' : 'この検索を保存'}
+            accessibilityRole="button"
             style={{
               alignSelf: 'flex-start',
-              paddingHorizontal: SP['3'], paddingVertical: 4,
-              backgroundColor: isCurrentSaved ? C.bg3 : C.accent,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 4,
+              paddingHorizontal: SP['3'], paddingVertical: 6,
+              backgroundColor: isCurrentSaved ? C.accentBg : C.accent,
               borderRadius: R.full,
+              borderWidth: 1,
+              borderColor: isCurrentSaved ? C.accent + '55' : 'transparent',
             }}
           >
-            <Text style={[T.caption, { color: isCurrentSaved ? C.text3 : '#fff', fontWeight: '700' }]}>
-              {isCurrentSaved ? '保存済み' : '保存'}
+            <Text style={{ fontSize: 12 }}>{isCurrentSaved ? '⭐' : '☆'}</Text>
+            <Text style={[T.caption, { color: isCurrentSaved ? C.accent : '#fff', fontWeight: '700' }]}>
+              {isCurrentSaved ? '保存済み' : 'この検索を保存'}
             </Text>
           </PressableScale>
         )}
@@ -609,23 +619,39 @@ export default function SearchScreen() {
             borderWidth: 1,
             borderColor: C.border,
             paddingVertical: 4,
+            overflow: 'hidden',
           }}>
-            {autocomplete.map((name) => (
+            {/* ヘッダで「クリックすると検索 + タグ画面へ」を明示 */}
+            <View style={{ paddingHorizontal: SP['3'], paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: C.border }}>
+              <Text style={[T.caption, { color: C.text3 }]}>候補のタグ — タップで検索</Text>
+            </View>
+            {autocomplete.map((name, i) => (
               <PressableScale
                 key={name}
                 onPress={() => {
                   recordClick(q.trim(), name);
-                  setQ(name); setDebounced(name); addHist(name);
+                  setQ(name);
+                  setDebounced(name);
+                  addHist(name);
                 }}
                 haptic="select"
+                hitSlop={4}
+                accessibilityLabel={`タグ ${name} で検索`}
+                accessibilityRole="button"
                 style={{
                   flexDirection: 'row', alignItems: 'center', gap: SP['2'],
                   paddingHorizontal: SP['3'], paddingVertical: SP['2'],
+                  backgroundColor: i === 0 ? C.accentBg + '40' : 'transparent',
                 }}
               >
-                <Icon.search size={14} color={C.text3} strokeWidth={2.2} />
-                <Text style={[T.smallM, { color: C.text, flex: 1 }]}>#{name}</Text>
-                <Text style={{ fontSize: 10, color: C.text3 }}>↗</Text>
+                <Icon.search size={14} color={i === 0 ? C.accent : C.text3} strokeWidth={2.2} />
+                <Text style={[T.smallM, { color: C.text, flex: 1 }]}>
+                  #{name}
+                </Text>
+                {i === 0 && (
+                  <Text style={[T.caption, { color: C.accent, fontWeight: '700' }]}>Enter</Text>
+                )}
+                <Icon.chevronR size={14} color={C.text3} strokeWidth={2.2} />
               </PressableScale>
             ))}
           </View>
@@ -741,11 +767,11 @@ export default function SearchScreen() {
             )}
 
             {/* 検索履歴 */}
-            {history.length > 0 && (
+            {history.length > 0 ? (
               <View style={{ gap: SP['2'] }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>履歴</Text>
-                  <PressableScale onPress={clearHist} haptic="warn">
+                  <PressableScale onPress={clearHist} haptic="warn" hitSlop={6}>
                     <Text style={[T.caption, { color: C.text3 }]}>消去</Text>
                   </PressableScale>
                 </View>
@@ -757,15 +783,31 @@ export default function SearchScreen() {
                       backgroundColor: C.bg3, borderRadius: R.full,
                       borderWidth: 1, borderColor: C.border,
                     }}>
-                      <PressableScale onPress={() => setQ(h)} haptic="tap">
-                        <Text style={[T.smallM, { color: C.text }]}>{h}</Text>
+                      <PressableScale onPress={() => setQ(h)} haptic="tap" hitSlop={4}>
+                        <Text style={[T.smallM, { color: C.text }]}>🕐 {h}</Text>
                       </PressableScale>
-                      <PressableScale onPress={() => removeHist(h)} haptic="warn" style={{ padding: 2 }}>
+                      <PressableScale onPress={() => removeHist(h)} haptic="warn" style={{ padding: 2 }} hitSlop={6}>
                         <Text style={{ fontSize: 11, color: C.text3 }}>✕</Text>
                       </PressableScale>
                     </View>
                   ))}
                 </View>
+              </View>
+            ) : !savedSearches.length && (
+              // ⭐ 履歴も保存検索もまだ無いユーザー向けの welcome 案内
+              <View style={{
+                padding: SP['3'],
+                backgroundColor: C.bg2,
+                borderRadius: R.md,
+                borderWidth: 1,
+                borderColor: C.border,
+                gap: SP['1'],
+              }}>
+                <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>🔎 何でも検索</Text>
+                <Text style={[T.caption, { color: C.text2, lineHeight: 18 }]}>
+                  タグ・投稿・掲示板を一気に検索。半角/全角・カタカナ/ひらがな・読み方の違いも自動で吸収します。
+                  例:「ホロライブ」「ｲｺﾗﾌﾞ」「ぽけもん」
+                </Text>
               </View>
             )}
 
@@ -892,12 +934,8 @@ export default function SearchScreen() {
                       </Text>
                     </View>
                     {reasons.length > 0 && (
-                      <View style={{ flexDirection: 'column', gap: 2 }}>
-                        {reasons.slice(0, 2).map((r) => (
-                          <View key={r} style={{ paddingHorizontal: 4, paddingVertical: 1, backgroundColor: C.accentBg, borderRadius: 3 }}>
-                            <Text style={{ fontSize: 8, color: C.accent, fontWeight: '700' }}>{r}</Text>
-                          </View>
-                        ))}
+                      <View style={{ maxWidth: 110 }}>
+                        <ReasonBadges reasons={reasons} max={2} size="xs" />
                       </View>
                     )}
                   </PressableScale>
@@ -982,19 +1020,7 @@ export default function SearchScreen() {
                         ))}
                       </View>
                     )}
-                    {reasons.length > 0 && (
-                      <View style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
-                        {reasons.map((r) => (
-                          <View key={r} style={{
-                            paddingHorizontal: 4, paddingVertical: 1,
-                            backgroundColor: 'rgba(212,177,74,0.15)',
-                            borderRadius: 3,
-                          }}>
-                            <Text style={{ fontSize: 9, color: '#d4b14a', fontWeight: '600' }}>{r}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    )}
+                    {reasons.length > 0 && <ReasonBadges reasons={reasons} max={4} />}
                   </PressableScale>
                 ))}
               </View>
