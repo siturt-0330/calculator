@@ -34,10 +34,27 @@ export type PersonalizationCtx = {
   tagAffinity: Record<string, number>;
   /** 直近に閲覧したタグ */
   recentTags: string[];
+  /** トレンド中のタグ — 加速度ベース (rolling 1h) */
+  trendingTags?: Set<string>;
+  /** タグの IDF map (log(N / df)) — 推定可能なら渡す */
+  tagIdf?: Record<string, number>;
+  /** 投稿全体の数 (BM25 IDF 計算用) */
+  totalDocs?: number;
+  /** ターム → 出現文書数 (BM25 IDF 計算用) */
+  termDocFreq?: Record<string, number>;
+  /** Cold start mode — 新規ユーザー向け diversity 補正 */
+  coldStartMode?: boolean;
 };
 
 // BM25 component: a single term within a single document field
-function bm25Field(term: string, fieldText: string, fieldWeight = 1, avgLen = AVG_DOC_LEN): number {
+//   ctx を渡すと実 IDF (log(N / df)) を計算する。渡さなければ fallback の 1.5
+function bm25Field(
+  term: string,
+  fieldText: string,
+  fieldWeight = 1,
+  avgLen = AVG_DOC_LEN,
+  ctx?: PersonalizationCtx,
+): number {
   if (!term || !fieldText) return 0;
   const t = normalize(term);
   const docNorm = normalize(fieldText);
@@ -60,8 +77,15 @@ function bm25Field(term: string, fieldText: string, fieldWeight = 1, avgLen = AV
     else if (tKa !== t && docNorm.includes(tKa)) tf = 0.5;
     else return 0;
   }
-  // BM25 standard
-  const idf = 1.5; // 簡易: 全文書数を取らず固定値
+  // 実 IDF — N / df の log。N が不明なら fallback 1.5
+  // よくあるタグは IDF が低く (~0)、希少タグは高く (~5) なる
+  let idf = 1.5;
+  if (ctx?.tagIdf && ctx.tagIdf[t] !== undefined) {
+    idf = ctx.tagIdf[t]!;
+  } else if (ctx?.totalDocs && ctx?.termDocFreq) {
+    const df = ctx.termDocFreq[t] ?? 1;
+    idf = Math.log(1 + ctx.totalDocs / Math.max(1, df));
+  }
   const denom = tf + BM25_K1 * (1 - BM25_B + BM25_B * (docLen / avgLen));
   const score = idf * (tf * (BM25_K1 + 1)) / denom;
   return score * fieldWeight;
@@ -124,22 +148,22 @@ export function scorePost(
 
   // ---- BM25: フレーズスコア (重み 5) ----
   for (const phrase of phrases) {
-    const s = bm25Field(phrase, post.content, 5);
+    const s = bm25Field(phrase, post.content, 5, AVG_DOC_LEN, ctx);
     if (s > 0) { phraseHits += s; total += s; reasons.push(`"${phrase}"`); }
     // tag にも完全一致
     const tagJoined = post.tag_names.join(' ');
-    const ts = bm25Field(phrase, tagJoined, 6);
+    const ts = bm25Field(phrase, tagJoined, 6, AVG_DOC_LEN, ctx);
     if (ts > 0) { phraseHits += ts; total += ts; }
   }
 
   // ---- BM25: キーワード ----
   for (const kw of terms) {
     // 本文 (重み 1)
-    const c = bm25Field(kw, post.content, 1);
+    const c = bm25Field(kw, post.content, 1, AVG_DOC_LEN, ctx);
     if (c > 0) { contentHits += c; total += c; }
     // タグ (重み 3)
     for (const tag of post.tag_names) {
-      const t = bm25Field(kw, tag, 3);
+      const t = bm25Field(kw, tag, 3, AVG_DOC_LEN, ctx);
       if (t > 0) { tagHits += t; total += t; }
       // 完全一致タグ
       if (normalize(tag) === normalize(kw)) {
@@ -167,9 +191,11 @@ export function scorePost(
   }
 
   // === シグナル ===
-  // 人気度: log(likes + 2*comments)
+  // 人気度: log(likes + 2*comments) — cap で popularity bubble 抑止
   const engagement = Math.log(1 + post.likes_count + post.comments_count * 2);
-  total += engagement * 0.3;
+  // engagement boost に上限 2.0 を入れて winner-takes-all を緩和
+  const engagementBoost = Math.min(2.0, engagement * 0.3);
+  total += engagementBoost;
 
   // 新鮮度: 24h で半減する指数減衰
   const ageHours = (Date.now() - postDate.getTime()) / 3600000;
@@ -177,13 +203,41 @@ export function scorePost(
   total += freshness;
   if (ageHours < 24) reasons.push('新着');
 
-  // 信頼スコア: 70 で base, 100 で +2, 30 で -2
-  const trustBoost = (post.trust_score_at_post - 50) * 0.04;
-  total += trustBoost;
+  // トレンド中タグを 1 件でも含み、かつ post が直近 24h ならホット boost
+  if (ctx.trendingTags && ctx.trendingTags.size > 0 && ageHours < 24) {
+    let trendingHit = 0;
+    for (const tag of post.tag_names) {
+      if (ctx.trendingTags.has(tag)) trendingHit++;
+    }
+    if (trendingHit > 0) {
+      total += Math.min(trendingHit * 2.5, 5);
+      reasons.push('🔥トレンド');
+    }
+  }
+
+  // 信頼スコア: 比例 + 低信頼の penalty を強化
+  // 70 → +0.8, 100 → +2.0, 30 → -0.8, 20 → ×0.5 multiplier 追加
+  const trustNorm = (post.trust_score_at_post - 50) / 50;  // -1..+1
+  if (trustNorm < -0.4) {
+    total *= 0.5;  // 著しく低信頼は半減
+  } else {
+    total += trustNorm * 2;
+  }
   if (post.trust_score_at_post >= 80) reasons.push('高信頼');
 
-  // 警告: concern > likes
-  if (post.concern_count > post.likes_count + 2) total *= 0.4;
+  // 警告: concern が likes に比べて多すぎる場合は graduated penalty
+  // ratio 0.5 → 0.85x, 1.0 → 0.6x, 2.0 → 0.3x
+  const engagementBase = Math.max(1, post.likes_count + post.comments_count);
+  const concernRatio = post.concern_count / engagementBase;
+  if (concernRatio > 0.5) {
+    total *= Math.max(0.3, 1 - concernRatio * 0.7);
+  }
+
+  // Cold-start mode: 新規ユーザーは popular content を抑え気味に
+  // → diversity 増加で新規ユーザーの "feed が全員同じ" 問題を緩和
+  if (ctx.coldStartMode && engagement > 5) {
+    total *= 0.75;
+  }
 
   // === パーソナライゼーション ===
   // 好きなタグを含む投稿は加点

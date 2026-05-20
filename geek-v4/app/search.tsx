@@ -150,7 +150,10 @@ export default function SearchScreen() {
   const signals = useMemo(() => aggregate(), [aggregate]);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(q.trim()), 220);
+    // 220ms → 150ms (体感応答性 up)
+    // 短いクエリ (≤2 文字) は 100ms — autocomplete を爆速に
+    const delay = q.trim().length <= 2 ? 100 : 150;
+    const t = setTimeout(() => setDebounced(q.trim()), delay);
     return () => clearTimeout(t);
   }, [q]);
 
