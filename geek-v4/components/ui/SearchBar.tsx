@@ -1,8 +1,16 @@
-import { View, TextInput } from 'react-native';
+import { useEffect, useState } from 'react';
+import { TextInput } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  interpolateColor,
+} from 'react-native-reanimated';
 import { PressableScale } from './PressableScale';
 import { Icon } from '@/constants/icons';
 import { C, R, SP, SIZE } from '@/design/tokens';
 import { T } from '@/design/typography';
+import { TIMING_FAST } from '@/design/motion';
 
 export function SearchBar({
   value,
@@ -19,17 +27,36 @@ export function SearchBar({
 }) {
   const Search = Icon.search;
   const X = Icon.close;
+  const [focused, setFocused] = useState(false);
+
+  // Smooth border-color transition on focus (transparent → accent).
+  const focusProgress = useSharedValue(0);
+  useEffect(() => {
+    focusProgress.value = withTiming(focused ? 1 : 0, TIMING_FAST);
+  }, [focused, focusProgress]);
+  const aBorder = useAnimatedStyle(() => ({
+    borderColor: interpolateColor(
+      focusProgress.value,
+      [0, 1],
+      ['rgba(0,0,0,0)', C.accent],
+    ),
+  }));
+
   return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: SP['2'],
-        height: SIZE.input,
-        paddingHorizontal: SP['4'],
-        borderRadius: R.full,
-        backgroundColor: C.bg3,
-      }}
+    <Animated.View
+      style={[
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: SP['2'],
+          height: SIZE.input,
+          paddingHorizontal: SP['4'],
+          borderRadius: R.full,
+          backgroundColor: C.bg3,
+          borderWidth: 1.5,
+        },
+        aBorder,
+      ]}
     >
       <Search size={18} color={C.text3} strokeWidth={2.2} />
       <TextInput
@@ -40,6 +67,8 @@ export function SearchBar({
         autoFocus={autoFocus}
         returnKeyType="search"
         onSubmitEditing={onSubmit}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         style={[T.body, { flex: 1, color: C.text }]}
       />
       {value.length > 0 && (
@@ -47,6 +76,6 @@ export function SearchBar({
           <X size={18} color={C.text3} strokeWidth={2.2} />
         </PressableScale>
       )}
-    </View>
+    </Animated.View>
   );
 }

@@ -1,7 +1,23 @@
-import { MotiView } from 'moti';
-import { View, DimensionValue, ViewStyle } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, DimensionValue, ViewStyle, LayoutChangeEvent } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  Easing,
+  interpolate,
+} from 'react-native-reanimated';
 import { C, R, SP } from '@/design/tokens';
-import { SHIMMER_DURATION } from '@/design/motion';
+
+// Smooth left-to-right shimmer skeleton.
+// - Uses a sliding highlight band over a dim base
+// - Reanimated based; cheap on the UI thread
+// - API kept backward-compatible with the previous Skeleton primitive so
+//   existing call-sites (ThreadCardSkeleton, MypageSkeleton, NotificationSkeleton,
+//   PostCardSkeleton) keep working with zero changes.
+const SHIMMER_BAND_WIDTH = 96;
+const SHIMMER_DURATION_MS = 1400;
 
 export function Skeleton({
   width = '100%',
@@ -14,13 +30,56 @@ export function Skeleton({
   radius?: number;
   style?: ViewStyle;
 }) {
+  // Track measured width so the shimmer band sweeps fully across.
+  const [measuredW, setMeasuredW] = useState<number>(0);
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = withRepeat(
+      withTiming(1, { duration: SHIMMER_DURATION_MS, easing: Easing.bezier(0.4, 0, 0.6, 1) }),
+      -1,
+      false,
+    );
+  }, [progress]);
+
+  const bandStyle = useAnimatedStyle(() => {
+    const w = measuredW || 200;
+    const tx = interpolate(progress.value, [0, 1], [-SHIMMER_BAND_WIDTH, w + SHIMMER_BAND_WIDTH]);
+    return { transform: [{ translateX: tx }] };
+  });
+
+  const onLayout = (e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    if (w && w !== measuredW) setMeasuredW(w);
+  };
+
   return (
-    <MotiView
-      from={{ opacity: 0.35 }}
-      animate={{ opacity: 0.7 }}
-      transition={{ type: 'timing', duration: SHIMMER_DURATION, loop: true, repeatReverse: true }}
-      style={[{ width, height, borderRadius: radius, backgroundColor: C.bg3 }, style]}
-    />
+    <View
+      onLayout={onLayout}
+      style={[
+        {
+          width,
+          height,
+          borderRadius: radius,
+          backgroundColor: C.bg3,
+          overflow: 'hidden',
+        },
+        style,
+      ]}
+    >
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            width: SHIMMER_BAND_WIDTH,
+            backgroundColor: 'rgba(255,255,255,0.06)',
+          },
+          bandStyle,
+        ]}
+      />
+    </View>
   );
 }
 

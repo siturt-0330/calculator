@@ -9,6 +9,10 @@ type Props = PressableProps & {
   haptic?: HapticType;
   scaleValue?: number;
   children?: React.ReactNode;
+  // When provided, enables long-press behavior. Fires the callback after
+  // the native long-press delay along with a medium impact haptic. The
+  // existing press animation is unchanged.
+  onLongPress?: () => void;
 };
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -25,6 +29,7 @@ export function PressableScale({
   onPress,
   onPressIn,
   onPressOut,
+  onLongPress,
   style,
   hitSlop,
   disabled,
@@ -79,6 +84,18 @@ export function PressableScale({
         onPressOut?.(e);
       }}
       onPress={onPress}
+      onLongPress={
+        onLongPress
+          ? () => {
+              if (disabled) return;
+              // Medium impact for the longer press gesture.
+              if (Platform.OS !== 'web') {
+                try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
+              }
+              onLongPress();
+            }
+          : undefined
+      }
       style={[animStyle, style as object]}
       {...rest}
     >

@@ -862,6 +862,92 @@ const ThreadsTab = memo(function ThreadsTab({ communityId }: { communityId: stri
 
   const threads: BBSThread[] = data ?? [];
 
+  const goCreate = useCallback(() => {
+    router.push(`/bbs/create?community_id=${encodeURIComponent(communityId)}` as never);
+  }, [router, communityId]);
+
+  // -----------------------------------------------------------
+  // Sticky-style CTA banner — always visible above the thread list
+  // -----------------------------------------------------------
+  const banner = (
+    <PressableScale
+      onPress={goCreate}
+      haptic="confirm"
+      scaleValue={0.98}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SP['3'],
+        marginHorizontal: SP['4'],
+        marginBottom: SP['3'],
+        paddingHorizontal: SP['3'],
+        paddingVertical: SP['3'],
+        backgroundColor: C.accent + '12',
+        borderWidth: 1,
+        borderColor: C.accent + '40',
+        borderRadius: R.lg,
+      }}
+    >
+      <View
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 20,
+          backgroundColor: C.accent + '33',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Icon.edit size={20} color={C.accent} strokeWidth={2.4} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[T.bodyM, { color: C.text, fontWeight: '700' }]}>
+          + スレッドを立てる
+        </Text>
+        <Text style={[T.small, { color: C.text2, marginTop: 2 }]} numberOfLines={1}>
+          このコミュニティで新しい話題を始めよう
+        </Text>
+      </View>
+      <Icon.chevronR size={18} color={C.text3} strokeWidth={2.2} />
+    </PressableScale>
+  );
+
+  // -----------------------------------------------------------
+  // Floating action button — bottom-right of the tab content
+  // -----------------------------------------------------------
+  const fab = (
+    <View
+      pointerEvents="box-none"
+      style={{
+        position: 'absolute',
+        right: SP['4'],
+        bottom: SP['4'],
+        zIndex: 10,
+      }}
+    >
+      <PressableScale
+        onPress={goCreate}
+        haptic="confirm"
+        scaleValue={0.92}
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          backgroundColor: C.accent,
+          alignItems: 'center',
+          justifyContent: 'center',
+          shadowColor: C.accent,
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.4,
+          shadowRadius: 12,
+          elevation: 8,
+        }}
+      >
+        <Icon.edit size={24} color="#fff" strokeWidth={2.6} />
+      </PressableScale>
+    </View>
+  );
+
   if (isLoading) {
     return (
       <View style={{ paddingVertical: SP['10'], alignItems: 'center' }}>
@@ -872,104 +958,171 @@ const ThreadsTab = memo(function ThreadsTab({ communityId }: { communityId: stri
 
   if (threads.length === 0) {
     return (
-      <EmptyState
-        icon={Icon.bbs}
-        title="スレッドがまだありません"
-        message="「投稿」タブから新しいスレッドを立てて、議論を始めよう"
-        tone="accent"
-      />
+      <View style={{ paddingTop: SP['3'] }}>
+        {banner}
+        <View
+          style={{
+            paddingHorizontal: SP['6'],
+            paddingTop: SP['6'],
+            paddingBottom: SP['8'],
+            alignItems: 'center',
+            gap: SP['3'],
+          }}
+        >
+          <View
+            style={{
+              width: 96,
+              height: 96,
+              borderRadius: 48,
+              backgroundColor: C.accent + '1A',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderWidth: 1,
+              borderColor: C.accent + '33',
+            }}
+          >
+            <Icon.bbs size={48} color={C.accent} strokeWidth={1.8} />
+          </View>
+          <Text
+            style={[T.h3, { color: C.text, textAlign: 'center', fontWeight: '700' }]}
+          >
+            最初のスレッドを立ててみよう 💬
+          </Text>
+          <Text
+            style={[
+              T.body,
+              {
+                color: C.text2,
+                textAlign: 'center',
+                lineHeight: 22,
+                maxWidth: 320,
+              },
+            ]}
+          >
+            気になる話題、質問、雑談、何でも！{'\n'}
+            このコミュニティが盛り上がるきっかけになるかも
+          </Text>
+          <PressableScale
+            onPress={goCreate}
+            haptic="confirm"
+            scaleValue={0.97}
+            style={{
+              alignSelf: 'stretch',
+              marginTop: SP['3'],
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: SP['2'],
+              backgroundColor: C.accent,
+              borderRadius: R.lg,
+              paddingVertical: SP['4'],
+              ...SHADOW.accentGlow,
+            }}
+          >
+            <Icon.edit size={20} color="#fff" strokeWidth={2.6} />
+            <Text style={[T.bodyB, { color: '#fff', fontWeight: '700' }]}>
+              + スレッドを立てる
+            </Text>
+          </PressableScale>
+        </View>
+      </View>
     );
   }
 
   return (
-    <View style={{ paddingTop: SP['3'], paddingHorizontal: SP['4'], gap: SP['3'] }}>
-      {threads.map((t) => {
-        const catColor = t.category ? (CATEGORY_COLORS[t.category] ?? C.accent) : C.accent;
-        return (
-          <PressableScale
-            key={t.id}
-            onPress={() => router.push(`/bbs/${t.id}` as never)}
-            haptic="tap"
-            style={{
-              flexDirection: 'row',
-              borderRadius: R.lg,
-              backgroundColor: C.bg2,
-              borderWidth: 1,
-              borderColor: C.border,
-              overflow: 'hidden',
-            }}
-          >
-            <View style={{ width: 4, backgroundColor: catColor }} />
-            <View style={{ flex: 1, padding: SP['3'], gap: SP['2'] }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-                {t.category && (
-                  <View
-                    style={{
-                      paddingHorizontal: SP['2'],
-                      paddingVertical: 2,
-                      backgroundColor: catColor + '22',
-                      borderRadius: R.sm,
-                      borderWidth: 1,
-                      borderColor: catColor + '55',
-                    }}
-                  >
-                    <Text style={[T.caption, { color: catColor, fontWeight: '700', fontSize: 10 }]}>
-                      {t.category}
-                    </Text>
-                  </View>
-                )}
-                {/* 公開範囲バッジ — community_only か public かを一目で */}
-                {t.visibility === 'community_only' ? (
-                  <View
-                    style={{
-                      paddingHorizontal: 6,
-                      paddingVertical: 2,
-                      backgroundColor: C.amber + '20',
-                      borderRadius: R.full,
-                      borderWidth: 1,
-                      borderColor: C.amber + '60',
-                    }}
-                  >
-                    <Text style={{ fontSize: 10, color: C.amber, fontWeight: '700' }}>
-                      🔒 限定
-                    </Text>
-                  </View>
-                ) : t.visibility === 'public' ? (
-                  <View
-                    style={{
-                      paddingHorizontal: 6,
-                      paddingVertical: 2,
-                      backgroundColor: 'transparent',
-                      borderRadius: R.full,
-                      borderWidth: 1,
-                      borderColor: C.border,
-                    }}
-                  >
-                    <Text style={{ fontSize: 10, color: C.text3, fontWeight: '700' }}>
-                      🌐 公開
-                    </Text>
-                  </View>
-                ) : null}
-                <View style={{ flex: 1 }} />
-                <Text style={[T.caption, { color: C.text3, fontSize: 11 }]}>
-                  {formatRelative(t.last_reply_at ?? t.created_at)}
-                </Text>
-              </View>
-              <Text style={[T.h4, { color: C.text, fontWeight: '700' }]} numberOfLines={2}>
-                {t.title}
-              </Text>
-              <View style={{ flexDirection: 'row', gap: SP['3'], alignItems: 'center' }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Icon.comment size={13} color={C.text3} strokeWidth={2.2} />
-                  <Text style={[T.small, { color: C.text3, fontWeight: '600' }]}>
-                    {t.replies_count.toLocaleString('ja-JP')}
+    <View style={{ paddingTop: SP['3'], paddingBottom: SP['10'] }}>
+      {banner}
+      <View style={{ paddingHorizontal: SP['4'], gap: SP['3'] }}>
+        {threads.map((t) => {
+          const catColor = t.category ? (CATEGORY_COLORS[t.category] ?? C.accent) : C.accent;
+          return (
+            <PressableScale
+              key={t.id}
+              onPress={() => router.push(`/bbs/${t.id}` as never)}
+              haptic="tap"
+              scaleValue={0.99}
+              style={{
+                flexDirection: 'row',
+                borderRadius: R.lg,
+                backgroundColor: C.bg2,
+                borderWidth: 1,
+                borderColor: C.border,
+                overflow: 'hidden',
+              }}
+            >
+              <View style={{ width: 4, backgroundColor: catColor }} />
+              <View style={{ flex: 1, padding: SP['3'], gap: SP['2'] }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+                  {t.category && (
+                    <View
+                      style={{
+                        paddingHorizontal: SP['2'],
+                        paddingVertical: 2,
+                        backgroundColor: catColor + '22',
+                        borderRadius: R.sm,
+                        borderWidth: 1,
+                        borderColor: catColor + '55',
+                      }}
+                    >
+                      <Text style={[T.caption, { color: catColor, fontWeight: '700', fontSize: 10 }]}>
+                        {t.category}
+                      </Text>
+                    </View>
+                  )}
+                  {/* 公開範囲バッジ — community_only か public かを一目で */}
+                  {t.visibility === 'community_only' ? (
+                    <View
+                      style={{
+                        paddingHorizontal: 6,
+                        paddingVertical: 2,
+                        backgroundColor: C.amber + '20',
+                        borderRadius: R.full,
+                        borderWidth: 1,
+                        borderColor: C.amber + '60',
+                      }}
+                    >
+                      <Text style={{ fontSize: 10, color: C.amber, fontWeight: '700' }}>
+                        🔒 限定
+                      </Text>
+                    </View>
+                  ) : t.visibility === 'public' ? (
+                    <View
+                      style={{
+                        paddingHorizontal: 6,
+                        paddingVertical: 2,
+                        backgroundColor: 'transparent',
+                        borderRadius: R.full,
+                        borderWidth: 1,
+                        borderColor: C.border,
+                      }}
+                    >
+                      <Text style={{ fontSize: 10, color: C.text3, fontWeight: '700' }}>
+                        🌐 公開
+                      </Text>
+                    </View>
+                  ) : null}
+                  <View style={{ flex: 1 }} />
+                  <Text style={[T.caption, { color: C.text3, fontSize: 11 }]}>
+                    {formatRelative(t.last_reply_at ?? t.created_at)}
                   </Text>
                 </View>
+                <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={2}>
+                  {t.title}
+                </Text>
+                <View style={{ flexDirection: 'row', gap: SP['3'], alignItems: 'center' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Icon.comment size={13} color={C.text3} strokeWidth={2.2} />
+                    <Text style={[T.small, { color: C.text3, fontWeight: '600' }]}>
+                      {t.replies_count.toLocaleString('ja-JP')}
+                    </Text>
+                  </View>
+                </View>
               </View>
-            </View>
-          </PressableScale>
-        );
-      })}
+            </PressableScale>
+          );
+        })}
+      </View>
+      {fab}
     </View>
   );
 });

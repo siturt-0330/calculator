@@ -1,5 +1,6 @@
 import { memo, useEffect } from 'react';
 import { View, Text, ScrollView } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { fetchTrendingTags } from '@/lib/api/trending';
@@ -43,7 +44,10 @@ function TrendingRowInner() {
   if (trending.length === 0) return null;
 
   return (
-    <View style={{ alignItems: 'center', backgroundColor: C.bg }}>
+    <Animated.View
+      entering={FadeIn.duration(300).delay(80)}
+      style={{ alignItems: 'center', backgroundColor: C.bg }}
+    >
       <View style={{ width: '100%', maxWidth: 720, paddingHorizontal: SP['4'], paddingTop: SP['2'], paddingBottom: SP['3'] }}>
         <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5, marginBottom: SP['2'] }]}>
           トレンド
@@ -87,7 +91,7 @@ function TrendingRowInner() {
           ))}
         </ScrollView>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
