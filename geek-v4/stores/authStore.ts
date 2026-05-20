@@ -89,15 +89,21 @@ async function buildUser(authUser: User): Promise<AppUser> {
   return { ...authUser, ...(profile ?? {}), onboarded };
 }
 
-// アカウント状態が問題 (suspended/restricted) なら強制 signOut してエラーを返す
+// アカウント状態が問題なら強制 signOut してエラーを返す
 // 戻り値: null = OK, string = エラーメッセージ
+//
+// 重要 policy: ログインを完全にブロックするのは 'suspended' (運営が手動凍結) のみ。
+// 'restricted' / 'warned' (concern/post 比率による自動算出) は誤発火が多いため
+// ログインは通し、UI 側で警告バナーを出す方針 (将来実装)。
+//   - 新規 1 投稿のみのユーザーが 1 通報を受けただけで ratio=1.0 → restricted となり
+//     ログイン不能になっていた。これは「制限してる」エラーで詰まる根本原因。
+//   - サーバ側トリガー (refresh_account_state) が ratio>=1.0 でフラグするので、
+//     クライアント側は厳格な凍結のみに反応するよう緩和する。
 function checkAccountState(user: AppUser): string | null {
   if (user.account_state === 'suspended') {
     return 'このアカウントは利用停止中です。サポートにお問い合わせください。';
   }
-  if (user.account_state === 'restricted') {
-    return 'このアカウントは制限中のためログインできません。';
-  }
+  // 'restricted' / 'warned' / 'caution' は通す
   return null;
 }
 
