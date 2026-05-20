@@ -17,8 +17,8 @@ export function BackButton({ onPress }: { onPress?: () => void }) {
   const handlePress = useCallback(() => {
     if (inFlight.current) return;
     inFlight.current = true;
-    // 200ms 後にロック解除 (アニメ中の二重トリガー防止)
-    setTimeout(() => { inFlight.current = false; }, 200);
+    // 80ms 後にロック解除 (誤連打のみ吸収。普通のタップは即時通過)
+    setTimeout(() => { inFlight.current = false; }, 80);
 
     if (onPress) {
       onPress();
