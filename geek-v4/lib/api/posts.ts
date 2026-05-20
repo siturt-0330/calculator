@@ -326,3 +326,55 @@ export async function fetchPostById(id: string): Promise<Post | null> {
   }
   return (data ?? null) as Post | null;
 }
+
+// ============================================================
+// 各 post に紐付いた community のメタ情報をまとめて取得
+// post_communities junction → communities テーブルを 1 リクエストで join
+// FlashList 上に大量 post があっても N+1 にならないよう .in() で集約。
+// ============================================================
+export type PostCommunityRef = {
+  community_id: string;
+  name: string;
+  icon_emoji: string;
+  icon_url: string | null;
+};
+
+// post id 配列 → 各 post に紐付いた community のメタ情報を返す
+// 1 リクエストで集約 (FlashList 上の大量 post でも軽い)
+export async function fetchCommunitiesForPosts(
+  postIds: string[],
+): Promise<Record<string, PostCommunityRef[]>> {
+  if (postIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('post_communities')
+    .select('post_id, community:communities(id, name, icon_emoji, icon_url)')
+    .in('post_id', postIds);
+  if (error) {
+    console.warn('[fetchCommunitiesForPosts] error:', error.message);
+    return {};
+  }
+  // Supabase の typed return は join 関係を array で返す形 (FK の方向に依らず) なので
+  // 単一でも複数でも安全に扱えるよう unknown 経由で narrow。
+  // community が null (RLS で読めない / 削除済み) の行は無視。
+  type CommunityCol = { id: string; name: string; icon_emoji: string; icon_url: string | null };
+  type Row = {
+    post_id: string;
+    community: CommunityCol | CommunityCol[] | null;
+  };
+  const rows = (data ?? []) as unknown as Row[];
+  const grouped: Record<string, PostCommunityRef[]> = {};
+  for (const r of rows) {
+    if (!r.community) continue;
+    const community = Array.isArray(r.community) ? r.community[0] : r.community;
+    if (!community) continue;
+    const arr = grouped[r.post_id] ?? [];
+    arr.push({
+      community_id: community.id,
+      name: community.name,
+      icon_emoji: community.icon_emoji,
+      icon_url: community.icon_url,
+    });
+    grouped[r.post_id] = arr;
+  }
+  return grouped;
+}

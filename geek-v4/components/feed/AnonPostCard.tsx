@@ -26,6 +26,7 @@ import { SHADOW } from '@/design/shadows';
 import { sanitizeUrl } from '@/lib/sanitize';
 import { ObsidianSaveButton } from '@/components/ui/ObsidianSaveButton';
 import { postToObsidianNote } from '@/hooks/useObsidian';
+import type { PostCommunityRef } from '@/lib/api/posts';
 
 function shortHost(url: string): string {
   try {
@@ -45,6 +46,7 @@ type AnonPostCardProps = {
   addedTags?: string[];
   poll?: Poll;
   reason?: { text: string; kind: string };
+  communities?: PostCommunityRef[];
   onLike: () => void;
   onConcern: () => void;
   onComment: () => void;
@@ -54,6 +56,7 @@ type AnonPostCardProps = {
   onMore: () => void;
   onReact: (meme: string) => void;
   onAddTag?: (tag: string) => Promise<void> | void;
+  onCommunityPress?: (id: string) => void;
 };
 
 function AnonPostCardInner({
@@ -65,6 +68,7 @@ function AnonPostCardInner({
   addedTags = [],
   poll,
   reason,
+  communities = [],
   onLike,
   onConcern,
   onComment,
@@ -74,6 +78,7 @@ function AnonPostCardInner({
   onMore,
   onReact,
   onAddTag,
+  onCommunityPress,
 }: AnonPostCardProps) {
   const { width } = useWindowDimensions();
   const cardWidth = Math.min(width, 720);
@@ -212,6 +217,40 @@ function AnonPostCardInner({
           <Text style={{ fontSize: 11, color: C.accent, fontWeight: '600' }}>
             {reason.text}
           </Text>
+        </View>
+      )}
+
+      {/* コミュニティバッジ (post が attach されているコミュニティ一覧) */}
+      {communities.length > 0 && (
+        <View style={{
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: 6,
+          marginHorizontal: SP['4'],
+          marginBottom: 6,
+        }}>
+          {communities.map((c) => (
+            <PressableScale
+              key={c.community_id}
+              onPress={() => onCommunityPress?.(c.community_id)}
+              haptic="tap"
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: R.full,
+                backgroundColor: C.bg3,
+                borderWidth: 1,
+                borderColor: C.border,
+              }}
+            >
+              <Text style={{ fontSize: 11, color: C.text2, fontWeight: '600' }}>
+                {`\u{1F3E0} ${c.icon_emoji} ${c.name}`}
+              </Text>
+            </PressableScale>
+          ))}
         </View>
       )}
 
@@ -504,6 +543,7 @@ export const AnonPostCard = memo(AnonPostCardInner, (prev, next) => {
   if (prev.addedTags !== next.addedTags) return false;
   if (prev.poll !== next.poll) return false;
   if (prev.reason !== next.reason) return false;
+  if (prev.communities !== next.communities) return false;
   // Handler refs are kept stable by the parent (handlersByPostId memoization).
   if (prev.onLike !== next.onLike) return false;
   if (prev.onConcern !== next.onConcern) return false;
@@ -514,5 +554,6 @@ export const AnonPostCard = memo(AnonPostCardInner, (prev, next) => {
   if (prev.onMore !== next.onMore) return false;
   if (prev.onReact !== next.onReact) return false;
   if (prev.onAddTag !== next.onAddTag) return false;
+  if (prev.onCommunityPress !== next.onCommunityPress) return false;
   return true; // skip re-render
 });
