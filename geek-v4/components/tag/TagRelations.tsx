@@ -12,6 +12,7 @@ import {
   fetchGroupMembers,
   suggestTagRelation,
 } from '../../lib/api/tags';
+import { fetchTagSynonyms, voteTagSynonym } from '../../lib/api/tagSynonyms';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 
@@ -34,15 +35,22 @@ export function TagRelations({
     queryKey: ['tag-groups', tagName],
     queryFn: () => fetchGroupsForTag(tagName),
   });
+  // 全ユーザー共有の synonym 票 (mv_tag_synonyms から)
+  const { data: sharedSynonyms = [] } = useQuery({
+    queryKey: ['tag-shared-synonyms', tagName],
+    queryFn: () => fetchTagSynonyms(tagName),
+    staleTime: 60_000,
+  });
 
   const otherSide = (a: string, b: string) => (a === tagName ? b : a);
   const aliases = relations.filter((r) => r.relation_type === 'alias').map((r) => otherSide(r.tag_a, r.tag_b));
   const related = relations.filter((r) => r.relation_type === 'related').map((r) => otherSide(r.tag_a, r.tag_b));
 
   // V4 エンジン: PMI + graph + cooccur + CTR で AI 関連タグ生成
+  // shared synonyms も exclude — 既に明示的に表示されているので重複させない
   const v4Recommendations = useTagRecommendations(
     [tagName],
-    [tagName, ...aliases, ...related],
+    [tagName, ...aliases, ...related, ...sharedSynonyms.map((s) => s.synonym)],
     8,
   );
 
@@ -54,6 +62,19 @@ export function TagRelations({
       setMode(null);
     },
     onError: () => show('送信に失敗しました', 'error'),
+  });
+
+  // shared synonym 投票 (全ユーザーに反映)
+  const { mutate: voteSynonym } = useMutation({
+    mutationFn: async (other: string) => {
+      const result = await voteTagSynonym(tagName, other);
+      if (result.error) throw new Error(result.error);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tag-shared-synonyms', tagName] });
+      show('みんなの synonym 候補に追加しました', 'success');
+    },
+    onError: () => show('投票に失敗しました', 'error'),
   });
 
   return (
@@ -82,30 +103,80 @@ export function TagRelations({
         </Section>
       )}
 
+      {/* みんなの synonym (全ユーザー共有 投票ベース) */}
+      {sharedSynonyms.length > 0 && (
+        <Section title="🌍 みんなの同義語" desc="他のユーザーが「同じ意味」と投票したタグ">
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
+            {sharedSynonyms.map((s) => (
+              <PressableScale
+                key={s.synonym}
+                onPress={() => onTagPress(s.synonym)}
+                haptic="tap"
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 4,
+                  paddingHorizontal: SP['3'], paddingVertical: SP['1'],
+                  backgroundColor: s.is_confirmed ? C.sameGroupBg : C.bg3,
+                  borderRadius: R.full,
+                  borderWidth: 1,
+                  borderColor: s.is_confirmed ? C.sameGroupBorder : C.border,
+                }}
+              >
+                <Text style={[T.smallM, { color: s.is_confirmed ? C.sameGroup : C.text, fontWeight: '700' }]}>
+                  #{s.synonym}
+                </Text>
+                {s.is_confirmed && (
+                  <Text style={{ fontSize: 9, color: C.sameGroup, marginLeft: 2, fontWeight: '700' }}>
+                    確定
+                  </Text>
+                )}
+                <Text style={{ fontSize: 9, color: C.text3, marginLeft: 2 }}>
+                  {s.vote_count}票
+                </Text>
+              </PressableScale>
+            ))}
+          </View>
+        </Section>
+      )}
+
       {/* V4 AI レコメンド */}
       {v4Recommendations.length > 0 && (
         <Section title="🤖 AI が選んだ関連タグ" desc="検索エンジン (PMI + グラフ + 共起 + CTR) で発見">
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
             {v4Recommendations.map((r) => (
-              <PressableScale
-                key={r.tag}
-                onPress={() => onTagPress(r.tag)}
-                haptic="tap"
-                style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 4,
-                  paddingHorizontal: SP['3'], paddingVertical: SP['1'],
-                  backgroundColor: C.accentBg,
-                  borderRadius: R.full,
-                  borderWidth: 1, borderColor: C.accentSoft,
-                }}
-              >
-                <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>
-                  #{r.tag}
-                </Text>
-                <Text style={{ fontSize: 9, color: C.text3, marginLeft: 2 }}>
-                  {r.primaryReason}
-                </Text>
-              </PressableScale>
+              <View key={r.tag} style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                <PressableScale
+                  onPress={() => onTagPress(r.tag)}
+                  haptic="tap"
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 4,
+                    paddingHorizontal: SP['3'], paddingVertical: SP['1'],
+                    backgroundColor: C.accentBg,
+                    borderRadius: R.full,
+                    borderWidth: 1, borderColor: C.accentSoft,
+                  }}
+                >
+                  <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>
+                    #{r.tag}
+                  </Text>
+                  <Text style={{ fontSize: 9, color: C.text3, marginLeft: 2 }}>
+                    {r.primaryReason}
+                  </Text>
+                </PressableScale>
+                <PressableScale
+                  onPress={() => voteSynonym(r.tag)}
+                  haptic="select"
+                  style={{
+                    paddingHorizontal: SP['2'], paddingVertical: SP['1'],
+                    borderRadius: R.full,
+                    backgroundColor: C.bg3,
+                    borderWidth: 1, borderColor: C.border,
+                  }}
+                >
+                  <Text style={{ fontSize: 10, color: C.text2, fontWeight: '700' }}>
+                    + 同じ意味
+                  </Text>
+                </PressableScale>
+              </View>
             ))}
           </View>
         </Section>

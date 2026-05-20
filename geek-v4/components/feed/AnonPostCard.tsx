@@ -10,6 +10,7 @@ import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { PressableScale } from '../ui/PressableScale';
 import { ProgressiveImage } from '../ui/ProgressiveImage';
+import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { DoubleTapHeart } from '../ui/DoubleTapHeart';
 import { TagPill } from '../tag/TagPill';
 import { AddTagInline } from '../tag/AddTagInline';
@@ -137,6 +138,11 @@ function AnonPostCardInner({
   // 画像の自然なアスペクト比を解決 — Image.getSize は web/native 両対応
   // tall portrait や wide landscape を square に潰さないよう、各 URI ごとに記録
   // 0.5 (極端な縦長) 〜 2.0 (極端な横長) でクランプして UI 暴走を防ぐ
+  //
+  // 重要: getSize はオリジナル URL を渡すと**フル画像をダウンロードして**寸法を測る。
+  // フィードでは数 MB の画像を 4 枚並べると合計 10MB 超 → モバイル/3G で
+  // 「画像が出るまで真っ暗 (= 親 View の C.bg しか見えない)」現象が起きる。
+  // → thumbedUrl 経由の 720px サムネで getSize を呼ぶ。アスペクト比は同じ。
   const [imgAspects, setImgAspects] = useState<Record<string, number>>({});
   useEffect(() => {
     if (mediaUrls.length === 0) return;
@@ -146,8 +152,10 @@ function AnonPostCardInner({
       // 既に解決済みのものは再取得しない (state を closure 経由で参照)
       setImgAspects((prev) => {
         if (prev[url] !== undefined) return prev;
+        // サムネ URL で getSize を呼ぶ — フル画像のダウンロード回避
+        const measureUri = thumbedUrl(url, 720);
         RNImage.getSize(
-          url,
+          measureUri,
           (w, h) => {
             if (!alive || h <= 0 || w <= 0) return;
             const ratio = Math.max(0.5, Math.min(2.0, w / h));
