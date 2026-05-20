@@ -1,7 +1,7 @@
-import { supabase } from '@/lib/supabase';
-import { generateVariants } from '@/lib/search/variants';
-import { findSimilar } from '@/lib/search/similarity';
-import { sanitizeContent } from '@/lib/sanitize';
+import { supabase } from '../supabase';
+import { generateVariants } from '../search/variants';
+import { findSimilar } from '../search/similarity';
+import { sanitizeContent } from '../sanitize';
 
 export type Visibility = 'open' | 'request' | 'invite';
 export type MemberRole = 'owner' | 'admin' | 'member';

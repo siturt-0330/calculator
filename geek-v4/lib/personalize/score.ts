@@ -7,7 +7,7 @@
 // ============================================================
 
 import type { UserInterestProfile } from './profile';
-import { deepNormalize } from '@/lib/search/tokenize';
+import { deepNormalize } from '../search/tokenize';
 
 // 候補のタグを profile キーと突き合わせる前に deepNormalize する。
 // (events.logEvent でも同じ正規化を通しているので、両側が hiragana lowercase で揃う)

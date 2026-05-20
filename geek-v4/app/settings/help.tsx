@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TopBar } from '@/components/nav/TopBar';
-import { BackButton } from '@/components/nav/BackButton';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { Icon } from '@/constants/icons';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { TopBar } from '../../components/nav/TopBar';
+import { BackButton } from '../../components/nav/BackButton';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { Icon } from '../../constants/icons';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 const FAQ: { q: string; a: string }[] = [
   {

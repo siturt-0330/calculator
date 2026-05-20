@@ -2,13 +2,13 @@ import { View, Text, Platform } from 'react-native';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Button } from '@/components/ui/Button';
-import { useAuthStore } from '@/stores/authStore';
-import { useSettingsStore } from '@/stores/settingsStore';
-import { useToastStore } from '@/stores/toastStore';
-import { supabase } from '@/lib/supabase';
+import { C, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Button } from '../../components/ui/Button';
+import { useAuthStore } from '../../stores/authStore';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { useToastStore } from '../../stores/toastStore';
+import { supabase } from '../../lib/supabase';
 
 export default function NotificationsOnboarding() {
   const insets = useSafeAreaInsets();

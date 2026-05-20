@@ -1,5 +1,5 @@
-import { supabase } from '@/lib/supabase';
-import { checkRate, rateLimitMessage } from '@/lib/rateLimit';
+import { supabase } from '../supabase';
+import { checkRate, rateLimitMessage } from '../rateLimit';
 
 export type ReactionRow = { post_id: string; user_id: string; meme: string };
 

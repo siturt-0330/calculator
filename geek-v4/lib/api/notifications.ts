@@ -1,5 +1,5 @@
-import { supabase } from '@/lib/supabase';
-import type { Notification } from '@/types/models';
+import { supabase } from '../supabase';
+import type { Notification } from '../../types/models';
 
 export async function fetchNotifications(): Promise<Notification[]> {
   const { data, error } = await supabase

@@ -1,5 +1,5 @@
 // 検索スコアリング & ランキングアルゴリズム
-import type { TagNode } from '@/stores/tagGraphStore';
+import type { TagNode } from '../../stores/tagGraphStore';
 
 export type ScoredItem<T> = { item: T; score: number; reasons: string[] };
 

@@ -8,9 +8,9 @@ import Animated, {
   withTiming,
   interpolateColor,
 } from 'react-native-reanimated';
-import { C, SP, R, SIZE } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { TIMING_FAST } from '@/design/motion';
+import { C, SP, R, SIZE } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { TIMING_FAST } from '../../design/motion';
 
 type Props = TextInputProps & {
   label?: string;

@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { resilient } from '@/lib/resilient';
-import { useOfflineQueueStore, type QueuedAction } from '@/stores/offlineQueueStore';
+import { supabase } from '../lib/supabase';
+import { resilient } from '../lib/resilient';
+import { useOfflineQueueStore, type QueuedAction } from '../stores/offlineQueueStore';
 import { useNetworkStatus } from './useNetworkStatus';
-import { useToastStore } from '@/stores/toastStore';
+import { useToastStore } from '../stores/toastStore';
 
 const MAX_ATTEMPTS = 5;
 

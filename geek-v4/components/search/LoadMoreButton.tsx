@@ -6,9 +6,9 @@
 
 import { View, Text, ActivityIndicator } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { PressableScale } from '../ui/PressableScale';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 type Props = {
   onPress: () => void;

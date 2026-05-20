@@ -1,10 +1,10 @@
 import { Pressable, PressableProps } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useEffect } from 'react';
-import { hap } from '@/design/haptics';
-import { SPRING_TIGHT, SPRING_SNAP, PRESS_SCALE } from '@/design/motion';
-import { C } from '@/design/tokens';
-import { TABBAR } from '@/design/tabbar';
+import { hap } from '../../design/haptics';
+import { SPRING_TIGHT, SPRING_SNAP, PRESS_SCALE } from '../../design/motion';
+import { C } from '../../design/tokens';
+import { TABBAR } from '../../design/tabbar';
 
 const APressable = Animated.createAnimatedComponent(Pressable);
 

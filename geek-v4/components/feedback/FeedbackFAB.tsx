@@ -2,13 +2,13 @@ import { useState } from 'react';
 import { View, Text, Modal, TextInput, ActivityIndicator, Platform } from 'react-native';
 import { useSegments } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { useToastStore } from '@/stores/toastStore';
-import { submitFeedback, type FeedbackKind } from '@/lib/api/feedback';
-import { useFeatureFlag } from '@/hooks/useFeatureFlag';
-import { useAuthStore } from '@/stores/authStore';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { PressableScale } from '../ui/PressableScale';
+import { useToastStore } from '../../stores/toastStore';
+import { submitFeedback, type FeedbackKind } from '../../lib/api/feedback';
+import { useFeatureFlag } from '../../hooks/useFeatureFlag';
+import { useAuthStore } from '../../stores/authStore';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 const KIND_OPTIONS: { kind: FeedbackKind; label: string; emoji: string }[] = [
   { kind: 'ui',         label: 'UIが変',          emoji: '🎨' },

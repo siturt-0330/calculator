@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchReplies, createReply, fetchThread } from '@/lib/api/bbs';
-import { attachChannel } from '@/lib/realtime';
+import { fetchReplies, createReply, fetchThread } from '../lib/api/bbs';
+import { attachChannel } from '../lib/realtime';
 
 export function useBBSThread(threadId: string) {
   const qc = useQueryClient();

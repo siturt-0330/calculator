@@ -1,4 +1,4 @@
-import { useLanguageStore, type Lang } from '@/stores/languageStore';
+import { useLanguageStore, type Lang } from '../stores/languageStore';
 
 // 主要 UI 文字列の翻訳辞書 (ja を基準として ja以外を定義すれば自動切替)
 type Dict = Record<string, Partial<Record<Lang, string>>>;

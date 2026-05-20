@@ -10,22 +10,22 @@ import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persi
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
-import { useAppFonts } from '@/hooks/useAppFonts';
-import { useAuthStore } from '@/stores/authStore';
-import { useSettingsStore } from '@/stores/settingsStore';
-import { useLanguageStore } from '@/stores/languageStore';
-import { useTagFilterStore } from '@/stores/tagFilterStore';
-import { ToastHost } from '@/components/ui/ToastHost';
-import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
-import { IntroAnimation, markIntroShown } from '@/components/ui/IntroAnimation';
-import { useIntroStore } from '@/stores/introStore';
-import { OfflineBanner } from '@/components/ui/OfflineBanner';
-import { FeedbackFAB } from '@/components/feedback/FeedbackFAB';
-import { useOfflineQueueProcessor } from '@/hooks/useOfflineQueueProcessor';
-import { initAnalytics } from '@/lib/analytics';
-import { initSentry } from '@/lib/sentry';
-import { initWebVitals } from '@/lib/webVitals';
-import { C } from '@/design/tokens';
+import { useAppFonts } from '../hooks/useAppFonts';
+import { useAuthStore } from '../stores/authStore';
+import { useSettingsStore } from '../stores/settingsStore';
+import { useLanguageStore } from '../stores/languageStore';
+import { useTagFilterStore } from '../stores/tagFilterStore';
+import { ToastHost } from '../components/ui/ToastHost';
+import { ErrorBoundary } from '../components/ui/ErrorBoundary';
+import { IntroAnimation, markIntroShown } from '../components/ui/IntroAnimation';
+import { useIntroStore } from '../stores/introStore';
+import { OfflineBanner } from '../components/ui/OfflineBanner';
+import { FeedbackFAB } from '../components/feedback/FeedbackFAB';
+import { useOfflineQueueProcessor } from '../hooks/useOfflineQueueProcessor';
+import { initAnalytics } from '../lib/analytics';
+import { initSentry } from '../lib/sentry';
+import { initWebVitals } from '../lib/webVitals';
+import { C } from '../design/tokens';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -131,7 +131,7 @@ export default function RootLayout() {
     //  飛ぶフローを完走させるため、auto-redirect で feed に攫われないようガード。)
     // typedRoutes の string literal union に reset-password がまだ含まれない
     // (cache 生成タイミング) 場合があるので string cast で比較。
-    const inResetPassword = (segments[1] as string | undefined) === 'reset-password';
+    const inResetPassword = ((segments as readonly string[])[1]) === 'reset-password';
 
     if (!user) {
       if (!inAuth) router.replace('/(auth)/login');

@@ -1,10 +1,10 @@
 import { View, Text, Linking, Platform } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { fetchAndCachePreview } from '@/lib/api/linkPreview';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { ProgressiveImage } from '@/components/ui/ProgressiveImage';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { fetchAndCachePreview } from '../../lib/api/linkPreview';
+import { PressableScale } from '../ui/PressableScale';
+import { ProgressiveImage } from '../ui/ProgressiveImage';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 function shortHost(url: string): string {
   try {

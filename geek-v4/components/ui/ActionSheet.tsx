@@ -1,8 +1,8 @@
 import { View, Text } from 'react-native';
 import { PressableScale } from './PressableScale';
 import { Divider } from './Divider';
-import { C, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { C, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 import type { LucideIcon } from 'lucide-react-native';
 
 export type Action = {

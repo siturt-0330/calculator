@@ -1,5 +1,5 @@
 import { Stack, Redirect } from 'expo-router';
-import { useAuthStore } from '@/stores/authStore';
+import { useAuthStore } from '../../stores/authStore';
 
 // ============================================================
 // 隠し admin パネル — /admin URL で直接叩いた時だけ到達できる。

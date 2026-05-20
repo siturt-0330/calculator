@@ -5,8 +5,8 @@ import Animated, {
   useAnimatedStyle,
   SharedValue,
 } from 'react-native-reanimated';
-import { C, SP, SIZE } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { C, SP, SIZE } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 type Props = {
   title?: string;

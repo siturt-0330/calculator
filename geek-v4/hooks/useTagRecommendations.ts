@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
-import { recommendForTags, type RecommendResult } from '@/lib/search/tagSearchV3';
+import { recommendForTags, type RecommendResult } from '../lib/search/tagSearchV3';
 import { useTagSearchV3 } from './useTagSearchV3';
-import { useSearchClickStore } from '@/stores/searchClickStore';
+import { useSearchClickStore } from '../stores/searchClickStore';
 
 /**
  * シードタグ集合 (likedTags / blockedTags) から、

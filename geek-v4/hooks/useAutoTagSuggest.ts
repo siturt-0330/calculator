@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useTagSearchV3 } from './useTagSearchV3';
-import { suggestTagsFromContent, type AutoTagSuggestion } from '@/lib/search/autoTagFromContent';
+import { suggestTagsFromContent, type AutoTagSuggestion } from '../lib/search/autoTagFromContent';
 
 /**
  * 投稿本文から自動的にタグ候補を提案するフック。

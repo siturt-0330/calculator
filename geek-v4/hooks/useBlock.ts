@@ -1,6 +1,6 @@
-import { useTagFilterStore } from '@/stores/tagFilterStore';
-import { useToastStore } from '@/stores/toastStore';
-import { impact, Haptics } from '@/lib/haptics';
+import { useTagFilterStore } from '../stores/tagFilterStore';
+import { useToastStore } from '../stores/toastStore';
+import { impact, Haptics } from '../lib/haptics';
 
 export function useBlock() {
   const { addBlocked, removeBlocked, blockedTags } = useTagFilterStore();

@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '../lib/supabase';
 import type { User } from '@supabase/supabase-js';
-import { detachAllChannels } from '@/lib/realtime';
-import { setUnauthorizedHandler } from '@/lib/resilient';
+import { detachAllChannels } from '../lib/realtime';
+import { setUnauthorizedHandler } from '../lib/resilient';
 
 // onboarded 状態のローカルキャッシュ — プロフィール取得失敗時のフォールバック
 const ONBOARDED_KEY = 'geek-v4-onboarded';

@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { attachChannel } from '@/lib/realtime';
-import { fetchFeatureFlags, userInRollout, type FeatureFlag } from '@/lib/api/featureFlags';
-import { useAuthStore } from '@/stores/authStore';
+import { attachChannel } from '../lib/realtime';
+import { fetchFeatureFlags, userInRollout, type FeatureFlag } from '../lib/api/featureFlags';
+import { useAuthStore } from '../stores/authStore';
 
 const KEY = ['feature-flags'];
 

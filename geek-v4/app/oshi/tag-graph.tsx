@@ -2,20 +2,20 @@ import { useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TextInput, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TopBar } from '@/components/nav/TopBar';
-import { BackButton } from '@/components/nav/BackButton';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { useTagGraphStore, type TagNode, TEMPLATES } from '@/stores/tagGraphStore';
-import { useTagFilterStore } from '@/stores/tagFilterStore';
-import { useTagCooccurStore } from '@/stores/tagCooccurStore';
-import { useToastStore } from '@/stores/toastStore';
-import { findRelatedTags } from '@/lib/search/tagVector';
-import { normalize } from '@/lib/search/tokenize';
-import { Icon } from '@/constants/icons';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { TopBar } from '../../components/nav/TopBar';
+import { BackButton } from '../../components/nav/BackButton';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { useTagGraphStore, type TagNode, TEMPLATES } from '../../stores/tagGraphStore';
+import { useTagFilterStore } from '../../stores/tagFilterStore';
+import { useTagCooccurStore } from '../../stores/tagCooccurStore';
+import { useToastStore } from '../../stores/toastStore';
+import { findRelatedTags } from '../../lib/search/tagVector';
+import { normalize } from '../../lib/search/tokenize';
+import { Icon } from '../../constants/icons';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 type ActionTarget =
   | { kind: 'add-root' }

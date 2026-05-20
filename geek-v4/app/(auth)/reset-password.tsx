@@ -2,15 +2,15 @@ import { View, Text, KeyboardAvoidingView, Platform, ScrollView, TextInput } fro
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { supabase } from '@/lib/supabase';
-import { useAuthStore } from '@/stores/authStore';
-import { useToastStore } from '@/stores/toastStore';
-import { Icon } from '@/constants/icons';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Button } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Input';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { supabase } from '../../lib/supabase';
+import { useAuthStore } from '../../stores/authStore';
+import { useToastStore } from '../../stores/toastStore';
+import { Icon } from '../../constants/icons';
 
 // ============================================================
 // パスワードリセット完了画面

@@ -2,13 +2,13 @@ import { View, Text, ScrollView, RefreshControl, KeyboardAvoidingView, Platform,
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Input } from '@/components/ui/Input';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { BackButton } from '@/components/nav/BackButton';
-import { Icon } from '@/constants/icons';
-import { discoverCommunities, type Community } from '@/lib/api/communities';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Input } from '../../components/ui/Input';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { BackButton } from '../../components/nav/BackButton';
+import { Icon } from '../../constants/icons';
+import { discoverCommunities, type Community } from '../../lib/api/communities';
 
 export default function DiscoverCommunitiesScreen() {
   const insets = useSafeAreaInsets();

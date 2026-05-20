@@ -1,14 +1,14 @@
 import { View, Text, KeyboardAvoidingView, Platform } from 'react-native';
 import { useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { BackButton } from '@/components/nav/BackButton';
-import { supabase } from '@/lib/supabase';
-import { useToastStore } from '@/stores/toastStore';
-import { Icon } from '@/constants/icons';
+import { C, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Button } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Input';
+import { BackButton } from '../../components/nav/BackButton';
+import { supabase } from '../../lib/supabase';
+import { useToastStore } from '../../stores/toastStore';
+import { Icon } from '../../constants/icons';
 
 // パスワードリセット完了画面の URL を組み立てる。
 //   - Web: 現在の origin + /reset-password (Netlify SPA fallback で OK)

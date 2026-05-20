@@ -3,21 +3,21 @@ import { View, Text, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
-import { BackButton } from '@/components/nav/BackButton';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { Spinner } from '@/components/ui/Spinner';
-import { supabase } from '@/lib/supabase';
-import { useAuthStore } from '@/stores/authStore';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Icon } from '@/constants/icons';
+import { BackButton } from '../../components/nav/BackButton';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { Spinner } from '../../components/ui/Spinner';
+import { supabase } from '../../lib/supabase';
+import { useAuthStore } from '../../stores/authStore';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Icon } from '../../constants/icons';
 import {
   TIERS,
   computeTrustBreakdown,
   type ProfileLike,
   type TrustComponent,
   type TrustTier,
-} from '@/lib/trust/score';
+} from '../../lib/trust/score';
 
 type TrustProfileRow = ProfileLike & {
   id: string;

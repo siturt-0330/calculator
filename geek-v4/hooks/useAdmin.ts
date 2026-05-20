@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { attachChannel } from '@/lib/realtime';
+import { attachChannel } from '../lib/realtime';
 import {
   fetchIsAdmin,
   fetchAllFeedback,
@@ -8,8 +8,8 @@ import {
   type FeedbackKind,
   type FeedbackRow,
   type AdminFeedbackRow,
-} from '@/lib/api/feedback';
-import { useAuthStore } from '@/stores/authStore';
+} from '../lib/api/feedback';
+import { useAuthStore } from '../stores/authStore';
 
 export function useIsAdmin(): boolean {
   const userId = useAuthStore((s) => s.user?.id);

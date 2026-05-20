@@ -1,9 +1,9 @@
 import { View, Text, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, SP, R } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { BackButton } from '@/components/nav/BackButton';
-import { Icon } from '@/constants/icons';
+import { C, SP, R } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { BackButton } from '../../components/nav/BackButton';
+import { Icon } from '../../constants/icons';
 
 const GOODS = [
   { title: 'ぬいぐるみ 限定版', tag: 'アニメ', type: '譲渡', price: '3,500円', color: C.pink },

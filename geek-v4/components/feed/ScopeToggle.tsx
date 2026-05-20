@@ -1,8 +1,8 @@
 import { View, Text } from 'react-native';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import type { FeedScope } from '@/stores/feedStore';
+import { PressableScale } from '../ui/PressableScale';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import type { FeedScope } from '../../stores/feedStore';
 
 export function ScopeToggle({
   value,

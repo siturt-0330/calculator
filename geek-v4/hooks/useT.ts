@@ -1,5 +1,5 @@
-import { useLanguageStore } from '@/stores/languageStore';
-import { t as translate, STRINGS } from '@/lib/i18n/dictionary';
+import { useLanguageStore } from '../stores/languageStore';
+import { t as translate, STRINGS } from '../lib/i18n/dictionary';
 
 /**
  * 国際化された翻訳フック

@@ -23,14 +23,14 @@ import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { C, R, SP, SHADOW } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Spinner } from '@/components/ui/Spinner';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { BackButton } from '@/components/nav/BackButton';
-import { Icon } from '@/constants/icons';
-import { AnonPostCard } from '@/components/feed/AnonPostCard';
+import { C, R, SP, SHADOW } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Spinner } from '../../components/ui/Spinner';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { BackButton } from '../../components/nav/BackButton';
+import { Icon } from '../../constants/icons';
+import { AnonPostCard } from '../../components/feed/AnonPostCard';
 import {
   fetchCommunity,
   joinCommunity,
@@ -41,22 +41,22 @@ import {
   type CommunityWithMembership,
   type CommunitySpot,
   type CommunityEvent,
-} from '@/lib/api/communities';
-import { fetchCommunityPosts } from '@/lib/api/posts';
-import { fetchCommunityThreads } from '@/lib/api/bbs';
-import { useToastStore } from '@/stores/toastStore';
-import { useLike, useLikes } from '@/hooks/useLike';
-import { useConcern, useConcerns } from '@/hooks/useConcern';
-import { useSave, useSaves } from '@/hooks/useSave';
-import { useShare } from '@/hooks/useShare';
-import { useReactions, useReactionToggle } from '@/hooks/useReactions';
-import { useAddedTags, useAddTag } from '@/hooks/useAddedTags';
-import { usePolls } from '@/hooks/usePolls';
-import { sanitizeContent, sanitizeUrl } from '@/lib/sanitize';
-import { formatRelative } from '@/lib/utils/date';
-import type { Post, BBSThread } from '@/types/models';
-import type { ReactionAgg } from '@/lib/api/reactions';
-import type { Poll } from '@/lib/api/polls';
+} from '../../lib/api/communities';
+import { fetchCommunityPosts } from '../../lib/api/posts';
+import { fetchCommunityThreads } from '../../lib/api/bbs';
+import { useToastStore } from '../../stores/toastStore';
+import { useLike, useLikes } from '../../hooks/useLike';
+import { useConcern, useConcerns } from '../../hooks/useConcern';
+import { useSave, useSaves } from '../../hooks/useSave';
+import { useShare } from '../../hooks/useShare';
+import { useReactions, useReactionToggle } from '../../hooks/useReactions';
+import { useAddedTags, useAddTag } from '../../hooks/useAddedTags';
+import { usePolls } from '../../hooks/usePolls';
+import { sanitizeContent, sanitizeUrl } from '../../lib/sanitize';
+import { formatRelative } from '../../lib/utils/date';
+import type { Post, BBSThread } from '../../types/models';
+import type { ReactionAgg } from '../../lib/api/reactions';
+import type { Poll } from '../../lib/api/polls';
 
 // ============================================================
 // Types

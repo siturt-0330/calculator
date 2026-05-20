@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '../lib/supabase';
 
 async function getMyLikes(postIds: string[]): Promise<Record<string, boolean>> {
   if (postIds.length === 0) return {};

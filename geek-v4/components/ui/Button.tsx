@@ -3,8 +3,8 @@ import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { PressableScale } from './PressableScale';
-import { C, SP, R } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { C, SP, R } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 type Size = 'sm' | 'md' | 'lg';

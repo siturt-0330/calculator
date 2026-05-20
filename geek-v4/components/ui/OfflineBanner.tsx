@@ -1,7 +1,7 @@
 import { View, Text } from 'react-native';
-import { useNetworkStatus } from '@/hooks/useNetworkStatus';
-import { C, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { useNetworkStatus } from '../../hooks/useNetworkStatus';
+import { C, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 export function OfflineBanner() {
   const { online } = useNetworkStatus();

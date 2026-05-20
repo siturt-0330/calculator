@@ -1,8 +1,8 @@
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useEffect } from 'react';
 import { PressableScale } from './PressableScale';
-import { C } from '@/design/tokens';
-import { SPRING_TIGHT } from '@/design/motion';
+import { C } from '../../design/tokens';
+import { SPRING_TIGHT } from '../../design/motion';
 
 export function Toggle({
   value,

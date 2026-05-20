@@ -1,8 +1,8 @@
 import { useRouter } from 'expo-router';
 import { useCallback, useRef } from 'react';
-import { Icon } from '@/constants/icons';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { C, SP } from '@/design/tokens';
+import { Icon } from '../../constants/icons';
+import { PressableScale } from '../ui/PressableScale';
+import { C, SP } from '../../design/tokens';
 
 // 戻るボタンの取りこぼし対策:
 // 1. canGoBack() が false でも (= ディープリンクで直接開いた等) フィードに戻れる fallback

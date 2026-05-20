@@ -1,7 +1,7 @@
 import { View, Text } from 'react-native';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import type { AccountState } from '@/types/models';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import type { AccountState } from '../../types/models';
 
 const META: Record<AccountState, { emoji: string; label: string; desc: string; bg: string; fg: string }> = {
   healthy:    { emoji: '🟢', label: '健康',       desc: '通常通り利用できます',           bg: '#0d2a22', fg: '#22D3A4' },

@@ -5,7 +5,7 @@ import BottomSheetLib, {
   BottomSheetBackdrop,
   type BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
-import { C } from '@/design/tokens';
+import { C } from '../../design/tokens';
 
 type Props = {
   snapPoints?: (string | number)[];

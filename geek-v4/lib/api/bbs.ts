@@ -1,9 +1,9 @@
-import { supabase } from '@/lib/supabase';
-import type { BBSThread, BBSReply, Comment, ThreadVisibility } from '@/types/models';
-import { sanitizeContent } from '@/lib/sanitize';
-import { checkRate, rateLimitMessage } from '@/lib/rateLimit';
+import { supabase } from '../supabase';
+import type { BBSThread, BBSReply, Comment, ThreadVisibility } from '../../types/models';
+import { sanitizeContent } from '../sanitize';
+import { checkRate, rateLimitMessage } from '../rateLimit';
 
-export type { ThreadVisibility } from '@/types/models';
+export type { ThreadVisibility } from '../../types/models';
 
 // bbs_threads SELECT で取得するカラム一覧 (一箇所でメンテ可能)
 // migration 0023 で community_id + visibility を追加

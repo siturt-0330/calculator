@@ -2,9 +2,9 @@ import { View, Text, LayoutChangeEvent } from 'react-native';
 import { useState, useEffect } from 'react';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { PressableScale } from './PressableScale';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { SPRING_TIGHT } from '@/design/motion';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { SPRING_TIGHT } from '../../design/motion';
 
 export function SegmentedControl<V extends string>({
   options,

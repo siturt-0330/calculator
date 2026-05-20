@@ -7,8 +7,8 @@ import Animated, {
   withTiming,
   Easing,
 } from 'react-native-reanimated';
-import { C, SP } from '@/design/tokens';
-import { FONT } from '@/design/typography';
+import { C, SP } from '../../design/tokens';
+import { FONT } from '../../design/typography';
 
 export function Spinner({ size = 'small', full }: { size?: 'small' | 'large'; full?: boolean }) {
   if (full) {

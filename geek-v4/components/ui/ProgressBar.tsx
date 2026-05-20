@@ -1,8 +1,8 @@
 import { View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useEffect } from 'react';
-import { C, R } from '@/design/tokens';
-import { SPRING_GENTLE } from '@/design/motion';
+import { C, R } from '../../design/tokens';
+import { SPRING_GENTLE } from '../../design/motion';
 
 export function ProgressBar({
   value,

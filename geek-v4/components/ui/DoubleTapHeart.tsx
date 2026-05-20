@@ -8,10 +8,10 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import { View } from 'react-native';
-import { Icon } from '@/constants/icons';
-import { hap } from '@/design/haptics';
-import { TIMING_FAST, SPRING_BOUNCY } from '@/design/motion';
-import { C } from '@/design/tokens';
+import { Icon } from '../../constants/icons';
+import { hap } from '../../design/haptics';
+import { TIMING_FAST, SPRING_BOUNCY } from '../../design/motion';
+import { C } from '../../design/tokens';
 
 export function DoubleTapHeart({
   children,

@@ -7,7 +7,7 @@
 //   - 反応量 (likes + comments + reactions)
 //   - 投稿種別の好みプロファイル
 
-import type { Post } from '@/types/models';
+import type { Post } from '../../types/models';
 
 export type RankingContext = {
   likedTags: Set<string>;

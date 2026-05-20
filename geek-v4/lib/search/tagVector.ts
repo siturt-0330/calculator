@@ -8,7 +8,7 @@
 // 4. 同義語辞書                                            [強]
 // → コサイン類似度 (相当の) スコアでマージし「関連度」を算出
 
-import type { TagNode } from '@/stores/tagGraphStore';
+import type { TagNode } from '../../stores/tagGraphStore';
 import { normalize } from './tokenize';
 
 // 文字 2-gram / 3-gram fingerprint

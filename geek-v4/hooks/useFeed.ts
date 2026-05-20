@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchPosts, fetchCommunitiesForPosts } from '@/lib/api/posts';
-import { supabase } from '@/lib/supabase';
-import { attachChannel } from '@/lib/realtime';
-import { useTagFilterStore } from '@/stores/tagFilterStore';
-import { useFeedStore } from '@/stores/feedStore';
-import { useSearchSignalsStore } from '@/stores/searchSignalsStore';
-import { useSearchClickStore } from '@/stores/searchClickStore';
-import { smartSort } from '@/lib/feed/smartRank';
-import type { Post } from '@/types/models';
+import { fetchPosts, fetchCommunitiesForPosts } from '../lib/api/posts';
+import { supabase } from '../lib/supabase';
+import { attachChannel } from '../lib/realtime';
+import { useTagFilterStore } from '../stores/tagFilterStore';
+import { useFeedStore } from '../stores/feedStore';
+import { useSearchSignalsStore } from '../stores/searchSignalsStore';
+import { useSearchClickStore } from '../stores/searchClickStore';
+import { smartSort } from '../lib/feed/smartRank';
+import type { Post } from '../types/models';
 import { useQuery as useReactQuery } from '@tanstack/react-query';
-import { getEvents, computeProfile, rankFeed } from '@/lib/personalize';
-import type { FeedEvent, RankableCandidate, RankReason } from '@/lib/personalize';
+import { getEvents, computeProfile, rankFeed } from '../lib/personalize';
+import type { FeedEvent, RankableCandidate, RankReason } from '../lib/personalize';
 
 // React Query の persist cache は JSON 経由なので Set を直接保存できない (空の {} になる)。
 // 配列で返して使い側で Set に包む。

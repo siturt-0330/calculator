@@ -2,12 +2,12 @@ import { useCallback, useState } from 'react';
 import { View, Text, ScrollView, TextInput, ActivityIndicator } from 'react-native';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TopBar } from '@/components/nav/TopBar';
-import { BackButton } from '@/components/nav/BackButton';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { Spinner } from '@/components/ui/Spinner';
-import { useAuthStore } from '@/stores/authStore';
-import { useToastStore } from '@/stores/toastStore';
+import { TopBar } from '../../components/nav/TopBar';
+import { BackButton } from '../../components/nav/BackButton';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { Spinner } from '../../components/ui/Spinner';
+import { useAuthStore } from '../../stores/authStore';
+import { useToastStore } from '../../stores/toastStore';
 import {
   fetchAllUsers,
   fetchAllPosts,
@@ -16,9 +16,9 @@ import {
   deletePost,
   type AdminUser,
   type AdminPost,
-} from '@/lib/api/admin';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+} from '../../lib/api/admin';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 type Tab = 'users' | 'posts';
 

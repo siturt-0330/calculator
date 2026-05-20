@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { attachChannel } from '@/lib/realtime';
-import { createUserStamp, deleteUserStamp, fetchUserStamps, type UserStamp } from '@/lib/api/userStamps';
+import { attachChannel } from '../lib/realtime';
+import { createUserStamp, deleteUserStamp, fetchUserStamps, type UserStamp } from '../lib/api/userStamps';
 
 const KEY = ['user-stamps'];
 

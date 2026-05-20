@@ -1,6 +1,6 @@
 import { View, ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C } from '@/design/tokens';
+import { C } from '../../design/tokens';
 
 export function ScreenContainer({
   children,

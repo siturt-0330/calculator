@@ -2,8 +2,8 @@ import { Image, type ImageContentFit } from 'expo-image';
 import { View, StyleProp, ViewStyle, Platform } from 'react-native';
 import { useEffect, useRef, useState } from 'react';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
-import { C, R } from '@/design/tokens';
-import { TIMING_NORMAL } from '@/design/motion';
+import { C, R } from '../../design/tokens';
+import { TIMING_NORMAL } from '../../design/motion';
 
 // ============================================================
 // ProgressiveImage

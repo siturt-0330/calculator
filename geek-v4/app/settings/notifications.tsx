@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { View, Text, ScrollView, Switch, Modal, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TopBar } from '@/components/nav/TopBar';
-import { BackButton } from '@/components/nav/BackButton';
-import { Divider } from '@/components/ui/Divider';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { useSettingsStore, isInQuietHours } from '@/stores/settingsStore';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Icon } from '@/constants/icons';
+import { TopBar } from '../../components/nav/TopBar';
+import { BackButton } from '../../components/nav/BackButton';
+import { Divider } from '../../components/ui/Divider';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { useSettingsStore, isInQuietHours } from '../../stores/settingsStore';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Icon } from '../../constants/icons';
 
 type Row = {
   key:

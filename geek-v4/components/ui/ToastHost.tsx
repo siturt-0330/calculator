@@ -1,8 +1,8 @@
 import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useToastStore } from '@/stores/toastStore';
+import { useToastStore } from '../../stores/toastStore';
 import { ToastItem } from './Toast';
-import { SP } from '@/design/tokens';
+import { SP } from '../../design/tokens';
 
 export function ToastHost() {
   const { toasts, dismiss } = useToastStore();

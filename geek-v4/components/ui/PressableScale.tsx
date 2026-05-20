@@ -1,7 +1,7 @@
 import { Platform, Pressable, type PressableProps } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { PRESS_SCALE, SPRING_SNAP } from '@/design/motion';
+import { PRESS_SCALE, SPRING_SNAP } from '../../design/motion';
 
 type HapticType = 'tap' | 'select' | 'pop' | 'confirm' | 'success' | 'warn' | 'error';
 

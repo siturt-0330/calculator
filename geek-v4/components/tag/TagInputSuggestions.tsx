@@ -1,12 +1,12 @@
 import { useMemo } from 'react';
 import { View, Text } from 'react-native';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { useTagSearchV3 } from '@/hooks/useTagSearchV3';
-import { useSearchClickStore } from '@/stores/searchClickStore';
-import { classifyIntent, intentEmoji, intentLabel } from '@/lib/search/queryIntent';
-import { didYouMean } from '@/lib/search/tagSearchV2';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { PressableScale } from '../ui/PressableScale';
+import { useTagSearchV3 } from '../../hooks/useTagSearchV3';
+import { useSearchClickStore } from '../../stores/searchClickStore';
+import { classifyIntent, intentEmoji, intentLabel } from '../../lib/search/queryIntent';
+import { didYouMean } from '../../lib/search/tagSearchV2';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 /**
  * Tag 入力中の高度な候補サジェスト (Search V3 を利用):

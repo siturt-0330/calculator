@@ -1,9 +1,9 @@
 import { View, Text, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, SP, R } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { BackButton } from '@/components/nav/BackButton';
-import { Icon } from '@/constants/icons';
+import { C, SP, R } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { BackButton } from '../../components/nav/BackButton';
+import { Icon } from '../../constants/icons';
 
 const PROFILES = [
   { name: 'オタク太郎', tags: ['アニメ', 'ゲーム'], msg: '一緒にオフ会参加する人募集！', color: '#7C6AF7' },

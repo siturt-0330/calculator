@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { NgramIndex } from '@/lib/search/ngramIndex';
-import { buildEmbeddings } from '@/lib/search/embeddings';
-import { Trie } from '@/lib/search/trie';
-import { useTagGraphStore } from '@/stores/tagGraphStore';
-import { useTagCooccurStore } from '@/stores/tagCooccurStore';
-import { useTagFilterStore } from '@/stores/tagFilterStore';
-import { useSearchSignalsStore } from '@/stores/searchSignalsStore';
-import { useSearchClickStore } from '@/stores/searchClickStore';
-import { searchTagsV3, type V3Result, type SearchV3Context } from '@/lib/search/tagSearchV3';
+import { supabase } from '../lib/supabase';
+import { NgramIndex } from '../lib/search/ngramIndex';
+import { buildEmbeddings } from '../lib/search/embeddings';
+import { Trie } from '../lib/search/trie';
+import { useTagGraphStore } from '../stores/tagGraphStore';
+import { useTagCooccurStore } from '../stores/tagCooccurStore';
+import { useTagFilterStore } from '../stores/tagFilterStore';
+import { useSearchSignalsStore } from '../stores/searchSignalsStore';
+import { useSearchClickStore } from '../stores/searchClickStore';
+import { searchTagsV3, type V3Result, type SearchV3Context } from '../lib/search/tagSearchV3';
 
 async function fetchAllTagNames(): Promise<string[]> {
   const { data } = await supabase

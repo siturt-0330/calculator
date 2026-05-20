@@ -1,6 +1,6 @@
 import { Text, type TextStyle, type StyleProp } from 'react-native';
-import { findHighlightRanges } from '@/lib/search/scoring';
-import { C } from '@/design/tokens';
+import { findHighlightRanges } from '../../lib/search/scoring';
+import { C } from '../../design/tokens';
 
 // 検索クエリにマッチした部分をハイライト表示
 export function HighlightedText({

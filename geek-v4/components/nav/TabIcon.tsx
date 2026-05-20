@@ -1,8 +1,8 @@
 import { View } from 'react-native';
 import type { LucideIcon } from 'lucide-react-native';
-import { C } from '@/design/tokens';
-import { TABBAR } from '@/design/tabbar';
-import { Icon, type IconName } from '@/constants/icons';
+import { C } from '../../design/tokens';
+import { TABBAR } from '../../design/tabbar';
+import { Icon, type IconName } from '../../constants/icons';
 
 export type TabKey = 'home' | 'bbs' | 'game' | 'community' | 'mypage';
 

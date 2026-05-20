@@ -1,5 +1,5 @@
 import { View, Text } from 'react-native';
-import { C, SP, R } from '@/design/tokens';
+import { C, SP, R } from '../../design/tokens';
 
 // 検索結果の補助バッジ — YouTube 風シンプル設計
 // 色は使わず、「過去に調べたかどうか」だけを subtle に伝える

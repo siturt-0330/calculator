@@ -1,9 +1,9 @@
 import { View, Text, Modal, Pressable } from 'react-native';
 import Animated, { FadeIn, FadeOut, ZoomIn, ZoomOut } from 'react-native-reanimated';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 import { Button } from './Button';
-import { SHADOW } from '@/design/shadows';
+import { SHADOW } from '../../design/shadows';
 
 // Polished confirm dialog:
 // - Backdrop fades in 200ms / out 160ms; tapping it dismisses (calls onCancel)

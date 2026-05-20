@@ -1,8 +1,8 @@
 import { View, Text } from 'react-native';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import type { SortMode } from '@/lib/api/posts';
+import { PressableScale } from '../ui/PressableScale';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import type { SortMode } from '../../lib/api/posts';
 
 const ORDER: ReadonlyArray<{ v: SortMode; label: string }> = [
   { v: 'for-you', label: 'あなた向け' },

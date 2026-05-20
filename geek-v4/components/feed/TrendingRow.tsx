@@ -3,11 +3,11 @@ import { View, Text, ScrollView } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { fetchTrendingTags } from '@/lib/api/trending';
-import { attachChannel } from '@/lib/realtime';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { fetchTrendingTags } from '../../lib/api/trending';
+import { attachChannel } from '../../lib/realtime';
+import { PressableScale } from '../ui/PressableScale';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 function TrendingRowInner() {
   const router = useRouter();

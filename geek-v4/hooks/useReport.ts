@@ -1,7 +1,7 @@
 import { useMutation } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { useToastStore } from '@/stores/toastStore';
-import { notify, Haptics } from '@/lib/haptics';
+import { supabase } from '../lib/supabase';
+import { useToastStore } from '../stores/toastStore';
+import { notify, Haptics } from '../lib/haptics';
 
 export function useReport() {
   const { show } = useToastStore();
