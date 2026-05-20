@@ -1,9 +1,9 @@
 import { View, Text, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TopBar } from '@/components/nav/TopBar';
-import { BackButton } from '@/components/nav/BackButton';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { TopBar } from '../../components/nav/TopBar';
+import { BackButton } from '../../components/nav/BackButton';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 const LIBRARIES: { name: string; license: string; desc: string }[] = [
   { name: 'React Native', license: 'MIT', desc: 'UIフレームワーク（Meta）' },

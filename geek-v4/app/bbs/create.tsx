@@ -3,16 +3,16 @@ import { View, Text, TextInput, ScrollView, KeyboardAvoidingView, Platform } fro
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createThread } from '@/lib/api/bbs';
-import { discoverCommunities, type Community } from '@/lib/api/communities';
-import type { ThreadVisibility } from '@/types/models';
-import { C, SP, R } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Button } from '@/components/ui/Button';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { Icon } from '@/constants/icons';
-import { notify, Haptics } from '@/lib/haptics';
-import { useToastStore } from '@/stores/toastStore';
+import { createThread } from '../../lib/api/bbs';
+import { discoverCommunities, type Community } from '../../lib/api/communities';
+import type { ThreadVisibility } from '../../types/models';
+import { C, SP, R } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Button } from '../../components/ui/Button';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { Icon } from '../../constants/icons';
+import { notify, Haptics } from '../../lib/haptics';
+import { useToastStore } from '../../stores/toastStore';
 
 export default function BBSCreateScreen() {
   const router = useRouter();

@@ -2,15 +2,15 @@ import { View, Text, KeyboardAvoidingView, Platform } from 'react-native';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { BackButton } from '@/components/nav/BackButton';
-import { Icon } from '@/constants/icons';
-import { useAuthStore } from '@/stores/authStore';
-import { useToastStore } from '@/stores/toastStore';
-import { supabase } from '@/lib/supabase';
+import { C, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Button } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Input';
+import { BackButton } from '../../components/nav/BackButton';
+import { Icon } from '../../constants/icons';
+import { useAuthStore } from '../../stores/authStore';
+import { useToastStore } from '../../stores/toastStore';
+import { supabase } from '../../lib/supabase';
 
 export default function NicknameScreen() {
   const [nickname, setNickname] = useState('');

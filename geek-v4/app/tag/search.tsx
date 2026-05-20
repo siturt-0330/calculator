@@ -3,16 +3,16 @@ import { View, Text, FlatList } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { useDebounce } from '@/hooks/useDebounce';
-import { findClosestK } from '@/lib/search/typoCorrect';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { SearchBar } from '@/components/ui/SearchBar';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { Spinner } from '@/components/ui/Spinner';
-import { Icon } from '@/constants/icons';
-import type { Tag } from '@/types/models';
+import { supabase } from '../../lib/supabase';
+import { useDebounce } from '../../hooks/useDebounce';
+import { findClosestK } from '../../lib/search/typoCorrect';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { SearchBar } from '../../components/ui/SearchBar';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { Spinner } from '../../components/ui/Spinner';
+import { Icon } from '../../constants/icons';
+import type { Tag } from '../../types/models';
 
 export default function TagSearchScreen() {
   const router = useRouter();

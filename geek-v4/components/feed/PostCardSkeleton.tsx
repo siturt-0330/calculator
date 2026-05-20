@@ -1,6 +1,6 @@
 import { View } from 'react-native';
-import { Skeleton, SkeletonCircle } from '@/components/ui/Skeleton';
-import { C, R, SP } from '@/design/tokens';
+import { Skeleton, SkeletonCircle } from '../ui/Skeleton';
+import { C, R, SP } from '../../design/tokens';
 
 export function PostCardSkeleton() {
   return (

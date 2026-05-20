@@ -1,7 +1,7 @@
 import { View, Text } from 'react-native';
-import { Icon } from '@/constants/icons';
-import { C, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { Icon } from '../../constants/icons';
+import { C, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 import { Button } from './Button';
 
 export function ErrorState({

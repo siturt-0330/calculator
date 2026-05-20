@@ -8,10 +8,10 @@
 // 既存の ScopeToggle / フィルタ画面のスタイルに揃える。
 
 import { View, Text } from 'react-native';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { Icon } from '@/constants/icons';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { PressableScale } from '../ui/PressableScale';
+import { Icon } from '../../constants/icons';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 type Props = {
   likedOnly: boolean;

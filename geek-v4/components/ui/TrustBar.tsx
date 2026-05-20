@@ -1,8 +1,8 @@
 import { View, Text } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { C, R, SP, GRAD } from '@/design/tokens';
-import { T } from '@/design/typography';
-import type { TrustTier } from '@/lib/trust/score';
+import { C, R, SP, GRAD } from '../../design/tokens';
+import { T } from '../../design/typography';
+import type { TrustTier } from '../../lib/trust/score';
 
 type Props = {
   score: number;

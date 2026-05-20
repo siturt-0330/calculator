@@ -1,8 +1,8 @@
 import { Text } from 'react-native';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Icon } from '@/constants/icons';
+import { PressableScale } from '../ui/PressableScale';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Icon } from '../../constants/icons';
 
 type State = 'normal' | 'liked' | 'blocked' | 'added' | 'alias' | 'group';
 type PillSize = 'sm' | 'md';

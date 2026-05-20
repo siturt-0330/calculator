@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { View, Text, TextInput, Platform } from 'react-native';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Icon } from '@/constants/icons';
+import { PressableScale } from '../ui/PressableScale';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Icon } from '../../constants/icons';
 
 export function AddTagInline({ onSubmit }: { onSubmit: (tag: string) => Promise<void> | void }) {
   const [open, setOpen] = useState(false);

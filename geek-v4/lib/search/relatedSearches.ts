@@ -9,7 +9,7 @@
 //   4. 共起タグ
 // ============================================================
 
-import type { TagNode } from '@/stores/tagGraphStore';
+import type { TagNode } from '../../stores/tagGraphStore';
 import type { EmbeddingVector } from './embeddings';
 import { cosineSim } from './embeddings';
 import { normalize } from './tokenize';

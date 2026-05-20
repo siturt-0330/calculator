@@ -1,8 +1,8 @@
 import { Text } from 'react-native';
-import { Icon } from '@/constants/icons';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { Icon } from '../../constants/icons';
+import { PressableScale } from '../ui/PressableScale';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 export function BlockedTagBanner({ count, onPress }: { count: number; onPress: () => void }) {
   const Ban = Icon.block;

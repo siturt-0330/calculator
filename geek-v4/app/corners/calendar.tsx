@@ -3,16 +3,16 @@ import { View, Text, ScrollView, ActivityIndicator, Modal, TextInput, Platform }
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { C, SP, R } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { BackButton } from '@/components/nav/BackButton';
-import { Input } from '@/components/ui/Input';
-import { Button } from '@/components/ui/Button';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { Icon } from '@/constants/icons';
-import { useTagFilterStore } from '@/stores/tagFilterStore';
-import { useToastStore } from '@/stores/toastStore';
-import { fetchMonthEvents, createPersonalEvent, createProposal, voteProposal, getMyVotes, type CalendarEvent } from '@/lib/api/calendar';
+import { C, SP, R } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { BackButton } from '../../components/nav/BackButton';
+import { Input } from '../../components/ui/Input';
+import { Button } from '../../components/ui/Button';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { Icon } from '../../constants/icons';
+import { useTagFilterStore } from '../../stores/tagFilterStore';
+import { useToastStore } from '../../stores/toastStore';
+import { fetchMonthEvents, createPersonalEvent, createProposal, voteProposal, getMyVotes, type CalendarEvent } from '../../lib/api/calendar';
 
 const DAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const MONTHS = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];

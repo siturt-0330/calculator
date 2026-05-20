@@ -15,7 +15,7 @@
 //   4. ダイバーシフィケーション + Top-N
 // ============================================================
 
-import type { TagNode } from '@/stores/tagGraphStore';
+import type { TagNode } from '../../stores/tagGraphStore';
 import type { EmbeddingVector } from './embeddings';
 import { generateVariants } from './variants';
 import { normalize } from './tokenize';

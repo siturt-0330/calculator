@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { fetchNotifications, markAllRead } from '@/lib/api/notifications';
-import { useAuthStore } from '@/stores/authStore';
-import type { Notification } from '@/types/models';
+import { supabase } from '../lib/supabase';
+import { fetchNotifications, markAllRead } from '../lib/api/notifications';
+import { useAuthStore } from '../stores/authStore';
+import type { Notification } from '../types/models';
 
 const NOTIF_KEY = ['notifications'];
 

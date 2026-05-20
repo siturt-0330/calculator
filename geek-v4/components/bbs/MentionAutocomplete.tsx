@@ -1,10 +1,10 @@
 import { useMemo } from 'react';
 import { View, Text } from 'react-native';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { similarity as damerauSimilarity } from '@/lib/search/typoCorrect';
-import { deepNormalize } from '@/lib/search/tokenize';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { PressableScale } from '../ui/PressableScale';
+import { similarity as damerauSimilarity } from '../../lib/search/typoCorrect';
+import { deepNormalize } from '../../lib/search/tokenize';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 export type MentionTarget = { id: string; label: string };  // id = reply id or "#N", label = display
 

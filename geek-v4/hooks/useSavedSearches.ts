@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { attachChannel } from '@/lib/realtime';
+import { attachChannel } from '../lib/realtime';
 import {
   fetchSavedSearches, createSavedSearch, updateSavedSearch, deleteSavedSearch, type SavedSearch,
-} from '@/lib/api/savedSearches';
+} from '../lib/api/savedSearches';
 
 const KEY = ['saved-searches'];
 

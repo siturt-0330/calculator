@@ -1,10 +1,10 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { attachChannel } from '@/lib/realtime';
+import { attachChannel } from '../lib/realtime';
 import {
   fetchMyCollections, createCollection, deleteCollection, saveToCollection,
   fetchPostsInCollection, type BookmarkCollection,
-} from '@/lib/api/bookmarks';
+} from '../lib/api/bookmarks';
 
 const COL_KEY = ['bookmark-collections'];
 

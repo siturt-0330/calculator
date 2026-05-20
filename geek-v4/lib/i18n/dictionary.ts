@@ -10,7 +10,7 @@
 //   vi: Tiếng Việt
 // ============================================================
 
-import type { Lang } from '@/stores/languageStore';
+import type { Lang } from '../../stores/languageStore';
 
 // キーをドット区切りで namespace 化
 export const STRINGS: Record<string, Partial<Record<Lang, string>>> = {

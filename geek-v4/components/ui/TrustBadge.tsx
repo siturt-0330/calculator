@@ -1,5 +1,5 @@
 import { View, Text } from 'react-native';
-import { Icon } from '@/constants/icons';
+import { Icon } from '../../constants/icons';
 
 type Size = 'sm' | 'md';
 

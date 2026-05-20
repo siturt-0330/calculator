@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { PressableScale } from './PressableScale';
-import { Icon } from '@/constants/icons';
-import { C } from '@/design/tokens';
-import { useToastStore } from '@/stores/toastStore';
-import { saveNoteToObsidian, OBSIDIAN_AVAILABLE, type ObsidianNote } from '@/lib/obsidian';
-import { useObsidianEnabled } from '@/hooks/useObsidian';
+import { Icon } from '../../constants/icons';
+import { C } from '../../design/tokens';
+import { useToastStore } from '../../stores/toastStore';
+import { saveNoteToObsidian, OBSIDIAN_AVAILABLE, type ObsidianNote } from '../../lib/obsidian';
+import { useObsidianEnabled } from '../../hooks/useObsidian';
 import type { ViewStyle } from 'react-native';
 
 // 共通の「Obsidian に保存」ボタン

@@ -28,10 +28,10 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { Icon } from '@/constants/icons';
-import { C, SP } from '@/design/tokens';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { resolveCropper } from '@/lib/imageCropper';
+import { Icon } from '../constants/icons';
+import { C, SP } from '../design/tokens';
+import { PressableScale } from '../components/ui/PressableScale';
+import { resolveCropper } from '../lib/imageCropper';
 
 type Rotation = 0 | 90 | 180 | 270;
 

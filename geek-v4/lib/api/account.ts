@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { supabase } from '../supabase';
 
 // ============================================================
 // Account API (GDPR / personal data control)

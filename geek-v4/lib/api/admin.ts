@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { supabase } from '../supabase';
 
 // ============================================================
 // 開発者 admin 専用 API。 RLS は 0025_admin_role.sql で

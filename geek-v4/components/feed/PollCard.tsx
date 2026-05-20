@@ -1,11 +1,11 @@
 import { useState, useRef } from 'react';
 import { View, Text } from 'react-native';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { usePollVote } from '@/hooks/usePolls';
-import type { Poll } from '@/lib/api/polls';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { formatRelative } from '@/lib/utils/date';
+import { PressableScale } from '../ui/PressableScale';
+import { usePollVote } from '../../hooks/usePolls';
+import type { Poll } from '../../lib/api/polls';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { formatRelative } from '../../lib/utils/date';
 
 // 期限切れ判定: 不正な expires_at (null / 壊れた文字列) でも throw しないように
 function isExpired(expiresAt: string | null | undefined): boolean {

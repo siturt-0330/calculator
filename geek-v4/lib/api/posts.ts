@@ -1,7 +1,7 @@
-import { supabase } from '@/lib/supabase';
-import type { Post, PostVisibility } from '@/types/models';
+import { supabase } from '../supabase';
+import type { Post, PostVisibility } from '../../types/models';
 
-export type { PostVisibility } from '@/types/models';
+export type { PostVisibility } from '../../types/models';
 export type SortMode = 'for-you' | 'hot' | 'new' | 'top';
 
 // posts SELECT で取得するカラム一覧 (一箇所でメンテ可能)
@@ -132,8 +132,8 @@ export async function fetchPosts({
   return { posts, nextCursor };
 }
 
-import { sanitizeContent, sanitizeTag, sanitizeUrl } from '@/lib/sanitize';
-import { checkRate, rateLimitMessage } from '@/lib/rateLimit';
+import { sanitizeContent, sanitizeTag, sanitizeUrl } from '../sanitize';
+import { checkRate, rateLimitMessage } from '../rateLimit';
 
 export async function createPost({
   content,

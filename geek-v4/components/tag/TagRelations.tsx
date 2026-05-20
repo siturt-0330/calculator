@@ -3,17 +3,17 @@ import { View, Text } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { TagPill } from './TagPill';
 import { AddTagInline } from './AddTagInline';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { useToastStore } from '@/stores/toastStore';
-import { useTagRecommendations } from '@/hooks/useTagRecommendations';
+import { PressableScale } from '../ui/PressableScale';
+import { useToastStore } from '../../stores/toastStore';
+import { useTagRecommendations } from '../../hooks/useTagRecommendations';
 import {
   fetchTagRelations,
   fetchGroupsForTag,
   fetchGroupMembers,
   suggestTagRelation,
-} from '@/lib/api/tags';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+} from '../../lib/api/tags';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 export function TagRelations({
   tagName,

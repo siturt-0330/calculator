@@ -1,13 +1,13 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Modal, View, Text, ScrollView, TextInput, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { Icon } from '@/constants/icons';
-import { MEMES } from '@/lib/memes';
-import { useUserStamps, useCreateUserStamp } from '@/hooks/useUserStamps';
-import { useToastStore } from '@/stores/toastStore';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { PressableScale } from '../ui/PressableScale';
+import { Icon } from '../../constants/icons';
+import { MEMES } from '../../lib/memes';
+import { useUserStamps, useCreateUserStamp } from '../../hooks/useUserStamps';
+import { useToastStore } from '../../stores/toastStore';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 export function MemeReactionPicker({
   visible,

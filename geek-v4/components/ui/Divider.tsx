@@ -1,5 +1,5 @@
 import { View, ViewStyle } from 'react-native';
-import { C } from '@/design/tokens';
+import { C } from '../../design/tokens';
 
 export function Divider({ style }: { style?: ViewStyle }) {
   return (

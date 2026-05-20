@@ -24,7 +24,7 @@
 // 6. ダイバーシフィケーション: 類似タグの cluster suppression
 // 7. ノルマライズ + ソート + top N
 
-import type { TagNode } from '@/stores/tagGraphStore';
+import type { TagNode } from '../../stores/tagGraphStore';
 import { generateVariants } from './variants';
 import { normalize, fullToHalf } from './tokenize';
 import { tagSimilarity } from './tagVector';

@@ -1,6 +1,6 @@
 import { View, Text } from 'react-native';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 type Variant = 'accent' | 'green' | 'amber' | 'red' | 'gray';
 const COLORS: Record<Variant, { bg: string; fg: string }> = {

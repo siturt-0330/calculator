@@ -1,12 +1,12 @@
 import { View, Text, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, R, SP } from '@/design/tokens';
-import { T, FONT } from '@/design/typography';
-import { Button } from '@/components/ui/Button';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { BackButton } from '@/components/nav/BackButton';
-import { useLanguageStore, LANG_OPTIONS, type Lang } from '@/stores/languageStore';
+import { C, R, SP } from '../../design/tokens';
+import { T, FONT } from '../../design/typography';
+import { Button } from '../../components/ui/Button';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { BackButton } from '../../components/nav/BackButton';
+import { useLanguageStore, LANG_OPTIONS, type Lang } from '../../stores/languageStore';
 
 export default function LanguageOnboarding() {
   const insets = useSafeAreaInsets();

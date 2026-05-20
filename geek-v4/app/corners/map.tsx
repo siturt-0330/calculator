@@ -4,15 +4,15 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import * as Location from 'expo-location';
-import { BackButton } from '@/components/nav/BackButton';
-import { TopBar } from '@/components/nav/TopBar';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { Icon } from '@/constants/icons';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { distanceKm, fetchEventLocations, fetchTourismSpots, type MapLocation } from '@/lib/api/map';
-import { useToastStore } from '@/stores/toastStore';
+import { BackButton } from '../../components/nav/BackButton';
+import { TopBar } from '../../components/nav/TopBar';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { Icon } from '../../constants/icons';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { distanceKm, fetchEventLocations, fetchTourismSpots, type MapLocation } from '../../lib/api/map';
+import { useToastStore } from '../../stores/toastStore';
 
 type Mode = 'event' | 'spot' | 'all';
 

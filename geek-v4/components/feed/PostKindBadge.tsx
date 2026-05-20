@@ -1,7 +1,7 @@
 import { View, Text } from 'react-native';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import type { PostKind } from '@/types/models';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import type { PostKind } from '../../types/models';
 
 const META: Record<PostKind, { label: string; emoji: string; bg: string; fg: string }> = {
   fact:    { label: '事実',     emoji: '📰', bg: '#0d1f3a', fg: '#3B82F6' },

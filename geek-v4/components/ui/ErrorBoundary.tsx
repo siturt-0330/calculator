@@ -1,8 +1,8 @@
 import React from 'react';
 import { View, Text, Platform } from 'react-native';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { C, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { PressableScale } from './PressableScale';
+import { C, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 type State = { hasError: boolean; error: Error | null };
 

@@ -1,7 +1,7 @@
 import { Platform, Share as RNShare } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { useToastStore } from '@/stores/toastStore';
-import { impact, Haptics } from '@/lib/haptics';
+import { useToastStore } from '../stores/toastStore';
+import { impact, Haptics } from '../lib/haptics';
 
 // カスタムスキーム (geek://post/xxx) → 実 Web URL に変換
 function toShareableUrl(input: string): string {

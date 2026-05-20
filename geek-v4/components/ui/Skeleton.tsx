@@ -8,7 +8,7 @@ import Animated, {
   Easing,
   interpolate,
 } from 'react-native-reanimated';
-import { C, R, SP } from '@/design/tokens';
+import { C, R, SP } from '../../design/tokens';
 
 // Smooth left-to-right shimmer skeleton.
 // - Uses a sliding highlight band over a dim base

@@ -4,13 +4,13 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useQuery } from '@tanstack/react-query';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { BackButton } from '@/components/nav/BackButton';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { Icon } from '@/constants/icons';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Button } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Input';
+import { BackButton } from '../../components/nav/BackButton';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { Icon } from '../../constants/icons';
 import {
   createCommunity,
   searchByName,
@@ -18,11 +18,11 @@ import {
   updateCommunity,
   type Visibility,
   type Community,
-} from '@/lib/api/communities';
-import { useToastStore } from '@/stores/toastStore';
-import { supabase } from '@/lib/supabase';
-import { useDebounce } from '@/hooks/useDebounce';
-import { deepNormalize } from '@/lib/search/tokenize';
+} from '../../lib/api/communities';
+import { useToastStore } from '../../stores/toastStore';
+import { supabase } from '../../lib/supabase';
+import { useDebounce } from '../../hooks/useDebounce';
+import { deepNormalize } from '../../lib/search/tokenize';
 
 type VisibilityOption = {
   value: Visibility | 'request' | 'invite';
@@ -31,8 +31,8 @@ type VisibilityOption = {
   icon: React.ReactNode;
 };
 
-import { prepareImageUpload } from '@/lib/image';
-import { openCropper } from '@/lib/imageCropper';
+import { prepareImageUpload } from '../../lib/image';
+import { openCropper } from '../../lib/imageCropper';
 
 export default function CreateCommunityScreen() {
   const insets = useSafeAreaInsets();

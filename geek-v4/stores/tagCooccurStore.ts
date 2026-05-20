@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '../lib/supabase';
 
 // タグの共起マトリクス: tag → { otherTag → 共出現回数 }
 // 一定数の最近の投稿から計算してキャッシュする (1時間有効)

@@ -1,5 +1,5 @@
-import { supabase } from '@/lib/supabase';
-import type { Post } from '@/types/models';
+import { supabase } from '../supabase';
+import type { Post } from '../../types/models';
 
 // 与えられた post のタグ群から、共通タグを多く持つ他の投稿を取得
 export async function fetchSimilarPosts(

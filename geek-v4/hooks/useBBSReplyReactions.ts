@@ -1,11 +1,11 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { attachChannel } from '@/lib/realtime';
+import { attachChannel } from '../lib/realtime';
 import {
   fetchReactionsForReplies,
   toggleBBSReplyReaction,
   type ReactionsByReply,
-} from '@/lib/api/bbsReplyReactions';
+} from '../lib/api/bbsReplyReactions';
 
 const KEY_PREFIX = 'bbs-reply-reactions';
 

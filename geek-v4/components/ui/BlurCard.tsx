@@ -1,6 +1,6 @@
 import { View, ViewStyle, StyleProp, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
-import { C, R } from '@/design/tokens';
+import { C, R } from '../../design/tokens';
 
 export function BlurCard({
   children,

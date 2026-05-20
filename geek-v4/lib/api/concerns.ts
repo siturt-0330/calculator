@@ -1,5 +1,5 @@
-import { supabase } from '@/lib/supabase';
-import type { ConcernReason } from '@/types/models';
+import { supabase } from '../supabase';
+import type { ConcernReason } from '../../types/models';
 
 export async function getMyConcerns(postIds: string[]): Promise<Record<string, boolean>> {
   if (postIds.length === 0) return {};

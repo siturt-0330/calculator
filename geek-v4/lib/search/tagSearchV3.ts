@@ -26,7 +26,7 @@
 //
 // ============================================================
 
-import type { TagNode } from '@/stores/tagGraphStore';
+import type { TagNode } from '../../stores/tagGraphStore';
 import { NgramIndex, type Candidate } from './ngramIndex';
 import { trySplit2Way } from './compoundSplit';
 import { type EmbeddingVector, cosineSim } from './embeddings';

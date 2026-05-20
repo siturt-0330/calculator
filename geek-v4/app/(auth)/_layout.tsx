@@ -1,5 +1,5 @@
 import { Stack } from 'expo-router';
-import { C } from '@/design/tokens';
+import { C } from '../../design/tokens';
 
 export default function AuthLayout() {
   return (

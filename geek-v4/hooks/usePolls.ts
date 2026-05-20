@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { attachChannel } from '@/lib/realtime';
-import { fetchPolls, vote as voteApi, type Poll } from '@/lib/api/polls';
+import { attachChannel } from '../lib/realtime';
+import { fetchPolls, vote as voteApi, type Poll } from '../lib/api/polls';
 
 const KEY_PREFIX = 'polls';
 

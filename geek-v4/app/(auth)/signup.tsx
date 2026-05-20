@@ -2,16 +2,16 @@ import { View, Text, KeyboardAvoidingView, Platform, ScrollView, Keyboard, TextI
 import { useState, useRef } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { BackButton } from '@/components/nav/BackButton';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { useAuthStore } from '@/stores/authStore';
-import { useToastStore } from '@/stores/toastStore';
-import { useNetworkStatus } from '@/hooks/useNetworkStatus';
-import { Icon } from '@/constants/icons';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Button } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Input';
+import { BackButton } from '../../components/nav/BackButton';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { useAuthStore } from '../../stores/authStore';
+import { useToastStore } from '../../stores/toastStore';
+import { useNetworkStatus } from '../../hooks/useNetworkStatus';
+import { Icon } from '../../constants/icons';
 
 // 初回ユーザーの障壁を最小化するため、
 //   - ステップ 1: メール + パスワード (必須)

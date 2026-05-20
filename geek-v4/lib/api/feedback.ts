@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '../supabase';
 
 export type FeedbackKind = 'bug' | 'ui' | 'typo' | 'suggestion' | 'content' | 'other';
 

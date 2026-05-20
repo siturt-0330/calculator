@@ -1,10 +1,10 @@
 import { Text } from 'react-native';
 import Animated, { FadeInUp, FadeOutUp } from 'react-native-reanimated';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { SHADOW } from '@/design/shadows';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { SHADOW } from '../../design/shadows';
 import { PressableScale } from './PressableScale';
-import type { Toast as ToastType } from '@/stores/toastStore';
+import type { Toast as ToastType } from '../../stores/toastStore';
 
 const BG: Record<string, string> = {
   info: C.bg3,

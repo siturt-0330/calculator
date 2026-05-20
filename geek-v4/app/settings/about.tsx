@@ -2,13 +2,13 @@ import { View, Text, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
-import { TopBar } from '@/components/nav/TopBar';
-import { BackButton } from '@/components/nav/BackButton';
-import { ListItem } from '@/components/ui/ListItem';
-import { Divider } from '@/components/ui/Divider';
-import { C, R, SP } from '@/design/tokens';
-import { T, FONT } from '@/design/typography';
-import { Icon } from '@/constants/icons';
+import { TopBar } from '../../components/nav/TopBar';
+import { BackButton } from '../../components/nav/BackButton';
+import { ListItem } from '../../components/ui/ListItem';
+import { Divider } from '../../components/ui/Divider';
+import { C, R, SP } from '../../design/tokens';
+import { T, FONT } from '../../design/typography';
+import { Icon } from '../../constants/icons';
 
 export default function AboutScreen() {
   const insets = useSafeAreaInsets();

@@ -2,17 +2,17 @@ import { useEffect } from 'react';
 import { View, Text, FlatList, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNotifications } from '@/hooks/useNotifications';
-import { TopBar } from '@/components/nav/TopBar';
-import { BackButton } from '@/components/nav/BackButton';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { Divider } from '@/components/ui/Divider';
-import { Icon } from '@/constants/icons';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { formatRelative } from '@/lib/utils/date';
-import { TABBAR } from '@/design/tabbar';
-import { NotificationSkeleton } from '@/components/ui/Skeleton';
+import { useNotifications } from '../../hooks/useNotifications';
+import { TopBar } from '../../components/nav/TopBar';
+import { BackButton } from '../../components/nav/BackButton';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { Divider } from '../../components/ui/Divider';
+import { Icon } from '../../constants/icons';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { formatRelative } from '../../lib/utils/date';
+import { TABBAR } from '../../design/tabbar';
+import { NotificationSkeleton } from '../../components/ui/Skeleton';
 
 export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();

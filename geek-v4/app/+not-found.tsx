@@ -1,7 +1,7 @@
 import { View, Text } from 'react-native';
 import { Link } from 'expo-router';
-import { C, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { C, SP } from '../design/tokens';
+import { T } from '../design/typography';
 
 export default function NotFound() {
   return (

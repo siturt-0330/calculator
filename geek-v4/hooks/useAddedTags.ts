@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { attachChannel } from '@/lib/realtime';
-import { addPostTag, fetchAddedTagsForPosts, removePostTag } from '@/lib/api/tags';
+import { attachChannel } from '../lib/realtime';
+import { addPostTag, fetchAddedTagsForPosts, removePostTag } from '../lib/api/tags';
 
 const KEY_PREFIX = 'post-added-tags-batch';
 

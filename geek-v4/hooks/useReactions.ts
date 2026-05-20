@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { attachChannel } from '@/lib/realtime';
-import { fetchReactionsForPosts, toggleReaction, type ReactionsByPost } from '@/lib/api/reactions';
+import { attachChannel } from '../lib/realtime';
+import { fetchReactionsForPosts, toggleReaction, type ReactionsByPost } from '../lib/api/reactions';
 
 const KEY_PREFIX = 'reactions';
 

@@ -117,7 +117,7 @@ export const SIZE = {
 
 // Refined elevation tokens for the premium card/CTA look.
 // Defined here in `tokens.ts` (alongside C / SP / R) so call sites can
-// pull a single import: `import { C, SP, SHADOW } from '@/design/tokens'`.
+// pull a single import: `import { C, SP, SHADOW } from './tokens'`.
 // (The legacy `design/shadows.ts` re-exports a Platform-split variant —
 //  both stay in sync; new code should prefer the tokens here.)
 export const SHADOW = {

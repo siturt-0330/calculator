@@ -3,18 +3,18 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { TopBar } from '@/components/nav/TopBar';
-import { BackButton } from '@/components/nav/BackButton';
-import { Input } from '@/components/ui/Input';
-import { Button } from '@/components/ui/Button';
-import { Avatar } from '@/components/ui/Avatar';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { useAuthStore } from '@/stores/authStore';
-import { useToastStore } from '@/stores/toastStore';
-import { supabase } from '@/lib/supabase';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Icon } from '@/constants/icons';
+import { TopBar } from '../../components/nav/TopBar';
+import { BackButton } from '../../components/nav/BackButton';
+import { Input } from '../../components/ui/Input';
+import { Button } from '../../components/ui/Button';
+import { Avatar } from '../../components/ui/Avatar';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { useAuthStore } from '../../stores/authStore';
+import { useToastStore } from '../../stores/toastStore';
+import { supabase } from '../../lib/supabase';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Icon } from '../../constants/icons';
 
 const AVATAR_EMOJIS = [
   '😀', '😎', '🥰', '🤩', '🥳', '😇', '🤓', '🥸',

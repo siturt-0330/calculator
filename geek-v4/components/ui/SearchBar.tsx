@@ -7,10 +7,10 @@ import Animated, {
   interpolateColor,
 } from 'react-native-reanimated';
 import { PressableScale } from './PressableScale';
-import { Icon } from '@/constants/icons';
-import { C, R, SP, SIZE } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { TIMING_FAST } from '@/design/motion';
+import { Icon } from '../../constants/icons';
+import { C, R, SP, SIZE } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { TIMING_FAST } from '../../design/motion';
 
 export function SearchBar({
   value,

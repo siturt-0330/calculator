@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { View, TextInput, Text, type TextInputProps, type ViewStyle } from 'react-native';
-import { C, SP, R } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { C, SP, R } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 type Props = TextInputProps & {
   label?: string;

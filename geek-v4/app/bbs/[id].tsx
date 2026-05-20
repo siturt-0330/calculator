@@ -5,24 +5,24 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
-import { useBBSThread } from '@/hooks/useBBSThread';
-import { useBBSReplyReactions, useBBSReplyReactionToggle } from '@/hooks/useBBSReplyReactions';
-import { MemeReactionPicker } from '@/components/feed/MemeReactionPicker';
-import { MentionAutocomplete, type MentionTarget } from '@/components/bbs/MentionAutocomplete';
-import { C, SP, R } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { Avatar } from '@/components/ui/Avatar';
-import { Spinner } from '@/components/ui/Spinner';
-import { TrustBadge } from '@/components/ui/TrustBadge';
-import { formatRelative } from '@/lib/utils/date';
-import { randomAvatarColor } from '@/lib/utils/color';
-import type { BBSReply } from '@/types/models';
-import { ObsidianSaveButton } from '@/components/ui/ObsidianSaveButton';
-import { bbsReplyToObsidianNote, bbsThreadToObsidianNote } from '@/hooks/useObsidian';
-import type { ReactionAgg } from '@/lib/api/bbsReplyReactions';
-import { Icon } from '@/constants/icons';
-import { notify, Haptics } from '@/lib/haptics';
+import { useBBSThread } from '../../hooks/useBBSThread';
+import { useBBSReplyReactions, useBBSReplyReactionToggle } from '../../hooks/useBBSReplyReactions';
+import { MemeReactionPicker } from '../../components/feed/MemeReactionPicker';
+import { MentionAutocomplete, type MentionTarget } from '../../components/bbs/MentionAutocomplete';
+import { C, SP, R } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { Avatar } from '../../components/ui/Avatar';
+import { Spinner } from '../../components/ui/Spinner';
+import { TrustBadge } from '../../components/ui/TrustBadge';
+import { formatRelative } from '../../lib/utils/date';
+import { randomAvatarColor } from '../../lib/utils/color';
+import type { BBSReply } from '../../types/models';
+import { ObsidianSaveButton } from '../../components/ui/ObsidianSaveButton';
+import { bbsReplyToObsidianNote, bbsThreadToObsidianNote } from '../../hooks/useObsidian';
+import type { ReactionAgg } from '../../lib/api/bbsReplyReactions';
+import { Icon } from '../../constants/icons';
+import { notify, Haptics } from '../../lib/haptics';
 
 const CATEGORY_COLORS: Record<string, string> = {
   '雑談': '#22D3A4', 'アニメ': '#FF6B7A', 'ゲーム': '#7CB1FF',

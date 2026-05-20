@@ -1,4 +1,4 @@
-import type { TagNode } from '@/stores/tagGraphStore';
+import type { TagNode } from '../../stores/tagGraphStore';
 
 export type TagSuggestion = {
   tag: string;

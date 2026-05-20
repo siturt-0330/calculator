@@ -1,15 +1,15 @@
 import { View, Text, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { useEffect, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TopBar } from '@/components/nav/TopBar';
-import { BackButton } from '@/components/nav/BackButton';
-import { Input } from '@/components/ui/Input';
-import { Button } from '@/components/ui/Button';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { useToastStore } from '@/stores/toastStore';
-import { Icon } from '@/constants/icons';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { TopBar } from '../../components/nav/TopBar';
+import { BackButton } from '../../components/nav/BackButton';
+import { Input } from '../../components/ui/Input';
+import { Button } from '../../components/ui/Button';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { useToastStore } from '../../stores/toastStore';
+import { Icon } from '../../constants/icons';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 import {
   getObsidianVault,
   setObsidianVault,
@@ -17,7 +17,7 @@ import {
   setObsidianEnabled,
   openObsidianVault,
   saveToObsidian,
-} from '@/lib/obsidian';
+} from '../../lib/obsidian';
 
 export default function ObsidianSettingsScreen() {
   const insets = useSafeAreaInsets();

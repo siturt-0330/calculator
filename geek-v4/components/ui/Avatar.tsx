@@ -1,8 +1,8 @@
 import { View, Text } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { ZoomIn } from 'react-native-reanimated';
-import { C, R } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { C, R } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 // Threshold above which we add an entrance pop animation.
 // Smaller avatars (list rows, post cards) skip the animation to keep

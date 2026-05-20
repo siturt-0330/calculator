@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { SortMode } from '@/lib/api/posts';
+import type { SortMode } from '../lib/api/posts';
 
 export type FeedScope = 'open' | 'closed'; // open=全部+ブロックで除外, closed=好きタグのみ
 

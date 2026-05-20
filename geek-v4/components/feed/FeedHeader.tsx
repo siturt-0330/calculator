@@ -1,8 +1,8 @@
 import { ScrollView, View, Text } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { PressableScale } from '@/components/ui/PressableScale';
-import { C, R, SP, GRAD } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { PressableScale } from '../ui/PressableScale';
+import { C, R, SP, GRAD } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 export function FeedHeader({
   tags,

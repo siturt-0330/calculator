@@ -1,13 +1,13 @@
 import { View, Text, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TopBar } from '@/components/nav/TopBar';
-import { BackButton } from '@/components/nav/BackButton';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { useTagFilter } from '@/hooks/useTagFilter';
-import { TagPill } from '@/components/tag/TagPill';
-import { C, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Icon } from '@/constants/icons';
+import { TopBar } from '../../components/nav/TopBar';
+import { BackButton } from '../../components/nav/BackButton';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { useTagFilter } from '../../hooks/useTagFilter';
+import { TagPill } from '../../components/tag/TagPill';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Icon } from '../../constants/icons';
 
 export default function BlockedListScreen() {
   const insets = useSafeAreaInsets();

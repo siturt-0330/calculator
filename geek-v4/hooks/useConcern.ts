@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { addConcern, getMyConcerns, removeConcern } from '@/lib/api/concerns';
-import { useToastStore } from '@/stores/toastStore';
-import { useSettingsStore } from '@/stores/settingsStore';
+import { addConcern, getMyConcerns, removeConcern } from '../lib/api/concerns';
+import { useToastStore } from '../stores/toastStore';
+import { useSettingsStore } from '../stores/settingsStore';
 
 export function useConcerns(postIds: string[]) {
   return useQuery({

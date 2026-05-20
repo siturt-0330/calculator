@@ -1,6 +1,6 @@
 import { View, Text } from 'react-native';
-import { C, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
+import { C, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 
 export function SectionHeader({ title, right }: { title: string; right?: React.ReactNode }) {
   return (

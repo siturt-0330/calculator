@@ -2,13 +2,13 @@ import { View, Text, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { C } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { TABBAR } from '@/design/tabbar';
+import { C } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { TABBAR } from '../../design/tabbar';
 import { TabIcon, type TabKey } from './TabIcon';
 import { HapticTab } from './HapticTab';
-import { useNotifications } from '@/hooks/useNotifications';
-import { NotificationBadge } from '@/components/ui/NotificationBadge';
+import { useNotifications } from '../../hooks/useNotifications';
+import { NotificationBadge } from '../ui/NotificationBadge';
 
 const ROUTE_TO_TAB: Record<string, TabKey> = {
   feed: 'home',

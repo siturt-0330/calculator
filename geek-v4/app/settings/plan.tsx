@@ -3,16 +3,16 @@ import { View, Text, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { TopBar } from '@/components/nav/TopBar';
-import { BackButton } from '@/components/nav/BackButton';
-import { Button } from '@/components/ui/Button';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { useAuthStore } from '@/stores/authStore';
-import { useToastStore } from '@/stores/toastStore';
-import { supabase } from '@/lib/supabase';
-import { C, GRAD, R, SP } from '@/design/tokens';
-import { T } from '@/design/typography';
-import { Icon } from '@/constants/icons';
+import { TopBar } from '../../components/nav/TopBar';
+import { BackButton } from '../../components/nav/BackButton';
+import { Button } from '../../components/ui/Button';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { useAuthStore } from '../../stores/authStore';
+import { useToastStore } from '../../stores/toastStore';
+import { supabase } from '../../lib/supabase';
+import { C, GRAD, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
+import { Icon } from '../../constants/icons';
 
 const FREE = [
   '基本投稿・閲覧',

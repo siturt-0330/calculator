@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { useToastStore } from '@/stores/toastStore';
+import { supabase } from '../lib/supabase';
+import { useToastStore } from '../stores/toastStore';
 
 async function getMySaves(postIds: string[]): Promise<Record<string, boolean>> {
   if (postIds.length === 0) return {};

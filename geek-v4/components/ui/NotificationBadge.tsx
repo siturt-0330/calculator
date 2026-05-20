@@ -1,5 +1,5 @@
 import { View, Text } from 'react-native';
-import { C } from '@/design/tokens';
+import { C } from '../../design/tokens';
 
 export function NotificationBadge({ count, top = -2, right = -2 }: { count: number; top?: number; right?: number }) {
   if (count <= 0) return null;
