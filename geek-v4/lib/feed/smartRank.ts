@@ -19,6 +19,20 @@ export type RankingContext = {
   ctrBoosts?: Record<string, number>;   // tag → CTR 加点
 };
 
+// ランキングモード。primary 軸の重みを変えつつ、blocked / liked / affinity は常に適用する。
+export type RankingMode = 'hot' | 'new' | 'top';
+
+type Weights = { affinity: number; decay: number; eng: number; trust: number };
+
+const WEIGHTS: Record<RankingMode, Weights> = {
+  // 既存のバランス重み (hot)
+  hot: { affinity: 1.0, decay: 1.5, eng: 0.7, trust: 0.4 },
+  // new: recency を 3x、engagement を 0.5x
+  new: { affinity: 1.0, decay: 4.5, eng: 0.35, trust: 0.4 },
+  // top: engagement を 3x、recency を 0.5x
+  top: { affinity: 1.0, decay: 0.75, eng: 2.1, trust: 0.4 },
+};
+
 const HALF_LIFE_HOURS = 24;  // 24時間で半減
 
 function recencyDecay(createdAt: string): number {
@@ -37,7 +51,7 @@ function engagementScore(p: Post): number {
   return Math.max(0, positive - negative);
 }
 
-export function smartScore(p: Post, ctx: RankingContext): number {
+export function smartScore(p: Post, ctx: RankingContext, mode: RankingMode = 'hot'): number {
   const tags = p.tag_names ?? [];
   if (tags.some((t) => ctx.blockedTags.has(t))) return -Infinity;
 
@@ -63,19 +77,20 @@ export function smartScore(p: Post, ctx: RankingContext): number {
   // エンゲージメント
   const eng = engagementScore(p);
 
-  // 重み付き合算
+  // モード別の重み付き合算 (個人化シグナルは常に適用)
+  const w = WEIGHTS[mode];
   const score = (
-    1.0 * affinity +
-    1.5 * decay +
-    0.7 * eng +
-    0.4 * trust
+    w.affinity * affinity +
+    w.decay * decay +
+    w.eng * eng +
+    w.trust * trust
   );
   return score;
 }
 
-export function smartSort(posts: Post[], ctx: RankingContext): Post[] {
+export function smartSort(posts: Post[], ctx: RankingContext, mode: RankingMode = 'hot'): Post[] {
   return posts
-    .map((p) => ({ p, s: smartScore(p, ctx) }))
+    .map((p) => ({ p, s: smartScore(p, ctx, mode) }))
     .filter((r) => r.s > -Infinity)
     .sort((a, b) => b.s - a.s)
     .map((r) => r.p);

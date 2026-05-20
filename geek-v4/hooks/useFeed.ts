@@ -47,7 +47,7 @@ export function useFeed() {
 
   const rawPosts: Post[] = data?.pages.flatMap((p) => p.posts) ?? [];
 
-  // Smart Rank: sort==='hot' のときだけ個人化スコアで並べ替え
+  // Smart Rank: 全 sort モードで個人化スコアを適用 (mode により primary 軸の重みを切替)
   const aggregate = useSearchSignalsStore((s) => s.aggregate);
   const signals = useMemo(() => aggregate(), [aggregate]);
   // CTR タグ集計: 全ての過去クエリのタグクリック数を合計
@@ -68,9 +68,9 @@ export function useFeed() {
   const trendingTags = useMemo(() => new Set(trendingQ.data ?? []), [trendingQ.data]);
 
   const posts: Post[] = useMemo(() => {
-    if (sort !== 'hot') return rawPosts;
     const likedSet = new Set(likedTags);
     const blockedSet = new Set(blockedTags);
+    // 全モードで個人化を適用。mode 引数で primary 軸 (hot=バランス / new=鮮度 / top=反応量) を切り替える。
     return smartSort(rawPosts, {
       likedTags: likedSet,
       blockedTags: blockedSet,
@@ -79,7 +79,7 @@ export function useFeed() {
       recentQueries: [],
       trendingTags,
       ctrBoosts,
-    });
+    }, sort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rawPosts, sort, likedTags, blockedTags, signals.tagFreq, signals.recentTags, trendingTags, ctrBoosts]);
 

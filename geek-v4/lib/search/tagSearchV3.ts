@@ -33,7 +33,7 @@ import { type EmbeddingVector, cosineSim } from './embeddings';
 import { generateVariants } from './variants';
 import { normalize } from './tokenize';
 import { tagSimilarity } from './tagVector';
-import { similarity as damerauSimilarity } from './typoCorrect';
+import { similarity as damerauSimilarity, findClosestK } from './typoCorrect';
 import { highlightTag, type Segment } from './highlight';
 
 export type SearchV3Context = {
@@ -388,6 +388,39 @@ export function searchTagsV3(
   }
 
   scored.sort((a, b) => b.score - a.score);
+
+  // ============================================================
+  // Typo correction fallback ("もしかして…")
+  //   - Triggered when the main pipeline produced no strong hit.
+  //   - Damerau-Levenshtein 類似度で候補プールから上位 3 件を引き出し、
+  //     既存結果を上書きしない程度の弱いスコアで注入する。
+  //   - Token 単位ではなくクエリ全体で 1 度だけ走らせる (安価)。
+  // ============================================================
+  const topScore = scored[0]?.score ?? 0;
+  // 主トークンが英数字でないシンプルな単一トークン時のみ走らせる
+  if (topScore < 50 && wsTokens.length === 1) {
+    const allTagsPool = Array.from(candidatePool);
+    const typoHits = findClosestK(trimmed, allTagsPool, 3, 0.6);
+    const alreadyIn = new Set(scored.map((s) => normalize(s.tag)));
+    for (const cand of typoHits) {
+      const cn = normalize(cand);
+      if (blockedSet.has(cn) || alreadyIn.has(cn)) continue;
+      const sim = damerauSimilarity(trimmed, cand);
+      // 0.6 → 0.4, 1.0 → 0.7 の範囲にマップ
+      const typoScore = 0.4 + (sim - 0.6) * 0.75;
+      const segments = highlightTag(cand, allTokens.flatMap((t) => generateVariants(t)));
+      scored.push({
+        tag: cand,
+        score: typoScore,
+        primaryReason: `typo:${cand}`,
+        reasons: [`typo:${cand}`],
+        segments,
+        signals: { typo: typoScore },
+      });
+      alreadyIn.add(cn);
+    }
+    scored.sort((a, b) => b.score - a.score);
+  }
 
   // ダイバーシフィケーション
   if (!diversify) return scored.slice(0, limit);
