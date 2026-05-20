@@ -9,10 +9,38 @@ export type Token = { text: string; type: 'word' | 'ngram' };
 
 const FULLWIDTH_REGEX = /[！-～]/g;
 const KATAKANA_REGEX = /[ァ-ヶ]/g;
+// 半角カタカナ (U+FF61-U+FF9F)
+const HALFWIDTH_KATA_REGEX = /[｡-ﾟ]/g;
+// 半角カナ → 全角カナ map (濁点 / 半濁点も合成)
+const HW_KATA_MAP: Record<string, string> = {
+  '｡': '。', '｢': '「', '｣': '」', '､': '、', '･': '・',
+  'ｦ': 'ヲ', 'ｧ': 'ァ', 'ｨ': 'ィ', 'ｩ': 'ゥ', 'ｪ': 'ェ', 'ｫ': 'ォ',
+  'ｬ': 'ャ', 'ｭ': 'ュ', 'ｮ': 'ョ', 'ｯ': 'ッ',
+  'ｰ': 'ー',
+  'ｱ': 'ア', 'ｲ': 'イ', 'ｳ': 'ウ', 'ｴ': 'エ', 'ｵ': 'オ',
+  'ｶ': 'カ', 'ｷ': 'キ', 'ｸ': 'ク', 'ｹ': 'ケ', 'ｺ': 'コ',
+  'ｻ': 'サ', 'ｼ': 'シ', 'ｽ': 'ス', 'ｾ': 'セ', 'ｿ': 'ソ',
+  'ﾀ': 'タ', 'ﾁ': 'チ', 'ﾂ': 'ツ', 'ﾃ': 'テ', 'ﾄ': 'ト',
+  'ﾅ': 'ナ', 'ﾆ': 'ニ', 'ﾇ': 'ヌ', 'ﾈ': 'ネ', 'ﾉ': 'ノ',
+  'ﾊ': 'ハ', 'ﾋ': 'ヒ', 'ﾌ': 'フ', 'ﾍ': 'ヘ', 'ﾎ': 'ホ',
+  'ﾏ': 'マ', 'ﾐ': 'ミ', 'ﾑ': 'ム', 'ﾒ': 'メ', 'ﾓ': 'モ',
+  'ﾔ': 'ヤ', 'ﾕ': 'ユ', 'ﾖ': 'ヨ',
+  'ﾗ': 'ラ', 'ﾘ': 'リ', 'ﾙ': 'ル', 'ﾚ': 'レ', 'ﾛ': 'ロ',
+  'ﾜ': 'ワ', 'ﾝ': 'ン',
+};
 
 // 全角英数字 → 半角
 export function fullToHalf(s: string): string {
-  return s.replace(FULLWIDTH_REGEX, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0));
+  // 先に半角カナを全角カナへ正規化 (ﾎﾛﾗｲﾌﾞ → ホロライブ)
+  let out = s.replace(HALFWIDTH_KATA_REGEX, (ch) => HW_KATA_MAP[ch] ?? ch);
+  // 続いて濁点・半濁点を直前文字に合成 (例: ｶﾞ → ガ)
+  out = out
+    .replace(/([カキクケコサシスセソタチツテトハヒフヘホ])ﾞ/g, (_, c) =>
+      String.fromCharCode(c.charCodeAt(0) + 1),
+    )
+    .replace(/([ハヒフヘホ])ﾟ/g, (_, c) => String.fromCharCode(c.charCodeAt(0) + 2));
+  // 既存の全角英数 → 半角変換
+  return out.replace(FULLWIDTH_REGEX, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0));
 }
 
 // 半角英数字 → 全角
@@ -30,9 +58,32 @@ export function hiraganaToKatakana(s: string): string {
   return s.replace(/[ぁ-ゖ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) + 0x60));
 }
 
+// 長音符 / 小書きかな の正規化 (recall を上げるため検索時のみ適用)
+// らーめん / らあめん / らぁめん → 同一トークンとして扱う
+const LONG_VOWEL_NORMALIZE: Record<string, string> = {
+  'ー': '',  // 長音符は削除
+  'ぁ': 'あ', 'ぃ': 'い', 'ぅ': 'う', 'ぇ': 'え', 'ぉ': 'お',
+  'ゃ': 'や', 'ゅ': 'ゆ', 'ょ': 'よ',
+  'ァ': 'ア', 'ィ': 'イ', 'ゥ': 'ウ', 'ェ': 'エ', 'ォ': 'オ',
+  'ャ': 'ヤ', 'ュ': 'ユ', 'ョ': 'ヨ',
+  'っ': 'つ', 'ッ': 'ツ',  // 促音は通常文字へ
+};
+const LONG_VOWEL_REGEX = /[ーぁぃぅぇぉゃゅょァィゥェォャュョっッ]/g;
+export function normalizeLongVowels(s: string): string {
+  return s.replace(LONG_VOWEL_REGEX, (ch) => LONG_VOWEL_NORMALIZE[ch] ?? ch);
+}
+
 // 正規化: 検索しやすい形に
 export function normalize(s: string): string {
   return fullToHalf(s).toLowerCase().trim();
+}
+
+// 深い正規化: 検索 recall を最大化する用途
+// 1) 通常 normalize に長音符 / 小書きかなを base 母音へ
+// 2) カタカナ → ひらがな統一
+// これで「らーめん」「らあめん」「ラーメン」「ラァメン」が同一トークン化
+export function deepNormalize(s: string): string {
+  return katakanaToHiragana(normalizeLongVowels(normalize(s)));
 }
 
 // 単語境界で分割 (空白・句読点・括弧・記号)

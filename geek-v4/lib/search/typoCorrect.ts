@@ -4,12 +4,21 @@
 //   例: "ポケモソ" → "ポケモン" は通常の Levenshtein なら 1 (substitute)、
 //       "ポケンモ" → "ポケモン" も通常なら 2 だが、Damerau なら 1 (transpose)
 
+// DoS / OOM 防止: 100 文字以上の入力は早期 reject
+// 100×100 で 10000 セルの 2D array = 約 80KB、これより大きいと安全側で
+// 距離は最大値を返してマッチさせない
+const MAX_LEN_FOR_DL = 100;
+
 function damerauLevenshtein(a: string, b: string): number {
   if (a === b) return 0;
   const m = a.length;
   const n = b.length;
   if (m === 0) return n;
   if (n === 0) return m;
+  // 長すぎる入力は OOM 防止のため bail-out
+  if (m > MAX_LEN_FOR_DL || n > MAX_LEN_FOR_DL) {
+    return Math.max(m, n);
+  }
 
   // 3行を使い回す (一つ前 + 二つ前)
   const d: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
