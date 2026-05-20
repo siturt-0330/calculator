@@ -28,6 +28,7 @@ import { findClosest, findClosestK } from '@/lib/search/typoCorrect';
 import { generateVariants, previewVariants } from '@/lib/search/variants';
 import { useLanguageStore } from '@/stores/languageStore';
 import { useSavedSearches, useCreateSavedSearch, useDeleteSavedSearch } from '@/hooks/useSavedSearches';
+import { logEvent } from '@/lib/personalize';
 import { searchTags as searchTagsV2 } from '@/lib/search/tagSearchV2';
 import { useTagSearchV3 } from '@/hooks/useTagSearchV3';
 import { useSearchClickStore } from '@/stores/searchClickStore';
@@ -174,7 +175,14 @@ export default function SearchScreen() {
     // 220ms → 150ms (体感応答性 up)
     // 短いクエリ (≤2 文字) は 100ms — autocomplete を爆速に
     const delay = q.trim().length <= 2 ? 100 : 150;
-    const t = setTimeout(() => setDebounced(q.trim()), delay);
+    const t = setTimeout(() => {
+      const trimmed = q.trim();
+      setDebounced(trimmed);
+      // パーソナライズ用シグナル: 2 文字以上の本気のクエリだけ記録
+      if (trimmed.length >= 2) {
+        void logEvent({ kind: 'search_submit', tags: [trimmed], query: trimmed });
+      }
+    }, delay);
     return () => clearTimeout(t);
   }, [q]);
 

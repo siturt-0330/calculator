@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import type { Post } from '@/types/models';
 
-export type SortMode = 'hot' | 'new' | 'top';
+export type SortMode = 'for-you' | 'hot' | 'new' | 'top';
 
 type FetchPostsOpts = {
   sort?: SortMode;
@@ -19,12 +19,18 @@ export async function fetchPosts({
   limit = 20,
   filterTags,
 }: FetchPostsOpts): Promise<{ posts: Post[]; nextCursor: string | null }> {
+  // 'for-you' は内部的に 'hot' と同じ広い候補プールを取りつつ、クライアント側で
+  // パーソナライズ再ランクするので、候補数を 1.5x にしてランカー側に余白を与える。
+  const isForYou = sort === 'for-you';
+  const effectiveLimit = isForYou ? Math.ceil(limit * 1.5) : limit;
+  const effectiveSort: 'hot' | 'new' | 'top' = isForYou ? 'hot' : sort;
+
   let query = supabase
     .from('posts')
     .select('id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, created_at')
     .eq('is_anonymous', true)
     .eq('is_public', true)
-    .limit(limit);
+    .limit(effectiveLimit);
 
   // PostgREST の URL 長さ制限 (≒8KB) 対策:
   // サーバー側で除外できるのは先頭 80 個まで。残りはクライアント側で smartSort
@@ -64,14 +70,14 @@ export async function fetchPosts({
     return { likes, ts };
   }
 
-  if (sort === 'new') {
+  if (effectiveSort === 'new') {
     query = query.order('created_at', { ascending: false });
     if (cursor) {
       const validTs = parseTimestampCursor(cursor);
       if (validTs) query = query.lt('created_at', validTs);
       // 不正なら cursor を無視して先頭から (DoS 防止 — error throw だと無限リロード起こす)
     }
-  } else if (sort === 'top') {
+  } else if (effectiveSort === 'top') {
     query = query.order('likes_count', { ascending: false }).order('created_at', { ascending: false });
     if (cursor) {
       const parsed = parseCompositeCursor(cursor);
@@ -97,10 +103,10 @@ export async function fetchPosts({
 
   const posts = (data ?? []) as Post[];
   let nextCursor: string | null = null;
-  if (posts.length === limit) {
+  if (posts.length === effectiveLimit) {
     const last = posts[posts.length - 1];
     if (last) {
-      if (sort === 'new') nextCursor = last.created_at;
+      if (effectiveSort === 'new') nextCursor = last.created_at;
       else nextCursor = `${last.likes_count}|${last.created_at}`;
     }
   }

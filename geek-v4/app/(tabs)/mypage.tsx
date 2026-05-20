@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useNotifications } from '@/hooks/useNotifications';
 import { supabase } from '@/lib/supabase';
 import { fetchMyCommunities } from '@/lib/api/communities';
+import { computeTrustBreakdown } from '@/lib/trust/score';
 import { Avatar } from '@/components/ui/Avatar';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -22,6 +23,9 @@ import { OBSIDIAN_AVAILABLE } from '@/lib/obsidian';
 type MypageStats = {
   post_count: number;
   like_received_count: number;
+  comment_count: number;
+  concern_received_count: number;
+  created_at: string | null;
   nickname: string | null;
   avatar_emoji: string | null;
   avatar_url: string | null;
@@ -40,7 +44,7 @@ export default function MypageScreen() {
       if (!user) return null;
       const { data } = await supabase
         .from('profiles')
-        .select('post_count, like_received_count, nickname, avatar_emoji, avatar_url')
+        .select('post_count, like_received_count, comment_count, concern_received_count, created_at, nickname, avatar_emoji, avatar_url')
         .eq('id', user.id)
         .single();
       return data as MypageStats | null;
@@ -61,6 +65,15 @@ export default function MypageScreen() {
   const accountAge = user?.created_at
     ? Math.floor((Date.now() - new Date(user.created_at).getTime()) / (1000 * 60 * 60 * 24))
     : 0;
+
+  // 信用スコア: tier + 現在値を mypage の Row に表示
+  const trust = computeTrustBreakdown({
+    post_count: stats?.post_count ?? 0,
+    like_received_count: stats?.like_received_count ?? 0,
+    comment_count: stats?.comment_count ?? 0,
+    concern_received_count: stats?.concern_received_count ?? 0,
+    created_at: stats?.created_at ?? user?.created_at ?? null,
+  });
 
   if (statsLoading && !stats) {
     return (
@@ -193,7 +206,8 @@ export default function MypageScreen() {
         <Section title="アカウント">
           <Row
             icon={Icon.shield}
-            label="信頼スコア"
+            label="信用スコア"
+            right={<TierBadge emoji={trust.tier.emoji} score={trust.score} color={trust.tier.color} />}
             onPress={() => router.push('/settings/trust-score' as never)}
           />
           <RowDivider />
@@ -458,6 +472,27 @@ function Pill({ text }: { text: string }) {
       }}
     >
       <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{text}</Text>
+    </View>
+  );
+}
+
+function TierBadge({ emoji, score, color }: { emoji: string; score: number; color: string }) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: R.full,
+        backgroundColor: C.bg3,
+        borderWidth: 1,
+        borderColor: color + '55',
+      }}
+    >
+      <Text style={{ fontSize: 12 }}>{emoji}</Text>
+      <Text style={{ color, fontSize: 11, fontWeight: '700', letterSpacing: 0.3 }}>{score}</Text>
     </View>
   );
 }

@@ -21,6 +21,7 @@ import { useFeedStore } from '@/stores/feedStore';
 import { AnonPostCard } from '@/components/feed/AnonPostCard';
 import { ScopeToggle } from '@/components/feed/ScopeToggle';
 import { BlockedTagBanner } from '@/components/feed/BlockedTagBanner';
+import { logEvent } from '@/lib/personalize';
 import { PostCardSkeleton } from '@/components/feed/PostCardSkeleton';
 import { TrendingRow } from '@/components/feed/TrendingRow';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -35,12 +36,20 @@ import type { Post } from '@/types/models';
 export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { posts, loading, refreshing, refresh, loadMore } = useFeed();
+  const { posts, reasonsMap, loading, refreshing, refresh, loadMore } = useFeed();
   const { blockedCount } = useTagFilter();
   const likedTags = useTagFilterStore((s) => s.likedTags);
   const scope = useFeedStore((s) => s.scope);
   const setScope = useFeedStore((s) => s.setScope);
+  // 並び替えは廃止 — 常に for-you (パーソナライズ) で配信。
+  // 既存ユーザーが旧 sort='hot' を localStorage に持っていても
+  // mount 時に強制的に for-you へ書き戻して画面と整合させる。
+  const sort = useFeedStore((s) => s.sort);
+  const setSort = useFeedStore((s) => s.setSort);
   const hydrateFeed = useFeedStore((s) => s.hydrate);
+  useEffect(() => {
+    if (sort !== 'for-you') setSort('for-you');
+  }, [sort, setSort]);
   const hasLikedTags = likedTags.length > 0;
 
   // 好きなタグが無いときに closed scope に居たら open へ強制
@@ -92,18 +101,34 @@ export default function FeedScreen() {
         reactions={reactionsByPost[item.id] ?? []}
         addedTags={addedTagsByPost[item.id] ?? []}
         poll={polls[item.id]}
-        onLike={() => toggleLike(item.id)}
-        onConcern={() => toggleConcern(item.id, !!myConcerns[item.id])}
-        onComment={() => router.push(`/post/${item.id}` as never)}
-        onSave={() => toggleSave(item.id)}
+        reason={reasonsMap[item.id]}
+        onLike={() => {
+          void logEvent({ kind: 'post_like', tags: item.tag_names ?? [], post_id: item.id });
+          toggleLike(item.id);
+        }}
+        onConcern={() => {
+          void logEvent({ kind: 'post_concern', tags: item.tag_names ?? [], post_id: item.id });
+          toggleConcern(item.id, !!myConcerns[item.id]);
+        }}
+        onComment={() => {
+          void logEvent({ kind: 'post_view', tags: item.tag_names ?? [], post_id: item.id, dwell_ms: 0 });
+          router.push(`/post/${item.id}` as never);
+        }}
+        onSave={() => {
+          void logEvent({ kind: 'post_save', tags: item.tag_names ?? [], post_id: item.id });
+          toggleSave(item.id);
+        }}
         onShare={() => share(`Geek の投稿 #${item.tag_names[0] ?? '雑談'}`, `/post/${item.id}`)}
-        onTagPress={(name) => router.push(`/tag/${encodeURIComponent(name)}` as never)}
+        onTagPress={(name) => {
+          void logEvent({ kind: 'tag_click', tags: [name] });
+          router.push(`/tag/${encodeURIComponent(name)}` as never);
+        }}
         onMore={() => setReportPostId(item.id)}
         onReact={(meme) => toggleReact(item.id, meme)}
         onAddTag={(tag) => handleAddTag(item.id, tag)}
       />
     ),
-    [router, toggleLike, toggleConcern, toggleSave, toggleReact, share, myLikes, myConcerns, mySaves, reactionsByPost, addedTagsByPost, polls, handleAddTag],
+    [router, toggleLike, toggleConcern, toggleSave, toggleReact, share, myLikes, myConcerns, mySaves, reactionsByPost, addedTagsByPost, polls, reasonsMap, handleAddTag],
   );
 
   const Bell = Icon.bell;
@@ -153,6 +178,9 @@ export default function FeedScreen() {
           </PressableScale>
         </View>
       </View>
+
+      {/* SortTabs は非表示 — 常にパーソナライズ (for-you) で配信。
+          ユーザーには「並び替え」という概念を見せず、あなた向けが唯一のホーム体験。 */}
 
       <View style={{ alignItems: 'center' }}>
         <View style={{ width: '100%', maxWidth: 720, paddingHorizontal: SP['4'], paddingBottom: SP['3'] }}>
