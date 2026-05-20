@@ -20,17 +20,26 @@ export function useBBS() {
   });
 
   // Realtime: スレッド新規/更新 + 返信があったら一覧を更新 (replies_count, last_reply_at)
+  // - visibility='public' のスレッドだけが一覧に出るので server-side で絞る
+  // - bbs_replies の INSERT は filter できない (どの thread の reply かは payload を
+  //   見ないと分からない) ので、3s debounce で fanout を集約する
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    const invalidate = () => {
+    const invalidate = (delay = 1500) => {
       if (debounce.current) clearTimeout(debounce.current);
       debounce.current = setTimeout(() => {
         qc.invalidateQueries({ queryKey: ['bbs-threads'] });
-      }, 1500);
+      }, delay);
     };
     const detach = attachChannel('bbs-threads-list', (ch) =>
-      ch.on('postgres_changes', { event: '*', schema: 'public', table: 'bbs_threads' }, invalidate)
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bbs_replies' }, invalidate),
+      ch.on('postgres_changes', {
+        event: '*', schema: 'public', table: 'bbs_threads',
+        filter: 'visibility=eq.public',
+      }, () => invalidate(1500))
+        // 返信は filter できないが、3s debounce で集約 (返信量が多いコミュニティでも
+        // 重い fanout を吸収)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bbs_replies' },
+          () => invalidate(3000)),
     );
     return () => {
       detach();

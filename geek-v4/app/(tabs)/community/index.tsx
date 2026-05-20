@@ -2,15 +2,15 @@ import { View, Text, ScrollView, RefreshControl, Image } from 'react-native';
 import { useEffect, useState, useCallback } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, R, SP } from '../../design/tokens';
-import { T } from '../../design/typography';
-import { TABBAR } from '../../design/tabbar';
-import { Icon } from '../../constants/icons';
-import { PressableScale } from '../../components/ui/PressableScale';
-import { EmptyState } from '../../components/ui/EmptyState';
-import { fetchMyCommunities, fetchMyCommunityFeed } from '../../lib/api/communities';
-import type { Community, CommunityPostWithCommunity } from '../../lib/api/communities';
-import { useAuthStore } from '../../stores/authStore';
+import { C, R, SP } from '../../../design/tokens';
+import { T } from '../../../design/typography';
+import { TABBAR } from '../../../design/tabbar';
+import { Icon } from '../../../constants/icons';
+import { PressableScale } from '../../../components/ui/PressableScale';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { fetchMyCommunities, fetchMyCommunityFeed } from '../../../lib/api/communities';
+import type { Community, CommunityPostWithCommunity } from '../../../lib/api/communities';
+import { useAuthStore } from '../../../stores/authStore';
 
 function timeAgo(iso: string): string {
   const t = Date.parse(iso);

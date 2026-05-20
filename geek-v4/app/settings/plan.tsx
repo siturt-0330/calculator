@@ -48,6 +48,8 @@ export default function PlanScreen() {
       return (data?.plan ?? 'free') as 'free' | 'pro';
     },
     enabled: !!user,
+    // プランは滅多に変わらない — 5 分は再 fetch しない
+    staleTime: 5 * 60_000,
   });
 
   const { mutate: changePlan, isPending } = useMutation({

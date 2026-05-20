@@ -173,14 +173,41 @@ export function useFeed() {
   }, [refetch]);
 
   // Realtime: posts UPDATE (likes/comments/concern カウント変動) と INSERT (新規投稿)
+  // フィードに見えてる post だけを server-side filter で絞る — 全 post の UPDATE を
+  // 受け取ると fanout が O(全ユーザー × 全 post 更新) になりサーバーが死ぬ。
+  //
+  // postIds の変化で頻繁に再 subscribe するのは避けたい (channel teardown コストが高い)
+  // ので、firstPageIds (上位 30 件 = 最も活発な投稿) を deps にして安定化する。
+  // 下に scroll しても再 subscribe しない — fetch 経由の値が staleTime 後に更新される。
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const visiblePostIdsRef = useRef<Set<string>>(new Set());
+  // 現在表示中の全 post id を ref に同期 (UPDATE handler の client-side filter 用)
   useEffect(() => {
-    const detach = attachChannel('feed-posts', (ch) =>
+    visiblePostIdsRef.current = new Set(postIds);
+  }, [postIds]);
+  // server filter 用: 上位 30 件のみ。
+  // - 多すぎると filter 文字列が長くなり Realtime のフィルタ長制限に抵触
+  // - 上位 30 件が最も active な投稿 (反応カウントが頻繁に変わる) なので
+  //   それだけ server から受け取れれば 99% カバーできる
+  const firstPageIds = useMemo(() => postIds.slice(0, 30), [postIds]);
+  const firstPageKey = firstPageIds.join(',');
+  useEffect(() => {
+    // 何も表示してない時は subscribe しない
+    if (firstPageIds.length === 0) return;
+    const channelName = `feed-posts:${firstPageKey.slice(0, 64)}`;
+    const detach = attachChannel(channelName, (ch) =>
       ch.on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'posts' },
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'posts',
+          filter: `id=in.(${firstPageIds.join(',')})`,
+        },
         (payload) => {
           const updated = payload.new as Partial<Post> & { id: string };
+          // 念のためクライアント側でも再チェック (filter が反映遅延した場合の保険)
+          if (!visiblePostIdsRef.current.has(updated.id)) return;
           qc.setQueriesData({ queryKey: ['feed'] }, (data: unknown) => {
             if (!data || typeof data !== 'object') return data;
             const old = data as { pages?: Array<{ posts: Post[] }> };
@@ -199,6 +226,8 @@ export function useFeed() {
         { event: 'INSERT', schema: 'public', table: 'posts' },
         () => {
           // 新規投稿は debounce で再フェッチ (連投時の連続再取得を回避)
+          // INSERT は filter 不可 (新規 id は事前に知り得ない) のため、サーバー filter を
+          // かけられないが、debounce で fetch を集約することで実害は最小化される。
           if (pendingTimer.current) clearTimeout(pendingTimer.current);
           pendingTimer.current = setTimeout(() => {
             qc.invalidateQueries({ queryKey: ['feed'] });
@@ -210,7 +239,7 @@ export function useFeed() {
       detach();
       if (pendingTimer.current) clearTimeout(pendingTimer.current);
     };
-  }, [qc]);
+  }, [firstPageKey, firstPageIds, qc]);
 
   return { posts, reasonsMap, communitiesByPost, loading: isLoading, refreshing, refresh, loadMore };
 }

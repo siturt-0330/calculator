@@ -36,10 +36,23 @@ initAnalytics();
 const qc = new QueryClient({
   defaultOptions: {
     queries: {
+      // 30 秒は同じデータを再 fetch しない (network roundtrip 大幅削減)
       staleTime: 30_000,
+      // 24h までキャッシュ保持 — persister と整合する長さ
       gcTime: 1_000 * 60 * 60 * 24,
+      // tab 戻り時の再 fetch を抑制 (頻繁な focus で連打しない)
       refetchOnWindowFocus: false,
-      retry: 2,
+      // 接続復帰時は必ず最新を取りに行く
+      refetchOnReconnect: 'always',
+      // mount 時は stale な場合だけ再 fetch (重複 round-trip 削減)
+      refetchOnMount: true,
+      // error 時の retry を 1 回まで (3 回はうるさい / サーバ負荷の元)
+      retry: 1,
+      retryDelay: (attemptIndex: number) =>
+        Math.min(1000 * 2 ** attemptIndex, 30000),
+    },
+    mutations: {
+      retry: 0,
     },
   },
 });
@@ -212,9 +225,8 @@ export default function RootLayout() {
                   <Stack.Screen name="mypage/saved" />
                   <Stack.Screen name="mypage/liked" />
                   <Stack.Screen name="mypage/posts" />
-                  <Stack.Screen name="community/[id]" />
-                  <Stack.Screen name="community/create" />
-                  <Stack.Screen name="community/discover" />
+                  {/* community/* routes live inside (tabs)/community/ so the
+                      bottom tab bar stays visible on detail / sub-routes. */}
                   {/* 隠し開発者 admin panel — /admin URL 直打ちのみで到達。
                       app 内ナビゲーションには一切リンクを生やさない。 */}
                   <Stack.Screen name="admin" />

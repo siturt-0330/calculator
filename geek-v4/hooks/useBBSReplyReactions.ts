@@ -27,10 +27,18 @@ export function useBBSReplyReactions(replyIds: string[]) {
   useEffect(() => {
     if (!sortedKey) return;
     const idSet = new Set(sortedKey.split(','));
+    // server-side filter: 現在表示中の reply_id のみ。全 BBS スレッドのリアクションを
+    // 受け取ると無駄な fanout が発生する。
+    const serverIds = replyIds.slice(0, 30);
     return attachChannel(`bbs-reply-reactions:${sortedKey.slice(0, 64)}`, (ch) =>
       ch.on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'bbs_reply_reactions' },
+        {
+          event: '*',
+          schema: 'public',
+          table: 'bbs_reply_reactions',
+          filter: `reply_id=in.(${serverIds.join(',')})`,
+        },
         (payload) => {
           const row = (payload.new ?? payload.old) as { reply_id?: string } | null;
           if (row?.reply_id && idSet.has(row.reply_id)) {
@@ -39,7 +47,7 @@ export function useBBSReplyReactions(replyIds: string[]) {
         },
       ),
     );
-  }, [sortedKey, qc]);
+  }, [sortedKey, replyIds, qc]);
 
   return { data: (q.data ?? {}) as ReactionsByReply, isLoading: q.isLoading };
 }

@@ -24,10 +24,18 @@ export function useAddedTags(postIds: string[]) {
     if (postIds.length === 0) return;
     // O(1) lookup
     const idSet = new Set(postIds);
+    // server-side filter で現在表示中の post の追加タグ変更だけを受信。
+    // 全フィードユーザーに全タグ追加イベントを fanout するのは無駄。
+    const serverIds = postIds.slice(0, 30);
     return attachChannel(`post-added-tags:${sortedKey.slice(0, 64)}`, (ch) =>
       ch.on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'post_added_tags' },
+        {
+          event: '*',
+          schema: 'public',
+          table: 'post_added_tags',
+          filter: `post_id=in.(${serverIds.join(',')})`,
+        },
         (payload) => {
           const row = (payload.new ?? payload.old) as { post_id?: string } | null;
           // 「全 prefix を invalidate」ではなく、今の sortedKey の query だけを再 fetch

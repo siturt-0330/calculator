@@ -483,6 +483,8 @@ export default function SearchScreen() {
         .limit(12);
       return (data ?? []) as TagDoc[];
     },
+    // TrendingRow と共有 — 5 分は信用する (一覧画面横断で重複 fetch 削減)
+    staleTime: 5 * 60_000,
   });
 
   const loading = tagsQ.isLoading || postsQ.isLoading || bbsQ.isLoading;
