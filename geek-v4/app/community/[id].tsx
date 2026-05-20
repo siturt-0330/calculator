@@ -23,10 +23,11 @@ import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { C, R, SP } from '@/design/tokens';
+import { C, R, SP, SHADOW } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { Spinner } from '@/components/ui/Spinner';
 import { PressableScale } from '@/components/ui/PressableScale';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { BackButton } from '@/components/nav/BackButton';
 import { Icon } from '@/constants/icons';
 import { AnonPostCard } from '@/components/feed/AnonPostCard';
@@ -64,7 +65,7 @@ type TabKey = 'feed' | 'threads' | 'spots' | 'events' | 'compose';
 type FeedSort = 'new' | 'top' | 'old';
 
 const TABS: { key: TabKey; label: string }[] = [
-  { key: 'feed', label: 'みんなの投稿集' },
+  { key: 'feed', label: 'ホーム' },
   { key: 'threads', label: '掲示板' },
   { key: 'spots', label: '聖地' },
   { key: 'events', label: 'カレンダー' },
@@ -81,11 +82,18 @@ const CATEGORY_COLORS: Record<string, string> = {
 // ============================================================
 // Helpers
 // ============================================================
-function deriveHandle(community: CommunityWithMembership): string {
-  // ASCII 英数字に絞り込めるならそれを優先 — 残らなければ id 先頭 8 文字を fallback
-  const ascii = community.name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-  if (ascii.length >= 2) return ascii.slice(0, 24);
-  return community.id.slice(0, 8);
+function deriveHandle(community: CommunityWithMembership): string | null {
+  // ASCII only → pure handle
+  if (/^[a-zA-Z0-9]+$/.test(community.name)) {
+    return community.name.toLowerCase();
+  }
+  // Japanese / mixed → take first 6 chars of name (whitespace stripped) +
+  // id4 suffix to keep it unique-ish. Return null if we can't form anything
+  // readable.
+  const stripped = community.name.replace(/[\s　]/g, '');
+  if (stripped.length === 0) return null;
+  const slug = stripped.slice(0, 6);
+  return `${slug}-${community.id.slice(0, 4)}`;
 }
 
 function CommunityAvatar({
@@ -299,39 +307,84 @@ export default function CommunityDetailScreen() {
         </View>
 
         {/* ============================================================
-            Channel header (YouTube-style)
+            Channel header — premium centered layout
+            avatar → name → @handle → tag pills → stats →
+            description → subscribe CTA
             ============================================================ */}
         <View
           style={{
             backgroundColor: C.bg2,
             paddingHorizontal: SP['4'],
-            paddingTop: SP['4'],
+            paddingTop: SP['3'],
             paddingBottom: SP['4'],
+            alignItems: 'center',
             gap: SP['3'],
           }}
         >
-          <View style={{ alignItems: 'center', gap: SP['3'] }}>
+          {/* Avatar with subtle accent ring */}
+          <View
+            style={{
+              borderRadius: 9999,
+              borderWidth: 2,
+              borderColor: C.accent + '40',
+              padding: 3,
+              ...SHADOW.card,
+            }}
+          >
+            <CommunityAvatar
+              icon_url={community.icon_url}
+              icon_emoji={community.icon_emoji}
+              icon_color={community.icon_color}
+              size={96}
+            />
+          </View>
+
+          {/* Name */}
+          <View style={{ alignItems: 'center', gap: 4 }}>
+            <Text
+              style={[
+                T.h2,
+                { color: C.text, textAlign: 'center', fontSize: 24, lineHeight: 30 },
+              ]}
+              numberOfLines={2}
+            >
+              {community.name}
+            </Text>
+            {handle && (
+              <Text style={{ color: C.text3, fontSize: 12, lineHeight: 16 }}>
+                @{handle}
+              </Text>
+            )}
+            {community.is_member && (
+              <View
+                style={{
+                  marginTop: 4,
+                  paddingHorizontal: SP['2'],
+                  paddingVertical: 3,
+                  backgroundColor: C.accentBg,
+                  borderRadius: R.full,
+                }}
+              >
+                <Text style={{ color: C.accent, fontSize: 11, fontWeight: '700' }}>
+                  ✓ 参加中
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Tag pills */}
+          {community.tags.length > 0 && (
             <View
               style={{
-                borderRadius: 9999,
-                borderWidth: 2,
-                borderColor: 'rgba(255,255,255,0.06)',
-                padding: 2,
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                justifyContent: 'center',
+                gap: 6,
               }}
             >
-              <CommunityAvatar
-                icon_url={community.icon_url}
-                icon_emoji={community.icon_emoji}
-                icon_color={community.icon_color}
-                size={community.icon_url ? 104 : 96}
-              />
-            </View>
-            <View style={{ alignItems: 'center', gap: SP['2'] }}>
-              <Text style={[T.h2, { color: C.text, textAlign: 'center', fontSize: 24 }]} numberOfLines={2}>
-                {community.name}
-              </Text>
-              {community.is_member && (
+              {community.tags.map((tg) => (
                 <View
+                  key={tg}
                   style={{
                     paddingHorizontal: SP['2'],
                     paddingVertical: 3,
@@ -339,64 +392,79 @@ export default function CommunityDetailScreen() {
                     borderRadius: R.full,
                   }}
                 >
-                  <Text style={{ color: C.accent, fontSize: 11, fontWeight: '700' }}>
-                    ✓ 参加中
+                  <Text style={{ color: C.accent, fontSize: 11, fontWeight: '600' }}>
+                    #{tg}
                   </Text>
-                </View>
-              )}
-            </View>
-            <Text style={[T.caption, { color: C.text3 }]}>@{handle}</Text>
-            <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
-              コミュニティ登録数 {community.member_count.toLocaleString('ja-JP')} 人 · 投稿 {community.post_count.toLocaleString('ja-JP')} 本
-            </Text>
-          </View>
-
-          {/* Description (collapsible) */}
-          {safeDesc.length > 0 && (
-            <Pressable onPress={() => setDescExpanded((v) => !v)}>
-              <Text
-                style={[T.body, { color: C.text2 }]}
-                numberOfLines={descExpanded ? undefined : 2}
-              >
-                {safeDesc}
-              </Text>
-              {safeDesc.length > 80 && (
-                <Text style={[T.caption, { color: C.text3, marginTop: 4, fontWeight: '600' }]}>
-                  {descExpanded ? '閉じる' : '...さらに表示'}
-                </Text>
-              )}
-            </Pressable>
-          )}
-
-          {/* Tags */}
-          {community.tags.length > 0 && (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['1'] }}>
-              {community.tags.map((tg) => (
-                <View
-                  key={tg}
-                  style={{
-                    paddingHorizontal: SP['2'],
-                    paddingVertical: 4,
-                    backgroundColor: C.accentBg,
-                    borderRadius: R.full,
-                  }}
-                >
-                  <Text style={[T.caption, { color: C.accent }]}>#{tg}</Text>
                 </View>
               ))}
             </View>
           )}
 
-          {/* Subscribe button */}
-          <SubscribeButton
-            isMember={community.is_member}
-            isRequestVisibility={community.visibility === 'request'}
-            loading={joining}
-            onPress={onJoinLeave}
-          />
+          {/* Compact stats */}
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: SP['2'],
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Icon.community size={12} color={C.text3} strokeWidth={2.2} />
+              <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>
+                {community.member_count.toLocaleString('ja-JP')}
+              </Text>
+              <Text style={{ color: C.text3, fontSize: 12 }}>メンバー</Text>
+            </View>
+            <Text style={{ color: C.text4, fontSize: 12 }}>·</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Icon.bbs size={12} color={C.text3} strokeWidth={2.2} />
+              <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>
+                {community.post_count.toLocaleString('ja-JP')}
+              </Text>
+              <Text style={{ color: C.text3, fontSize: 12 }}>投稿</Text>
+            </View>
+          </View>
+
+          {/* Description (collapsible) */}
+          {safeDesc.length > 0 && (
+            <Pressable
+              onPress={() => setDescExpanded((v) => !v)}
+              style={{ alignSelf: 'stretch' }}
+            >
+              <Text
+                style={[T.body, { color: C.text2, textAlign: 'center' }]}
+                numberOfLines={descExpanded ? undefined : 3}
+              >
+                {safeDesc}
+              </Text>
+              {safeDesc.length > 80 && (
+                <Text
+                  style={{
+                    color: C.text3,
+                    fontSize: 12,
+                    fontWeight: '600',
+                    marginTop: 4,
+                    textAlign: 'center',
+                  }}
+                >
+                  {descExpanded ? '閉じる' : '...もっと見る'}
+                </Text>
+              )}
+            </Pressable>
+          )}
+
+          {/* Subscribe CTA (full width) */}
+          <View style={{ alignSelf: 'stretch', marginTop: SP['1'] }}>
+            <SubscribeButton
+              isMember={community.is_member}
+              isRequestVisibility={community.visibility === 'request'}
+              loading={joining}
+              onPress={onJoinLeave}
+            />
+          </View>
         </View>
 
-        {/* Subtle separator before tabs */}
+        {/* Hairline separator before tabs */}
         <View style={{ height: 1, backgroundColor: C.divider }} />
 
         {/* ============================================================
@@ -499,17 +567,17 @@ function SubscribeButton({
           alignItems: 'center',
           justifyContent: 'center',
           gap: SP['2'],
-          backgroundColor: C.bg3,
+          backgroundColor: 'transparent',
           borderRadius: R.full,
-          borderWidth: 1,
-          borderColor: C.border,
+          borderWidth: 1.5,
+          borderColor: C.border2,
           paddingVertical: SP['3'],
           opacity: loading ? 0.5 : 1,
         }}
       >
-        <Icon.bell size={16} color={C.text} strokeWidth={2.2} />
-        <Text style={[T.bodyB, { color: C.text }]}>登録済み</Text>
-        <Icon.chevronD size={14} color={C.text2} strokeWidth={2.2} />
+        <Icon.bell size={15} color={C.text2} strokeWidth={2.2} />
+        <Text style={[T.bodyB, { color: C.text2, fontWeight: '700' }]}>登録済み</Text>
+        <Icon.chevronD size={13} color={C.text3} strokeWidth={2.2} />
       </PressableScale>
     );
   }
@@ -526,9 +594,10 @@ function SubscribeButton({
         borderRadius: R.full,
         paddingVertical: SP['3'],
         opacity: loading ? 0.5 : 1,
+        ...SHADOW.accentGlow,
       }}
     >
-      <Text style={[T.bodyB, { color: '#fff' }]}>
+      <Text style={[T.bodyB, { color: '#fff', fontWeight: '700' }]}>
         {isRequestVisibility ? '参加を申請する' : '登録する'}
       </Text>
     </PressableScale>
@@ -646,33 +715,16 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
           <Spinner size="large" />
         </View>
       ) : posts.length === 0 ? (
-        <View style={{ paddingVertical: SP['10'], alignItems: 'center', gap: SP['3'] }}>
-          <View
-            style={{
-              width: 60,
-              height: 60,
-              borderRadius: 30,
-              backgroundColor: C.bg3,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Icon.community size={28} color={C.text3} strokeWidth={1.8} />
-          </View>
-          <Text style={[T.body, { color: C.text2 }]}>まだ投稿がありません</Text>
-          <PressableScale
-            onPress={() => router.push(`/post/create?community_id=${encodeURIComponent(communityId)}` as never)}
-            haptic="confirm"
-            style={{
-              paddingHorizontal: SP['4'],
-              paddingVertical: SP['2'],
-              backgroundColor: C.accent,
-              borderRadius: R.full,
-            }}
-          >
-            <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>最初の一投をしよう</Text>
-          </PressableScale>
-        </View>
+        <EmptyState
+          icon={Icon.community}
+          title="まだ投稿がありません"
+          message="最初の一投を投稿して、このコミュニティを盛り上げよう"
+          actionLabel="投稿する"
+          onAction={() =>
+            router.push(`/post/create?community_id=${encodeURIComponent(communityId)}` as never)
+          }
+          tone="accent"
+        />
       ) : (
         <View>
           {posts.map((p) => (
@@ -820,24 +872,12 @@ const ThreadsTab = memo(function ThreadsTab({ communityId }: { communityId: stri
 
   if (threads.length === 0) {
     return (
-      <View style={{ paddingVertical: SP['10'], paddingHorizontal: SP['4'], alignItems: 'center', gap: SP['3'] }}>
-        <View
-          style={{
-            width: 60,
-            height: 60,
-            borderRadius: 30,
-            backgroundColor: C.bg3,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Icon.sparkles size={28} color={C.text3} strokeWidth={1.8} />
-        </View>
-        <Text style={[T.body, { color: C.text2, textAlign: 'center' }]}>スレッドがありません</Text>
-        <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
-          「投稿」タブからスレッドを立てよう
-        </Text>
-      </View>
+      <EmptyState
+        icon={Icon.bbs}
+        title="スレッドがまだありません"
+        message="「投稿」タブから新しいスレッドを立てて、議論を始めよう"
+        tone="accent"
+      />
     );
   }
 
@@ -1028,15 +1068,12 @@ const SpotsTab = memo(function SpotsTab({ communityId, canCreate }: { communityI
           <Spinner size="large" />
         </View>
       ) : spots.length === 0 ? (
-        <View style={{ paddingVertical: SP['8'], alignItems: 'center', gap: SP['2'] }}>
-          <Icon.map size={40} color={C.text3} strokeWidth={1.6} />
-          <Text style={[T.body, { color: C.text2, textAlign: 'center' }]}>
-            聖地がまだありません
-          </Text>
-          <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
-            メンバーが投稿した聖地がここに集まります
-          </Text>
-        </View>
+        <EmptyState
+          icon={Icon.map}
+          title="まだ聖地がありません"
+          message="メンバーが投稿した場所がここに集まります"
+          tone="green"
+        />
       ) : (
         <FlatList
           data={spots}
@@ -1110,15 +1147,12 @@ const EventsTab = memo(function EventsTab({ communityId, canCreate }: { communit
           <Spinner size="large" />
         </View>
       ) : events.length === 0 ? (
-        <View style={{ paddingVertical: SP['8'], alignItems: 'center', gap: SP['2'] }}>
-          <Icon.calendar size={40} color={C.text3} strokeWidth={1.6} />
-          <Text style={[T.body, { color: C.text2, textAlign: 'center' }]}>
-            イベントがまだありません
-          </Text>
-          <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
-            配信・オフ会・誕生日など何でも！
-          </Text>
-        </View>
+        <EmptyState
+          icon={Icon.calendar}
+          title="まだイベントがありません"
+          message="配信・オフ会・誕生日など、何でも気軽に追加できます"
+          tone="amber"
+        />
       ) : (
         grouped.map(([monthLabel, monthEvents]) => (
           <View key={monthLabel} style={{ gap: SP['2'] }}>
