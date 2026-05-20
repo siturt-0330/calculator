@@ -2,32 +2,36 @@ import { useState } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useQuery } from '@tanstack/react-query';
+import type { LucideIcon } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
-import { useTagFilter } from '@/hooks/useTagFilter';
 import { useNotifications } from '@/hooks/useNotifications';
 import { supabase } from '@/lib/supabase';
+import { fetchMyCommunities } from '@/lib/api/communities';
 import { Avatar } from '@/components/ui/Avatar';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { NotificationBadge } from '@/components/ui/NotificationBadge';
-import { ActivitySummary } from '@/components/mypage/ActivitySummary';
-import { useFeatureFlag } from '@/hooks/useFeatureFlag';
 import { MypageSkeleton } from '@/components/ui/Skeleton';
 import { Icon } from '@/constants/icons';
-import { C, GRAD, R, SP } from '@/design/tokens';
+import { C, R, SP } from '@/design/tokens';
 import { T } from '@/design/typography';
 import { TABBAR } from '@/design/tabbar';
 import { OBSIDIAN_AVAILABLE } from '@/lib/obsidian';
+
+type MypageStats = {
+  post_count: number;
+  like_received_count: number;
+  nickname: string | null;
+  avatar_emoji: string | null;
+  avatar_url: string | null;
+};
 
 export default function MypageScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, signOut } = useAuthStore();
-  const { likedTags } = useTagFilter();
   const { unreadCount } = useNotifications();
-  const showActivity = useFeatureFlag('profile_summary');
   const [logoutOpen, setLogoutOpen] = useState(false);
 
   const { data: stats, isLoading: statsLoading } = useQuery({
@@ -36,26 +40,27 @@ export default function MypageScreen() {
       if (!user) return null;
       const { data } = await supabase
         .from('profiles')
-        .select('post_count, like_received_count, trust_score, nickname, avatar_emoji, avatar_url')
+        .select('post_count, like_received_count, nickname, avatar_emoji, avatar_url')
         .eq('id', user.id)
         .single();
-      return data as {
-        post_count: number;
-        like_received_count: number;
-        trust_score: number;
-        nickname: string | null;
-        avatar_emoji: string | null;
-        avatar_url: string | null;
-      } | null;
+      return data as MypageStats | null;
     },
     enabled: !!user,
+  });
+
+  const { data: communityCount = 0 } = useQuery({
+    queryKey: ['mypage-community-count', user?.id],
+    queryFn: async () => {
+      const list = await fetchMyCommunities();
+      return list.length;
+    },
+    enabled: !!user,
+    staleTime: 60 * 1000,
   });
 
   const accountAge = user?.created_at
     ? Math.floor((Date.now() - new Date(user.created_at).getTime()) / (1000 * 60 * 60 * 24))
     : 0;
-
-  const trustScore = stats?.trust_score ?? 50;
 
   if (statsLoading && !stats) {
     return (
@@ -69,212 +74,187 @@ export default function MypageScreen() {
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScrollView
         contentContainerStyle={{
-          paddingTop: insets.top,
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
         }}
+        showsVerticalScrollIndicator={false}
       >
-        {/* ヘッダー: グラデーション背景 + アクションボタン */}
-        <LinearGradient
-          colors={[C.accentBg, C.bg]}
-          style={{ paddingTop: SP['4'], paddingBottom: SP['6'], paddingHorizontal: SP['4'] }}
+        {/* ───────── 上部: アイコン2つだけのミニマルバー ───────── */}
+        <View
+          style={{
+            paddingTop: insets.top + SP['2'],
+            paddingHorizontal: SP['4'],
+            paddingBottom: SP['1'],
+            flexDirection: 'row',
+            justifyContent: 'flex-end',
+            gap: SP['1'],
+          }}
         >
-          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: SP['2'], marginBottom: SP['4'] }}>
-            <PressableScale
-              onPress={() => router.push('/notifications' as never)}
-              haptic="tap"
-              style={{
-                width: 38, height: 38, borderRadius: 19,
-                backgroundColor: C.bg2,
-                alignItems: 'center', justifyContent: 'center',
-                borderWidth: 1, borderColor: C.border,
-              }}
-            >
-              <Icon.bell size={18} color={C.text} strokeWidth={2.2} />
-              <NotificationBadge count={unreadCount} top={2} right={2} />
-            </PressableScale>
-            <PressableScale
-              onPress={() => router.push('/settings' as never)}
-              haptic="tap"
-              style={{
-                width: 38, height: 38, borderRadius: 19,
-                backgroundColor: C.bg2,
-                alignItems: 'center', justifyContent: 'center',
-                borderWidth: 1, borderColor: C.border,
-              }}
-            >
-              <Icon.settings size={18} color={C.text} strokeWidth={2.2} />
-            </PressableScale>
-          </View>
-
-          {/* プロフィール中央 */}
-          <View style={{ alignItems: 'center', gap: SP['3'] }}>
-            <LinearGradient
-              colors={[...GRAD.accent]}
-              style={{ padding: 2, borderRadius: 54 }}
-            >
-              <View style={{ borderRadius: 52, overflow: 'hidden', backgroundColor: C.bg }}>
-                <Avatar size={100} name={user?.nickname ?? user?.email} emoji={stats?.avatar_emoji ?? undefined} uri={stats?.avatar_url ?? undefined} />
-              </View>
-            </LinearGradient>
-            <View style={{ alignItems: 'center', gap: 4 }}>
-              <Text style={[T.h2, { color: C.text }]}>
-                {user?.nickname ?? 'ユーザー'}
-              </Text>
-              <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5 }]}>
-                匿名 · {accountAge}日目
-              </Text>
-            </View>
-            <PressableScale
-              onPress={() => router.push('/settings/profile-edit' as never)}
-              haptic="tap"
-              style={{
-                paddingHorizontal: SP['4'],
-                paddingVertical: 6,
-              }}
-            >
-              <Text style={[T.smallM, { color: C.accent, fontWeight: '600' }]}>編集</Text>
-            </PressableScale>
-          </View>
-        </LinearGradient>
-
-        {/* 統計 (フラット 3 列) */}
-        <View style={{
-          flexDirection: 'row',
-          marginHorizontal: SP['4'],
-          marginTop: -SP['2'],
-          paddingVertical: SP['3'],
-        }}>
-          <StatItem value={stats?.post_count ?? 0} label="投稿" />
-          <StatItem value={stats?.like_received_count ?? 0} label="いいね" />
-          <StatItem value={trustScore} label="信頼" color={trustScore >= 70 ? C.green : trustScore >= 40 ? C.amber : C.red} />
+          <IconButton
+            icon={Icon.bell}
+            badge={unreadCount}
+            onPress={() => router.push('/notifications' as never)}
+          />
+          <IconButton
+            icon={Icon.settings}
+            onPress={() => router.push('/settings' as never)}
+          />
         </View>
 
-        {/* 今週の活動サマリー */}
-        {showActivity && <ActivitySummary />}
-
-
-        {/* 好きタグ */}
-        {likedTags.length > 0 && (
-          <View style={{ paddingHorizontal: SP['4'], marginTop: SP['4'], gap: SP['2'] }}>
-            <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5 }]}>タグ</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-              {likedTags.slice(0, 10).map((t) => (
-                <PressableScale
-                  key={t}
-                  onPress={() => router.push(`/tag/${encodeURIComponent(t)}` as never)}
-                  haptic="tap"
-                  style={{
-                    paddingHorizontal: SP['3'],
-                    paddingVertical: 6,
-                    backgroundColor: C.bg2,
-                    borderRadius: R.full,
-                  }}
-                >
-                  <Text style={[T.smallM, { color: C.text }]}>#{t}</Text>
-                </PressableScale>
-              ))}
-              {likedTags.length > 10 && (
-                <PressableScale
-                  onPress={() => router.push('/filter' as never)}
-                  style={{
-                    paddingHorizontal: SP['3'],
-                    paddingVertical: 6,
-                    borderRadius: R.full,
-                  }}
-                >
-                  <Text style={[T.smallM, { color: C.text3 }]}>+{likedTags.length - 10}</Text>
-                </PressableScale>
-              )}
-            </View>
+        {/* ───────── ヒーロー: 大きなアバター + 名前 ───────── */}
+        <View style={{ alignItems: 'center', paddingTop: SP['4'], paddingHorizontal: SP['4'], gap: SP['3'] }}>
+          <Avatar
+            size={96}
+            name={user?.nickname ?? user?.email}
+            emoji={stats?.avatar_emoji ?? undefined}
+            uri={stats?.avatar_url ?? undefined}
+          />
+          <View style={{ alignItems: 'center', gap: 2 }}>
+            <Text style={[T.h1, { color: C.text, textAlign: 'center' }]} numberOfLines={1}>
+              {stats?.nickname ?? user?.nickname ?? 'ユーザー'}
+            </Text>
+            <Text style={[T.small, { color: C.text3, letterSpacing: 0.5 }]}>
+              匿名 · {accountAge}日目
+            </Text>
           </View>
-        )}
+          <PressableScale
+            onPress={() => router.push('/settings/profile-edit' as never)}
+            haptic="tap"
+            style={{
+              marginTop: SP['1'],
+              paddingHorizontal: SP['4'],
+              paddingVertical: SP['2'],
+              borderRadius: R.full,
+              borderWidth: 1,
+              borderColor: C.border2,
+            }}
+          >
+            <Text style={[T.smallM, { color: C.text2 }]}>プロフィールを編集</Text>
+          </PressableScale>
+        </View>
 
-        {/* メニューグリッド */}
-        <View style={{
-          paddingHorizontal: SP['4'],
-          marginTop: SP['5'],
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: SP['3'],
-        }}>
-          <MenuTile
-            icon={Icon.edit}
-            label="自分の投稿"
-            onPress={() => router.push('/mypage/posts' as never)}
-            color={C.accent}
+        {/* ───────── KPI: 3 つの大きな数字カード ───────── */}
+        <View
+          style={{
+            flexDirection: 'row',
+            marginTop: SP['6'],
+            marginHorizontal: SP['4'],
+            gap: SP['2'],
+          }}
+        >
+          <Kpi value={stats?.post_count ?? 0} label="投稿" />
+          <Kpi value={stats?.like_received_count ?? 0} label="もらった♥" />
+          <Kpi value={communityCount} label="コミュ" />
+        </View>
+
+        {/* ───────── プライマリアクション 2 つ ───────── */}
+        <View
+          style={{
+            flexDirection: 'row',
+            marginTop: SP['4'],
+            marginHorizontal: SP['4'],
+            gap: SP['2'],
+          }}
+        >
+          <PrimaryAction
+            icon={Icon.post}
+            label="投稿する"
+            onPress={() => router.push('/post/create' as never)}
+            solid
           />
-          <MenuTile
-            icon={Icon.heart}
-            label="いいね"
-            onPress={() => router.push('/mypage/liked' as never)}
-            color={C.pink}
-          />
-          <MenuTile
-            icon={Icon.save}
-            label="保存"
-            onPress={() => router.push('/mypage/saved' as never)}
-            color={C.amber}
-          />
-          <MenuTile
-            icon={Icon.community}
-            label="コミュニティ"
-            onPress={() => router.push('/(tabs)/community' as never)}
-            color={C.pink}
-          />
-          <MenuTile
+          <PrimaryAction
             icon={Icon.calendar}
             label="カレンダー"
             onPress={() => router.push('/corners/calendar' as never)}
-            color={C.amber}
           />
-          <MenuTile
+        </View>
+
+        {/* ───────── セクション: アクティビティ ───────── */}
+        <Section title="アクティビティ">
+          <Row
+            icon={Icon.edit}
+            label="自分の投稿"
+            onPress={() => router.push('/mypage/posts' as never)}
+          />
+          <RowDivider />
+          <Row
+            icon={Icon.heart}
+            label="いいねした投稿"
+            onPress={() => router.push('/mypage/liked' as never)}
+          />
+          <RowDivider />
+          <Row
+            icon={Icon.save}
+            label="保存した投稿"
+            onPress={() => router.push('/mypage/saved' as never)}
+          />
+        </Section>
+
+        {/* ───────── セクション: アカウント ───────── */}
+        <Section title="アカウント">
+          <Row
             icon={Icon.shield}
             label="信頼スコア"
             onPress={() => router.push('/settings/trust-score' as never)}
-            color={C.accent}
           />
-          <MenuTile
+          <RowDivider />
+          <Row
             icon={Icon.award}
             label="プラン"
             onPress={() => router.push('/settings/plan' as never)}
-            color={C.green}
           />
-          <MenuTile
+          <RowDivider />
+          <Row
+            icon={Icon.bell}
+            label="通知"
+            right={unreadCount > 0 ? <Pill text={String(unreadCount)} /> : undefined}
+            onPress={() => router.push('/notifications' as never)}
+          />
+        </Section>
+
+        {/* ───────── セクション: プライバシー ───────── */}
+        <Section title="プライバシー">
+          <Row
             icon={Icon.hash}
-            label="ブロックタグ"
+            label="ブロックしたタグ"
             onPress={() => router.push('/settings/blocked-tags' as never)}
-            color="#E24B4A"
           />
-          <MenuTile
+          <RowDivider />
+          <Row
             icon={Icon.block}
-            label="ブロック中"
+            label="ブロックしたユーザー"
             onPress={() => router.push('/settings/blocked-users' as never)}
-            color={C.block}
           />
-          {OBSIDIAN_AVAILABLE && (
-            <MenuTile
+          <RowDivider />
+          <Row
+            icon={Icon.settings}
+            label="すべての設定"
+            onPress={() => router.push('/settings' as never)}
+          />
+        </Section>
+
+        {OBSIDIAN_AVAILABLE && (
+          <Section title="開発">
+            <Row
               icon={Icon.edit}
               label="Obsidian (DEV)"
               onPress={() => router.push('/settings/obsidian' as never)}
-              color={C.accent}
             />
-          )}
-        </View>
+          </Section>
+        )}
 
-        {/* ログアウト */}
-        <View style={{ paddingHorizontal: SP['4'], marginTop: SP['6'] }}>
-          <PressableScale
-            onPress={() => setLogoutOpen(true)}
-            haptic="warn"
-            style={{
-              alignItems: 'center',
-              justifyContent: 'center',
-              paddingVertical: SP['3'],
-            }}
-          >
-            <Text style={[T.smallM, { color: C.red, letterSpacing: 0.5 }]}>ログアウト</Text>
-          </PressableScale>
-        </View>
+        {/* ───────── ログアウト (控えめ) ───────── */}
+        <PressableScale
+          onPress={() => setLogoutOpen(true)}
+          haptic="warn"
+          style={{
+            marginTop: SP['8'],
+            marginHorizontal: SP['4'],
+            paddingVertical: SP['3'],
+            alignItems: 'center',
+          }}
+        >
+          <Text style={[T.smallM, { color: C.red, letterSpacing: 0.5 }]}>ログアウト</Text>
+        </PressableScale>
       </ScrollView>
 
       <ConfirmDialog
@@ -294,10 +274,61 @@ export default function MypageScreen() {
   );
 }
 
-function StatItem({ value, label, color }: { value: number; label: string; color?: string }) {
+// ───────────────────────────────────────────────────────────────
+// 内部コンポーネント
+// ───────────────────────────────────────────────────────────────
+
+function IconButton({
+  icon: I,
+  onPress,
+  badge,
+}: {
+  icon: LucideIcon;
+  onPress: () => void;
+  badge?: number;
+}) {
   return (
-    <View style={{ flex: 1, alignItems: 'center', gap: 4 }}>
-      <Text style={{ fontSize: 24, fontWeight: '700', color: color ?? C.text, letterSpacing: -0.5 }}>
+    <PressableScale
+      onPress={onPress}
+      haptic="tap"
+      style={{
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <I size={22} color={C.text} strokeWidth={2.2} />
+      {badge !== undefined && <NotificationBadge count={badge} top={4} right={4} />}
+    </PressableScale>
+  );
+}
+
+function Kpi({ value, label }: { value: number; label: string }) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: C.bg2,
+        borderRadius: R.lg,
+        borderWidth: 1,
+        borderColor: C.border,
+        paddingVertical: SP['4'],
+        paddingHorizontal: SP['2'],
+        alignItems: 'center',
+        gap: 2,
+      }}
+    >
+      <Text
+        style={{
+          fontSize: 26,
+          fontWeight: '800',
+          color: C.text,
+          letterSpacing: -0.5,
+          lineHeight: 30,
+        }}
+      >
         {value.toLocaleString()}
       </Text>
       <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5 }]}>{label}</Text>
@@ -305,36 +336,128 @@ function StatItem({ value, label, color }: { value: number; label: string; color
   );
 }
 
-type IconComponent = React.ComponentType<Record<string, unknown>>;
-
-function MenuTile({
+function PrimaryAction({
   icon: I,
   label,
   onPress,
-  color,
+  solid,
 }: {
-  icon: IconComponent;
+  icon: LucideIcon;
   label: string;
   onPress: () => void;
-  color: string;
+  solid?: boolean;
 }) {
+  const bg = solid ? C.accent : C.bg2;
+  const border = solid ? C.accent : C.border;
+  const textColor = solid ? '#fff' : C.text;
+  const iconColor = solid ? '#fff' : C.text2;
+  return (
+    <PressableScale
+      onPress={onPress}
+      haptic={solid ? 'confirm' : 'tap'}
+      style={{
+        flex: 1,
+        backgroundColor: bg,
+        borderRadius: R.lg,
+        borderWidth: 1,
+        borderColor: border,
+        paddingVertical: SP['3'],
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+      }}
+    >
+      <I size={16} color={iconColor} strokeWidth={2.4} />
+      <Text style={[T.smallB, { color: textColor }]}>{label}</Text>
+    </PressableScale>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={{ marginTop: SP['6'] }}>
+      <Text
+        style={[
+          T.smallB,
+          {
+            color: C.text3,
+            paddingHorizontal: SP['4'],
+            paddingBottom: SP['2'],
+            letterSpacing: 1.2,
+            fontSize: 11,
+          },
+        ]}
+      >
+        {title.toUpperCase()}
+      </Text>
+      <View
+        style={{
+          marginHorizontal: SP['4'],
+          backgroundColor: C.bg2,
+          borderRadius: R.lg,
+          borderWidth: 1,
+          borderColor: C.border,
+          overflow: 'hidden',
+        }}
+      >
+        {children}
+      </View>
+    </View>
+  );
+}
+
+function Row({
+  icon: I,
+  label,
+  right,
+  onPress,
+}: {
+  icon: LucideIcon;
+  label: string;
+  right?: React.ReactNode;
+  onPress: () => void;
+}) {
+  const ChevronR = Icon.chevronR;
   return (
     <PressableScale
       onPress={onPress}
       haptic="tap"
+      scaleValue={0.99}
       style={{
-        flexBasis: '30%',
-        flexGrow: 1,
-        paddingVertical: SP['4'],
-        paddingHorizontal: SP['2'],
-        backgroundColor: C.bg2,
-        borderRadius: R.lg,
+        flexDirection: 'row',
         alignItems: 'center',
-        gap: SP['2'],
+        paddingHorizontal: SP['4'],
+        paddingVertical: SP['3'],
+        gap: SP['3'],
       }}
     >
-      <I size={22} color={color} strokeWidth={2} />
-      <Text style={[T.smallM, { color: C.text }]}>{label}</Text>
+      <I size={19} color={C.text2} strokeWidth={2} />
+      <Text style={[T.body, { flex: 1, color: C.text }]}>{label}</Text>
+      {right}
+      <ChevronR size={16} color={C.text4} strokeWidth={2.2} />
     </PressableScale>
+  );
+}
+
+function RowDivider() {
+  return <View style={{ height: 1, backgroundColor: C.divider, marginLeft: SP['4'] + 19 + SP['3'] }} />;
+}
+
+function Pill({ text }: { text: string }) {
+  return (
+    <View
+      style={{
+        minWidth: 22,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: R.full,
+        backgroundColor: C.red,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{text}</Text>
+    </View>
   );
 }
