@@ -39,6 +39,8 @@ import { EmptyState } from '../../../../components/ui/EmptyState';
 import { BackButton } from '../../../../components/nav/BackButton';
 import { Icon } from '../../../../constants/icons';
 import { AnonPostCard } from '../../../../components/feed/AnonPostCard';
+import { OfficialBadge } from '../../../../components/community/OfficialBadge';
+import { useAuthStore } from '../../../../stores/authStore';
 import {
   fetchCommunity,
   joinCommunity,
@@ -388,18 +390,27 @@ export default function CommunityDetailScreen() {
 
           {/* Name */}
           <View style={{ alignItems: 'center', gap: 4 }}>
-            <Text
-              style={[
-                T.h2,
-                { color: C.text, textAlign: 'center', fontSize: 24, lineHeight: 30 },
-              ]}
-              numberOfLines={2}
-            >
-              {community.name}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <Text
+                style={[
+                  T.h2,
+                  { color: C.text, textAlign: 'center', fontSize: 24, lineHeight: 30 },
+                ]}
+                numberOfLines={2}
+              >
+                {community.name}
+              </Text>
+              {community.is_official && <OfficialBadge size="md" />}
+            </View>
             {handle && (
               <Text style={{ color: C.text3, fontSize: 12, lineHeight: 16 }}>
                 @{handle}
+              </Text>
+            )}
+            {community.is_official && community.official_admin_display_name && (
+              <Text style={[T.small, { color: C.text2, textAlign: 'center', marginTop: 2 }]}>
+                管理者: {community.official_admin_display_name}
+                {community.official_organization ? ` · ${community.official_organization}` : ''}
               </Text>
             )}
             {community.is_member && (
@@ -512,7 +523,18 @@ export default function CommunityDetailScreen() {
               onPress={onJoinLeave}
             />
           </View>
+
+          {/* オーナーのみ: 公式登録を申請する CTA */}
+          <OwnerApplyOfficialCta community={community} />
         </View>
+
+        {/* 公式機能ピル (Q&A / カレンダー / 地図) — sub-route navigation */}
+        {community.is_official && (community.official_features?.length ?? 0) > 0 && (
+          <OfficialFeatureNav
+            communityId={id}
+            features={community.official_features ?? []}
+          />
+        )}
 
         {/* ============================================================
             Tab bar — bottom border 区切り + sliding active underline
@@ -1427,6 +1449,99 @@ const EventsTab = memo(function EventsTab({ communityId, canCreate }: { communit
     </View>
   );
 });
+
+// ============================================================
+// Owner only: 公式登録を申請する CTA
+// ============================================================
+function OwnerApplyOfficialCta({ community }: { community: CommunityWithMembership }) {
+  const router = useRouter();
+  const userId = useAuthStore((s) => s.user?.id);
+  const isOwner = community.role === 'owner' || (userId && community.created_by === userId);
+  if (community.is_official) return null;
+  if (!isOwner) return null;
+  return (
+    <PressableScale
+      onPress={() => router.push(`/community/${community.id}/apply-official` as never)}
+      haptic="tap"
+      style={{
+        alignSelf: 'stretch',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        marginTop: SP['1'],
+        paddingVertical: SP['2'] + 2,
+        backgroundColor: C.accentBg,
+        borderRadius: R.full,
+        borderWidth: 1,
+        borderColor: C.accent + '55',
+      }}
+    >
+      <Icon.shield size={14} color={C.accentLight} strokeWidth={2.4} />
+      <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>
+        公式コミュニティとして申請する
+      </Text>
+    </PressableScale>
+  );
+}
+
+// ============================================================
+// 公式機能ナビ (Q&A / カレンダー / 地図) — 横並びチップ
+// ============================================================
+function OfficialFeatureNav({
+  communityId,
+  features,
+}: {
+  communityId: string;
+  features: Array<'qna' | 'calendar' | 'map'>;
+}) {
+  const router = useRouter();
+  type Item = { key: 'qna' | 'calendar' | 'map'; label: string; icon: typeof Icon.community; route: string };
+  const items: Item[] = [];
+  if (features.includes('qna')) items.push({ key: 'qna',      label: 'Q&A',       icon: Icon.help,     route: `/community/${communityId}/qna` });
+  if (features.includes('calendar')) items.push({ key: 'calendar', label: 'カレンダー', icon: Icon.calendar, route: `/community/${communityId}/calendar` });
+  if (features.includes('map')) items.push({ key: 'map',      label: '地図',      icon: Icon.map,      route: `/community/${communityId}/map` });
+  if (items.length === 0) return null;
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        gap: SP['2'],
+        paddingHorizontal: SP['4'],
+        paddingVertical: SP['3'],
+        borderBottomWidth: 1,
+        borderBottomColor: C.border,
+        flexWrap: 'wrap',
+      }}
+    >
+      {items.map((it) => {
+        const IconComp = it.icon;
+        return (
+          <PressableScale
+            key={it.key}
+            onPress={() => router.push(it.route as never)}
+            haptic="tap"
+            scaleValue={0.97}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              paddingHorizontal: SP['3'],
+              paddingVertical: 8,
+              backgroundColor: C.accentBg,
+              borderRadius: R.full,
+              borderWidth: 1,
+              borderColor: C.accent + '55',
+            }}
+          >
+            <IconComp size={14} color={C.accentLight} strokeWidth={2.4} />
+            <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>{it.label}</Text>
+          </PressableScale>
+        );
+      })}
+    </View>
+  );
+}
 
 function EventRow({ event }: { event: CommunityEvent }) {
   const d = new Date(event.starts_at);

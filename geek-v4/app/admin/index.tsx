@@ -31,6 +31,7 @@ import {
   type AdminProblemUser,
   type AdminModerationLogEntry,
 } from '../../lib/api/adminExt';
+import { fetchPendingOfficialApps } from '../../lib/api/officialCommunities';
 import { formatRelative } from '../../lib/utils/date';
 import { C, R, SP, SHADOW } from '../../design/tokens';
 import { T, FONT } from '../../design/typography';
@@ -468,6 +469,11 @@ function DashboardTab({ stats, onJumpReports }: { stats: { totalUsers: number; t
     queryFn: () => fetchReportedPosts({ minReports: 1, limit: 3 }),
     staleTime: 30_000,
   });
+  const { data: pendingApps = [] } = useQuery({
+    queryKey: ['admin-pending-official-apps'],
+    queryFn: fetchPendingOfficialApps,
+    staleTime: 30_000,
+  });
 
   const health = computeHealth(stats);
 
@@ -518,6 +524,71 @@ function DashboardTab({ stats, onJumpReports }: { stats: { totalUsers: number; t
             )}
           </View>
         </View>
+      </View>
+
+      {/* 公式申請 */}
+      <SectionHeader
+        label="公式申請"
+        right={
+          pendingApps.length > 0 ? (
+            <PressableScale
+              onPress={() => router.push('/admin/official-apps' as never)}
+              haptic="tap"
+              hitSlop={6}
+            >
+              <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>もっと見る →</Text>
+            </PressableScale>
+          ) : null
+        }
+      />
+      <View style={{ paddingHorizontal: SP['4'] }}>
+        <PressableScale
+          onPress={() => router.push('/admin/official-apps' as never)}
+          haptic="tap"
+          style={[{
+            padding: SP['3'],
+            backgroundColor: C.bg2,
+            borderRadius: R.lg,
+            borderWidth: 1,
+            borderColor: pendingApps.length > 0 ? C.accent + '55' : C.border,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: SP['3'],
+          }, SHADOW.card]}
+        >
+          <View
+            style={{
+              width: 40, height: 40, borderRadius: 20,
+              backgroundColor: C.accentBg,
+              alignItems: 'center', justifyContent: 'center',
+              borderWidth: 1, borderColor: C.accent + '55',
+            }}
+          >
+            <Icon.shield size={18} color={C.accentLight} strokeWidth={2.4} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[T.bodyB, { color: C.text }]}>未対応の公式申請</Text>
+            <Text style={[T.caption, { color: C.text3 }]}>
+              {pendingApps.length > 0
+                ? `${pendingApps.length} 件 — 承認 / 却下を判断してください`
+                : '現在、未対応の申請はありません'}
+            </Text>
+          </View>
+          {pendingApps.length > 0 && (
+            <View
+              style={{
+                minWidth: 24, paddingHorizontal: 6, height: 24, borderRadius: 12,
+                backgroundColor: C.accent,
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>
+                {pendingApps.length}
+              </Text>
+            </View>
+          )}
+          <Icon.chevronR size={18} color={C.text3} strokeWidth={2.2} />
+        </PressableScale>
       </View>
 
       {/* Top reported */}

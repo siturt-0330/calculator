@@ -10,6 +10,7 @@ import { Skeleton, SkeletonCircle } from '../../../components/ui/Skeleton';
 import { BackButton } from '../../../components/nav/BackButton';
 import { Icon } from '../../../constants/icons';
 import { discoverCommunities, type Community } from '../../../lib/api/communities';
+import { OfficialBadge } from '../../../components/community/OfficialBadge';
 import { TABBAR } from '../../../design/tabbar';
 
 export default function DiscoverCommunitiesScreen() {
@@ -244,10 +245,11 @@ export default function DiscoverCommunitiesScreen() {
                 )}
               </View>
               <View style={{ flex: 1, gap: 2 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
                     {c.name}
                   </Text>
+                  {c.is_official && <OfficialBadge size="sm" />}
                   {c.visibility === 'request' && (
                     <Icon.lock size={12} color={C.amber} strokeWidth={2.4} />
                   )}

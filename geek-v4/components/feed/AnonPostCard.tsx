@@ -28,6 +28,7 @@ import { sanitizeUrl } from '../../lib/sanitize';
 import { ObsidianSaveButton } from '../ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
 import type { PostCommunityRef } from '../../lib/api/posts';
+import { OfficialBadge } from '../community/OfficialBadge';
 
 // 画像アスペクト比のモジュールレベルキャッシュ — FlashList のリサイクルで
 // カードがアンマウント/マウントされるたびに getSize() で再フェッチ (= ネットワーク往復)
@@ -311,12 +312,13 @@ function AnonPostCardInner({
                 borderRadius: R.full,
                 backgroundColor: C.bg3,
                 borderWidth: 1,
-                borderColor: C.border,
+                borderColor: c.is_official ? C.accent + '66' : C.border,
               }}
             >
               <Text style={{ fontSize: 11, color: C.text2, fontWeight: '600' }}>
                 {`\u{1F3E0} ${c.icon_emoji} ${c.name}`}
               </Text>
+              {c.is_official && <OfficialBadge size="sm" iconOnly />}
             </PressableScale>
           ))}
         </View>

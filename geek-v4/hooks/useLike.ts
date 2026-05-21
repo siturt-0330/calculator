@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { useToastStore } from '../stores/toastStore';
 
 async function getMyLikes(postIds: string[]): Promise<Record<string, boolean>> {
   if (postIds.length === 0) return {};
@@ -106,7 +107,11 @@ export function useLike() {
       for (const [, d] of cached) {
         if (d?.[postId]) { wasLiked = true; break; }
       }
-      return mutateAsync({ postId, wasLiked }).catch(() => {});
+      return mutateAsync({ postId, wasLiked }).catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : '';
+        // 楽観更新の rollback は onError で実行済み — ここではユーザー通知だけ
+        useToastStore.getState().show(msg ? `いいねに失敗しました: ${msg}` : 'いいねに失敗しました', 'error');
+      });
     },
   };
 }

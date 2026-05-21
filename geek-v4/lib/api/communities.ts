@@ -19,6 +19,12 @@ export type Community = {
   last_post_at: string | null;
   created_by: string;
   created_at: string;
+  // 公式コミュニティ (migration 0032)
+  is_official?: boolean;
+  official_admin_user_id?: string | null;
+  official_admin_display_name?: string | null;
+  official_organization?: string | null;
+  official_features?: Array<'qna' | 'calendar' | 'map'>;
 };
 
 export type CommunityWithMembership = Community & {
@@ -68,7 +74,7 @@ export type CommunityEvent = {
 };
 
 export type CommunityPostWithCommunity = CommunityPost & {
-  community: Pick<Community, 'id' | 'name' | 'icon_emoji' | 'icon_color' | 'icon_url'>;
+  community: Pick<Community, 'id' | 'name' | 'icon_emoji' | 'icon_color' | 'icon_url' | 'is_official'>;
   author_nickname?: string;
 };
 
@@ -124,7 +130,7 @@ export async function fetchMyCommunityFeed(limit = 30): Promise<CommunityPostWit
 
   const { data, error } = await supabase
     .from('community_posts')
-    .select('*, community:communities(id, name, icon_emoji, icon_color, icon_url)')
+    .select('*, community:communities(id, name, icon_emoji, icon_color, icon_url, is_official)')
     .in('community_id', ids)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -456,7 +462,7 @@ export async function fetchCommunityPosts(
 ): Promise<CommunityPostWithCommunity[]> {
   const { data, error } = await supabase
     .from('community_posts')
-    .select('*, community:communities(id, name, icon_emoji, icon_color, icon_url)')
+    .select('*, community:communities(id, name, icon_emoji, icon_color, icon_url, is_official)')
     .eq('community_id', community_id)
     .order('created_at', { ascending: false })
     .limit(limit);

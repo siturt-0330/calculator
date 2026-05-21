@@ -53,17 +53,22 @@ export function useSave() {
     mutationFn: toggle,
     onMutate: async ({ postId }: { postId: string; wasSaved: boolean }) => {
       await qc.cancelQueries({ queryKey: ['my-saves'] });
+      // 失敗時 rollback のため snapshot を取る
+      const prevSaves = qc.getQueriesData({ queryKey: ['my-saves'] });
       qc.setQueriesData({ queryKey: ['my-saves'] }, (old: Record<string, boolean> | undefined) => {
         const next = { ...(old ?? {}) };
         if (next[postId]) delete next[postId];
         else next[postId] = true;
         return next;
       });
+      return { prevSaves };
     },
     onSuccess: (newState) => {
       show(newState ? '保存しました' : '保存を解除しました', 'success');
     },
-    onError: () => {
+    onError: (_e, _v, ctx) => {
+      // 楽観更新を巻き戻してから通知
+      if (ctx?.prevSaves) ctx.prevSaves.forEach(([k, d]) => qc.setQueryData(k, d));
       show('保存に失敗しました', 'error');
     },
     onSettled: () => {
@@ -80,7 +85,10 @@ export function useSave() {
       for (const [, d] of cached) {
         if (d?.[postId]) { wasSaved = true; break; }
       }
-      return mutateAsync({ postId, wasSaved }).catch(() => {});
+      // onError でトーストを出すのでここでは握り潰す (unhandled rejection 防止)
+      return mutateAsync({ postId, wasSaved }).catch((e: unknown) => {
+        console.warn('[useSave] toggle failed:', e);
+      });
     },
   };
 }

@@ -337,6 +337,7 @@ export type PostCommunityRef = {
   name: string;
   icon_emoji: string;
   icon_url: string | null;
+  is_official?: boolean;
 };
 
 // post id 配列 → 各 post に紐付いた community のメタ情報を返す
@@ -347,7 +348,7 @@ export async function fetchCommunitiesForPosts(
   if (postIds.length === 0) return {};
   const { data, error } = await supabase
     .from('post_communities')
-    .select('post_id, community:communities(id, name, icon_emoji, icon_url)')
+    .select('post_id, community:communities(id, name, icon_emoji, icon_url, is_official)')
     .in('post_id', postIds);
   if (error) {
     console.warn('[fetchCommunitiesForPosts] error:', error.message);
@@ -356,7 +357,7 @@ export async function fetchCommunitiesForPosts(
   // Supabase の typed return は join 関係を array で返す形 (FK の方向に依らず) なので
   // 単一でも複数でも安全に扱えるよう unknown 経由で narrow。
   // community が null (RLS で読めない / 削除済み) の行は無視。
-  type CommunityCol = { id: string; name: string; icon_emoji: string; icon_url: string | null };
+  type CommunityCol = { id: string; name: string; icon_emoji: string; icon_url: string | null; is_official?: boolean };
   type Row = {
     post_id: string;
     community: CommunityCol | CommunityCol[] | null;
@@ -373,6 +374,7 @@ export async function fetchCommunitiesForPosts(
       name: community.name,
       icon_emoji: community.icon_emoji,
       icon_url: community.icon_url,
+      is_official: community.is_official ?? false,
     });
     grouped[r.post_id] = arr;
   }

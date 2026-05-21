@@ -131,7 +131,9 @@ export default function PostDetailScreen() {
     if (!text.trim() || isPending) return;
     // mutateAsync は失敗時に reject するが、onError でトーストを出すので
     // ここでは握り潰して UI を壊さない (unhandled rejection 防止)
-    await submitReply(text.trim()).catch(() => {});
+    await submitReply(text.trim()).catch((e: unknown) => {
+      console.warn('[post/handleSend] submit failed:', e);
+    });
   };
 
   if (postLoading) {
