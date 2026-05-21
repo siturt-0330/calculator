@@ -9,6 +9,7 @@ import { PressableScale } from '../../../components/ui/PressableScale';
 import { BackButton } from '../../../components/nav/BackButton';
 import { Icon } from '../../../constants/icons';
 import { discoverCommunities, type Community } from '../../../lib/api/communities';
+import { TABBAR } from '../../../design/tabbar';
 
 export default function DiscoverCommunitiesScreen() {
   const insets = useSafeAreaInsets();
@@ -101,7 +102,7 @@ export default function DiscoverCommunitiesScreen() {
         contentContainerStyle={{
           padding: SP['4'],
           gap: SP['3'],
-          paddingBottom: insets.bottom + SP['10'],
+          paddingBottom: TABBAR.height + insets.bottom + SP['10'],
         }}
         keyboardShouldPersistTaps="handled"
         refreshControl={

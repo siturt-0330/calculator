@@ -18,6 +18,7 @@ import { Button } from '../../../../../components/ui/Button';
 import { Icon } from '../../../../../constants/icons';
 import { useToastStore } from '../../../../../stores/toastStore';
 import { createSpot } from '../../../../../lib/api/communities';
+import { TABBAR } from '../../../../../design/tabbar';
 
 export default function CreateSpotScreen() {
   const insets = useSafeAreaInsets();
@@ -99,7 +100,7 @@ export default function CreateSpotScreen() {
       <ScrollView
         contentContainerStyle={{
           paddingHorizontal: SP['4'],
-          paddingBottom: insets.bottom + SP['10'],
+          paddingBottom: TABBAR.height + insets.bottom + SP['10'],
           gap: SP['4'],
         }}
         keyboardShouldPersistTaps="handled"

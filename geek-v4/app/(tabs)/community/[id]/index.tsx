@@ -33,6 +33,7 @@ import { C, R, SP, SHADOW } from '../../../../design/tokens';
 import { T } from '../../../../design/typography';
 import { SPRING_TIGHT } from '../../../../design/motion';
 import { Spinner } from '../../../../components/ui/Spinner';
+import { TABBAR } from '../../../../design/tabbar';
 import { PressableScale } from '../../../../components/ui/PressableScale';
 import { EmptyState } from '../../../../components/ui/EmptyState';
 import { BackButton } from '../../../../components/nav/BackButton';
@@ -269,7 +270,7 @@ export default function CommunityDetailScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: insets.bottom + SP['20'] }}
+        contentContainerStyle={{ paddingBottom: TABBAR.height + insets.bottom + SP['10'] }}
         refreshControl={<RefreshControl tintColor={C.text2} refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {/* Top nav bar */}

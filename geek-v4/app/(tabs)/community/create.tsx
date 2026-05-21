@@ -20,6 +20,7 @@ import {
   type Community,
 } from '../../../lib/api/communities';
 import { useToastStore } from '../../../stores/toastStore';
+import { TABBAR } from '../../../design/tabbar';
 import { supabase } from '../../../lib/supabase';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { deepNormalize } from '../../../lib/search/tokenize';
@@ -313,7 +314,9 @@ export default function CreateCommunityScreen() {
         contentContainerStyle={{
           paddingTop: insets.top + SP['2'],
           paddingHorizontal: SP['5'],
-          paddingBottom: insets.bottom + SP['10'],
+          // (tabs) 配下の screen は下部 tab bar に重なるので、その高さ + safe area
+          // を加味して padding を取らないとフォームの末尾が tab bar に隠れる
+          paddingBottom: TABBAR.height + insets.bottom + SP['10'],
           gap: SP['5'],
         }}
         keyboardShouldPersistTaps="handled"
