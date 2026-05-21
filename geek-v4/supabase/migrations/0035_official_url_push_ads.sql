@@ -253,7 +253,12 @@ as $$
     a.cta_label,
     a.target_tags,
     -- マッチスコア: ターゲットタグと興味タグの交差数
-    cardinality(a.target_tags & p_interest_tags)::real
+    -- (PostgreSQL の text[] には & 演算子が無いので、unnest + INTERSECT で計算)
+    (
+      select count(*)::real
+        from unnest(a.target_tags) as t
+       where t = any(p_interest_tags)
+    )
       + (case when a.target_tags = '{}'::text[] then 0.1 else 0 end) -- 全配信は薄く
     as match_score
   from public.ads a
