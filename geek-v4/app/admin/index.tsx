@@ -1,5 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, LayoutChangeEvent, ScrollView, Text, TextInput, View } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -30,10 +32,17 @@ import {
   type AdminModerationLogEntry,
 } from '../../lib/api/adminExt';
 import { formatRelative } from '../../lib/utils/date';
-import { C, R, SP } from '../../design/tokens';
-import { T } from '../../design/typography';
+import { C, R, SP, SHADOW } from '../../design/tokens';
+import { T, FONT } from '../../design/typography';
 
 type Tab = 'dashboard' | 'reports' | 'users' | 'posts';
+
+const TABS: Array<{ key: Tab; label: string }> = [
+  { key: 'dashboard', label: 'ダッシュボード' },
+  { key: 'reports',   label: '通報' },
+  { key: 'users',     label: 'ユーザー' },
+  { key: 'posts',     label: '投稿' },
+];
 
 // ============================================================
 // 表示用メタ — state / visibility / moderation action
@@ -53,15 +62,26 @@ const VISIBILITY_META: Record<string, { label: string; color: string }> = {
   private:          { label: '非公開',       color: C.text3 },
 };
 
-const ACTION_META: Record<string, { label: string; color: string }> = {
-  suspend_user:        { label: '凍結',         color: C.red },
-  unsuspend_user:      { label: '凍結解除',     color: C.green },
-  delete_post:         { label: '投稿削除',     color: C.red },
-  delete_thread:       { label: 'スレ削除',     color: C.red },
-  delete_comment:      { label: 'コメ削除',     color: C.red },
-  send_message:        { label: 'DM 送信',      color: C.blue },
-  reset_account_state: { label: 'state reset', color: C.amber },
-  note:                { label: 'メモ',         color: C.text3 },
+const ACTION_META: Record<string, { label: string; color: string; emoji: string }> = {
+  suspend_user:        { label: '凍結',         color: C.red,    emoji: '🔒' },
+  unsuspend_user:      { label: '凍結解除',     color: C.green,  emoji: '🔓' },
+  delete_post:         { label: '投稿削除',     color: C.red,    emoji: '🗑️' },
+  delete_thread:       { label: 'スレ削除',     color: C.red,    emoji: '🗑️' },
+  delete_comment:      { label: 'コメ削除',     color: C.red,    emoji: '🗑️' },
+  send_message:        { label: 'DM 送信',      color: C.blue,   emoji: '✉️' },
+  reset_account_state: { label: 'state reset', color: C.amber,  emoji: '♻️' },
+  note:                { label: 'メモ',         color: C.text3,  emoji: '📝' },
+};
+
+type KpiTone = 'neutral' | 'accent' | 'red' | 'amber' | 'green' | 'blue';
+type KpiPalette = { fg: string; bg: string; border: string };
+const KPI_PALETTE: Record<KpiTone, KpiPalette> = {
+  neutral: { fg: C.text,        bg: C.bg2,      border: C.border },
+  accent:  { fg: C.accentLight, bg: C.accentBg, border: C.accent + '55' },
+  red:     { fg: C.red,         bg: C.redBg,    border: C.red + '55' },
+  amber:   { fg: C.amber,       bg: C.amberBg,  border: C.amber + '55' },
+  green:   { fg: C.green,       bg: C.greenBg,  border: C.green + '55' },
+  blue:    { fg: C.blue,        bg: C.blueBg,   border: C.blue + '55' },
 };
 
 // ============================================================
@@ -70,8 +90,15 @@ const ACTION_META: Record<string, { label: string; color: string }> = {
 export default function AdminIndexScreen() {
   const insets = useSafeAreaInsets();
   const signOut = useAuthStore((s) => s.signOut);
+  const userEmail = useAuthStore((s) => s.user?.email);
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>('dashboard');
+
+  const { data: stats } = useQuery({
+    queryKey: ['admin-stats'],
+    queryFn: fetchAdminDashboardStats,
+    staleTime: 30_000,
+  });
 
   // header の reload — 表示中の admin クエリを全て invalidate
   const reloadAll = useCallback(() => {
@@ -86,7 +113,7 @@ export default function AdminIndexScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <TopBar
-        title="管理パネル"
+        title=" "
         left={<BackButton />}
         right={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
@@ -95,7 +122,7 @@ export default function AdminIndexScreen() {
               haptic="tap"
               hitSlop={10}
               style={{
-                width: 32, height: 32, borderRadius: R.full,
+                width: 34, height: 34, borderRadius: R.full,
                 backgroundColor: C.bg3, alignItems: 'center', justifyContent: 'center',
                 borderWidth: 1, borderColor: C.border,
               }}
@@ -107,7 +134,7 @@ export default function AdminIndexScreen() {
               onPress={() => { void signOut(); }}
               haptic="warn"
               style={{
-                paddingHorizontal: SP['3'], paddingVertical: 6,
+                paddingHorizontal: SP['3'], paddingVertical: 7,
                 backgroundColor: C.bg3, borderRadius: R.full,
                 borderWidth: 1, borderColor: C.border,
               }}
@@ -118,151 +145,264 @@ export default function AdminIndexScreen() {
         }
       />
 
-      {/* DEV badge */}
-      <View style={{
-        paddingHorizontal: SP['4'], paddingTop: SP['2'], paddingBottom: SP['1'],
-        flexDirection: 'row', alignItems: 'center', gap: SP['2'],
-      }}>
-        <View style={{
-          paddingHorizontal: SP['2'], paddingVertical: 2,
-          backgroundColor: C.redBg, borderRadius: R.sm,
-          borderWidth: 1, borderColor: C.red + '55',
-        }}>
-          <Text style={{ fontSize: 10, color: C.red, fontWeight: '700', letterSpacing: 0.5 }}>DEV ADMIN</Text>
+      <ScrollView
+        stickyHeaderIndices={[2]}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: insets.bottom + SP['10'] }}
+      >
+        {/* ============ Header (title + email + DEV badge) ============ */}
+        <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['1'], paddingBottom: SP['3'] }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], marginBottom: 4 }}>
+            <Text style={{
+              fontFamily: FONT.display,
+              fontSize: 30,
+              lineHeight: 36,
+              color: C.text,
+              letterSpacing: -0.6,
+            }}>
+              Admin Panel
+            </Text>
+            <View style={{
+              paddingHorizontal: SP['2'], paddingVertical: 2,
+              backgroundColor: C.redBg, borderRadius: R.sm,
+              borderWidth: 1, borderColor: C.red + '55',
+            }}>
+              <Text style={{ fontSize: 10, color: C.red, fontWeight: '800', letterSpacing: 0.6 }}>DEV</Text>
+            </View>
+          </View>
+          <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
+            {userEmail ? `${userEmail} としてログイン中` : 'admin としてログイン中'} · 全データへの書き込み権限
+          </Text>
         </View>
-        <Text style={[T.caption, { color: C.text3 }]}>
-          全ユーザー / 投稿への書き込み権限あり。慎重に。
-        </Text>
-      </View>
 
-      {/* KPI ストリップ — 常時表示 */}
-      <KpiStrip />
+        {/* ============ KPI 2x3 grid ============ */}
+        <KpiGrid stats={stats} />
 
-      {/* タブ */}
-      <View style={{
-        flexDirection: 'row',
-        paddingHorizontal: SP['4'],
-        paddingTop: SP['3'],
-        gap: SP['4'],
-        borderBottomWidth: 1,
-        borderBottomColor: C.border,
-      }}>
-        <TabUnderline active={tab === 'dashboard'} label="ダッシュボード" onPress={() => setTab('dashboard')} />
-        <TabUnderline active={tab === 'reports'}   label="通報"           onPress={() => setTab('reports')} />
-        <TabUnderline active={tab === 'users'}     label="ユーザー"       onPress={() => setTab('users')} />
-        <TabUnderline active={tab === 'posts'}     label="投稿"           onPress={() => setTab('posts')} />
-      </View>
+        {/* ============ Sticky Tab bar ============ */}
+        <View style={{ backgroundColor: C.bg, paddingTop: SP['3'], paddingBottom: SP['2'] }}>
+          <TabPills
+            tab={tab}
+            onChange={setTab}
+            openReports={stats?.openReports ?? 0}
+          />
+        </View>
 
-      <View style={{ flex: 1, paddingTop: SP['3'] }}>
-        {tab === 'dashboard' ? (
-          <DashboardTab bottomInset={insets.bottom} onJumpReports={() => setTab('reports')} />
-        ) : tab === 'reports' ? (
-          <ReportsTab bottomInset={insets.bottom} />
-        ) : tab === 'users' ? (
-          <UsersTab bottomInset={insets.bottom} />
-        ) : (
-          <PostsTab bottomInset={insets.bottom} />
-        )}
-      </View>
+        {/* ============ Tab content ============ */}
+        <View style={{ paddingTop: SP['1'] }}>
+          {tab === 'dashboard' ? (
+            <DashboardTab stats={stats} onJumpReports={() => setTab('reports')} />
+          ) : tab === 'reports' ? (
+            <ReportsTab />
+          ) : tab === 'users' ? (
+            <UsersTab />
+          ) : (
+            <PostsTab />
+          )}
+        </View>
+      </ScrollView>
     </View>
   );
 }
 
 // ============================================================
-// 共通 — KPI / Tab underline / SectionHeader
+// KPI 2x3 grid
 // ============================================================
-function KpiStrip() {
-  const { data } = useQuery({
-    queryKey: ['admin-stats'],
-    queryFn: fetchAdminDashboardStats,
-    staleTime: 30_000,
-  });
+function KpiGrid({ stats }: { stats: { totalUsers: number; totalPosts: number; activeUsers24h: number; newPostsToday: number; suspendedUsers: number; openReports: number } | undefined }) {
+  const suspendedTone: KpiTone = (stats?.suspendedUsers ?? 0) > 0 ? 'red' : 'neutral';
+  const openReportsTone: KpiTone = (stats?.openReports ?? 0) > 0 ? 'amber' : 'neutral';
 
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={{
-        paddingHorizontal: SP['4'],
-        paddingTop: SP['2'],
-        gap: SP['2'],
-      }}
-    >
-      <KpiCard label="ユーザー"     value={data?.totalUsers}     tone="neutral" compact />
-      <KpiCard label="投稿"         value={data?.totalPosts}     tone="neutral" compact />
-      <KpiCard label="24h アクティブ" value={data?.activeUsers24h} tone="accent"  compact />
-      <KpiCard label="未対応通報"   value={data?.openReports}    tone="red"     compact />
-    </ScrollView>
+    <View style={{
+      paddingHorizontal: SP['4'],
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: SP['2'],
+    }}>
+      <KpiCard label="全ユーザー"     value={stats?.totalUsers}     tone="neutral" hint="過去24h" />
+      <KpiCard label="全投稿"         value={stats?.totalPosts}     tone="neutral" hint="過去24h" />
+      <KpiCard label="24h アクティブ" value={stats?.activeUsers24h} tone="accent"  hint="last 24h" />
+      <KpiCard label="今日の新規投稿" value={stats?.newPostsToday}  tone="blue"    hint="本日" />
+      <KpiCard label="凍結中"         value={stats?.suspendedUsers} tone={suspendedTone}    hint="累計" />
+      <KpiCard label="未対応の通報"   value={stats?.openReports}    tone={openReportsTone}  hint="要対応" />
+    </View>
   );
 }
 
-type KpiTone = 'neutral' | 'accent' | 'red' | 'amber' | 'green' | 'blue';
-type KpiPalette = { fg: string; bg: string; border: string };
-const KPI_PALETTE: Record<KpiTone, KpiPalette> = {
-  neutral: { fg: C.text,        bg: C.bg2,      border: C.border },
-  accent:  { fg: C.accentLight, bg: C.accentBg, border: C.accent + '55' },
-  red:     { fg: C.red,         bg: C.redBg,    border: C.red + '55' },
-  amber:   { fg: C.amber,       bg: C.amberBg,  border: C.amber + '55' },
-  green:   { fg: C.green,       bg: C.greenBg,  border: C.green + '55' },
-  blue:    { fg: C.blue,        bg: C.blueBg,   border: C.blue + '55' },
-};
-
 function KpiCard({
-  label, value, tone = 'neutral', compact = false,
+  label, value, tone = 'neutral', hint,
 }: {
   label: string;
   value: number | undefined;
   tone?: KpiTone;
-  compact?: boolean;
+  hint?: string;
 }) {
   const p: KpiPalette = KPI_PALETTE[tone];
   const showValue = value !== undefined ? value.toLocaleString('ja-JP') : '—';
+  const isAccent = tone !== 'neutral';
   return (
     <View
-      style={{
-        minWidth: compact ? 96 : 140,
-        paddingHorizontal: SP['3'],
-        paddingVertical: compact ? SP['2'] : SP['3'],
+      style={[{
+        flexBasis: '48%',
+        flexGrow: 1,
         backgroundColor: p.bg,
         borderRadius: R.lg,
         borderWidth: 1,
         borderColor: p.border,
-        gap: 2,
-      }}
+        overflow: 'hidden',
+      }, SHADOW.card]}
     >
-      <Text
-        style={{
-          fontSize: compact ? 20 : 28,
-          lineHeight: compact ? 24 : 32,
-          color: p.fg,
-          fontWeight: '700',
-          letterSpacing: -0.4,
-        }}
-        numberOfLines={1}
-      >
-        {showValue}
-      </Text>
-      <Text style={{ fontSize: 11, color: C.text3, fontWeight: '600' }} numberOfLines={1}>
-        {label}
-      </Text>
+      {/* 5-10% accent gradient overlay */}
+      {isAccent && (
+        <LinearGradient
+          colors={[p.fg + '14', 'transparent']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '70%' }}
+          pointerEvents="none"
+        />
+      )}
+      <View style={{ padding: SP['3'], gap: 4 }}>
+        <Text
+          style={{
+            fontFamily: FONT.uiBold,
+            fontSize: 30,
+            lineHeight: 34,
+            color: p.fg,
+            fontWeight: '700',
+            letterSpacing: -0.6,
+          }}
+          numberOfLines={1}
+        >
+          {showValue}
+        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SP['2'] }}>
+          <Text
+            style={{
+              fontSize: 10,
+              color: C.text3,
+              fontWeight: '700',
+              letterSpacing: 0.8,
+              textTransform: 'uppercase',
+              flexShrink: 1,
+            }}
+            numberOfLines={1}
+          >
+            {label}
+          </Text>
+          {hint && (
+            <Text style={{ fontSize: 9, color: C.text4, fontWeight: '600' }} numberOfLines={1}>
+              {hint}
+            </Text>
+          )}
+        </View>
+      </View>
     </View>
   );
 }
 
-function TabUnderline({ active, label, onPress }: { active: boolean; label: string; onPress: () => void }) {
+// ============================================================
+// Tab pills with sliding indicator (Reanimated)
+// ============================================================
+function TabPills({ tab, onChange, openReports }: { tab: Tab; onChange: (t: Tab) => void; openReports: number }) {
+  const [widths, setWidths] = useState<number[]>([0, 0, 0, 0]);
+  const [positions, setPositions] = useState<number[]>([0, 0, 0, 0]);
+  const x = useSharedValue(0);
+  const w = useSharedValue(0);
+  const activeIndex = TABS.findIndex((t) => t.key === tab);
+
+  useEffect(() => {
+    const targetX = positions[activeIndex] ?? 0;
+    const targetW = widths[activeIndex] ?? 0;
+    x.value = withSpring(targetX, { damping: 22, stiffness: 220 });
+    w.value = withTiming(targetW, { duration: 220 });
+  }, [activeIndex, positions, widths, x, w]);
+
+  const indicatorStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: x.value }],
+    width: w.value,
+  }));
+
+  const onLayout = (i: number) => (e: LayoutChangeEvent) => {
+    const { x: lx, width } = e.nativeEvent.layout;
+    setPositions((prev) => {
+      const next = [...prev]; next[i] = lx; return next;
+    });
+    setWidths((prev) => {
+      const next = [...prev]; next[i] = width; return next;
+    });
+  };
+
   return (
-    <PressableScale
-      onPress={onPress}
-      haptic="tap"
-      style={{
-        paddingVertical: SP['2'],
-        borderBottomWidth: 2,
-        borderBottomColor: active ? C.accent : 'transparent',
-        marginBottom: -1,
-      }}
-    >
-      <Text style={[T.smallB, { color: active ? C.text : C.text3 }]}>{label}</Text>
-    </PressableScale>
+    <View style={{
+      marginHorizontal: SP['4'],
+      padding: 4,
+      backgroundColor: C.bg2,
+      borderRadius: R.full,
+      borderWidth: 1,
+      borderColor: C.border,
+      flexDirection: 'row',
+      position: 'relative',
+    }}>
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            top: 4,
+            bottom: 4,
+            left: 0,
+            backgroundColor: C.accent,
+            borderRadius: R.full,
+          },
+          indicatorStyle,
+          SHADOW.accentGlow,
+        ]}
+        pointerEvents="none"
+      />
+      {TABS.map((t, i) => {
+        const active = t.key === tab;
+        const showBadge = t.key === 'reports' && openReports > 0;
+        return (
+          <PressableScale
+            key={t.key}
+            onPress={() => onChange(t.key)}
+            haptic="select"
+            onLayout={onLayout(i)}
+            style={{
+              flex: 1,
+              paddingVertical: 8,
+              paddingHorizontal: SP['2'],
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 4,
+            }}
+          >
+            <Text
+              style={[T.smallB, {
+                color: active ? '#fff' : C.text2,
+                fontSize: 12,
+              }]}
+              numberOfLines={1}
+            >
+              {t.label}
+            </Text>
+            {showBadge && (
+              <View style={{
+                minWidth: 16,
+                paddingHorizontal: 4,
+                height: 16,
+                borderRadius: R.full,
+                backgroundColor: active ? 'rgba(255,255,255,0.25)' : C.red,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <Text style={{ fontSize: 9, color: '#fff', fontWeight: '800' }}>{openReports}</Text>
+              </View>
+            )}
+          </PressableScale>
+        );
+      })}
+    </View>
   );
 }
 
@@ -270,7 +410,7 @@ function SectionHeader({ label, right }: { label: string; right?: React.ReactNod
   return (
     <View style={{
       flexDirection: 'row', alignItems: 'center', gap: SP['2'],
-      paddingHorizontal: SP['4'], paddingBottom: SP['2'], paddingTop: SP['3'],
+      paddingHorizontal: SP['4'], paddingBottom: SP['2'], paddingTop: SP['4'],
     }}>
       <Text style={{
         fontSize: 10, fontWeight: '800', color: C.text3,
@@ -285,15 +425,39 @@ function SectionHeader({ label, right }: { label: string; right?: React.ReactNod
 }
 
 // ============================================================
-// Tab 1 — ダッシュボード
+// Tab 1 — ダッシュボード (Hero + Recent + Top reported)
 // ============================================================
-function DashboardTab({ bottomInset, onJumpReports }: { bottomInset: number; onJumpReports: () => void }) {
+type HealthLevel = 'healthy' | 'caution' | 'critical';
+
+function computeHealth(stats: { totalUsers: number; suspendedUsers: number; openReports: number } | undefined): {
+  level: HealthLevel; emoji: string; label: string; color: string; bg: string; border: string; description: string;
+} {
+  if (!stats) {
+    return { level: 'healthy', emoji: '🟢', label: 'Loading', color: C.text3, bg: C.bg2, border: C.border, description: 'データ取得中…' };
+  }
+  const ratio = stats.totalUsers > 0 ? stats.suspendedUsers / stats.totalUsers : 0;
+  if (stats.openReports >= 10 || ratio >= 0.1) {
+    return {
+      level: 'critical', emoji: '🔴', label: '要対応', color: C.red, bg: C.redBg, border: C.red + '66',
+      description: `未対応の通報が ${stats.openReports} 件あります`,
+    };
+  }
+  if (stats.openReports >= 1 || ratio >= 0.03) {
+    return {
+      level: 'caution', emoji: '🟡', label: '注意', color: C.amber, bg: C.amberBg, border: C.amber + '66',
+      description: stats.openReports > 0
+        ? `未対応の通報が ${stats.openReports} 件あります`
+        : `凍結中ユーザー ${stats.suspendedUsers} 名`,
+    };
+  }
+  return {
+    level: 'healthy', emoji: '🟢', label: 'Healthy', color: C.green, bg: C.greenBg, border: C.green + '66',
+    description: '通報・凍結ともに落ち着いています',
+  };
+}
+
+function DashboardTab({ stats, onJumpReports }: { stats: { totalUsers: number; totalPosts: number; activeUsers24h: number; newPostsToday: number; suspendedUsers: number; openReports: number } | undefined; onJumpReports: () => void }) {
   const router = useRouter();
-  const { data: stats } = useQuery({
-    queryKey: ['admin-stats'],
-    queryFn: fetchAdminDashboardStats,
-    staleTime: 30_000,
-  });
   const { data: log } = useQuery({
     queryKey: ['admin-mod-log'],
     queryFn: () => fetchModerationLog({ limit: 10 }),
@@ -305,56 +469,94 @@ function DashboardTab({ bottomInset, onJumpReports }: { bottomInset: number; onJ
     staleTime: 30_000,
   });
 
+  const health = computeHealth(stats);
+
   return (
-    <ScrollView
-      contentContainerStyle={{
-        paddingBottom: bottomInset + SP['10'],
-      }}
-    >
-      {/* 6 big KPI cards (2x3 grid) */}
-      <SectionHeader label="OVERVIEW" />
-      <View style={{
-        paddingHorizontal: SP['4'],
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: SP['2'],
-      }}>
-        <KpiBig label="全ユーザー"        value={stats?.totalUsers}     tone="neutral" />
-        <KpiBig label="全投稿"            value={stats?.totalPosts}     tone="neutral" />
-        <KpiBig label="24h アクティブ"    value={stats?.activeUsers24h} tone="accent" />
-        <KpiBig label="今日の新規投稿"    value={stats?.newPostsToday}  tone="blue" />
-        <KpiBig label="凍結ユーザー"      value={stats?.suspendedUsers} tone="amber" />
-        <KpiBig label="未対応通報"        value={stats?.openReports}    tone="red" />
+    <View>
+      {/* Hero — 今週の様子 */}
+      <SectionHeader label="今週の様子" />
+      <View style={{ paddingHorizontal: SP['4'] }}>
+        <View style={[{
+          padding: SP['4'],
+          backgroundColor: health.bg,
+          borderRadius: R.xl,
+          borderWidth: 1,
+          borderColor: health.border,
+          overflow: 'hidden',
+        }, SHADOW.card]}>
+          <LinearGradient
+            colors={[health.color + '22', 'transparent']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+            pointerEvents="none"
+          />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['3'] }}>
+            <Text style={{ fontSize: 40 }}>{health.emoji}</Text>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{
+                fontFamily: FONT.display2,
+                fontSize: 22, lineHeight: 28,
+                color: health.color, letterSpacing: -0.3,
+              }}>
+                {health.label}
+              </Text>
+              <Text style={[T.small, { color: C.text2 }]}>{health.description}</Text>
+            </View>
+            {health.level !== 'healthy' && (
+              <PressableScale
+                onPress={onJumpReports}
+                haptic="tap"
+                style={{
+                  paddingHorizontal: SP['3'], paddingVertical: 7,
+                  backgroundColor: health.color,
+                  borderRadius: R.full,
+                }}
+              >
+                <Text style={[T.smallB, { color: '#fff' }]}>確認</Text>
+              </PressableScale>
+            )}
+          </View>
+        </View>
       </View>
 
       {/* Top reported */}
       <SectionHeader
-        label="TOP REPORTED"
+        label="Top Reported"
         right={
-          <PressableScale onPress={onJumpReports} haptic="tap" hitSlop={6}>
-            <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>詳細を見る →</Text>
-          </PressableScale>
+          (topReports?.length ?? 0) > 0 ? (
+            <PressableScale onPress={onJumpReports} haptic="tap" hitSlop={6}>
+              <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>もっと見る →</Text>
+            </PressableScale>
+          ) : null
         }
       />
       <View style={{ paddingHorizontal: SP['4'], gap: SP['2'] }}>
         {topReports === undefined ? (
           <View style={{ paddingVertical: SP['6'], alignItems: 'center' }}><Spinner /></View>
         ) : topReports.length === 0 ? (
-          <Text style={[T.small, { color: C.text3, paddingVertical: SP['4'] }]}>通報されている投稿はありません</Text>
+          <View style={{
+            padding: SP['5'], alignItems: 'center', gap: SP['1'],
+            backgroundColor: C.bg2, borderRadius: R.lg,
+            borderWidth: 1, borderColor: C.border,
+          }}>
+            <Text style={{ fontSize: 28 }}>✨</Text>
+            <Text style={[T.small, { color: C.text3 }]}>通報されている投稿はありません</Text>
+          </View>
         ) : (
           topReports.map((r) => (
             <PressableScale
               key={r.post_id}
               onPress={() => router.push(`/admin/post/${r.post_id}` as never)}
               haptic="tap"
-              style={{
+              style={[{
                 padding: SP['3'],
                 backgroundColor: C.bg2,
                 borderRadius: R.lg,
                 borderWidth: 1,
                 borderColor: C.border,
                 gap: 6,
-              }}
+              }, SHADOW.card]}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
                 <ReportCountBadge count={r.reports_count} />
@@ -371,59 +573,37 @@ function DashboardTab({ bottomInset, onJumpReports }: { bottomInset: number; onJ
       </View>
 
       {/* Recent activity */}
-      <SectionHeader label="RECENT ACTIVITY" />
-      <View style={{ paddingHorizontal: SP['4'], gap: 4 }}>
-        {log === undefined ? (
-          <View style={{ paddingVertical: SP['6'], alignItems: 'center' }}><Spinner /></View>
-        ) : log.length === 0 ? (
-          <Text style={[T.small, { color: C.text3, paddingVertical: SP['4'] }]}>履歴はまだありません</Text>
-        ) : (
-          log.map((e) => <ActivityRow key={e.id} entry={e} />)
-        )}
+      <SectionHeader label="Recent Activity" />
+      <View style={{ paddingHorizontal: SP['4'] }}>
+        <View style={{
+          backgroundColor: C.bg2,
+          borderRadius: R.lg,
+          borderWidth: 1,
+          borderColor: C.border,
+          overflow: 'hidden',
+        }}>
+          {log === undefined ? (
+            <View style={{ paddingVertical: SP['6'], alignItems: 'center' }}><Spinner /></View>
+          ) : log.length === 0 ? (
+            <Text style={[T.small, { color: C.text3, padding: SP['4'], textAlign: 'center' }]}>履歴はまだありません</Text>
+          ) : (
+            log.map((e, idx) => <ActivityRow key={e.id} entry={e} last={idx === log.length - 1} />)
+          )}
+        </View>
       </View>
-    </ScrollView>
-  );
-}
-
-function KpiBig({
-  label, value, tone = 'neutral',
-}: {
-  label: string;
-  value: number | undefined;
-  tone?: KpiTone;
-}) {
-  // 2 列固定 — flexBasis 48% で割る
-  const p: KpiPalette = KPI_PALETTE[tone];
-  const showValue = value !== undefined ? value.toLocaleString('ja-JP') : '—';
-  return (
-    <View
-      style={{
-        flexBasis: '48%',
-        flexGrow: 1,
-        padding: SP['3'],
-        backgroundColor: p.bg,
-        borderRadius: R.lg,
-        borderWidth: 1,
-        borderColor: p.border,
-        gap: 4,
-      }}
-    >
-      <Text style={{ fontSize: 28, lineHeight: 32, color: p.fg, fontWeight: '700', letterSpacing: -0.4 }}>
-        {showValue}
-      </Text>
-      <Text style={{ fontSize: 11, color: C.text3, fontWeight: '600' }}>{label}</Text>
     </View>
   );
 }
 
-function ActivityRow({ entry }: { entry: AdminModerationLogEntry }) {
-  const meta = ACTION_META[entry.action] ?? { label: entry.action, color: C.text3 };
+function ActivityRow({ entry, last }: { entry: AdminModerationLogEntry; last: boolean }) {
+  const meta = ACTION_META[entry.action] ?? { label: entry.action, color: C.text3, emoji: '·' };
   return (
     <View style={{
       paddingHorizontal: SP['3'], paddingVertical: SP['2'],
       flexDirection: 'row', alignItems: 'center', gap: SP['2'],
-      borderBottomWidth: 1, borderBottomColor: C.divider,
+      borderBottomWidth: last ? 0 : 1, borderBottomColor: C.divider,
     }}>
+      <Text style={{ fontSize: 16 }}>{meta.emoji}</Text>
       <View style={{
         paddingHorizontal: SP['2'], paddingVertical: 1,
         backgroundColor: meta.color + '22', borderRadius: R.sm,
@@ -440,9 +620,9 @@ function ActivityRow({ entry }: { entry: AdminModerationLogEntry }) {
 }
 
 // ============================================================
-// Tab 2 — 通報 (NEW)
+// Tab 2 — 通報
 // ============================================================
-function ReportsTab({ bottomInset }: { bottomInset: number }) {
+function ReportsTab() {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [minReports, setMinReports] = useState<1 | 3 | 5>(1);
@@ -467,26 +647,20 @@ function ReportsTab({ bottomInset }: { bottomInset: number }) {
   });
 
   return (
-    <View style={{ flex: 1 }}>
+    <View>
       <SearchInput value={search} onChange={setSearch} placeholder="本文で検索…" />
       <View style={{ flexDirection: 'row', gap: 6, paddingHorizontal: SP['4'], paddingBottom: SP['2'] }}>
-        <SortChip label="すべて"   active={minReports === 1} onPress={() => setMinReports(1)} />
-        <SortChip label="3件以上" active={minReports === 3} onPress={() => setMinReports(3)} />
-        <SortChip label="5件以上" active={minReports === 5} onPress={() => setMinReports(5)} />
+        <SortChip label="全部"     active={minReports === 1} onPress={() => setMinReports(1)} />
+        <SortChip label="3件以上"  active={minReports === 3} onPress={() => setMinReports(3)} />
+        <SortChip label="5件以上"  active={minReports === 5} onPress={() => setMinReports(5)} />
       </View>
-      <ScrollView
-        contentContainerStyle={{
-          paddingHorizontal: SP['4'],
-          paddingBottom: bottomInset + SP['10'],
-          gap: SP['2'],
-        }}
-      >
+      <View style={{ paddingHorizontal: SP['4'], gap: SP['2'] }}>
         {isLoading ? (
           <View style={{ padding: SP['8'], alignItems: 'center' }}><Spinner /></View>
         ) : error ? (
           <ErrorBlock message="通報を取得できませんでした" onRetry={() => void refetch()} />
         ) : (data ?? []).length === 0 ? (
-          <EmptyBlock label="該当する通報はありません" />
+          <EmptyBlock emoji="✨" label="通報されている投稿はありません" />
         ) : (
           (data ?? []).map((r) => (
             <ReportRow
@@ -499,7 +673,7 @@ function ReportsTab({ bottomInset }: { bottomInset: number }) {
             />
           ))
         )}
-      </ScrollView>
+      </View>
       <ConfirmDialog
         visible={pendingDelete !== null}
         title="投稿を削除"
@@ -529,13 +703,13 @@ function ReportCountBadge({ count }: { count: number }) {
         : { fg: C.text2, bg: C.bg3, border: C.border };
   return (
     <View style={{
-      minWidth: 38,
+      minWidth: 40,
       paddingHorizontal: SP['2'], paddingVertical: 2,
-      backgroundColor: meta.bg, borderRadius: R.sm,
+      backgroundColor: meta.bg, borderRadius: R.md,
       borderWidth: 1, borderColor: meta.border,
       alignItems: 'center',
     }}>
-      <Text style={{ fontSize: 12, fontWeight: '800', color: meta.fg }}>
+      <Text style={{ fontSize: 13, fontWeight: '800', color: meta.fg, lineHeight: 15 }}>
         {count}
       </Text>
       <Text style={{ fontSize: 8, color: meta.fg, letterSpacing: 0.6, fontWeight: '700' }}>
@@ -556,45 +730,41 @@ function ReportRow({
 }) {
   const v = VISIBILITY_META[row.visibility] ?? { label: row.visibility, color: C.text3 };
   return (
-    <View style={{
+    <View style={[{
       padding: SP['3'],
       backgroundColor: C.bg2,
       borderRadius: R.lg,
       borderWidth: 1,
       borderColor: C.border,
       gap: SP['2'],
-    }}>
-      {/* 1 行目: badge + visibility + last reported */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+    }, SHADOW.card]}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: SP['3'] }}>
         <ReportCountBadge count={row.reports_count} />
-        <View style={{
-          paddingHorizontal: SP['2'], paddingVertical: 1,
-          backgroundColor: v.color + '22', borderRadius: R.sm,
-          borderWidth: 1, borderColor: v.color + '55',
-        }}>
-          <Text style={{ fontSize: 10, color: v.color, fontWeight: '700' }}>{v.label}</Text>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text style={[T.body, { color: C.text, lineHeight: 21 }]} numberOfLines={3}>
+            {previewText(row.content)}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], flexWrap: 'wrap' }}>
+            <Text style={[T.captionM, { color: C.accentLight }]} numberOfLines={1}>
+              {row.author_nickname ?? '(unknown)'}
+            </Text>
+            <View style={{
+              paddingHorizontal: SP['2'], paddingVertical: 1,
+              backgroundColor: v.color + '22', borderRadius: R.sm,
+              borderWidth: 1, borderColor: v.color + '55',
+            }}>
+              <Text style={{ fontSize: 9, color: v.color, fontWeight: '700' }}>{v.label}</Text>
+            </View>
+            <View style={{ flex: 1 }} />
+            <Text style={[T.caption, { color: C.text4 }]}>{formatRelative(row.last_reported_at)}</Text>
+          </View>
         </View>
-        <View style={{ flex: 1 }} />
-        <Text style={[T.caption, { color: C.text4 }]}>{formatRelative(row.last_reported_at)}</Text>
       </View>
 
-      {/* 2 行目: author (tap to author) */}
-      <PressableScale onPress={onViewAuthor} haptic="tap" hitSlop={6}>
-        <Text style={[T.captionM, { color: C.accentLight }]} numberOfLines={1}>
-          {row.author_nickname ?? '(unknown)'} の投稿 →
-        </Text>
-      </PressableScale>
-
-      {/* 3 行目: content preview */}
-      <Text style={[T.body, { color: C.text, lineHeight: 21 }]} numberOfLines={3}>
-        {previewText(row.content)}
-      </Text>
-
-      {/* 4 行目: actions */}
-      <View style={{ flexDirection: 'row', gap: SP['2'], justifyContent: 'flex-end' }}>
-        <ActionButton label="作者を見る" tone="neutral" onPress={onViewAuthor} />
-        <ActionButton label="投稿を見る" tone="accent"  onPress={onView} />
-        <ActionButton label="削除"       tone="danger"  onPress={onDelete} busy={busy} />
+      <View style={{ flexDirection: 'row', gap: SP['2'], justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+        <ActionButton label="作者を見る"  tone="neutral" onPress={onViewAuthor} />
+        <ActionButton label="投稿詳細"    tone="accent"  onPress={onView} />
+        <ActionButton label="削除"        tone="danger"  onPress={onDelete} busy={busy} />
       </View>
     </View>
   );
@@ -623,7 +793,7 @@ function ActionButton({
       haptic={tone === 'danger' ? 'warn' : 'tap'}
       disabled={busy}
       style={{
-        paddingHorizontal: SP['3'], paddingVertical: 6,
+        paddingHorizontal: SP['3'], paddingVertical: 7,
         backgroundColor: p.bg,
         borderRadius: R.full,
         borderWidth: 1,
@@ -633,7 +803,7 @@ function ActionButton({
       }}
     >
       {busy && <ActivityIndicator size="small" color={p.fg} />}
-      <Text style={[T.smallB, { color: p.fg }]}>{label}</Text>
+      <Text style={[T.smallB, { color: p.fg, fontSize: 12 }]}>{label}</Text>
     </PressableScale>
   );
 }
@@ -641,7 +811,7 @@ function ActionButton({
 // ============================================================
 // Tab 3 — ユーザー
 // ============================================================
-function UsersTab({ bottomInset }: { bottomInset: number }) {
+function UsersTab() {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'recent' | 'concern' | 'trust' | 'problem'>('recent');
@@ -651,7 +821,6 @@ function UsersTab({ bottomInset }: { bottomInset: number }) {
 
   const isProblemMode = sortBy === 'problem';
 
-  // 通常モード — 全ユーザー
   const usersQuery = useQuery({
     queryKey: ['admin-users', search],
     queryFn: () => fetchAllUsers({ search, limit: 200 }),
@@ -659,7 +828,6 @@ function UsersTab({ bottomInset }: { bottomInset: number }) {
     enabled: !isProblemMode,
   });
 
-  // 問題ユーザーモード — 別 view
   const problemQuery = useQuery({
     queryKey: ['admin-problem-users'],
     queryFn: () => fetchProblemUsers({ limit: 200, sortBy: 'concern' }),
@@ -667,10 +835,9 @@ function UsersTab({ bottomInset }: { bottomInset: number }) {
     enabled: isProblemMode,
   });
 
-  // 共通 AdminUser 型に normalize
   const list: AdminUser[] = useMemo(() => {
     if (isProblemMode) {
-      const arr = problemQuery.data ?? [];
+      const arr: AdminProblemUser[] = problemQuery.data ?? [];
       return arr.map<AdminUser>((u) => ({
         id: u.id,
         nickname: u.nickname,
@@ -725,7 +892,7 @@ function UsersTab({ bottomInset }: { bottomInset: number }) {
   }, [unsuspend]);
 
   return (
-    <View style={{ flex: 1 }}>
+    <View>
       <SearchInput value={search} onChange={setSearch} placeholder="ニックネームで検索…" />
       <ScrollView
         horizontal
@@ -735,23 +902,17 @@ function UsersTab({ bottomInset }: { bottomInset: number }) {
         }}
       >
         <SortChip label="最新"           active={sortBy === 'recent'}  onPress={() => setSortBy('recent')} />
+        <SortChip label="信頼スコア低い順" active={sortBy === 'trust'}   onPress={() => setSortBy('trust')} />
         <SortChip label="通報多い順"     active={sortBy === 'concern'} onPress={() => setSortBy('concern')} />
-        <SortChip label="信頼低い順"     active={sortBy === 'trust'}   onPress={() => setSortBy('trust')} />
         <SortChip label="問題ユーザー"   active={sortBy === 'problem'} onPress={() => setSortBy('problem')} />
       </ScrollView>
-      <ScrollView
-        contentContainerStyle={{
-          paddingHorizontal: SP['4'],
-          paddingBottom: bottomInset + SP['10'],
-          gap: SP['2'],
-        }}
-      >
+      <View style={{ paddingHorizontal: SP['4'], gap: SP['2'] }}>
         {isLoading ? (
           <View style={{ padding: SP['8'], alignItems: 'center' }}><Spinner /></View>
         ) : error ? (
           <ErrorBlock message="ユーザーを取得できませんでした" onRetry={() => void refetch()} />
         ) : list.length === 0 ? (
-          <EmptyBlock label="該当するユーザーはありません" />
+          <EmptyBlock emoji="📭" label="ユーザーがいません" />
         ) : (
           list.map((u) => (
             <UserRow
@@ -767,7 +928,7 @@ function UsersTab({ bottomInset }: { bottomInset: number }) {
             />
           ))
         )}
-      </ScrollView>
+      </View>
       <ConfirmDialog
         visible={pendingSuspend !== null}
         title="ユーザーを凍結"
@@ -784,6 +945,32 @@ function UsersTab({ bottomInset }: { bottomInset: number }) {
   );
 }
 
+function UserAvatar({ name }: { name: string }) {
+  // deterministic accent based on first char
+  const code = (name.charCodeAt(0) || 0) % 4;
+  const colors: ReadonlyArray<readonly [string, string]> = [
+    [C.accent, C.accentDeep],
+    [C.pink, C.accent],
+    [C.blue, C.accentDeep],
+    [C.amber, C.red],
+  ];
+  const pair = colors[code] ?? colors[0]!;
+  const initial = (name || '?').trim().charAt(0).toUpperCase();
+  return (
+    <LinearGradient
+      colors={pair as unknown as readonly [string, string, ...string[]]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={{
+        width: 40, height: 40, borderRadius: R.full,
+        alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      <Text style={{ color: '#fff', fontWeight: '800', fontSize: 16 }}>{initial}</Text>
+    </LinearGradient>
+  );
+}
+
 function UserRow({
   user, busy, onOpen, onMessage, onToggle,
 }: {
@@ -795,54 +982,52 @@ function UserRow({
 }) {
   const stateMeta = STATE_META[user.account_state] ?? { label: user.account_state, color: C.text3 };
   const isSuspended = user.account_state === 'suspended';
+  const displayName = user.nickname ?? '(no nickname)';
 
   return (
-    <PressableScale
-      onPress={onOpen}
-      haptic="tap"
-      style={{
-        padding: SP['3'],
-        backgroundColor: C.bg2,
-        borderRadius: R.lg,
-        borderWidth: 1,
-        borderColor: C.border,
-        gap: SP['2'],
-      }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], flexWrap: 'wrap' }}>
-        <Text style={[T.bodyB, { color: C.text, flexShrink: 1 }]} numberOfLines={1}>
-          {user.nickname ?? '(no nickname)'}
-        </Text>
-        {user.is_admin && (
-          <View style={{
-            paddingHorizontal: SP['2'], paddingVertical: 1,
-            backgroundColor: C.accentBg, borderRadius: R.sm,
-            borderWidth: 1, borderColor: C.accent + '55',
-          }}>
-            <Text style={{ fontSize: 9, color: C.accentLight, fontWeight: '700' }}>ADMIN</Text>
+    <View style={[{
+      padding: SP['3'],
+      backgroundColor: C.bg2,
+      borderRadius: R.lg,
+      borderWidth: 1,
+      borderColor: C.border,
+      gap: SP['2'],
+    }, SHADOW.card]}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['3'] }}>
+        <UserAvatar name={displayName} />
+        <View style={{ flex: 1, gap: 4 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], flexWrap: 'wrap' }}>
+            <Text style={[T.bodyB, { color: C.text, flexShrink: 1 }]} numberOfLines={1}>
+              {displayName}
+            </Text>
+            {user.is_admin && (
+              <View style={{
+                paddingHorizontal: SP['2'], paddingVertical: 1,
+                backgroundColor: C.accentBg, borderRadius: R.sm,
+                borderWidth: 1, borderColor: C.accent + '55',
+              }}>
+                <Text style={{ fontSize: 9, color: C.accentLight, fontWeight: '700' }}>ADMIN</Text>
+              </View>
+            )}
+            <View style={{
+              paddingHorizontal: SP['2'], paddingVertical: 1,
+              backgroundColor: stateMeta.color + '22', borderRadius: R.sm,
+              borderWidth: 1, borderColor: stateMeta.color + '55',
+            }}>
+              <Text style={{ fontSize: 10, color: stateMeta.color, fontWeight: '700' }}>{stateMeta.label}</Text>
+            </View>
           </View>
-        )}
-        <View style={{
-          paddingHorizontal: SP['2'], paddingVertical: 1,
-          backgroundColor: stateMeta.color + '22', borderRadius: R.sm,
-          borderWidth: 1, borderColor: stateMeta.color + '55',
-        }}>
-          <Text style={{ fontSize: 10, color: stateMeta.color, fontWeight: '700' }}>{stateMeta.label}</Text>
+          <View style={{ flexDirection: 'row', gap: SP['4'], flexWrap: 'wrap' }}>
+            <Stat label="投稿" value={String(user.post_count)} />
+            <Stat label="信頼" value={String(user.trust_score)} />
+            <Stat label="通報" value={String(user.concern_received_count)} accent={user.concern_received_count > 0 ? C.red : undefined} />
+          </View>
         </View>
       </View>
 
-      <Text style={[T.mono, { color: C.text4, fontSize: 10 }]} numberOfLines={1}>
-        {user.id}
-      </Text>
-
-      <View style={{ flexDirection: 'row', gap: SP['4'], flexWrap: 'wrap' }}>
-        <Stat label="信頼" value={String(user.trust_score)} />
-        <Stat label="投稿" value={String(user.post_count)} />
-        <Stat label="通報" value={String(user.concern_received_count)} accent={user.concern_received_count > 0 ? C.red : undefined} />
-      </View>
-
-      <View style={{ flexDirection: 'row', gap: SP['2'], justifyContent: 'flex-end' }}>
-        <ActionButton label="DM" tone="accent" onPress={onMessage} />
+      <View style={{ flexDirection: 'row', gap: SP['2'], justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+        <ActionButton label="詳細" tone="neutral" onPress={onOpen} />
+        <ActionButton label="DM"   tone="accent"  onPress={onMessage} />
         <ActionButton
           label={isSuspended ? '解除' : '凍結'}
           tone={isSuspended ? 'amber' : 'danger'}
@@ -850,16 +1035,17 @@ function UserRow({
           busy={busy}
         />
       </View>
-    </PressableScale>
+    </View>
   );
 }
 
 // ============================================================
-// Tab 4 — 投稿 (既存ロジック)
+// Tab 4 — 投稿
 // ============================================================
-function PostsTab({ bottomInset }: { bottomInset: number }) {
+function PostsTab() {
   const router = useRouter();
   const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<'recent' | 'popular' | 'reports'>('recent');
   const [pendingDelete, setPendingDelete] = useState<AdminPost | null>(null);
   const qc = useQueryClient();
   const { show } = useToastStore();
@@ -869,6 +1055,16 @@ function PostsTab({ bottomInset }: { bottomInset: number }) {
     queryFn: () => fetchAllPosts({ search, limit: 200 }),
     staleTime: 30_000,
   });
+
+  const sorted: AdminPost[] = useMemo(() => {
+    const arr = [...(data ?? [])];
+    if (sortBy === 'popular') {
+      arr.sort((a, b) => b.likes_count - a.likes_count);
+    } else if (sortBy === 'reports') {
+      arr.sort((a, b) => b.concern_count - a.concern_count);
+    }
+    return arr;
+  }, [data, sortBy]);
 
   const remove = useMutation({
     mutationFn: deletePost,
@@ -881,23 +1077,22 @@ function PostsTab({ bottomInset }: { bottomInset: number }) {
   });
 
   return (
-    <View style={{ flex: 1 }}>
+    <View>
       <SearchInput value={search} onChange={setSearch} placeholder="本文で検索…" />
-      <ScrollView
-        contentContainerStyle={{
-          paddingHorizontal: SP['4'],
-          paddingBottom: bottomInset + SP['10'],
-          gap: SP['2'],
-        }}
-      >
+      <View style={{ flexDirection: 'row', gap: 6, paddingHorizontal: SP['4'], paddingBottom: SP['2'] }}>
+        <SortChip label="最新" active={sortBy === 'recent'}  onPress={() => setSortBy('recent')} />
+        <SortChip label="人気" active={sortBy === 'popular'} onPress={() => setSortBy('popular')} />
+        <SortChip label="通報" active={sortBy === 'reports'} onPress={() => setSortBy('reports')} />
+      </View>
+      <View style={{ paddingHorizontal: SP['4'], gap: SP['2'] }}>
         {isLoading ? (
           <View style={{ padding: SP['8'], alignItems: 'center' }}><Spinner /></View>
         ) : error ? (
           <ErrorBlock message="投稿を取得できませんでした" onRetry={() => void refetch()} />
-        ) : (data ?? []).length === 0 ? (
-          <EmptyBlock label="該当する投稿はありません" />
+        ) : sorted.length === 0 ? (
+          <EmptyBlock emoji="📭" label="投稿がありません" />
         ) : (
-          (data ?? []).map((p) => (
+          sorted.map((p) => (
             <PostRow
               key={p.id}
               post={p}
@@ -907,7 +1102,7 @@ function PostsTab({ bottomInset }: { bottomInset: number }) {
             />
           ))
         )}
-      </ScrollView>
+      </View>
       <ConfirmDialog
         visible={pendingDelete !== null}
         title="投稿を削除"
@@ -934,18 +1129,14 @@ function PostRow({
 }) {
   const vMeta = VISIBILITY_META[post.visibility] ?? { label: post.visibility, color: C.text3 };
   return (
-    <PressableScale
-      onPress={onOpen}
-      haptic="tap"
-      style={{
-        padding: SP['3'],
-        backgroundColor: C.bg2,
-        borderRadius: R.lg,
-        borderWidth: 1,
-        borderColor: C.border,
-        gap: SP['2'],
-      }}
-    >
+    <View style={[{
+      padding: SP['3'],
+      backgroundColor: C.bg2,
+      borderRadius: R.lg,
+      borderWidth: 1,
+      borderColor: C.border,
+      gap: SP['2'],
+    }, SHADOW.card]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], flexWrap: 'wrap' }}>
         <View style={{
           paddingHorizontal: SP['2'], paddingVertical: 1,
@@ -959,7 +1150,7 @@ function PostRow({
         </Text>
         <View style={{ flex: 1 }} />
         <Text style={[T.caption, { color: C.text4 }]}>
-          {new Date(post.created_at).toLocaleDateString('ja-JP')}
+          {formatRelative(post.created_at)}
         </Text>
       </View>
 
@@ -969,15 +1160,12 @@ function PostRow({
 
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['4'], flexWrap: 'wrap' }}>
         <Stat label="いいね" value={String(post.likes_count)} />
-        <Stat label="通報" value={String(post.concern_count)} accent={post.concern_count > 0 ? C.red : undefined} />
+        <Stat label="通報"   value={String(post.concern_count)} accent={post.concern_count > 0 ? C.red : undefined} />
         <View style={{ flex: 1 }} />
+        <ActionButton label="詳細" tone="accent"  onPress={onOpen} />
         <ActionButton label="削除" tone="danger" onPress={onDelete} busy={busy} />
       </View>
-
-      <Text style={[T.mono, { color: C.text4, fontSize: 10 }]} numberOfLines={1}>
-        {post.id}
-      </Text>
-    </PressableScale>
+    </View>
   );
 }
 
@@ -989,8 +1177,8 @@ function SearchInput({ value, onChange, placeholder }: { value: string; onChange
     <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'], paddingBottom: SP['3'] }}>
       <View style={{
         flexDirection: 'row', alignItems: 'center', gap: SP['2'],
-        backgroundColor: C.bg3,
-        borderRadius: R.md,
+        backgroundColor: C.bg2,
+        borderRadius: R.full,
         borderWidth: 1,
         borderColor: C.border,
         paddingHorizontal: SP['3'],
@@ -1005,7 +1193,7 @@ function SearchInput({ value, onChange, placeholder }: { value: string; onChange
           autoCorrect={false}
           style={[
             T.body,
-            { color: C.text, flex: 1, paddingVertical: SP['3'] },
+            { color: C.text, flex: 1, paddingVertical: 10 },
           ]}
         />
         {value.length > 0 && (
@@ -1026,11 +1214,11 @@ function SortChip({ label, active, onPress }: { label: string; active: boolean; 
       hitSlop={10}
       style={{
         paddingHorizontal: SP['3'],
-        paddingVertical: 4,
-        backgroundColor: active ? C.accentBg : C.bg3,
+        paddingVertical: 6,
+        backgroundColor: active ? C.accentBg : C.bg2,
         borderRadius: R.full,
         borderWidth: 1,
-        borderColor: active ? C.accent + '55' : C.border,
+        borderColor: active ? C.accent + '66' : C.border,
       }}
     >
       <Text style={[T.caption, { color: active ? C.accentLight : C.text2, fontWeight: '700' }]}>{label}</Text>
@@ -1047,10 +1235,14 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
   );
 }
 
-function EmptyBlock({ label }: { label: string }) {
+function EmptyBlock({ label, emoji = '📭' }: { label: string; emoji?: string }) {
   return (
-    <View style={{ padding: SP['8'], alignItems: 'center', gap: SP['2'] }}>
-      <Text style={{ fontSize: 36 }}>📭</Text>
+    <View style={{
+      padding: SP['8'], alignItems: 'center', gap: SP['2'],
+      backgroundColor: C.bg2, borderRadius: R.lg,
+      borderWidth: 1, borderColor: C.border,
+    }}>
+      <Text style={{ fontSize: 36 }}>{emoji}</Text>
       <Text style={[T.body, { color: C.text2 }]}>{label}</Text>
     </View>
   );
@@ -1078,7 +1270,6 @@ function ErrorBlock({ message, onRetry }: { message: string; onRetry: () => void
 
 function previewText(s: string): string {
   if (!s) return '(本文なし)';
-  // 80 文字 + ellipsis。改行はスペースに潰してレイアウト安定。
   const clean = s.replace(/\s+/g, ' ').trim();
   return clean.length > 80 ? clean.slice(0, 80) + '…' : clean;
 }
