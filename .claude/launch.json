@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "geek-dist",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "geek-v4/dist", "-l", "9125"],
+      "port": 9125
+    },
+    {
+      "name": "geek-admin-dist",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "geek-admin/dist", "-s", "-l", "9126"],
+      "port": 9126
+    }
+  ]
+}

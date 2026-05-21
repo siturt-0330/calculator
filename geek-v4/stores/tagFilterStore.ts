@@ -3,10 +3,32 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const KEY_LIKED = 'geek:liked_tags';
 const KEY_BLOCKED = 'geek:blocked_tags';
-// v3: 自殺/虐待/薬物/個人情報/誹謗中傷など、社会的にもブロック推奨されるタグを追加
-const KEY_BLOCKED_INIT = 'geek:blocked_tags_init_v3';
+// v4: ゴシップ/スキャンダル/事件報道など、人が不幸になる関連のタグを追加
+const KEY_BLOCKED_INIT = 'geek:blocked_tags_init_v4';
 const KEY_BLOCKED_INIT_V1 = 'geek:blocked_tags_init_v1';
 const KEY_BLOCKED_INIT_V2 = 'geek:blocked_tags_init_v2';
+const KEY_BLOCKED_INIT_V3 = 'geek:blocked_tags_init_v3';
+
+// 「人が不幸になる」「トラブル」「スキャンダル」系のタグ — トレンド/フィードから
+// 強制除外する用途で使う。DEFAULT_BLOCKED_TAGS とマージしてユーザーの初回 hydrate
+// 時にもブロックリストへ入る。
+// このカテゴリは trending では**ユーザー設定に関わらず**絶対に出さない (= 検閲ではなく
+// 「健全な趣味 SNS」というプロダクト価値の表明)。
+export const GOSSIP_TRENDING_BLOCKLIST = [
+  // 不倫・スキャンダル系
+  '浮気', '不倫', '熱愛', '熱愛報道', 'スクープ', '報道', 'ゴシップ', 'ゴシップ記事',
+  '暴露', '暴露話', '流出', 'リーク', 'リーク情報', '文春', '文春砲', '週刊文春',
+  '週刊誌', 'フライデー', '新潮', '芸能ニュース', 'スキャンダル',
+  '略奪愛', '二股', '三股', '不貞', '離婚', '別居', '修羅場', '不仲', '破局',
+  // 事件・事故・犯罪報道
+  '事件', '事故', '訴訟', '裁判', '逮捕', '書類送検', '容疑', '容疑者',
+  '殺人', '殺害', '殺人事件', '強盗事件', '暴行', '暴行事件', '誘拐',
+  '不祥事', '謝罪会見', '辞任', '解雇', '解任', '降格',
+  // 死亡・訃報
+  '死亡', '訃報', '死去', '急逝', '逝去', '自殺報道', '事故死', '突然死',
+  // 炎上・批判
+  '炎上', '炎上中', '大炎上', '叩き', '炎上商法', '物議', '批判殺到',
+];
 
 // 初回のみ自動で適用されるデフォルトのブロックタグ
 // 削除可能 (ユーザーは自由に解除できる)
@@ -41,7 +63,12 @@ export const DEFAULT_BLOCKED_TAGS = [
   'カルト', '宗教勧誘', '勧誘',
   // 過激コンテンツ
   'グロ', '流血', '死体', '猟奇',
+  // ゴシップ・スキャンダル・事件報道 (v4 で追加)
+  ...GOSSIP_TRENDING_BLOCKLIST,
 ];
+
+// Set 化したもの — fetchTrending 等でホットパスで毎回構築しなくて済むようエクスポート
+export const GOSSIP_TRENDING_BLOCKLIST_SET = new Set(GOSSIP_TRENDING_BLOCKLIST);
 
 type TagFilterState = {
   likedTags: string[];
@@ -60,12 +87,13 @@ export const useTagFilterStore = create<TagFilterState>((set, get) => ({
   hydrated: false,
   hydrate: async () => {
     try {
-      const [liked, blocked, initCurrent, initV1, initV2] = await Promise.all([
+      const [liked, blocked, initCurrent, initV1, initV2, initV3] = await Promise.all([
         AsyncStorage.getItem(KEY_LIKED),
         AsyncStorage.getItem(KEY_BLOCKED),
-        AsyncStorage.getItem(KEY_BLOCKED_INIT),    // = v3 現行
+        AsyncStorage.getItem(KEY_BLOCKED_INIT),    // = v4 現行
         AsyncStorage.getItem(KEY_BLOCKED_INIT_V1),
         AsyncStorage.getItem(KEY_BLOCKED_INIT_V2),
+        AsyncStorage.getItem(KEY_BLOCKED_INIT_V3),
       ]);
       const likedArr = liked ? (JSON.parse(liked) as string[]) : [];
       let blockedArr = blocked ? (JSON.parse(blocked) as string[]) : [];
@@ -81,6 +109,7 @@ export const useTagFilterStore = create<TagFilterState>((set, get) => ({
         // 旧キーは消しておく (二度と評価しない)
         if (initV1) await AsyncStorage.removeItem(KEY_BLOCKED_INIT_V1).catch((e) => console.warn('[tagFilterStore] AsyncStorage write failed:', e));
         if (initV2) await AsyncStorage.removeItem(KEY_BLOCKED_INIT_V2).catch((e) => console.warn('[tagFilterStore] AsyncStorage write failed:', e));
+        if (initV3) await AsyncStorage.removeItem(KEY_BLOCKED_INIT_V3).catch((e) => console.warn('[tagFilterStore] AsyncStorage write failed:', e));
       }
       set({
         likedTags: likedArr,

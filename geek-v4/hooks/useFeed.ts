@@ -8,10 +8,13 @@ import { useFeedStore } from '../stores/feedStore';
 import { useSearchSignalsStore } from '../stores/searchSignalsStore';
 import { useSearchClickStore } from '../stores/searchClickStore';
 import { smartSort } from '../lib/feed/smartRank';
+import { GOSSIP_TRENDING_BLOCKLIST_SET } from '../stores/tagFilterStore';
 import type { Post } from '../types/models';
 import { useQuery as useReactQuery } from '@tanstack/react-query';
 import { getEvents, computeProfile, rankFeed } from '../lib/personalize';
 import type { FeedEvent, RankableCandidate, RankReason } from '../lib/personalize';
+import { fetchTargetedAds, type Ad } from '../lib/api/ads';
+import { useAdPreferencesStore } from '../stores/adPreferencesStore';
 
 // React Query の persist cache は JSON 経由なので Set を直接保存できない (空の {} になる)。
 // 配列で返して使い側で Set に包む。
@@ -24,8 +27,18 @@ async function fetchTrendingTagList(): Promise<string[]> {
     .order('created_at', { ascending: false })
     .limit(200);
   const counts: Record<string, number> = {};
+  // ゴシップ/事件報道系のキーワード — 部分一致でもブロック
+  const gossipTriggers = ['炎上', '逮捕', '訃報', '不倫', '浮気', '熱愛', 'スキャンダル', 'スクープ', '事件', '殺人', '死亡', '訴訟', '謝罪'];
+  const isGossip = (tag: string) => {
+    if (GOSSIP_TRENDING_BLOCKLIST_SET.has(tag)) return true;
+    for (const trig of gossipTriggers) if (tag.includes(trig)) return true;
+    return false;
+  };
   for (const row of (data ?? []) as Array<{ tag_names: string[] }>) {
-    for (const t of row.tag_names ?? []) counts[t] = (counts[t] ?? 0) + 1;
+    for (const t of row.tag_names ?? []) {
+      if (isGossip(t)) continue;
+      counts[t] = (counts[t] ?? 0) + 1;
+    }
   }
   return Object.entries(counts).filter(([, c]) => c >= 2).map(([t]) => t);
 }
@@ -161,6 +174,36 @@ export function useFeed() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rawPosts, sort, likedTags, blockedTags, signals.tagFreq, signals.recentTags, trendingTags, ctrBoosts, profile]);
 
+  // ----------------------------------------------------------------
+  // タグターゲティング広告 — プライバシー保護 (個人 id は送らず、タグだけで配信)
+  // ----------------------------------------------------------------
+  // ユーザーが opt-out した場合は fetch 自体をスキップする。
+  // 興味タグは tagFreq の上位 10 件 (関心度の高い順)。
+  // exclude は blockedTags そのまま渡す。
+  const personalizedAds = useAdPreferencesStore((s) => s.personalizedAds);
+  const interestTags = useMemo(() => {
+    return Object.entries(signals.tagFreq)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 10)
+      .map(([t]) => t);
+  }, [signals.tagFreq]);
+  // クエリキーが「興味タグの中身」で安定するよう、文字列で hash 化する。
+  const interestTagsKey = interestTags.join('|');
+  const blockedTagsKey = blockedTags.join('|');
+  const adsQ = useReactQuery<Ad[]>({
+    queryKey: ['ads', interestTagsKey, blockedTagsKey],
+    queryFn: () => fetchTargetedAds(interestTags, blockedTags, 3),
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    enabled: personalizedAds,
+  });
+  // ads 配列を ID hash で安定化 — 同じ id の集合が返ってくる限り
+  // 参照が変わらず、下流の useMemo (feed の merge 等) が無駄に再評価されない。
+  const adsIdHash = (adsQ.data ?? []).map((a) => a.id).join('|');
+  const ads: Ad[] = useMemo(() => adsQ.data ?? [], [adsIdHash]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const loadMore = useCallback(() => {
     if (hasNextPage && !isFetching) fetchNextPage();
   }, [hasNextPage, isFetching, fetchNextPage]);
@@ -180,6 +223,13 @@ export function useFeed() {
   // ので、firstPageIds (上位 30 件 = 最も活発な投稿) を deps にして安定化する。
   // 下に scroll しても再 subscribe しない — fetch 経由の値が staleTime 後に更新される。
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // UPDATE event coalescing — multiple postgres_changes UPDATE events within
+  // 250ms are merged into a single setQueriesData call.  Previously each
+  // UPDATE re-allocated the entire pages/posts tree which thrashed React
+  // during scroll. Now we buffer partial updates by id and flush them on
+  // rAF after a short debounce.
+  const updateBuffer = useRef<Map<string, Partial<Post>>>(new Map());
+  const updateFlushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const visiblePostIdsRef = useRef<Set<string>>(new Set());
   // 現在表示中の全 post id を ref に同期 (UPDATE handler の client-side filter 用)
   useEffect(() => {
@@ -208,18 +258,37 @@ export function useFeed() {
           const updated = payload.new as Partial<Post> & { id: string };
           // 念のためクライアント側でも再チェック (filter が反映遅延した場合の保険)
           if (!visiblePostIdsRef.current.has(updated.id)) return;
-          qc.setQueriesData({ queryKey: ['feed'] }, (data: unknown) => {
-            if (!data || typeof data !== 'object') return data;
-            const old = data as { pages?: Array<{ posts: Post[] }> };
-            if (!old.pages) return data;
-            return {
-              ...old,
-              pages: old.pages.map((p) => ({
-                ...p,
-                posts: p.posts.map((post) => (post.id === updated.id ? { ...post, ...updated } : post)),
-              })),
-            };
-          });
+          // バッファに溜めて 250ms debounce で一括反映 — スクロール中に
+          // 大量の UPDATE が来ても React 再 render は 1 回に集約される
+          const existing = updateBuffer.current.get(updated.id);
+          updateBuffer.current.set(updated.id, { ...(existing ?? {}), ...updated });
+          if (updateFlushTimer.current) return;
+          updateFlushTimer.current = setTimeout(() => {
+            updateFlushTimer.current = null;
+            const patches = updateBuffer.current;
+            if (patches.size === 0) return;
+            updateBuffer.current = new Map();
+            qc.setQueriesData({ queryKey: ['feed'] }, (data: unknown) => {
+              if (!data || typeof data !== 'object') return data;
+              const old = data as { pages?: Array<{ posts: Post[] }> };
+              if (!old.pages) return data;
+              // どの page にも該当 id が無ければ早期 return で参照を維持
+              let touched = false;
+              const newPages = old.pages.map((p) => {
+                let pageTouched = false;
+                const newPosts = p.posts.map((post) => {
+                  const patch = patches.get(post.id);
+                  if (!patch) return post;
+                  pageTouched = true;
+                  return { ...post, ...patch };
+                });
+                if (!pageTouched) return p;
+                touched = true;
+                return { ...p, posts: newPosts };
+              });
+              return touched ? { ...old, pages: newPages } : data;
+            });
+          }, 250);
         },
       ).on(
         'postgres_changes',
@@ -238,8 +307,10 @@ export function useFeed() {
     return () => {
       detach();
       if (pendingTimer.current) clearTimeout(pendingTimer.current);
+      if (updateFlushTimer.current) clearTimeout(updateFlushTimer.current);
+      updateBuffer.current.clear();
     };
   }, [firstPageKey, firstPageIds, qc]);
 
-  return { posts, reasonsMap, communitiesByPost, loading: isLoading, refreshing, refresh, loadMore };
+  return { posts, reasonsMap, communitiesByPost, ads, interestTags, loading: isLoading, refreshing, refresh, loadMore };
 }

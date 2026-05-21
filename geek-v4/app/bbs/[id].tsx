@@ -53,6 +53,8 @@ export default function BBSThreadScreen() {
   // 「>>N で返信」: 該当番号を入力先頭に挿入してフォーカス。
   // 既に >>N が含まれていれば二重挿入しない。
   const quoteReply = useCallback((replyIndex: number) => {
+    // bounds check — 範囲外の index を引用すると存在しない >>N が挿入されてしまう
+    if (replyIndex < 0 || replyIndex >= replies.length) return;
     const tag = `>>${replyIndex + 1}`;
     setText((prev) => {
       if (prev.includes(tag)) return prev;
@@ -61,7 +63,7 @@ export default function BBSThreadScreen() {
     });
     // ちょい遅延 focus (state 反映後)
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, []);
+  }, [replies.length]);
 
   // @メンション候補 (#1, #2, ...)
   const mentionTargets = useMemo<MentionTarget[]>(

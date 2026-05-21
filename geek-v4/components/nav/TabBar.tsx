@@ -1,5 +1,5 @@
 import { View, Text, Platform } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { memo } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { C } from '../../design/tokens';
@@ -25,101 +25,139 @@ const LABELS: Record<TabKey, string> = {
   mypage: 'マイ',
 };
 
+// ============================================================
+// Slack 風 浮遊型タブバー (dark)
+// - 画面下に余白を持って "浮く" pill
+// - active タブだけが accent 色の小さな pill で強調される
+// - 背景は深い black + 薄い border / shadow で立体感
+// ============================================================
 export function TabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  const bottomPad = Math.max(insets.bottom, 8);
+  // pill の下マージン — safeArea 下端 + 余白
+  const bottomMargin = Math.max(insets.bottom, 8) + 8;
   const { unreadCount } = useNotifications();
 
-  // Web の glass-morphism: backdrop-filter で背後の content をぼかしつつ薄い alpha 背景。
-  // BlurView は web で no-op なので明示的に CSS を当てる。
-  const webGlassStyle =
-    Platform.OS === 'web'
-      ? // RN-web は backdrop-filter を直接通すので any キャストで as object 渡し
-        ({
-          backdropFilter: 'blur(20px) saturate(140%)',
-          WebkitBackdropFilter: 'blur(20px) saturate(140%)',
-          backgroundColor: 'rgba(10,10,10,0.72)',
-        } as object)
-      : null;
-
   return (
-    <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
-      <BlurView
-        intensity={Platform.OS === 'ios' ? TABBAR.bgBlur : 0}
-        tint="dark"
+    <View
+      pointerEvents="box-none"
+      style={{
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        alignItems: 'center',
+        paddingBottom: bottomMargin,
+      }}
+    >
+      {/* pill 本体 — 浮遊型の dark capsule */}
+      <View
         style={[
           {
-            paddingBottom: bottomPad,
-            backgroundColor:
-              Platform.OS === 'ios'
-                ? 'rgba(10,10,10,0.72)'
-                : Platform.OS === 'web'
-                  ? 'transparent'
-                  : 'rgba(10,10,10,0.96)',
-            borderTopWidth: 1,
-            borderTopColor: C.border,
+            flexDirection: 'row',
+            backgroundColor: '#141417',
+            borderRadius: 32,
+            paddingHorizontal: 8,
+            paddingVertical: 6,
+            gap: 2,
+            borderWidth: 1,
+            borderColor: 'rgba(255,255,255,0.06)',
+            // shadow
+            shadowColor: '#000',
+            shadowOpacity: 0.5,
+            shadowOffset: { width: 0, height: 8 },
+            shadowRadius: 24,
+            elevation: 12,
           },
-          webGlassStyle,
+          // web 用に backdrop-blur をオーバーレイ
+          Platform.OS === 'web'
+            ? ({
+                backgroundColor: 'rgba(20,20,23,0.92)',
+                backdropFilter: 'blur(20px) saturate(140%)',
+                WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+              } as object)
+            : null,
         ]}
       >
-        <View style={{ flexDirection: 'row', height: TABBAR.height }}>
-          {state.routes.map((route, index) => {
-            const focused = state.index === index;
-            const tab = ROUTE_TO_TAB[route.name];
-            if (!tab) return null;
+        {state.routes.map((route, index) => {
+          const focused = state.index === index;
+          const tab = ROUTE_TO_TAB[route.name];
+          if (!tab) return null;
 
-            const onPress = () => {
-              const event = navigation.emit({
-                type: 'tabPress',
-                target: route.key,
-                canPreventDefault: true,
-              });
-              if (!focused && !event.defaultPrevented) {
-                navigation.navigate(route.name, route.params as never);
-              }
-            };
+          const onPress = () => {
+            const event = navigation.emit({
+              type: 'tabPress',
+              target: route.key,
+              canPreventDefault: true,
+            });
+            if (!focused && !event.defaultPrevented) {
+              navigation.navigate(route.name, route.params as never);
+            }
+          };
 
-            return (
-              <HapticTab key={route.key} focused={focused} onPress={onPress}>
-                <View
-                  // Android では子要素の overflow が dimensions を超えると clip される。
-                  // badge が icon の右上に -6px はみ出るので明示的に visible 指定。
-                  style={{ alignItems: 'center', gap: TABBAR.labelGap, marginTop: 6, overflow: 'visible' }}
-                >
-                  {/* 上端に小さい accent ドット — active タブだけ点灯 */}
-                  <View
-                    style={{
-                      position: 'absolute',
-                      top: -6,
-                      width: 4,
-                      height: 4,
-                      borderRadius: 2,
-                      backgroundColor: focused ? C.accent : 'transparent',
-                      ...(focused
-                        ? {
-                            shadowColor: C.accent,
-                            shadowOpacity: 0.8,
-                            shadowRadius: 6,
-                            shadowOffset: { width: 0, height: 0 },
-                          }
-                        : {}),
-                    }}
-                  />
-                  <View style={{ overflow: 'visible' }}>
-                    <TabIcon tab={tab} focused={focused} />
-                    {tab === 'mypage' && (
-                      <NotificationBadge count={unreadCount} top={-3} right={-6} />
-                    )}
-                  </View>
-                  <Text style={[T.caption, { color: focused ? C.accent : C.text3 }]}>
-                    {LABELS[tab]}
-                  </Text>
-                </View>
-              </HapticTab>
-            );
-          })}
-        </View>
-      </BlurView>
+          return (
+            <HapticTab key={route.key} focused={focused} onPress={onPress}>
+              <TabPill
+                tab={tab}
+                focused={focused}
+                badgeCount={tab === 'mypage' ? unreadCount : 0}
+              />
+            </HapticTab>
+          );
+        })}
+      </View>
     </View>
   );
 }
+
+// 個別の「ピル」型タブ — memo 化して unreadCount 変更時に
+// mypage 以外の pill が再 render しないようにする
+const TabPill = memo(function TabPill({
+  tab,
+  focused,
+  badgeCount = 0,
+}: {
+  tab: TabKey;
+  focused: boolean;
+  badgeCount?: number;
+}) {
+  // active 時は accent 色の半透明 fill + icon/label が accent 色になる
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingVertical: 9,
+        paddingHorizontal: focused ? 14 : 12,
+        borderRadius: 22,
+        backgroundColor: focused ? 'rgba(124,106,247,0.18)' : 'transparent',
+        // active 時は subtle border + glow
+        borderWidth: focused ? 1 : 0,
+        borderColor: focused ? 'rgba(124,106,247,0.45)' : 'transparent',
+        minHeight: 40,
+      }}
+    >
+      <View style={{ overflow: 'visible' }}>
+        <TabIcon tab={tab} focused={focused} size={22} />
+        {badgeCount > 0 && (
+          <NotificationBadge count={badgeCount} top={-4} right={-6} />
+        )}
+      </View>
+      {focused && (
+        <Text
+          style={[
+            T.caption,
+            {
+              color: C.accent,
+              fontWeight: '700',
+              letterSpacing: 0.2,
+            },
+          ]}
+          numberOfLines={1}
+        >
+          {LABELS[tab]}
+        </Text>
+      )}
+    </View>
+  );
+});

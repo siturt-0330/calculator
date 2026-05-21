@@ -8,6 +8,7 @@ import { TABBAR } from '../../../design/tabbar';
 import { Icon } from '../../../constants/icons';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { EmptyState } from '../../../components/ui/EmptyState';
+import { OfficialBadge } from '../../../components/community/OfficialBadge';
 import { fetchMyCommunities, fetchMyCommunityFeed } from '../../../lib/api/communities';
 import type { Community, CommunityPostWithCommunity } from '../../../lib/api/communities';
 import { useAuthStore } from '../../../stores/authStore';
@@ -147,23 +148,39 @@ export default function CommunityScreen() {
                   haptic="tap"
                   style={{ alignItems: 'center', width: 70 }}
                 >
-                  <View
-                    style={{
-                      width: 56,
-                      height: 56,
-                      borderRadius: 28,
-                      backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      borderWidth: 1,
-                      borderColor: C.border,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {c.icon_url ? (
-                      <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                    ) : (
-                      <Text style={{ fontSize: 28 }}>{c.icon_emoji}</Text>
+                  <View style={{ position: 'relative' }}>
+                    <View
+                      style={{
+                        width: 56,
+                        height: 56,
+                        borderRadius: 28,
+                        backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderWidth: c.is_official ? 2 : 1,
+                        borderColor: c.is_official ? C.accent : C.border,
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {c.icon_url ? (
+                        <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                      ) : (
+                        <Text style={{ fontSize: 28 }}>{c.icon_emoji}</Text>
+                      )}
+                    </View>
+                    {c.is_official && (
+                      <View
+                        style={{
+                          position: 'absolute',
+                          right: -2,
+                          bottom: -2,
+                          borderWidth: 2,
+                          borderColor: C.bg,
+                          borderRadius: R.full,
+                        }}
+                      >
+                        <OfficialBadge size="sm" iconOnly />
+                      </View>
                     )}
                   </View>
                   <Text
@@ -299,11 +316,16 @@ export default function CommunityScreen() {
                     )}
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
-                      {p.community?.name ?? 'コミュニティ'}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
+                        {p.community?.name ?? 'コミュニティ'}
+                      </Text>
+                      {p.community?.is_official && <OfficialBadge size="sm" />}
+                    </View>
                     <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
-                      {p.author_nickname ?? '匿名'} · {timeAgo(p.created_at)}
+                      {p.official_author
+                        ? `${p.official_author.name || '公式管理者'}${p.official_author.organization ? ` · ${p.official_author.organization}` : ''} · ${timeAgo(p.created_at)}`
+                        : `${p.author_nickname ?? '匿名'} · ${timeAgo(p.created_at)}`}
                     </Text>
                   </View>
                 </View>

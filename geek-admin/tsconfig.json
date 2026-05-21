@@ -1,0 +1,25 @@
+{
+  "extends": "../geek-v4/tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "skipLibCheck": true,
+    "paths": {
+      "react-native": ["../geek-v4/node_modules/react-native"],
+      "react-native/*": ["../geek-v4/node_modules/react-native/*"],
+      "react": ["../geek-v4/node_modules/react"],
+      "react/*": ["../geek-v4/node_modules/react/*"],
+      "react-native-reanimated": ["../geek-v4/node_modules/react-native-reanimated"],
+      "react-native-reanimated/*": ["../geek-v4/node_modules/react-native-reanimated/*"]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "nativewind-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    ".expo"
+  ]
+}

@@ -13,6 +13,7 @@ import { T } from '../../design/typography';
 import { formatRelative } from '../../lib/utils/date';
 import { TABBAR } from '../../design/tabbar';
 import { NotificationSkeleton } from '../../components/ui/Skeleton';
+import { supabase } from '../../lib/supabase';
 import type { Notification } from '../../types/models';
 
 // 通知を 4 つの時間バケットへグルーピング
@@ -129,13 +130,31 @@ export default function NotificationsScreen() {
       case 'follow': return '👤';
       case 'reply': return '↩';
       case 'event': return '📅';
+      case 'official_post': return '📣';
       default: return '🔔';
     }
   };
 
   // 通知タップ時 — 関連 surface (タグ feed など) へ遷移する。
   // notifications table に source_id が無いケースが多いので tag_name を最優先で利用。
-  const handleTap = (n: Notification) => {
+  // 'official_post' だけは tag_name が「コミュニティ名」なので name→id を runtime ルックアップ。
+  const handleTap = async (n: Notification) => {
+    if (n.type === 'official_post' && n.tag_name) {
+      // 公式コミュニティを name で fetch (LIMIT 1)。見つからなければフォールバック。
+      const { data } = await supabase
+        .from('communities')
+        .select('id')
+        .eq('name', n.tag_name)
+        .eq('is_official', true)
+        .limit(1)
+        .maybeSingle();
+      if (data?.id) {
+        router.push(`/community/${data.id}` as never);
+      } else {
+        router.push('/(tabs)/corners' as never);
+      }
+      return;
+    }
     if (n.tag_name) {
       router.push(`/tag/${encodeURIComponent(n.tag_name)}` as never);
     } else if (n.type === 'follow') {
@@ -204,9 +223,10 @@ export default function NotificationsScreen() {
             );
           }
           const n = item.n;
+          const isOfficial = n.type === 'official_post';
           return (
             <PressableScale
-              onPress={() => handleTap(n)}
+              onPress={() => void handleTap(n)}
               haptic="tap"
               scaleValue={0.99}
               style={{
@@ -218,6 +238,9 @@ export default function NotificationsScreen() {
                 gap: SP['3'],
                 borderBottomWidth: 1,
                 borderBottomColor: C.divider,
+                // 公式投稿は左に強いアクセントバーを出して可視性を上げる
+                borderLeftWidth: isOfficial ? 3 : 0,
+                borderLeftColor: isOfficial ? C.accent : 'transparent',
               }}
             >
               {/* 未読インジケータ */}
@@ -229,10 +252,12 @@ export default function NotificationsScreen() {
                   backgroundColor: C.accent,
                 }} />
               )}
-              {/* type ごとの絵文字 */}
+              {/* type ごとの絵文字 — 公式は常にアクセント色のバッジ */}
               <View style={{
                 width: 36, height: 36, borderRadius: 18,
-                backgroundColor: n.read ? C.bg3 : C.accent + '33',
+                backgroundColor: isOfficial
+                  ? C.accent
+                  : (n.read ? C.bg3 : C.accent + '33'),
                 alignItems: 'center', justifyContent: 'center',
               }}>
                 <Text style={{ fontSize: 18 }}>{typeEmoji(n.type)}</Text>
@@ -251,7 +276,9 @@ export default function NotificationsScreen() {
                   {n.message}
                 </Text>
                 {n.tag_name && (
-                  <Text style={[T.small, { color: C.accent }]}>#{n.tag_name}</Text>
+                  <Text style={[T.small, { color: C.accent }]}>
+                    {isOfficial ? n.tag_name : `#${n.tag_name}`}
+                  </Text>
                 )}
                 <Text style={[T.caption, { color: C.text3 }]}>
                   {formatRelative(n.created_at)}

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { attachChannel } from '../lib/realtime';
 import { fetchReactionsForPosts, toggleReaction, type ReactionsByPost } from '../lib/api/reactions';
+import { useToastStore } from '../stores/toastStore';
 
 const KEY_PREFIX = 'reactions';
 
@@ -90,10 +91,16 @@ export function useReactionToggle() {
 
   return {
     toggle: (postId: string, meme: string) =>
-      mutateAsync({ postId, meme }).catch((e) => {
+      mutateAsync({ postId, meme }).catch((e: unknown) => {
         console.warn('[useReactions] toggle failed:', e);
         // 失敗時は invalidate して server-truth に戻す (楽観更新の rollback)
         qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
+        // ユーザーには無反応に見えていたので明示的に通知
+        const msg = e instanceof Error ? e.message : '';
+        useToastStore.getState().show(
+          msg ? `リアクションに失敗しました: ${msg}` : 'リアクションに失敗しました',
+          'error',
+        );
       }),
   };
 }

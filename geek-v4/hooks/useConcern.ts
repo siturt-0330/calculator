@@ -25,6 +25,9 @@ export function useConcern() {
     },
     onMutate: async ({ postId, current }) => {
       await qc.cancelQueries({ queryKey: ['my-concerns'] });
+      // 失敗時 rollback のため snapshot を取る
+      const prevConcerns = qc.getQueriesData({ queryKey: ['my-concerns'] });
+      const prevFeed = qc.getQueriesData({ queryKey: ['feed'] });
       qc.setQueriesData({ queryKey: ['my-concerns'] }, (old: Record<string, boolean> | undefined) => {
         const next = { ...(old ?? {}) };
         if (current) delete next[postId];
@@ -48,6 +51,12 @@ export function useConcern() {
           })),
         };
       });
+      return { prevConcerns, prevFeed };
+    },
+    onError: (_e, _v, ctx) => {
+      // 楽観更新を巻き戻す — server 真値に戻す
+      if (ctx?.prevConcerns) ctx.prevConcerns.forEach(([k, d]) => qc.setQueryData(k, d));
+      if (ctx?.prevFeed) ctx.prevFeed.forEach(([k, d]) => qc.setQueryData(k, d));
     },
     onSuccess: (_d, { current }) => {
       if (current) {
@@ -67,6 +76,14 @@ export function useConcern() {
   });
 
   return {
-    toggle: (postId: string, current: boolean) => mutateAsync({ postId, current }).catch(() => {}),
+    toggle: (postId: string, current: boolean) =>
+      mutateAsync({ postId, current }).catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : '';
+        // 楽観更新の rollback は onError で実行済み — ここではユーザー通知だけ
+        useToastStore.getState().show(
+          msg ? `「気になる」に失敗しました: ${msg}` : '「気になる」に失敗しました',
+          'error',
+        );
+      }),
   };
 }

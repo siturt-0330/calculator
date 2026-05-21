@@ -18,6 +18,7 @@ import {
   Pressable,
   FlatList,
   ActivityIndicator,
+  TextInput,
   type ListRenderItem,
 } from 'react-native';
 import Animated, {
@@ -28,7 +29,7 @@ import Animated, {
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { C, R, SP, SHADOW } from '../../../../design/tokens';
 import { T } from '../../../../design/typography';
 import { SPRING_TIGHT } from '../../../../design/motion';
@@ -39,6 +40,8 @@ import { EmptyState } from '../../../../components/ui/EmptyState';
 import { BackButton } from '../../../../components/nav/BackButton';
 import { Icon } from '../../../../constants/icons';
 import { AnonPostCard } from '../../../../components/feed/AnonPostCard';
+import { OfficialBadge } from '../../../../components/community/OfficialBadge';
+import { useAuthStore } from '../../../../stores/authStore';
 import {
   fetchCommunity,
   joinCommunity,
@@ -46,12 +49,19 @@ import {
   leaveCommunity,
   fetchCommunitySpots,
   fetchCommunityEvents,
+  toggleSpotCertified,
   type CommunityWithMembership,
   type CommunitySpot,
   type CommunityEvent,
 } from '../../../../lib/api/communities';
 import { fetchCommunityPosts } from '../../../../lib/api/posts';
 import { fetchCommunityThreads } from '../../../../lib/api/bbs';
+import {
+  askQna,
+  fetchQnaHistory,
+  fetchQnaDocuments,
+  type QnaQuestion,
+} from '../../../../lib/api/officialCommunities';
 import { useToastStore } from '../../../../stores/toastStore';
 import { useLike, useLikes } from '../../../../hooks/useLike';
 import { useConcern, useConcerns } from '../../../../hooks/useConcern';
@@ -69,7 +79,7 @@ import type { Poll } from '../../../../lib/api/polls';
 // ============================================================
 // Types
 // ============================================================
-type TabKey = 'feed' | 'threads' | 'spots' | 'events' | 'compose';
+type TabKey = 'feed' | 'threads' | 'spots' | 'events' | 'compose' | 'comments';
 type FeedSort = 'new' | 'top' | 'old';
 
 const TABS: { key: TabKey; label: string }[] = [
@@ -79,6 +89,23 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'events', label: 'カレンダー' },
   { key: 'compose', label: '投稿' },
 ];
+
+// 公式コミュニティ用のタブセット
+// - ホーム: 公式管理者のみ投稿可 (一般メンバーは閲覧のみ)
+// - Q&A: 旧「掲示板」を置換 — NotebookLM 風の質疑応答
+// - 聖地 / カレンダー: 同じ
+// - コメント: 旧「投稿」を置換 — 一般ユーザーが唯一書き込める場
+const OFFICIAL_TABS: { key: TabKey; label: string }[] = [
+  { key: 'feed', label: 'ホーム' },
+  { key: 'threads', label: 'Q&A' },
+  { key: 'spots', label: '聖地' },
+  { key: 'events', label: 'カレンダー' },
+  { key: 'comments', label: 'コメント' },
+];
+
+function getTabsFor(isOfficial: boolean) {
+  return isOfficial ? OFFICIAL_TABS : TABS;
+}
 
 const CATEGORY_COLORS: Record<string, string> = {
   '雑談': '#22D3A4', 'アニメ': '#FF6B7A', 'ゲーム': '#7CB1FF',
@@ -158,6 +185,7 @@ export default function CommunityDetailScreen() {
     spots: false,
     events: false,
     compose: false,
+    comments: false,
   });
   useEffect(() => {
     if (!visitedTabs[activeTab]) {
@@ -388,18 +416,27 @@ export default function CommunityDetailScreen() {
 
           {/* Name */}
           <View style={{ alignItems: 'center', gap: 4 }}>
-            <Text
-              style={[
-                T.h2,
-                { color: C.text, textAlign: 'center', fontSize: 24, lineHeight: 30 },
-              ]}
-              numberOfLines={2}
-            >
-              {community.name}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <Text
+                style={[
+                  T.h2,
+                  { color: C.text, textAlign: 'center', fontSize: 24, lineHeight: 30 },
+                ]}
+                numberOfLines={2}
+              >
+                {community.name}
+              </Text>
+              {community.is_official && <OfficialBadge size="md" />}
+            </View>
             {handle && (
               <Text style={{ color: C.text3, fontSize: 12, lineHeight: 16 }}>
                 @{handle}
+              </Text>
+            )}
+            {community.is_official && community.official_admin_display_name && (
+              <Text style={[T.small, { color: C.text2, textAlign: 'center', marginTop: 2 }]}>
+                管理者: {community.official_admin_display_name}
+                {community.official_organization ? ` · ${community.official_organization}` : ''}
               </Text>
             )}
             {community.is_member && (
@@ -512,17 +549,22 @@ export default function CommunityDetailScreen() {
               onPress={onJoinLeave}
             />
           </View>
+
+          {/* オーナーのみ: 公式登録を申請する CTA */}
+          <OwnerApplyOfficialCta community={community} />
         </View>
+
+        {/* 公式機能ピル (Q&A / カレンダー / 地図) は廃止 —
+            タブ自体に統合されたので、上部のチップ navigation は表示しない */}
 
         {/* ============================================================
             Tab bar — bottom border 区切り + sliding active underline
-            (hairline 区切り line は border で兼ねる)
-            アクティブ tab の下に走る underline を spring で滑らかに移動させる。
-            5 等分されているので 1 セグメント幅は全幅 / 5。
+            公式コミュニティでは「掲示板→Q&A」「投稿→コメント」にラベル差し替え
             ============================================================ */}
         <CommunityTabBar
           activeTab={activeTab}
           onChange={setActiveTab}
+          isOfficial={!!community.is_official}
         />
 
         {/* ============================================================
@@ -536,12 +578,16 @@ export default function CommunityDetailScreen() {
         </View>
         {visitedTabs.threads && (
           <View style={{ display: activeTab === 'threads' ? 'flex' : 'none' }}>
-            <ThreadsTab communityId={id} />
+            {community.is_official ? (
+              <QnaTabInline communityId={id} community={community} />
+            ) : (
+              <ThreadsTab communityId={id} />
+            )}
           </View>
         )}
         {visitedTabs.spots && (
           <View style={{ display: activeTab === 'spots' ? 'flex' : 'none' }}>
-            <SpotsTab communityId={id} canCreate={community.is_member} />
+            <SpotsTab communityId={id} canCreate={community.is_member} community={community} />
           </View>
         )}
         {visitedTabs.events && (
@@ -549,7 +595,14 @@ export default function CommunityDetailScreen() {
             <EventsTab communityId={id} canCreate={community.is_member} />
           </View>
         )}
-        {/* compose tab navigates away in the effect above */}
+        {/* 公式コミュニティの「コメント」タブ — 一般ユーザーが唯一書き込める BBS スレッド一覧。
+            掲示板タブと同じ ThreadsTab を流用 (UX 統一) */}
+        {community.is_official && visitedTabs.comments && (
+          <View style={{ display: activeTab === 'comments' ? 'flex' : 'none' }}>
+            <ThreadsTab communityId={id} />
+          </View>
+        )}
+        {/* compose tab navigates away in the effect above (一般コミュニティのみ) */}
       </ScrollView>
     </View>
   );
@@ -633,13 +686,16 @@ function SubscribeButton({
 function CommunityTabBar({
   activeTab,
   onChange,
+  isOfficial = false,
 }: {
   activeTab: TabKey;
   onChange: (k: TabKey) => void;
+  isOfficial?: boolean;
 }) {
+  const tabs = getTabsFor(isOfficial);
   const [barW, setBarW] = useState(0);
-  const segW = barW / TABS.length;
-  const idx = TABS.findIndex((t) => t.key === activeTab);
+  const segW = barW / tabs.length;
+  const idx = tabs.findIndex((t) => t.key === activeTab);
   const x = useSharedValue(0);
 
   useEffect(() => {
@@ -662,7 +718,7 @@ function CommunityTabBar({
         position: 'relative',
       }}
     >
-      {TABS.map((t) => {
+      {tabs.map((t) => {
         const active = activeTab === t.key;
         return (
           <Pressable
@@ -1238,9 +1294,21 @@ const ThreadsTab = memo(function ThreadsTab({ communityId }: { communityId: stri
 // ============================================================
 // Tab: 聖地 (community spots)
 // ============================================================
-const SpotsTab = memo(function SpotsTab({ communityId, canCreate }: { communityId: string; canCreate: boolean }) {
+const SpotsTab = memo(function SpotsTab({
+  communityId,
+  canCreate,
+  community,
+}: {
+  communityId: string;
+  canCreate: boolean;
+  community: CommunityWithMembership;
+}) {
   const router = useRouter();
   const { show: showToast } = useToastStore();
+  const qc = useQueryClient();
+  const userId = useAuthStore((s) => s.user?.id);
+  const isOfficialAdmin = !!userId && community.official_admin_user_id === userId;
+
   const { data, isLoading, isError } = useQuery({
     queryKey: ['community', communityId, 'spots'],
     queryFn: () => fetchCommunitySpots(communityId),
@@ -1254,6 +1322,18 @@ const SpotsTab = memo(function SpotsTab({ communityId, canCreate }: { communityI
 
   const spots: CommunitySpot[] = data ?? [];
 
+  const toggleCertify = useMutation({
+    mutationFn: ({ spotId, certified }: { spotId: string; certified: boolean }) =>
+      toggleSpotCertified(spotId, certified),
+    onSuccess: (_, vars) => {
+      void qc.invalidateQueries({ queryKey: ['community', communityId, 'spots'] });
+      showToast(vars.certified ? '公認に設定しました' : '公認を解除しました', 'success');
+    },
+    onError: (e: unknown) => {
+      showToast(e instanceof Error ? e.message : '公認設定に失敗しました', 'error');
+    },
+  });
+
   const renderItem: ListRenderItem<CommunitySpot> = ({ item }) => {
     const safePhoto = item.photo_url ? sanitizeUrl(item.photo_url) : null;
     return (
@@ -1265,7 +1345,7 @@ const SpotsTab = memo(function SpotsTab({ communityId, canCreate }: { communityI
           backgroundColor: C.bg2,
           borderRadius: R.lg,
           borderWidth: 1,
-          borderColor: C.border,
+          borderColor: item.is_certified ? C.accent + '55' : C.border,
         }}
       >
         <View
@@ -1286,9 +1366,51 @@ const SpotsTab = memo(function SpotsTab({ communityId, canCreate }: { communityI
           )}
         </View>
         <View style={{ flex: 1, gap: 4 }}>
-          <Text style={[T.bodyB, { color: C.text }]} numberOfLines={1}>
-            {item.name}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={[T.bodyB, { color: C.text, flexShrink: 1 }]} numberOfLines={1}>
+              {item.name}
+            </Text>
+            {item.is_certified && (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 3,
+                  paddingHorizontal: 6,
+                  paddingVertical: 2,
+                  backgroundColor: C.accentBg,
+                  borderRadius: R.full,
+                  borderWidth: 1,
+                  borderColor: C.accent + '55',
+                }}
+              >
+                <Icon.shield size={10} color={C.accent} strokeWidth={2.6} />
+                <Text style={{ fontSize: 10, color: C.accent, fontWeight: '700' }}>公認</Text>
+              </View>
+            )}
+            <View style={{ flex: 1 }} />
+            {isOfficialAdmin && (
+              <PressableScale
+                onPress={() =>
+                  toggleCertify.mutate({ spotId: item.id, certified: !item.is_certified })
+                }
+                haptic="tap"
+                style={{
+                  padding: 6,
+                  borderRadius: R.full,
+                  backgroundColor: item.is_certified ? C.accentBg : C.bg3,
+                  borderWidth: 1,
+                  borderColor: item.is_certified ? C.accent + '55' : C.border,
+                }}
+              >
+                <Icon.edit
+                  size={12}
+                  color={item.is_certified ? C.accent : C.text3}
+                  strokeWidth={2.4}
+                />
+              </PressableScale>
+            )}
+          </View>
           {item.description.length > 0 && (
             <Text style={[T.small, { color: C.text2 }]} numberOfLines={2}>
               {item.description}
@@ -1427,6 +1549,332 @@ const EventsTab = memo(function EventsTab({ communityId, canCreate }: { communit
     </View>
   );
 });
+
+// ============================================================
+// Owner only: 公式登録を申請する CTA
+// ============================================================
+function OwnerApplyOfficialCta({ community }: { community: CommunityWithMembership }) {
+  const router = useRouter();
+  const userId = useAuthStore((s) => s.user?.id);
+  const isOwner = community.role === 'owner' || (userId && community.created_by === userId);
+  if (community.is_official) return null;
+  if (!isOwner) return null;
+  return (
+    <PressableScale
+      onPress={() => router.push(`/community/${community.id}/apply-official` as never)}
+      haptic="tap"
+      style={{
+        alignSelf: 'stretch',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        marginTop: SP['1'],
+        paddingVertical: SP['2'] + 2,
+        backgroundColor: C.accentBg,
+        borderRadius: R.full,
+        borderWidth: 1,
+        borderColor: C.accent + '55',
+      }}
+    >
+      <Icon.shield size={14} color={C.accentLight} strokeWidth={2.4} />
+      <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>
+        公式コミュニティとして申請する
+      </Text>
+    </PressableScale>
+  );
+}
+
+// ============================================================
+// Q&A タブ (公式コミュニティのみ) — NotebookLM 風
+// 管理者が登録したナレッジから検索して回答する
+// ============================================================
+function QnaTabInline({
+  communityId,
+  community,
+}: {
+  communityId: string;
+  community: CommunityWithMembership;
+}) {
+  const userId = useAuthStore((s) => s.user?.id);
+  const { show } = useToastStore();
+  const qc = useQueryClient();
+  const router = useRouter();
+  const [question, setQuestion] = useState('');
+  const [latest, setLatest] = useState<QnaQuestion | null>(null);
+
+  const isAdmin = !!userId && community.official_admin_user_id === userId;
+
+  const { data: history = [] } = useQuery({
+    queryKey: ['community', communityId, 'qna-history'],
+    queryFn: () => fetchQnaHistory(communityId, 30),
+    enabled: communityId.length > 0,
+    staleTime: 15_000,
+  });
+
+  const { data: docs = [] } = useQuery({
+    queryKey: ['community', communityId, 'qna-docs'],
+    queryFn: () => fetchQnaDocuments(communityId),
+    enabled: communityId.length > 0,
+    staleTime: 30_000,
+  });
+  const docTitleById = new Map<string, string>(docs.map((d) => [d.id, d.title]));
+
+  const ask = useMutation({
+    mutationFn: () => askQna({ communityId, question: question.trim() }),
+    onSuccess: (q) => {
+      setLatest(q);
+      setQuestion('');
+      void qc.invalidateQueries({ queryKey: ['community', communityId, 'qna-history'] });
+    },
+    onError: (e: unknown) => {
+      show(e instanceof Error ? e.message : '質問の送信に失敗しました', 'error');
+    },
+  });
+
+  const canAsk = question.trim().length >= 3 && !ask.isPending;
+
+  return (
+    <View style={{ padding: SP['4'], gap: SP['4'] }}>
+      {/* 入力 */}
+      <View style={{ gap: SP['2'] }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Icon.help size={16} color={C.accent} strokeWidth={2.4} />
+          <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>
+            このコミュニティに質問する
+          </Text>
+        </View>
+        <View
+          style={{
+            flexDirection: 'row',
+            gap: SP['2'],
+            backgroundColor: C.bg2,
+            borderRadius: R.lg,
+            borderWidth: 1,
+            borderColor: C.border,
+            paddingHorizontal: SP['3'],
+            paddingVertical: SP['2'],
+            alignItems: 'flex-end',
+          }}
+        >
+          <TextInput
+            value={question}
+            onChangeText={setQuestion}
+            placeholder="例: 使い方を教えて"
+            placeholderTextColor={C.text3}
+            multiline
+            style={{
+              flex: 1,
+              color: C.text,
+              fontSize: 14,
+              maxHeight: 100,
+              paddingVertical: 4,
+            }}
+          />
+          <PressableScale
+            onPress={() => canAsk && ask.mutate()}
+            disabled={!canAsk}
+            haptic="confirm"
+            style={{
+              paddingHorizontal: SP['3'],
+              paddingVertical: SP['2'],
+              backgroundColor: canAsk ? C.accent : C.bg3,
+              borderRadius: R.full,
+              opacity: canAsk ? 1 : 0.5,
+              minWidth: 60,
+              alignItems: 'center',
+            }}
+          >
+            {ask.isPending ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>送信</Text>
+            )}
+          </PressableScale>
+        </View>
+        {isAdmin && (
+          <PressableScale
+            onPress={() => router.push(`/community/${communityId}/qna-admin` as never)}
+            haptic="tap"
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              alignSelf: 'flex-start',
+              paddingHorizontal: SP['3'],
+              paddingVertical: 6,
+              backgroundColor: C.bg2,
+              borderRadius: R.full,
+              borderWidth: 1,
+              borderColor: C.border,
+            }}
+          >
+            <Icon.plus size={12} color={C.text2} strokeWidth={2.4} />
+            <Text style={[T.caption, { color: C.text2, fontWeight: '600' }]}>
+              ナレッジを管理 ({docs.length})
+            </Text>
+          </PressableScale>
+        )}
+      </View>
+
+      {/* 最新の回答 */}
+      {latest && (
+        <View
+          style={{
+            padding: SP['3'],
+            backgroundColor: C.accentBg,
+            borderRadius: R.lg,
+            borderWidth: 1,
+            borderColor: C.accent + '40',
+            gap: SP['2'],
+          }}
+        >
+          <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>
+            Q. {latest.question}
+          </Text>
+          <Text style={[T.body, { color: C.text }]}>
+            {latest.answer || '...'}
+          </Text>
+          {latest.source_doc_ids.length > 0 && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              {latest.source_doc_ids.map((sid) => (
+                <View
+                  key={sid}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
+                    backgroundColor: C.bg2,
+                    borderRadius: R.full,
+                    borderWidth: 1,
+                    borderColor: C.border,
+                  }}
+                >
+                  <Icon.info size={10} color={C.text3} strokeWidth={2.4} />
+                  <Text style={[T.caption, { color: C.text2, fontWeight: '600' }]} numberOfLines={1}>
+                    {docTitleById.get(sid) ?? 'ナレッジ'}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* 履歴 */}
+      <View style={{ gap: SP['2'] }}>
+        <Text style={[T.smallM, { color: C.text3, fontWeight: '700' }]}>
+          みんなの質問
+        </Text>
+        {history.length === 0 ? (
+          <View
+            style={{
+              padding: SP['4'],
+              backgroundColor: C.bg2,
+              borderRadius: R.lg,
+              borderWidth: 1,
+              borderColor: C.border,
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <Icon.help size={28} color={C.text3} strokeWidth={1.8} />
+            <Text style={[T.small, { color: C.text3, textAlign: 'center' }]}>
+              まだ質問がありません。{'\n'}最初の質問をしてみましょう。
+            </Text>
+          </View>
+        ) : (
+          history.map((h) => (
+            <View
+              key={h.id}
+              style={{
+                padding: SP['3'],
+                backgroundColor: C.bg2,
+                borderRadius: R.lg,
+                borderWidth: 1,
+                borderColor: C.border,
+                gap: 6,
+              }}
+            >
+              <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>
+                Q. {h.question}
+              </Text>
+              {h.answer && (
+                <Text style={[T.small, { color: C.text2 }]} numberOfLines={3}>
+                  {h.answer}
+                </Text>
+              )}
+              <Text style={[T.caption, { color: C.text3 }]}>
+                {formatRelative(h.asked_at)}
+                {h.status === 'no_source' && ' · 該当ナレッジなし'}
+              </Text>
+            </View>
+          ))
+        )}
+      </View>
+    </View>
+  );
+}
+
+// ============================================================
+// 公式機能ナビ (Q&A / カレンダー / 地図) — 横並びチップ
+// ============================================================
+function OfficialFeatureNav({
+  communityId,
+  features,
+}: {
+  communityId: string;
+  features: Array<'qna' | 'calendar' | 'map'>;
+}) {
+  const router = useRouter();
+  type Item = { key: 'qna' | 'calendar' | 'map'; label: string; icon: typeof Icon.community; route: string };
+  const items: Item[] = [];
+  if (features.includes('qna')) items.push({ key: 'qna',      label: 'Q&A',       icon: Icon.help,     route: `/community/${communityId}/qna` });
+  if (features.includes('calendar')) items.push({ key: 'calendar', label: 'カレンダー', icon: Icon.calendar, route: `/community/${communityId}/calendar` });
+  if (features.includes('map')) items.push({ key: 'map',      label: '地図',      icon: Icon.map,      route: `/community/${communityId}/map` });
+  if (items.length === 0) return null;
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        gap: SP['2'],
+        paddingHorizontal: SP['4'],
+        paddingVertical: SP['3'],
+        borderBottomWidth: 1,
+        borderBottomColor: C.border,
+        flexWrap: 'wrap',
+      }}
+    >
+      {items.map((it) => {
+        const IconComp = it.icon;
+        return (
+          <PressableScale
+            key={it.key}
+            onPress={() => router.push(it.route as never)}
+            haptic="tap"
+            scaleValue={0.97}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              paddingHorizontal: SP['3'],
+              paddingVertical: 8,
+              backgroundColor: C.accentBg,
+              borderRadius: R.full,
+              borderWidth: 1,
+              borderColor: C.accent + '55',
+            }}
+          >
+            <IconComp size={14} color={C.accentLight} strokeWidth={2.4} />
+            <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>{it.label}</Text>
+          </PressableScale>
+        );
+      })}
+    </View>
+  );
+}
 
 function EventRow({ event }: { event: CommunityEvent }) {
   const d = new Date(event.starts_at);
