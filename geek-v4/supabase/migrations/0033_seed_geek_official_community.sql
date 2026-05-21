@@ -7,6 +7,9 @@
 --
 -- このマイグレーションは 0032 が適用されていることが前提。
 -- 冪等: 既に同名のコミュニティがあれば何もしない。
+--
+-- 0024 の communities_set_created_by trigger は auth.uid() を要求するため
+-- SQL Editor から実行する seed では一時的に無効化する。
 -- ============================================================
 
 do $$
@@ -36,24 +39,36 @@ begin
     return;
   end if;
 
+  -- 0024 の auth.uid() 要求 trigger を一時的に無効化 (seed 実行時のみ)
+  alter table public.communities disable trigger communities_set_created_by;
+
   -- 公式コミュニティを作成
-  insert into public.communities (
-    name, description,
-    icon_emoji, icon_color, visibility,
-    is_official, official_admin_user_id,
-    official_admin_display_name, official_organization,
-    official_approved_at, official_features,
-    created_by
-  ) values (
-    'Geek公式',
-    'Geek アプリの公式コミュニティです。お知らせ・新機能のアナウンス・コミュニティガイドライン・運営からのメッセージなどを発信します。質問は Q&A コーナーへどうぞ。',
-    '✨', '#7C6AF7', 'open',
-    true, v_admin_user_id,
-    'Geek 運営', 'Geek 開発チーム',
-    now(), array['qna', 'calendar', 'map']::text[],
-    v_admin_user_id
-  )
-  returning id into v_community_id;
+  begin
+    insert into public.communities (
+      name, description,
+      icon_emoji, icon_color, visibility,
+      is_official, official_admin_user_id,
+      official_admin_display_name, official_organization,
+      official_approved_at, official_features,
+      created_by
+    ) values (
+      'Geek公式',
+      'Geek アプリの公式コミュニティです。お知らせ・新機能のアナウンス・コミュニティガイドライン・運営からのメッセージなどを発信します。質問は Q&A コーナーへどうぞ。',
+      '✨', '#7C6AF7', 'open',
+      true, v_admin_user_id,
+      'Geek 運営', 'Geek 開発チーム',
+      now(), array['qna', 'calendar', 'map']::text[],
+      v_admin_user_id
+    )
+    returning id into v_community_id;
+  exception when others then
+    -- trigger は必ず戻す
+    alter table public.communities enable trigger communities_set_created_by;
+    raise;
+  end;
+
+  -- trigger を元に戻す
+  alter table public.communities enable trigger communities_set_created_by;
 
   -- 管理者をオーナーとして登録
   insert into public.community_members (community_id, user_id, role)
@@ -68,7 +83,7 @@ begin
     (v_community_id, 'ガイドライン')
   on conflict do nothing;
 
-  -- 初期ナレッジドキュメントを 3 件追加 (Q&A コーナーの種)
+  -- 初期ナレッジドキュメントを 4 件追加 (Q&A コーナーの種)
   insert into public.community_qna_documents (community_id, title, content, created_by) values
   (
     v_community_id,
