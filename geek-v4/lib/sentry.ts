@@ -1,4 +1,3 @@
-import * as Sentry from '@sentry/react-native';
 import { ENV } from './env';
 
 // Sensitive substrings — error message に出てきたら redact する
@@ -29,38 +28,50 @@ function redactObject<T>(v: T): T {
   return v;
 }
 
+// Sentry は production 専用 + DSN がセットされている時しか初期化しない。
+// `@sentry/react-native` 本体 (数百KB) が initial bundle に乗らないよう、
+// require() を関数内に閉じ込めて bundler に副作用なし import を伝える。
+// (top-level の `import * as Sentry from '@sentry/react-native'` だと
+//  実際に init を呼ばなくてもバンドルに含まれてしまう。)
 export function initSentry() {
   if (!ENV.SENTRY_DSN) return;
-  Sentry.init({
-    dsn: ENV.SENTRY_DSN,
-    environment: ENV.IS_DEV ? 'development' : 'production',
-    // PII / token を Sentry に流出させないよう sample rate を絞る + scrub
-    tracesSampleRate: 0.05,
-    sendDefaultPii: false,
-    beforeSend(event) {
-      try {
-        if (event.message) event.message = redact(event.message);
-        if (event.exception?.values) {
-          for (const ex of event.exception.values) {
-            if (ex.value) ex.value = redact(ex.value);
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Sentry = require('@sentry/react-native') as typeof import('@sentry/react-native');
+    // ErrorBoundary / resilient breadcrumb は globalThis.Sentry を遅延参照する
+    // ので init 完了後に晒しておく (lib/resilient.ts, components/ui/ErrorBoundary.tsx)
+    (globalThis as { Sentry?: typeof Sentry }).Sentry = Sentry;
+    Sentry.init({
+      dsn: ENV.SENTRY_DSN,
+      environment: ENV.IS_DEV ? 'development' : 'production',
+      // PII / token を Sentry に流出させないよう sample rate を絞る + scrub
+      tracesSampleRate: 0.05,
+      sendDefaultPii: false,
+      beforeSend(event) {
+        try {
+          if (event.message) event.message = redact(event.message);
+          if (event.exception?.values) {
+            for (const ex of event.exception.values) {
+              if (ex.value) ex.value = redact(ex.value);
+            }
           }
-        }
-        if (event.breadcrumbs) {
-          for (const bc of event.breadcrumbs) {
-            if (bc.message) bc.message = redact(bc.message);
-            if (bc.data) bc.data = redactObject(bc.data);
+          if (event.breadcrumbs) {
+            for (const bc of event.breadcrumbs) {
+              if (bc.message) bc.message = redact(bc.message);
+              if (bc.data) bc.data = redactObject(bc.data);
+            }
           }
-        }
-        if (event.request?.url) event.request.url = redact(event.request.url);
-        // user の email / phone / username を Sentry に送らない
-        if (event.user) {
-          const { id } = event.user;
-          event.user = id ? { id } : undefined;
-        }
-      } catch {}
-      return event;
-    },
-  });
+          if (event.request?.url) event.request.url = redact(event.request.url);
+          // user の email / phone / username を Sentry に送らない
+          if (event.user) {
+            const { id } = event.user;
+            event.user = id ? { id } : undefined;
+          }
+        } catch {}
+        return event;
+      },
+    });
+  } catch {
+    // Sentry 未インストールでも本体が止まらないように
+  }
 }
-
-export { Sentry };

@@ -1,4 +1,5 @@
-import { View, Text, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -90,77 +91,86 @@ export default function SavedPosts() {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator color={C.accent} />
         </View>
+      ) : items.length === 0 ? (
+        <View style={{ padding: SP['4'] }}>
+          <EmptyState
+            icon={Icon.save}
+            title="保存した投稿はありません"
+            message="気になる投稿の保存アイコンを押すとここに表示されます"
+            tone="amber"
+          />
+        </View>
       ) : (
-        <ScrollView
-          contentContainerStyle={{ padding: SP['4'], paddingBottom: insets.bottom + SP['10'], gap: SP['2'] }}
-        >
-          {OBSIDIAN_AVAILABLE && obsidianEnabled && items.length > 0 && (
-            <PressableScale
-              onPress={handleBulkExport}
-              haptic="confirm"
-              disabled={!!bulkProgress}
-              style={{
-                padding: SP['3'],
-                backgroundColor: C.accentBg,
-                borderRadius: R.md,
-                borderWidth: 1,
-                borderColor: C.accent + '55',
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: SP['2'],
-                opacity: bulkProgress ? 0.6 : 1,
-                marginBottom: SP['2'],
-              }}
-            >
-              <Icon.edit size={18} color={C.accent} strokeWidth={2.2} />
-              <Text style={[T.bodyMd, { color: C.accent, fontWeight: '700', flex: 1 }]}>
-                {bulkProgress
-                  ? `Obsidian に送信中… ${bulkProgress.current} / ${bulkProgress.total}`
-                  : `${items.length} 件をまとめて Obsidian に保存`}
-              </Text>
-              {bulkProgress && <ActivityIndicator size="small" color={C.accent} />}
-            </PressableScale>
-          )}
-          {items.length === 0 ? (
-            <EmptyState
-              icon={Icon.save}
-              title="保存した投稿はありません"
-              message="気になる投稿の保存アイコンを押すとここに表示されます"
-              tone="amber"
-            />
-          ) : (
-            items.map((p) => (
+        // 最大 100 件保存される可能性 → ScrollView+.map から virtualization へ。
+        // 一括 export ボタンは ListHeaderComponent で表示。
+        <FlashList
+          data={items}
+          keyExtractor={(p) => p.id}
+          estimatedItemSize={140}
+          drawDistance={250}
+          removeClippedSubviews
+          decelerationRate="fast"
+          contentContainerStyle={{ padding: SP['4'], paddingBottom: insets.bottom + SP['10'] }}
+          ItemSeparatorComponent={() => <View style={{ height: SP['2'] }} />}
+          ListHeaderComponent={
+            OBSIDIAN_AVAILABLE && obsidianEnabled && items.length > 0 ? (
               <PressableScale
-                key={p.id}
-                onPress={() => router.push(`/post/${p.id}` as never)}
-                haptic="tap"
+                onPress={handleBulkExport}
+                haptic="confirm"
+                disabled={!!bulkProgress}
                 style={{
                   padding: SP['3'],
-                  backgroundColor: C.bg2,
-                  borderRadius: R.lg,
+                  backgroundColor: C.accentBg,
+                  borderRadius: R.md,
                   borderWidth: 1,
-                  borderColor: C.border,
+                  borderColor: C.accent + '55',
+                  flexDirection: 'row',
+                  alignItems: 'center',
                   gap: SP['2'],
+                  opacity: bulkProgress ? 0.6 : 1,
+                  marginBottom: SP['2'],
                 }}
               >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-                  <Avatar size={20} anonymous />
-                  <Text style={[T.caption, { color: C.accent }]}>
-                    {p.tag_names[0] ? `#${p.tag_names[0]}` : '#雑談'}
-                  </Text>
-                  <Text style={[T.caption, { color: C.text3 }]}>· {formatRelative(p.created_at)}</Text>
-                  <View style={{ flex: 1 }} />
-                  <ObsidianSaveButton note={postToObsidianNote(p as never)} size={16} />
-                </View>
-                <Text style={[T.body, { color: C.text }]} numberOfLines={3}>{p.content}</Text>
-                <View style={{ flexDirection: 'row', gap: SP['3'] }}>
-                  <Text style={[T.caption, { color: C.text3 }]}>♥ {p.likes_count}</Text>
-                  <Text style={[T.caption, { color: C.text3 }]}>💬 {p.comments_count}</Text>
-                </View>
+                <Icon.edit size={18} color={C.accent} strokeWidth={2.2} />
+                <Text style={[T.bodyMd, { color: C.accent, fontWeight: '700', flex: 1 }]}>
+                  {bulkProgress
+                    ? `Obsidian に送信中… ${bulkProgress.current} / ${bulkProgress.total}`
+                    : `${items.length} 件をまとめて Obsidian に保存`}
+                </Text>
+                {bulkProgress && <ActivityIndicator size="small" color={C.accent} />}
               </PressableScale>
-            ))
+            ) : null
+          }
+          renderItem={({ item: p }) => (
+            <PressableScale
+              onPress={() => router.push(`/post/${p.id}` as never)}
+              haptic="tap"
+              style={{
+                padding: SP['3'],
+                backgroundColor: C.bg2,
+                borderRadius: R.lg,
+                borderWidth: 1,
+                borderColor: C.border,
+                gap: SP['2'],
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+                <Avatar size={20} anonymous />
+                <Text style={[T.caption, { color: C.accent }]}>
+                  {p.tag_names[0] ? `#${p.tag_names[0]}` : '#雑談'}
+                </Text>
+                <Text style={[T.caption, { color: C.text3 }]}>· {formatRelative(p.created_at)}</Text>
+                <View style={{ flex: 1 }} />
+                <ObsidianSaveButton note={postToObsidianNote(p as never)} size={16} />
+              </View>
+              <Text style={[T.body, { color: C.text }]} numberOfLines={3}>{p.content}</Text>
+              <View style={{ flexDirection: 'row', gap: SP['3'] }}>
+                <Text style={[T.caption, { color: C.text3 }]}>♥ {p.likes_count}</Text>
+                <Text style={[T.caption, { color: C.text3 }]}>💬 {p.comments_count}</Text>
+              </View>
+            </PressableScale>
           )}
-        </ScrollView>
+        />
       )}
     </View>
   );

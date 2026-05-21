@@ -26,7 +26,8 @@ export function MemeReactionPicker({
   const [showCustomInput, setShowCustomInput] = useState(false);
   const { stamps: userStamps } = useUserStamps();
   const { mutateAsync: createStamp, isPending: creating } = useCreateUserStamp();
-  const { show } = useToastStore();
+  // toast actions のみ subscribe — picker は post カードから render される多発路
+  const show = useToastStore((s) => s.show);
   // ローカル送信ロック: ネット往復中に再タップを即座に弾く (React Query の
   // isPending 反映遅延 / state 反映前の二重押下を防ぐ defense-in-depth)
   const [submitting, setSubmitting] = useState(false);

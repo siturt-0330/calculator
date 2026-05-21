@@ -26,7 +26,8 @@ function timeAgo(iso: string): string {
 export default function CommunityScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user } = useAuthStore();
+  // user 以外のフィールド (hydrated 等) の変化で再 render されないよう scoped
+  const user = useAuthStore((s) => s.user);
   const [myCommunities, setMyCommunities] = useState<Community[]>([]);
   const [posts, setPosts] = useState<CommunityPostWithCommunity[]>([]);
   const [loading, setLoading] = useState(true);

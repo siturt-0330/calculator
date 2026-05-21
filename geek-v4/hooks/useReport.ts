@@ -4,7 +4,8 @@ import { useToastStore } from '../stores/toastStore';
 import { notify, Haptics } from '../lib/haptics';
 
 export function useReport() {
-  const { show } = useToastStore();
+  // scoped selector — toast actions are stable, avoid whole-store subscription
+  const show = useToastStore((s) => s.show);
 
   const { mutateAsync: report, isPending } = useMutation({
     mutationFn: async ({ postId, reason }: { postId: string; reason: string }) => {

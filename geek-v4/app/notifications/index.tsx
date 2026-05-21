@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { View, Text, FlatList, ScrollView } from 'react-native';
+import { View, Text, ScrollView } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNotifications } from '../../hooks/useNotifications';
@@ -118,9 +119,15 @@ export default function NotificationsScreen() {
           ) : null
         }
       />
-      <FlatList
+      <FlashList
         data={notifications}
         keyExtractor={(n) => n.id}
+        // 通知 1 行: アイコン + メッセージ 1-2 行 = 約 90px
+        estimatedItemSize={90}
+        // viewport 外で +250px 先読みで白セル防止
+        drawDistance={250}
+        removeClippedSubviews
+        decelerationRate="fast"
         contentContainerStyle={{
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
         }}

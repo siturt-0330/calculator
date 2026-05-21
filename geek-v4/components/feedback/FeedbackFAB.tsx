@@ -24,7 +24,8 @@ export function FeedbackFAB() {
   const user = useAuthStore((s) => s.user);
   const segments = useSegments();
   const insets = useSafeAreaInsets();
-  const { show } = useToastStore();
+  // toast action のみ subscribe
+  const show = useToastStore((s) => s.show);
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<FeedbackKind>('ui');
   const [message, setMessage] = useState('');

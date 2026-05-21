@@ -17,7 +17,8 @@ function toShareableUrl(input: string): string {
 }
 
 export function useShare() {
-  const { show } = useToastStore();
+  // scoped selector — avoid re-render on every toast push/dismiss
+  const show = useToastStore((s) => s.show);
 
   const share = async (title: string, rawUrl: string) => {
     impact(Haptics.ImpactFeedbackStyle.Light);

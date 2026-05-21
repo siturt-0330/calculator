@@ -149,6 +149,22 @@ export default function CommunityDetailScreen() {
   const qc = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<TabKey>('feed');
+  // タブを開いたかの sticky フラグ。一度開いたタブは display:none でも mount を維持し、
+  // 再 fetch を避ける (keep-alive)。 初期表示時は feed タブの query しか走らない。
+  // → 4 並列の Supabase RTT を 1 つに減らし、コミュニティ詳細の first paint が大幅に軽くなる。
+  const [visitedTabs, setVisitedTabs] = useState<Record<TabKey, boolean>>({
+    feed: true,
+    threads: false,
+    spots: false,
+    events: false,
+    compose: false,
+  });
+  useEffect(() => {
+    if (!visitedTabs[activeTab]) {
+      setVisitedTabs((prev) => ({ ...prev, [activeTab]: true }));
+    }
+  }, [activeTab, visitedTabs]);
+
   // NOTE: feedSort lives inside FeedTab so changing the sort does not
   // re-render sibling tabs.
   const [descExpanded, setDescExpanded] = useState(false);
@@ -493,22 +509,29 @@ export default function CommunityDetailScreen() {
         />
 
         {/* ============================================================
-            Tab content — all tabs rendered, only the active one is
-            visible. This avoids unmount/remount + refetch on every
-            tab switch (the heaviest source of jank).
+            Tab content — lazy mount: 一度開いたタブだけ mount、以降は
+            display:none で keep-alive (再 fetch を避ける)。
+            初期表示時は feed タブだけが mount され、threads / spots /
+            events の query は触られないので first paint が軽い。
             ============================================================ */}
         <View style={{ display: activeTab === 'feed' ? 'flex' : 'none' }}>
           <FeedTab communityId={id} />
         </View>
-        <View style={{ display: activeTab === 'threads' ? 'flex' : 'none' }}>
-          <ThreadsTab communityId={id} />
-        </View>
-        <View style={{ display: activeTab === 'spots' ? 'flex' : 'none' }}>
-          <SpotsTab communityId={id} canCreate={community.is_member} />
-        </View>
-        <View style={{ display: activeTab === 'events' ? 'flex' : 'none' }}>
-          <EventsTab communityId={id} canCreate={community.is_member} />
-        </View>
+        {visitedTabs.threads && (
+          <View style={{ display: activeTab === 'threads' ? 'flex' : 'none' }}>
+            <ThreadsTab communityId={id} />
+          </View>
+        )}
+        {visitedTabs.spots && (
+          <View style={{ display: activeTab === 'spots' ? 'flex' : 'none' }}>
+            <SpotsTab communityId={id} canCreate={community.is_member} />
+          </View>
+        )}
+        {visitedTabs.events && (
+          <View style={{ display: activeTab === 'events' ? 'flex' : 'none' }}>
+            <EventsTab communityId={id} canCreate={community.is_member} />
+          </View>
+        )}
         {/* compose tab navigates away in the effect above */}
       </ScrollView>
     </View>

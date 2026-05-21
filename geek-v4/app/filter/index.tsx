@@ -22,10 +22,17 @@ export default function FilterScreen() {
   const router = useRouter();
   const [likedInput, setLikedInput] = useState('');
   const [blockedInput, setBlockedInput] = useState('');
-  const { likedTags, blockedTags, addLiked, removeLiked, addBlocked, removeBlocked } =
-    useTagFilterStore();
-  const { nodes, rootIds, hydrate: hydrateGraph } = useTagGraphStore();
-  const { show } = useToastStore();
+  // 個別 selector で subscribe — graph nodes や toast の更新で全体 re-render しない
+  const likedTags = useTagFilterStore((s) => s.likedTags);
+  const blockedTags = useTagFilterStore((s) => s.blockedTags);
+  const addLiked = useTagFilterStore((s) => s.addLiked);
+  const removeLiked = useTagFilterStore((s) => s.removeLiked);
+  const addBlocked = useTagFilterStore((s) => s.addBlocked);
+  const removeBlocked = useTagFilterStore((s) => s.removeBlocked);
+  const nodes = useTagGraphStore((s) => s.nodes);
+  const rootIds = useTagGraphStore((s) => s.rootIds);
+  const hydrateGraph = useTagGraphStore((s) => s.hydrate);
+  const show = useToastStore((s) => s.show);
   const insets = useSafeAreaInsets();
   const Hash = Icon.hash;
 

@@ -14,7 +14,8 @@ export function useConcerns(postIds: string[]) {
 
 export function useConcern() {
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  // scoped selector — toast actions don't change, avoid whole-store subscription
+  const show = useToastStore((s) => s.show);
   const concernsPrivate = useSettingsStore((s) => s.concernsPrivate);
 
   const { mutateAsync } = useMutation({

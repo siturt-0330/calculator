@@ -64,6 +64,15 @@ export function PressableScale({
   //   the same `delayPressIn: 0` cast is correct on native and harmless on web.
   const extra = { delayPressIn: 0 } as Record<string, unknown>;
 
+  // Web のみ: cursor: 'pointer' を必ず付ける。
+  // RN Web の Pressable はデフォルトで cursor を変更しないため、disabled でない
+  // 全ての tappable な要素は手のアイコンに変わるべき (即時の視覚フィードバック → 体感速度 up)。
+  // touch device では cursor は無視されるので React Native への副作用無し。
+  const webCursorStyle =
+    Platform.OS === 'web' && !disabled
+      ? ({ cursor: 'pointer' } as Record<string, unknown>)
+      : null;
+
   return (
     <AnimatedPressable
       {...extra}
@@ -96,7 +105,7 @@ export function PressableScale({
             }
           : undefined
       }
-      style={[animStyle, style as object]}
+      style={[animStyle, style as object, webCursorStyle as object]}
       {...rest}
     >
       {children}

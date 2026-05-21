@@ -24,7 +24,8 @@ export function TagRelations({
   onTagPress: (t: string) => void;
 }) {
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  // toast action のみ subscribe
+  const show = useToastStore((s) => s.show);
   const [mode, setMode] = useState<'alias' | 'related' | null>(null);
 
   const { data: relations = [] } = useQuery({

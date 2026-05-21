@@ -47,7 +47,8 @@ export function useSaves(postIds: string[]) {
 
 export function useSave() {
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  // scoped selector — avoid re-render on every toast push/dismiss
+  const show = useToastStore((s) => s.show);
 
   const { mutateAsync } = useMutation({
     mutationFn: toggle,

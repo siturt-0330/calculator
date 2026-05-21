@@ -23,7 +23,9 @@ type Props = {
 export function ObsidianSaveButton({ note, size = 20, color = C.accent, style, showWhenDisabled }: Props) {
   const { enabled } = useObsidianEnabled();
   const [saving, setSaving] = useState(false);
-  const { show } = useToastStore();
+  // toast action は安定参照 — whole-store subscription を避けて post カードで
+  // 連発される render を抑止
+  const show = useToastStore((s) => s.show);
   // 開発者専用 — production では完全に非表示
   if (!OBSIDIAN_AVAILABLE) return null;
   if (!enabled && !showWhenDisabled) return null;

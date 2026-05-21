@@ -83,7 +83,10 @@ async function executeAction(action: QueuedAction): Promise<void> {
  */
 export function useOfflineQueueProcessor() {
   const { online } = useNetworkStatus();
-  const { queue, dequeue, markAttempt } = useOfflineQueueStore();
+  // 個別 selector に分割 — queue 配列以外のフィールド更新で全体 re-render を避ける
+  const queue = useOfflineQueueStore((s) => s.queue);
+  const dequeue = useOfflineQueueStore((s) => s.dequeue);
+  const markAttempt = useOfflineQueueStore((s) => s.markAttempt);
   const hydrate = useOfflineQueueStore((s) => s.hydrate);
   const show = useToastStore((s) => s.show);
   const qc = useQueryClient();
