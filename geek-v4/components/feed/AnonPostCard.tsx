@@ -270,19 +270,55 @@ function AnonPostCardInner({
         </View>
       )}
 
-      {/* ヘッダー: アバター / 匿 · 時刻 / ⋯ */}
+      {/* ヘッダー: アバター / 匿 · 時刻 / ⋯
+          公式コミュ管理者の投稿は de-anonymize して 実名 · 所属 を表示 */}
       <View style={{
         flexDirection: 'row',
         alignItems: 'center',
         gap: SP['2'],
       }}>
-        <Avatar size={36} anonymous />
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, flexWrap: 'wrap' }}>
-          <Text style={[T.smallM, { color: C.text }]}>匿</Text>
-          <TrustBadge score={post.trust_score_at_post} />
-          <Text style={[T.small, { color: C.text3 }]}>· {formatRelative(post.created_at)}</Text>
-          <PostKindBadge kind={post.kind ?? 'opinion'} size="sm" />
-        </View>
+        {post.official_author ? (
+          // 公式管理者: ✓ shield アクセント色のアバター
+          <View
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: C.accentBg,
+              borderWidth: 1.5,
+              borderColor: C.accent,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            accessibilityLabel="公式管理者"
+          >
+            <Icon.shield size={18} color={C.accent} strokeWidth={2.4} />
+          </View>
+        ) : (
+          <Avatar size={36} anonymous />
+        )}
+        {post.official_author ? (
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
+                {post.official_author.name || '公式管理者'}
+              </Text>
+              <PostKindBadge kind={post.kind ?? 'opinion'} size="sm" />
+            </View>
+            <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
+              {post.official_author.organization
+                ? `${post.official_author.organization} · ${formatRelative(post.created_at)}`
+                : formatRelative(post.created_at)}
+            </Text>
+          </View>
+        ) : (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, flexWrap: 'wrap' }}>
+            <Text style={[T.smallM, { color: C.text }]}>匿</Text>
+            <TrustBadge score={post.trust_score_at_post} />
+            <Text style={[T.small, { color: C.text3 }]}>· {formatRelative(post.created_at)}</Text>
+            <PostKindBadge kind={post.kind ?? 'opinion'} size="sm" />
+          </View>
+        )}
         <PressableScale onPress={onMore} hitSlop={8} style={{ padding: 2 }}>
           <More size={20} color={C.text3} strokeWidth={2.2} />
         </PressableScale>

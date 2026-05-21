@@ -55,6 +55,7 @@ export type CommunitySpot = {
   photo_url: string | null;
   created_by: string;
   created_at: string;
+  is_certified?: boolean;
 };
 
 // ============================================================
@@ -76,6 +77,8 @@ export type CommunityEvent = {
 export type CommunityPostWithCommunity = CommunityPost & {
   community: Pick<Community, 'id' | 'name' | 'icon_emoji' | 'icon_color' | 'icon_url' | 'is_official'>;
   author_nickname?: string;
+  // 公式コミュ管理者投稿の de-anonymize 用 (匿名ニックネームではなく実名 · 所属を表示)
+  official_author?: { name: string; organization: string } | null;
 };
 
 // ============================================================
@@ -128,9 +131,12 @@ export async function fetchMyCommunityFeed(limit = 30): Promise<CommunityPostWit
 
   const ids = memberRows.map((r) => r.community_id);
 
+  // community embed には公式コミュ管理者識別用のカラムも取得 (de-anonymize 判定)
   const { data, error } = await supabase
     .from('community_posts')
-    .select('*, community:communities(id, name, icon_emoji, icon_color, icon_url, is_official)')
+    .select(
+      '*, community:communities(id, name, icon_emoji, icon_color, icon_url, is_official, official_admin_user_id, official_admin_display_name, official_organization)',
+    )
     .in('community_id', ids)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -152,10 +158,48 @@ export async function fetchMyCommunityFeed(limit = 30): Promise<CommunityPostWit
     nickMap = Object.fromEntries((profs ?? []).map((p) => [p.id, p.nickname]));
   }
 
-  return (data ?? []).map((p) => ({
-    ...p,
-    author_nickname: nickMap[p.author_id],
-  }));
+  // Supabase embed の型 narrowing が one-to-many と判定するので unknown 経由で正規化
+  type FullCommunity = Pick<Community, 'id' | 'name' | 'icon_emoji' | 'icon_color' | 'icon_url' | 'is_official'> & {
+    official_admin_user_id?: string | null;
+    official_admin_display_name?: string | null;
+    official_organization?: string | null;
+  };
+  type Row = CommunityPost & { community: FullCommunity | FullCommunity[] | null };
+  const rows = ((data ?? []) as unknown) as Row[];
+
+  return rows.map((p) => {
+    const c = Array.isArray(p.community) ? p.community[0] : p.community;
+    // 公式管理者の投稿: 匿名ニックネームの代わりに 実名 · 所属 を返す
+    let official_author: { name: string; organization: string } | null = null;
+    if (
+      c &&
+      c.is_official &&
+      c.official_admin_user_id &&
+      p.author_id === c.official_admin_user_id
+    ) {
+      official_author = {
+        name: c.official_admin_display_name ?? '',
+        organization: c.official_organization ?? '',
+      };
+    }
+    // 戻り値の community は元の Pick<...> 型に絞る (consumer から余分カラムが見えないように)
+    const trimmedCommunity = c
+      ? {
+          id: c.id,
+          name: c.name,
+          icon_emoji: c.icon_emoji,
+          icon_color: c.icon_color,
+          icon_url: c.icon_url,
+          is_official: c.is_official,
+        }
+      : null;
+    return {
+      ...p,
+      community: trimmedCommunity as CommunityPostWithCommunity['community'],
+      author_nickname: nickMap[p.author_id],
+      official_author,
+    };
+  });
 }
 
 // ============================================================
@@ -300,6 +344,25 @@ export async function searchByName(query: string, limit = 20): Promise<Community
   // クライアント側で similarity score で再ランキング (近重複だけを上位に)
   const ranked = findSimilar(q, rows, { threshold: 0.4, limit });
   return ranked.map((r) => r.item);
+}
+
+// ============================================================
+// 公式コミュニティ一覧 — 探す画面の上部セクション用
+// is_official = true のものを member_count → created_at の順で返す
+// ============================================================
+export async function fetchOfficialCommunities(limit = 10): Promise<Community[]> {
+  const { data, error } = await supabase
+    .from('communities')
+    .select('*')
+    .eq('is_official', true)
+    .order('member_count', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.warn('[communities] fetchOfficialCommunities failed:', error.message);
+    return [];
+  }
+  return (data ?? []) as Community[];
 }
 
 // ============================================================
@@ -569,6 +632,19 @@ export async function deleteSpot(spot_id: string): Promise<{ error: string | nul
   const { error } = await supabase.from('community_spots').delete().eq('id', spot_id);
   if (error) return { error: error.message };
   return { error: null };
+}
+
+// 公認フラグの toggle (公式コミュニティの official_admin だけが操作可)
+export async function toggleSpotCertified(spotId: string, certified: boolean): Promise<void> {
+  const { error } = await supabase.rpc('toggle_spot_certified', {
+    p_spot_id: spotId,
+    p_certified: certified,
+  });
+  if (error) {
+    if (error.message.includes('NOT_OFFICIAL_ADMIN')) throw new Error('公式管理者のみ操作できます');
+    if (error.message.includes('SPOT_NOT_FOUND')) throw new Error('聖地が見つかりません');
+    throw new Error(error.message || '公認設定に失敗しました');
+  }
 }
 
 // ============================================================

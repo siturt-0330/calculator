@@ -323,7 +323,9 @@ export default function CommunityScreen() {
                       {p.community?.is_official && <OfficialBadge size="sm" />}
                     </View>
                     <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
-                      {p.author_nickname ?? '匿名'} · {timeAgo(p.created_at)}
+                      {p.official_author
+                        ? `${p.official_author.name || '公式管理者'}${p.official_author.organization ? ` · ${p.official_author.organization}` : ''} · ${timeAgo(p.created_at)}`
+                        : `${p.author_nickname ?? '匿名'} · ${timeAgo(p.created_at)}`}
                     </Text>
                   </View>
                 </View>

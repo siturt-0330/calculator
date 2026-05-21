@@ -49,6 +49,7 @@ import {
   leaveCommunity,
   fetchCommunitySpots,
   fetchCommunityEvents,
+  toggleSpotCertified,
   type CommunityWithMembership,
   type CommunitySpot,
   type CommunityEvent,
@@ -78,7 +79,7 @@ import type { Poll } from '../../../../lib/api/polls';
 // ============================================================
 // Types
 // ============================================================
-type TabKey = 'feed' | 'threads' | 'spots' | 'events' | 'compose';
+type TabKey = 'feed' | 'threads' | 'spots' | 'events' | 'compose' | 'comments';
 type FeedSort = 'new' | 'top' | 'old';
 
 const TABS: { key: TabKey; label: string }[] = [
@@ -99,7 +100,7 @@ const OFFICIAL_TABS: { key: TabKey; label: string }[] = [
   { key: 'threads', label: 'Q&A' },
   { key: 'spots', label: '聖地' },
   { key: 'events', label: 'カレンダー' },
-  { key: 'compose', label: 'コメント' },
+  { key: 'comments', label: 'コメント' },
 ];
 
 function getTabsFor(isOfficial: boolean) {
@@ -184,6 +185,7 @@ export default function CommunityDetailScreen() {
     spots: false,
     events: false,
     compose: false,
+    comments: false,
   });
   useEffect(() => {
     if (!visitedTabs[activeTab]) {
@@ -585,7 +587,7 @@ export default function CommunityDetailScreen() {
         )}
         {visitedTabs.spots && (
           <View style={{ display: activeTab === 'spots' ? 'flex' : 'none' }}>
-            <SpotsTab communityId={id} canCreate={community.is_member} />
+            <SpotsTab communityId={id} canCreate={community.is_member} community={community} />
           </View>
         )}
         {visitedTabs.events && (
@@ -593,7 +595,14 @@ export default function CommunityDetailScreen() {
             <EventsTab communityId={id} canCreate={community.is_member} />
           </View>
         )}
-        {/* compose tab navigates away in the effect above */}
+        {/* 公式コミュニティの「コメント」タブ — 一般ユーザーが唯一書き込める BBS スレッド一覧。
+            掲示板タブと同じ ThreadsTab を流用 (UX 統一) */}
+        {community.is_official && visitedTabs.comments && (
+          <View style={{ display: activeTab === 'comments' ? 'flex' : 'none' }}>
+            <ThreadsTab communityId={id} />
+          </View>
+        )}
+        {/* compose tab navigates away in the effect above (一般コミュニティのみ) */}
       </ScrollView>
     </View>
   );
@@ -1285,9 +1294,21 @@ const ThreadsTab = memo(function ThreadsTab({ communityId }: { communityId: stri
 // ============================================================
 // Tab: 聖地 (community spots)
 // ============================================================
-const SpotsTab = memo(function SpotsTab({ communityId, canCreate }: { communityId: string; canCreate: boolean }) {
+const SpotsTab = memo(function SpotsTab({
+  communityId,
+  canCreate,
+  community,
+}: {
+  communityId: string;
+  canCreate: boolean;
+  community: CommunityWithMembership;
+}) {
   const router = useRouter();
   const { show: showToast } = useToastStore();
+  const qc = useQueryClient();
+  const userId = useAuthStore((s) => s.user?.id);
+  const isOfficialAdmin = !!userId && community.official_admin_user_id === userId;
+
   const { data, isLoading, isError } = useQuery({
     queryKey: ['community', communityId, 'spots'],
     queryFn: () => fetchCommunitySpots(communityId),
@@ -1301,6 +1322,18 @@ const SpotsTab = memo(function SpotsTab({ communityId, canCreate }: { communityI
 
   const spots: CommunitySpot[] = data ?? [];
 
+  const toggleCertify = useMutation({
+    mutationFn: ({ spotId, certified }: { spotId: string; certified: boolean }) =>
+      toggleSpotCertified(spotId, certified),
+    onSuccess: (_, vars) => {
+      void qc.invalidateQueries({ queryKey: ['community', communityId, 'spots'] });
+      showToast(vars.certified ? '公認に設定しました' : '公認を解除しました', 'success');
+    },
+    onError: (e: unknown) => {
+      showToast(e instanceof Error ? e.message : '公認設定に失敗しました', 'error');
+    },
+  });
+
   const renderItem: ListRenderItem<CommunitySpot> = ({ item }) => {
     const safePhoto = item.photo_url ? sanitizeUrl(item.photo_url) : null;
     return (
@@ -1312,7 +1345,7 @@ const SpotsTab = memo(function SpotsTab({ communityId, canCreate }: { communityI
           backgroundColor: C.bg2,
           borderRadius: R.lg,
           borderWidth: 1,
-          borderColor: C.border,
+          borderColor: item.is_certified ? C.accent + '55' : C.border,
         }}
       >
         <View
@@ -1333,9 +1366,51 @@ const SpotsTab = memo(function SpotsTab({ communityId, canCreate }: { communityI
           )}
         </View>
         <View style={{ flex: 1, gap: 4 }}>
-          <Text style={[T.bodyB, { color: C.text }]} numberOfLines={1}>
-            {item.name}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={[T.bodyB, { color: C.text, flexShrink: 1 }]} numberOfLines={1}>
+              {item.name}
+            </Text>
+            {item.is_certified && (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 3,
+                  paddingHorizontal: 6,
+                  paddingVertical: 2,
+                  backgroundColor: C.accentBg,
+                  borderRadius: R.full,
+                  borderWidth: 1,
+                  borderColor: C.accent + '55',
+                }}
+              >
+                <Icon.shield size={10} color={C.accent} strokeWidth={2.6} />
+                <Text style={{ fontSize: 10, color: C.accent, fontWeight: '700' }}>公認</Text>
+              </View>
+            )}
+            <View style={{ flex: 1 }} />
+            {isOfficialAdmin && (
+              <PressableScale
+                onPress={() =>
+                  toggleCertify.mutate({ spotId: item.id, certified: !item.is_certified })
+                }
+                haptic="tap"
+                style={{
+                  padding: 6,
+                  borderRadius: R.full,
+                  backgroundColor: item.is_certified ? C.accentBg : C.bg3,
+                  borderWidth: 1,
+                  borderColor: item.is_certified ? C.accent + '55' : C.border,
+                }}
+              >
+                <Icon.edit
+                  size={12}
+                  color={item.is_certified ? C.accent : C.text3}
+                  strokeWidth={2.4}
+                />
+              </PressableScale>
+            )}
+          </View>
           {item.description.length > 0 && (
             <Text style={[T.small, { color: C.text2 }]} numberOfLines={2}>
               {item.description}

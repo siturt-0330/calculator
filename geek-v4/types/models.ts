@@ -26,6 +26,13 @@ export type Post = {
   cw_category?: CWCategory;
   visibility?: PostVisibility;
   created_at: string;
+  // posts.author_id — RLS で誰でも読める。公式管理者識別のため fetch する。
+  author_id?: string;
+  // 公式コミュニティの管理者が投稿した時に、posts API 側でクライアントが
+  // 算出する派生フィールド。is_official=true なコミュニティに紐付き、かつ
+  // post.author_id === community.official_admin_user_id の時のみセットされる。
+  // セット時は「匿」の代わりに実名 · 所属を表示する。
+  official_author?: { name: string; organization: string } | null;
 };
 
 export type Comment = {

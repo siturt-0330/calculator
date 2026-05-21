@@ -5,8 +5,9 @@ export type { PostVisibility } from '../../types/models';
 export type SortMode = 'for-you' | 'hot' | 'new' | 'top';
 
 // posts SELECT で取得するカラム一覧 (一箇所でメンテ可能)
+// author_id は公式コミュ管理者投稿を de-anonymize する判定に使う (RLS で誰でも読める)
 const POSTS_SELECT_COLS =
-  'id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, created_at';
+  'id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, created_at, author_id';
 
 // UUID 形式チェック (壊れた URL や古い ID 対策) — fetchPostById と fetchCommunityPosts で使う
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -129,7 +130,8 @@ export async function fetchPosts({
       else nextCursor = `${last.likes_count}|${last.created_at}`;
     }
   }
-  return { posts, nextCursor };
+  const decorated = await attachOfficialAuthor(posts);
+  return { posts: decorated, nextCursor };
 }
 
 import { sanitizeContent, sanitizeTag, sanitizeUrl } from '../sanitize';
@@ -309,7 +311,8 @@ export async function fetchCommunityPosts({
     if (last) nextCursor = last.created_at;
   }
 
-  return { posts, nextCursor };
+  const decorated = await attachOfficialAuthor(posts);
+  return { posts: decorated, nextCursor };
 }
 
 export async function fetchPostById(id: string): Promise<Post | null> {
@@ -324,7 +327,61 @@ export async function fetchPostById(id: string): Promise<Post | null> {
     console.warn('[fetchPostById] error:', error.message);
     return null;
   }
-  return (data ?? null) as Post | null;
+  if (!data) return null;
+  const [decorated] = await attachOfficialAuthor([data as Post]);
+  return decorated ?? null;
+}
+
+// ============================================================
+// 公式コミュ管理者投稿の de-anonymize
+// ------------------------------------------------------------
+// posts.author_id === communities.official_admin_user_id かつ
+// is_official=true の community に紐付いている post には、実名 + 所属
+// を派生フィールド official_author としてセットする。
+// post → post_communities → communities を 1 リクエストで集約。
+// 該当しない post は official_author = undefined のまま (anon 表示)。
+// ============================================================
+async function attachOfficialAuthor<T extends Post>(posts: T[]): Promise<T[]> {
+  if (posts.length === 0) return posts;
+  const postIds = posts.map((p) => p.id);
+  const { data, error } = await supabase
+    .from('post_communities')
+    .select(
+      'post_id, community:communities(is_official, official_admin_user_id, official_admin_display_name, official_organization)',
+    )
+    .in('post_id', postIds);
+  if (error) {
+    // 致命的ではない — 公式表示が出ないだけで anon 表示にフォールバック
+    console.warn('[attachOfficialAuthor] join failed:', error.message);
+    return posts;
+  }
+  type CommunityCol = {
+    is_official?: boolean | null;
+    official_admin_user_id?: string | null;
+    official_admin_display_name?: string | null;
+    official_organization?: string | null;
+  };
+  type Row = { post_id: string; community: CommunityCol | CommunityCol[] | null };
+  const rows = (data ?? []) as unknown as Row[];
+  // post_id → official admin info (最初に該当する公式コミュ管理者を採用)
+  const officialByPostId: Record<string, { name: string; organization: string }> = {};
+  for (const r of rows) {
+    if (!r.community) continue;
+    const c = Array.isArray(r.community) ? r.community[0] : r.community;
+    if (!c || !c.is_official || !c.official_admin_user_id) continue;
+    const post = posts.find((p) => p.id === r.post_id);
+    if (!post || !post.author_id) continue;
+    if (post.author_id !== c.official_admin_user_id) continue;
+    officialByPostId[r.post_id] = {
+      name: c.official_admin_display_name ?? '',
+      organization: c.official_organization ?? '',
+    };
+  }
+  return posts.map((p) => {
+    const off = officialByPostId[p.id];
+    if (!off) return p;
+    return { ...p, official_author: off };
+  });
 }
 
 // ============================================================
