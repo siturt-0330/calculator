@@ -17,6 +17,7 @@ import {
   Image,
   Pressable,
   FlatList,
+  ActivityIndicator,
   type ListRenderItem,
 } from 'react-native';
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
@@ -178,10 +179,11 @@ export default function CommunityDetailScreen() {
       const { error } = await leaveCommunity(community.id);
       setJoining(false);
       if (error) {
+        console.warn('[community] leave failed:', error);
         show(error, 'error');
         return;
       }
-      show('登録を解除しました', 'success');
+      show('コミュニティから抜けました', 'success');
     } else if (community.visibility === 'request') {
       const { error } = await requestJoinCommunity(community.id);
       setJoining(false);
@@ -194,12 +196,16 @@ export default function CommunityDetailScreen() {
       const { error } = await joinCommunity(community.id);
       setJoining(false);
       if (error) {
+        console.warn('[community] join failed:', error);
         show(error, 'error');
         return;
       }
-      show('登録しました', 'success');
+      show('コミュニティに参加しました', 'success');
     }
+    // 即座にすべての関連 query を invalidate (header / マイコミュ / 投稿先候補 全部更新)
     void qc.invalidateQueries({ queryKey: ['community', id] });
+    void qc.invalidateQueries({ queryKey: ['mypage-my-communities'] });
+    void qc.invalidateQueries({ queryKey: ['community-discover'] });
   };
 
   // -----------------------------------------------------------
@@ -574,7 +580,7 @@ function SubscribeButton({
         }}
       >
         <Icon.bell size={15} color={C.text2} strokeWidth={2.2} />
-        <Text style={[T.bodyB, { color: C.text2, fontWeight: '700' }]}>登録済み</Text>
+        <Text style={[T.bodyB, { color: C.text2, fontWeight: '700' }]}>参加中</Text>
         <Icon.chevronD size={13} color={C.text3} strokeWidth={2.2} />
       </PressableScale>
     );
@@ -586,17 +592,20 @@ function SubscribeButton({
       disabled={loading}
       style={{
         alignSelf: 'stretch',
+        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
+        gap: SP['2'],
         backgroundColor: C.accent,
         borderRadius: R.full,
         paddingVertical: SP['3'],
-        opacity: loading ? 0.5 : 1,
+        opacity: loading ? 0.7 : 1,
         ...SHADOW.accentGlow,
       }}
     >
+      {loading && <ActivityIndicator size="small" color="#fff" />}
       <Text style={[T.bodyB, { color: '#fff', fontWeight: '700' }]}>
-        {isRequestVisibility ? '参加を申請する' : '登録する'}
+        {loading ? '処理中…' : isRequestVisibility ? '参加を申請する' : 'コミュニティに参加する'}
       </Text>
     </PressableScale>
   );
