@@ -19,6 +19,9 @@ export default function NotificationsOnboarding() {
   const [saving, setSaving] = useState(false);
 
   const finish = async (allow: boolean) => {
+    // 二重 submit 防止 — 旧コードは「あとで設定」を連打すると finish が
+    // 何度も走って router.replace が複数発火していた
+    if (saving) return;
     setSaving(true);
     let dbCommitted = false;
     try {
@@ -38,22 +41,29 @@ export default function NotificationsOnboarding() {
       // 旧コードは local を先に書き換えていたため、DB 失敗時に
       // local true / DB false の state divergence が起きていた
       if (user) {
-        // upsert で atomic: 行が無ければ INSERT、あれば UPDATE
-        const fallback = (user.email?.split('@')[0] ?? 'user').padEnd(2, '_').slice(0, 20);
-        const { error: upErr } = await supabase
-          .from('profiles')
-          .upsert(
-            { id: user.id, nickname: user.nickname ?? fallback, onboarded: true },
-            { onConflict: 'id' },
-          )
-          .select();
-        if (upErr) {
-          console.warn('profile upsert failed:', upErr.message);
+        try {
+          // upsert で atomic: 行が無ければ INSERT、あれば UPDATE
+          const fallback = (user.email?.split('@')[0] ?? 'user').padEnd(2, '_').slice(0, 20);
+          const { error: upErr } = await supabase
+            .from('profiles')
+            .upsert(
+              { id: user.id, nickname: user.nickname ?? fallback, onboarded: true },
+              { onConflict: 'id' },
+            )
+            .select();
+          if (upErr) {
+            console.warn('profile upsert failed:', upErr.message);
+            show('プロフィール保存に失敗しましたが、続行します', 'warn');
+            // DB は失敗だが UX 上は進める — ローカルだけ onboarded にして app を続行可能に
+            setUser({ ...user, onboarded: true });
+          } else {
+            dbCommitted = true;
+            setUser({ ...user, onboarded: true });
+          }
+        } catch (e) {
+          // ネットワーク例外で finally 経由してくる前にここで捕まえる
+          console.warn('profile upsert exception:', e);
           show('プロフィール保存に失敗しましたが、続行します', 'warn');
-          // DB は失敗だが UX 上は進める — ローカルだけ onboarded にして app を続行可能に
-          setUser({ ...user, onboarded: true });
-        } else {
-          dbCommitted = true;
           setUser({ ...user, onboarded: true });
         }
       }
@@ -106,7 +116,7 @@ export default function NotificationsOnboarding() {
 
       <View style={{ gap: SP['3'] }}>
         <Button label="通知を許可する" onPress={() => finish(true)} loading={saving} haptic="success" />
-        <Button label="あとで設定する" onPress={() => finish(false)} variant="ghost" />
+        <Button label="あとで設定する" onPress={() => finish(false)} variant="ghost" disabled={saving} />
       </View>
     </View>
   );

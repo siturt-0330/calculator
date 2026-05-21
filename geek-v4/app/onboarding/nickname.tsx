@@ -119,6 +119,9 @@ export default function NicknameScreen() {
             placeholder="例: ぽけオタク"
             maxLength={20}
             autoFocus
+            // 改行キー → 次へを直接発火させて 1 タップで進めるようにする
+            returnKeyType="next"
+            onSubmitEditing={() => { void next(); }}
             keyboardAppearance="dark"
             selectionColor={C.accent}
           />

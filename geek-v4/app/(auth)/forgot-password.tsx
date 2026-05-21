@@ -34,22 +34,29 @@ export default function ForgotPasswordScreen() {
   const MailIcon = Icon.at;
 
   const handleReset = async () => {
+    // 二重 submit 防止は最初に — 検証より前
+    if (loading) return;
     const e = email.trim();
     if (!/\S+@\S+\.\S+/.test(e)) {
       show('メールアドレスの形式が正しくありません。', 'warn');
       return;
     }
-    if (loading) return;
     setLoading(true);
     const redirectTo = buildResetRedirectUrl();
-    const { error } = await supabase.auth.resetPasswordForEmail(e, { redirectTo });
-    setLoading(false);
-    if (error) {
-      show('送信に失敗しました。時間をおいて再度お試しください。', 'error');
-    } else {
-      // セキュリティ上、メールが登録されているかは伝えない
-      setSent(true);
-      show('もしそのメールが登録済みなら、リセットメールが届きます。', 'success');
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(e, { redirectTo });
+      if (error) {
+        show('送信に失敗しました。時間をおいて再度お試しください。', 'error');
+      } else {
+        // セキュリティ上、メールが登録されているかは伝えない
+        setSent(true);
+        show('もしそのメールが登録済みなら、リセットメールが届きます。', 'success');
+      }
+    } catch {
+      // ネットワーク例外でも loading が解除されるよう catch を必ず通す
+      show('送信に失敗しました。回線を確認してください。', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 

@@ -100,22 +100,40 @@ export default function ProfileEditScreen() {
 
   const save = async () => {
     if (!user) return;
-    if (nickname.trim().length < 2) {
+    // 二重 submit 防止 — ボタン連打で重複 update を防ぐ
+    if (loading || uploading) return;
+    const trimmedNickname = nickname.trim();
+    if (trimmedNickname.length < 2) {
       show('ニックネームは2文字以上で入力してください', 'warn');
       return;
     }
+    if (Array.from(trimmedNickname).length > 20) {
+      show('ニックネームは20文字以内にしてください', 'warn');
+      return;
+    }
     setLoading(true);
-    const { error } = await supabase
-      .from('profiles')
-      .update({ nickname: nickname.trim(), avatar_emoji: emoji, avatar_url: avatarUrl })
-      .eq('id', user.id);
-    setLoading(false);
-    if (error) {
-      show('保存に失敗しました', 'error');
-    } else {
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ nickname: trimmedNickname, avatar_emoji: emoji, avatar_url: avatarUrl })
+        .eq('id', user.id);
+      if (error) {
+        const msg = error.message.toLowerCase();
+        if (msg.includes('duplicate') || msg.includes('unique')) {
+          show('このニックネームは既に使われています', 'error');
+        } else {
+          show('保存に失敗しました', 'error');
+        }
+        return;
+      }
       show('保存しました', 'success');
       await refreshProfile();
       router.back();
+    } catch {
+      // ネットワーク例外でも loading を確実に解除する
+      show('ネットワークエラー。接続を確認してください。', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -179,6 +197,9 @@ export default function ProfileEditScreen() {
           onChangeText={setNickname}
           placeholder="例: ぽけオタク"
           maxLength={20}
+          // 改行キーで直接保存 — フォームを下までスクロールせず済む
+          returnKeyType="done"
+          onSubmitEditing={() => { void save(); }}
         />
 
         {/* 絵文字アイコン選択 */}
@@ -213,7 +234,12 @@ export default function ProfileEditScreen() {
           </View>
         </View>
 
-        <Button label="保存" onPress={save} loading={loading} />
+        <Button label="保存" onPress={save} loading={loading} disabled={uploading} />
+        {uploading && (
+          <Text style={[T.caption, { color: C.text3, textAlign: 'center', marginTop: -SP['2'] }]}>
+            画像アップロード中は保存できません
+          </Text>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );

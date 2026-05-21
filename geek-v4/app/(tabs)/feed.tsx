@@ -208,6 +208,8 @@ export default function FeedScreen() {
           <PressableScale
             onPress={() => router.push('/post/create' as never)}
             haptic="confirm"
+            hitSlop={8}
+            accessibilityLabel="新規投稿"
             style={{
               width: 36, height: 36, borderRadius: 18,
               backgroundColor: C.accent,
@@ -226,10 +228,22 @@ export default function FeedScreen() {
           }}>
             Geek
           </Text>
-          <PressableScale onPress={() => router.push('/search' as never)} style={{ padding: SP['2'] }}>
+          <PressableScale
+            onPress={() => router.push('/search' as never)}
+            hitSlop={10}
+            haptic="tap"
+            accessibilityLabel="検索"
+            style={{ padding: SP['2'] }}
+          >
             <Search size={22} color={C.text} strokeWidth={2.2} />
           </PressableScale>
-          <PressableScale onPress={() => router.push('/notifications' as never)} style={{ padding: SP['2'] }}>
+          <PressableScale
+            onPress={() => router.push('/notifications' as never)}
+            hitSlop={10}
+            haptic="tap"
+            accessibilityLabel={`通知${unreadCount > 0 ? ` ${unreadCount}件` : ''}`}
+            style={{ padding: SP['2'] }}
+          >
             <View>
               <Bell size={22} color={C.text} strokeWidth={2.2} />
               <NotificationBadge count={unreadCount} top={-4} right={-6} />

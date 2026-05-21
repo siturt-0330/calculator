@@ -23,6 +23,7 @@ import { bbsReplyToObsidianNote, bbsThreadToObsidianNote } from '../../hooks/use
 import type { ReactionAgg } from '../../lib/api/bbsReplyReactions';
 import { Icon } from '../../constants/icons';
 import { notify, Haptics } from '../../lib/haptics';
+import { useToastStore } from '../../stores/toastStore';
 
 const CATEGORY_COLORS: Record<string, string> = {
   '雑談': '#22D3A4', 'アニメ': '#FF6B7A', 'ゲーム': '#7CB1FF',
@@ -44,6 +45,7 @@ export default function BBSThreadScreen() {
   const BackIcon = Icon.arrowL;
 
   const { thread, replies, loading, refreshing, refresh, reply, error } = useBBSThread(id);
+  const { show: showToast } = useToastStore();
 
   // 入力欄への ref。クォート返信時に focus する。
   const inputRef = useRef<TextInput>(null);
@@ -82,8 +84,12 @@ export default function BBSThreadScreen() {
       await reply(text.trim());
       setText('');
       notify(Haptics.NotificationFeedbackType.Success);
-    } catch {
+    } catch (e: unknown) {
+      // 以前は haptic だけで toast が出ず、ユーザーには「ボタンを押したのに何も起きない」
+      // ように見えていた。失敗時は明示的にトーストでフィードバックする。
       notify(Haptics.NotificationFeedbackType.Error);
+      const msg = e instanceof Error ? e.message : '';
+      showToast(msg ? `送信に失敗しました: ${msg}` : '送信に失敗しました', 'error');
     } finally {
       setSending(false);
     }
@@ -181,6 +187,8 @@ export default function BBSThreadScreen() {
                   <PressableScale
                     onPress={() => quoteReply(index)}
                     haptic="tap"
+                    hitSlop={8}
+                    accessibilityLabel={`>>${index + 1} で返信`}
                     style={{
                       flexDirection: 'row',
                       alignItems: 'center',
@@ -200,6 +208,8 @@ export default function BBSThreadScreen() {
                   <PressableScale
                     onPress={() => setPickerForReplyId(item.id)}
                     haptic="tap"
+                    hitSlop={10}
+                    accessibilityLabel="リアクションを選ぶ"
                     style={{ padding: 4 }}
                   >
                     <Text style={{ fontSize: 16 }}>🪶</Text>
@@ -273,6 +283,8 @@ export default function BBSThreadScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderReply}
         estimatedItemSize={120}
+        // 返信入力中に >>N ボタンを 1 タップで操作できるよう keyboard を保持
+        keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.accent} />
         }
@@ -455,7 +467,13 @@ function Header({
         flexDirection: 'row', alignItems: 'center',
         paddingHorizontal: SP['3'], paddingVertical: SP['2'],
       }}>
-        <PressableScale onPress={() => router.back()} haptic="tap" style={{ padding: SP['2'] }}>
+        <PressableScale
+          onPress={() => router.back()}
+          haptic="tap"
+          hitSlop={12}
+          accessibilityLabel="戻る"
+          style={{ padding: SP['2'] }}
+        >
           <BackIcon size={22} color={C.text} strokeWidth={2.2} />
         </PressableScale>
         <Text style={[T.smallM, { color: C.text3, marginLeft: SP['2'] }]}>💬 掲示板</Text>

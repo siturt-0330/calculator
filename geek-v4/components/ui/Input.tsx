@@ -77,6 +77,11 @@ export const Input = forwardRef<TextInput, Props>(function Input(
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           placeholderTextColor={C.text3}
+          // dark theme で黒系カーソルが見えなくなる事故防止
+          // - selectionColor: 選択範囲ハイライト (iOS/Android/Web)
+          // - cursorColor: Android 13+ のキャレット色 (selectionColor だけだと薄い)
+          selectionColor={C.accent}
+          cursorColor={C.accent}
           style={[T.body, { flex: 1, color: C.text }, style]}
           {...rest}
         />

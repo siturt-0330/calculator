@@ -233,35 +233,52 @@ export default function CreateCommunityScreen() {
       return;
     }
     setSubmitting(true);
-    const v: Visibility = visibility === 'open' ? 'open' : closedMode;
-    // Step 1: row を INSERT (icon_url なし)
-    const { data: created, error } = await createCommunity({
-      name,
-      description,
-      icon_emoji: '👥', // placeholder
-      icon_color: '#7C6AF7', // placeholder
-      visibility: v,
-      tags,
-    });
-    if (error || !created) {
-      setSubmitting(false);
-      show(error ?? 'コミュニティ作成に失敗しました', 'error');
-      return;
-    }
-    // Step 2: アイコンアップロード — 失敗しても community は出来ているので警告だけ
-    const { url, error: upErr } = await uploadCommunityIcon(created.id, localIconBlob, localIconMime);
-    if (upErr || !url) {
-      console.warn('[community/create] icon upload failed:', upErr);
-      show('コミュニティは作成されましたがアイコンアップロードに失敗しました。詳細画面から再設定できます。', 'warn');
-      setSubmitting(false);
+    try {
+      const v: Visibility = visibility === 'open' ? 'open' : closedMode;
+      // Step 1: row を INSERT (icon_url なし)
+      const { data: created, error } = await createCommunity({
+        name,
+        description,
+        icon_emoji: '👥', // placeholder
+        icon_color: '#7C6AF7', // placeholder
+        visibility: v,
+        tags,
+      });
+      if (error || !created) {
+        show(error ?? 'コミュニティ作成に失敗しました', 'error');
+        return;
+      }
+      // Step 2: アイコンアップロード — 失敗しても community は出来ているので警告だけ
+      const { url, error: upErr } = await uploadCommunityIcon(created.id, localIconBlob, localIconMime);
+      if (upErr || !url) {
+        console.warn('[community/create] icon upload failed:', upErr);
+        show('コミュニティは作成されましたがアイコンアップロードに失敗しました。詳細画面から再設定できます。', 'warn');
+        router.replace(`/community/${created.id}` as never);
+        return;
+      }
+      // Step 3: icon_url を反映 — 失敗しても致命的ではないので警告のみ
+      try {
+        await updateCommunity(created.id, { icon_url: url });
+      } catch (e) {
+        console.warn('[community/create] icon_url update failed:', e);
+      }
+      show('コミュニティを作成しました！', 'success');
       router.replace(`/community/${created.id}` as never);
-      return;
+    } catch (e) {
+      console.warn('[community/create] submit failed:', e);
+      const msg = e instanceof Error ? e.message : '';
+      let userMsg = 'コミュニティ作成に失敗しました';
+      if (msg.includes('Network') || msg.includes('Failed to fetch')) {
+        userMsg = '通信エラー。電波を確認してください';
+      } else if (msg.includes('row-level security') || msg.includes('RLS')) {
+        userMsg = '権限エラー。ログインし直してください';
+      }
+      show(userMsg, 'error');
+    } finally {
+      // 成功時は router.replace で離れるので setSubmitting は不要だが、
+      // エラー時に確実にフォーム解放するため呼ぶ
+      setSubmitting(false);
     }
-    // Step 3: icon_url を反映
-    await updateCommunity(created.id, { icon_url: url });
-    setSubmitting(false);
-    show('コミュニティを作成しました！', 'success');
-    router.replace(`/community/${created.id}` as never);
   };
 
   // Preview avatar — uploaded image or fallback
@@ -459,7 +476,14 @@ export default function CreateCommunityScreen() {
 
         {/* 説明 */}
         <View style={{ gap: SP['2'] }}>
-          <Text style={[T.smallM, { color: C.text2 }]}>説明 (任意 / 最大 500 文字)</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={[T.smallM, { color: C.text2, flex: 1 }]}>説明 (任意 / 最大 500 文字)</Text>
+            {description.length > 0 && (
+              <Text style={[T.caption, { color: description.length >= 480 ? C.amber : C.text3 }]}>
+                {description.length} / 500
+              </Text>
+            )}
+          </View>
           <Input
             value={description}
             onChangeText={setDescription}
@@ -672,6 +696,24 @@ export default function CreateCommunityScreen() {
           })}
         </View>
 
+        {/* Submit ボタンが disabled の理由を inline で示す — 何で押せないか分からない事象を防ぐ */}
+        {!submitting && (name.trim().length < 2 || !localIconBlob) && (
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', gap: 6,
+            paddingHorizontal: SP['3'], paddingVertical: SP['2'],
+            backgroundColor: C.amberBg,
+            borderRadius: R.md,
+            borderWidth: 1,
+            borderColor: C.amber + '40',
+          }}>
+            <Icon.warn size={14} color={C.amber} strokeWidth={2.4} />
+            <Text style={[T.caption, { color: C.amber, fontWeight: '600', flex: 1 }]}>
+              {name.trim().length < 2
+                ? 'コミュニティ名を 2 文字以上で入力してください'
+                : 'アイコン画像を選択してください'}
+            </Text>
+          </View>
+        )}
         <Button
           label="コミュニティを作成"
           onPress={onSubmit}
