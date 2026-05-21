@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import Animated, { FadeIn, FadeInDown, Layout } from 'react-native-reanimated';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -153,20 +154,25 @@ export default function BBSCreateScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ padding: SP['5'], gap: SP['5'] }}
+        contentContainerStyle={{ padding: SP['5'], gap: SP['5'], paddingBottom: insets.bottom + SP['10'] }}
         keyboardShouldPersistTaps="handled"
       >
         <View style={{ gap: SP['2'] }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <Text style={[T.small, { color: C.text2 }]}>タイトル</Text>
-            <Text style={[T.small, { color: title.length > 50 ? C.red : C.text3 }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
+            <Text style={[T.smallB, { color: C.text2 }]}>タイトル</Text>
+            <Text style={[T.caption, { color: C.red }]}>*</Text>
+            <View style={{ flex: 1 }} />
+            <Text style={[T.caption, { color: title.length > 50 ? C.red : C.text3 }]}>
               {title.length} / 50
             </Text>
           </View>
+          <Text style={[T.caption, { color: C.text3 }]}>
+            何の話か一目で分かる短いタイトルを
+          </Text>
           <TextInput
             value={title}
             onChangeText={setTitle}
-            placeholder="スレッドのタイトルを入力..."
+            placeholder="例: 鬼滅 無限城編 ネタバレ感想"
             placeholderTextColor={C.text3}
             maxLength={60}
             autoFocus
@@ -181,14 +187,17 @@ export default function BBSCreateScreen() {
                 paddingHorizontal: SP['4'],
                 paddingVertical: SP['3'],
                 borderWidth: 1.5,
-                borderColor: C.border,
+                borderColor: title.length > 50 ? C.red : C.border,
               },
             ]}
           />
         </View>
 
         <View style={{ gap: SP['2'] }}>
-          <Text style={[T.small, { color: C.text2 }]}>カテゴリ（任意）</Text>
+          <Text style={[T.smallB, { color: C.text2 }]}>カテゴリ（任意）</Text>
+          <Text style={[T.caption, { color: C.text3 }]}>
+            プリセットから選ぶ、または自由入力
+          </Text>
           <TextInput
             value={category}
             onChangeText={setCategory}
@@ -236,8 +245,11 @@ export default function BBSCreateScreen() {
 
         {/* 公開設定 */}
         <View style={{ gap: SP['2'] }}>
-          <Text style={[T.smallM, { color: C.text2 }]}>公開設定</Text>
-          <View style={{ flexDirection: 'row', gap: SP['2'] }}>
+          <Text style={[T.smallB, { color: C.text2 }]}>公開設定</Text>
+          <Text style={[T.caption, { color: C.text3 }]}>
+            だれが見られるスレッドかを選ぶ
+          </Text>
+          <View style={{ flexDirection: 'row', gap: SP['2'], marginTop: SP['1'] }}>
             <PressableScale
               onPress={() => {
                 setVisibility('public');
@@ -333,7 +345,11 @@ export default function BBSCreateScreen() {
           )}
 
           {showCommunityPicker && (
-            <View style={{ gap: SP['2'] }}>
+            <Animated.View
+              entering={FadeInDown.duration(200)}
+              layout={Layout.springify().damping(20)}
+              style={{ gap: SP['2'] }}
+            >
               <View style={{
                 flexDirection: 'row', alignItems: 'center', gap: SP['2'],
                 paddingHorizontal: SP['3'], paddingVertical: SP['2'],
@@ -423,14 +439,15 @@ export default function BBSCreateScreen() {
                   })
                 )}
               </View>
-            </View>
+            </Animated.View>
           )}
         </View>
 
         {error ? (
-          <View style={{ backgroundColor: C.redBg, borderRadius: R.md, padding: SP['3'] }}>
-            <Text style={[T.small, { color: C.red }]}>{error}</Text>
-          </View>
+          <Animated.View entering={FadeIn.duration(150)} style={{ backgroundColor: C.redBg, borderRadius: R.md, padding: SP['3'], flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+            <Icon.warn size={14} color={C.red} strokeWidth={2.4} />
+            <Text style={[T.small, { color: C.red, flex: 1 }]}>{error}</Text>
+          </Animated.View>
         ) : null}
 
         <Text style={[T.caption, { color: C.text3, textAlign: 'center', marginTop: SP['2'] }]}>

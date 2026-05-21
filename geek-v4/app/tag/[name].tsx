@@ -220,6 +220,14 @@ export default function TagDetailScreen() {
           keyExtractor={(item) => item.id}
           renderItem={renderPost}
           estimatedItemSize={300}
+          // スワイプフリック時の慣性減速を速める (iOS デフォルトの "normal" は
+          // ややダラダラ滑るので、リスト系では "fast" のほうがキビキビ感が出る)。
+          decelerationRate="fast"
+          // viewport 外で +250px 先読み — スクロール中に AnonPostCard の画像が
+          // 間に合わないと白セルが見える。
+          drawDistance={250}
+          // 大きい AnonPostCard を unmount してメモリ + GPU 負荷を下げる
+          removeClippedSubviews
           onEndReached={() => hasNextPage && fetchNextPage()}
           onEndReachedThreshold={0.5}
           refreshControl={

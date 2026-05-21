@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Modal, View, Text, ScrollView, TextInput, ActivityIndicator } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '../ui/PressableScale';
 import { Icon } from '../../constants/icons';
@@ -26,7 +27,8 @@ export function MemeReactionPicker({
   const [showCustomInput, setShowCustomInput] = useState(false);
   const { stamps: userStamps } = useUserStamps();
   const { mutateAsync: createStamp, isPending: creating } = useCreateUserStamp();
-  const { show } = useToastStore();
+  // toast actions のみ subscribe — picker は post カードから render される多発路
+  const show = useToastStore((s) => s.show);
   // ローカル送信ロック: ネット往復中に再タップを即座に弾く (React Query の
   // isPending 反映遅延 / state 反映前の二重押下を防ぐ defense-in-depth)
   const [submitting, setSubmitting] = useState(false);
@@ -138,7 +140,9 @@ export function MemeReactionPicker({
 
           {/* カスタム作成エリア */}
           {showCustomInput ? (
-            <View style={{
+            <Animated.View
+              entering={FadeIn.duration(160)}
+              style={{
               gap: SP['2'],
               padding: SP['3'],
               backgroundColor: C.bg3,
@@ -201,7 +205,7 @@ export function MemeReactionPicker({
                   )}
                 </PressableScale>
               </View>
-            </View>
+            </Animated.View>
           ) : (
             <PressableScale
               onPress={() => setShowCustomInput(true)}

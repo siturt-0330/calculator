@@ -29,9 +29,11 @@ import { C } from '../design/tokens';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
-if (!__DEV__) initSentry();
-initAnalytics();
-// initWebVitals は useEffect 内で cleanup 込みで呼ぶ — listener が leak しないように
+// 旧版は module top-level で initSentry() / initAnalytics() を即時起動していた。
+// この経路だと PostHog / Sentry 本体のロード + init が first paint の同期処理に
+// 乗ってしまい、体感の "もたつき" の元になっていた。
+// → 起動直後 idle に逃がす useEffect 経由に変更。bundle 自体も dynamic require
+//   なので、不要なルートでは取り込まれない。
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -80,8 +82,15 @@ function markIntroSeenForSession() {
 
 export default function RootLayout() {
   const fontsLoaded = useAppFonts();
-  const { hydrate: hydrateAuth, hydrated: authHydrated, user } = useAuthStore();
-  const { hydrate: hydrateSettings, hydrated: settingsHydrated } = useSettingsStore();
+  // 全 store destructure はやめる — settings の 16 フィールド (notifyLike,
+  // dataSaver, quietHour 等) が更新されるたび RootLayout 全体が再 render され、
+  // navigation tree と全 screen を巻き込んで「かくかく」する。必要な field
+  // (user / hydrated / hydrate action) だけを subscribe する。
+  const hydrateAuth = useAuthStore((s) => s.hydrate);
+  const authHydrated = useAuthStore((s) => s.hydrated);
+  const user = useAuthStore((s) => s.user);
+  const hydrateSettings = useSettingsStore((s) => s.hydrate);
+  const settingsHydrated = useSettingsStore((s) => s.hydrated);
   const router = useRouter();
   const segments = useSegments();
   const [introDone, setIntroDone] = useState<boolean>(() => !shouldShowIntro());
@@ -118,6 +127,32 @@ export default function RootLayout() {
   useEffect(() => {
     const cleanup = initWebVitals();
     return cleanup;
+  }, []);
+
+  // Sentry / Analytics は first paint のクリティカルパスから外す。
+  // requestIdleCallback (Web) / setTimeout (RN) で 1tick 後ろに倒す。
+  useEffect(() => {
+    let cancelled = false;
+    const run = () => {
+      if (cancelled) return;
+      if (!__DEV__) {
+        try { initSentry(); } catch {}
+      }
+      try { initAnalytics(); } catch {}
+    };
+    const ric: ((cb: () => void) => number) | undefined =
+      typeof globalThis !== 'undefined'
+        ? (globalThis as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback
+        : undefined;
+    const handle = ric ? ric(run) : setTimeout(run, 120);
+    return () => {
+      cancelled = true;
+      const cic = typeof globalThis !== 'undefined'
+        ? (globalThis as { cancelIdleCallback?: (h: number) => void }).cancelIdleCallback
+        : undefined;
+      if (ric && cic) cic(handle as number);
+      else clearTimeout(handle as ReturnType<typeof setTimeout>);
+    };
   }, []);
 
   // ★ Safety: hydration / font 読み込みが何らかの理由で詰まっても、

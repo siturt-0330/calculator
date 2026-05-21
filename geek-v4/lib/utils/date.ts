@@ -1,5 +1,21 @@
-import { formatDistanceToNow, parseISO } from 'date-fns';
-import { ja } from 'date-fns/locale';
+// ============================================================
+// Date utilities — zero-dependency.
+// ============================================================
+// 旧版は date-fns + ja locale を top-level import していたため、
+// formatRelative しか呼ばれないルートでも 30-50KB が初期バンドルに
+// 入っていた。formatRelative は元々 date-fns を使っていない (自前
+// ロジック) ので、依存自体を外して bundle に乗らないようにする。
+// formatRelativeDetail はどこからも呼ばれていない (確認済み) ので
+// 削除した。再導入する場合は date-fns/formatDistanceToNow を
+// その関数内で動的 import すること。
+// ============================================================
+
+// ISO 文字列を Date に直す軽量パーサ。
+// `new Date(str)` で十分カバーできるが、無効値の場合に NaN になり
+// その先で getFullYear() 等が落ちるので try/catch で吸収する。
+function parseISO(dateStr: string): Date {
+  return new Date(dateStr);
+}
 
 // 自然な日本語の時刻表記
 // "たった今" / "1分前" / "3時間前" / "昨日" / "3日前" / "先週" / "9/12"
@@ -7,6 +23,7 @@ export function formatRelative(dateStr: string): string {
   try {
     const d = parseISO(dateStr);
     const diffMs = Date.now() - d.getTime();
+    if (Number.isNaN(diffMs)) return '';
     const sec = Math.floor(diffMs / 1000);
     if (sec < 0) return 'たった今';
     if (sec < 60) return 'たった今';
@@ -30,18 +47,10 @@ export function formatRelative(dateStr: string): string {
   }
 }
 
-// 詳細な相対表記 (date-fns 版) — 必要なら使う
-export function formatRelativeDetail(dateStr: string): string {
-  try {
-    return formatDistanceToNow(parseISO(dateStr), { addSuffix: true, locale: ja });
-  } catch {
-    return '';
-  }
-}
-
 export function formatDate(dateStr: string): string {
   try {
     const d = parseISO(dateStr);
+    if (Number.isNaN(d.getTime())) return '';
     return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
   } catch {
     return '';

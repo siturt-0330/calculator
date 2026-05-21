@@ -16,6 +16,7 @@ import { useTagRecommendations } from '../../hooks/useTagRecommendations';
 import { useToastStore } from '../../stores/toastStore';
 import { BackButton } from '../../components/nav/BackButton';
 import { Icon } from '../../constants/icons';
+import { StepProgress } from './_progress';
 
 export default function BlockedTagsScreen() {
   const [input, setInput] = useState('');
@@ -62,11 +63,14 @@ export default function BlockedTagsScreen() {
         }}
         keyboardShouldPersistTaps="handled"
       >
-        <BackButton />
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <BackButton />
+          <StepProgress step={4} />
+        </View>
         <View style={{ gap: SP['2'] }}>
           <Text style={[T.h1, { color: C.text }]}>見たくないタグを除外しよう</Text>
           <Text style={[T.body, { color: C.text2 }]}>
-            このタグを含む投稿はフィードに表示されません。
+            このタグを含む投稿はフィードに表示されません。スキップしてもデフォルトの安全フィルタは効いています。
           </Text>
         </View>
 
@@ -204,7 +208,7 @@ export default function BlockedTagsScreen() {
         }}
       >
         <Button
-          label="次へ"
+          label={(blockedTags.length - 0) > 0 ? `${blockedTags.length}件で次へ` : '次へ（スキップ可）'}
           onPress={() => router.push('/onboarding/notifications')}
         />
       </View>

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTagFilterStore, DEFAULT_BLOCKED_TAGS } from '../../stores/tagFilterStore';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useTagGraphStore } from '../../stores/tagGraphStore';
 import { useToastStore } from '../../stores/toastStore';
 import { TopBar } from '../../components/nav/TopBar';
@@ -22,10 +23,18 @@ export default function FilterScreen() {
   const router = useRouter();
   const [likedInput, setLikedInput] = useState('');
   const [blockedInput, setBlockedInput] = useState('');
-  const { likedTags, blockedTags, addLiked, removeLiked, addBlocked, removeBlocked } =
-    useTagFilterStore();
-  const { nodes, rootIds, hydrate: hydrateGraph } = useTagGraphStore();
-  const { show } = useToastStore();
+  const [showReset, setShowReset] = useState(false);
+  // 個別 selector で subscribe — graph nodes や toast の更新で全体 re-render しない
+  const likedTags = useTagFilterStore((s) => s.likedTags);
+  const blockedTags = useTagFilterStore((s) => s.blockedTags);
+  const addLiked = useTagFilterStore((s) => s.addLiked);
+  const removeLiked = useTagFilterStore((s) => s.removeLiked);
+  const addBlocked = useTagFilterStore((s) => s.addBlocked);
+  const removeBlocked = useTagFilterStore((s) => s.removeBlocked);
+  const nodes = useTagGraphStore((s) => s.nodes);
+  const rootIds = useTagGraphStore((s) => s.rootIds);
+  const hydrateGraph = useTagGraphStore((s) => s.hydrate);
+  const show = useToastStore((s) => s.show);
   const insets = useSafeAreaInsets();
   const Hash = Icon.hash;
 
@@ -87,14 +96,51 @@ export default function FilterScreen() {
     }
   };
 
+  // 「好き」+ ユーザー追加ブロックを 0 に戻す
+  // (デフォルト安全タグはセーフティ網なので保持)
+  const customBlockedCount = blockedTags.filter((t) => !DEFAULT_BLOCKED_TAGS.includes(t)).length;
+  const hasResettable = likedTags.length > 0 || customBlockedCount > 0;
+  const doReset = () => {
+    for (const t of [...likedTags]) removeLiked(t);
+    for (const t of [...blockedTags]) {
+      if (!DEFAULT_BLOCKED_TAGS.includes(t)) removeBlocked(t);
+    }
+    setShowReset(false);
+    show('フィルターをリセットしました', 'success');
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <TopBar title="フィルター設定" left={<BackButton />} />
+      <TopBar
+        title="フィルター設定"
+        left={<BackButton />}
+        right={
+          hasResettable ? (
+            <PressableScale
+              onPress={() => setShowReset(true)}
+              haptic="tap"
+              hitSlop={10}
+              style={{
+                paddingHorizontal: SP['3'],
+                paddingVertical: 6,
+                backgroundColor: C.bg3,
+                borderRadius: R.full,
+                borderWidth: 1,
+                borderColor: C.border,
+              }}
+            >
+              <Text style={[T.caption, { color: C.text2, fontWeight: '700' }]}>リセット</Text>
+            </PressableScale>
+          ) : null
+        }
+      />
       <ScrollView
         contentContainerStyle={{ paddingBottom: insets.bottom + SP['10'] }}
         keyboardShouldPersistTaps="handled"
       >
-        <SectionHeader title="好きなタグ" />
+        <SectionHeader
+          title={`好きなタグ${likedTags.length > 0 ? ` · ${likedTags.length}` : ''}`}
+        />
         <View style={{ paddingHorizontal: SP['4'], gap: SP['3'] }}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: SP['2'] }}>
             <View style={{ flex: 1 }}>
@@ -188,7 +234,9 @@ export default function FilterScreen() {
           )}
         </View>
 
-        <SectionHeader title="ブロックするタグ" />
+        <SectionHeader
+          title={`ブロックするタグ · ${blockedTags.length}/${DEFAULT_BLOCKED_TAGS.length + customBlockedCount}`}
+        />
         <View style={{ paddingHorizontal: SP['4'], gap: SP['3'] }}>
           {/* 安全のため事前にブロック中のタグの案内 */}
           <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5 }]}>
@@ -392,6 +440,15 @@ export default function FilterScreen() {
           </View>
         </View>
       </ScrollView>
+      <ConfirmDialog
+        visible={showReset}
+        title="フィルターをリセット"
+        message={`好きなタグ ${likedTags.length} 件${customBlockedCount > 0 ? `、追加でブロックしたタグ ${customBlockedCount} 件` : ''}を削除します。安全のためのデフォルトブロックは残ります。`}
+        confirmLabel="リセット"
+        onConfirm={doReset}
+        onCancel={() => setShowReset(false)}
+        destructive
+      />
     </View>
   );
 }

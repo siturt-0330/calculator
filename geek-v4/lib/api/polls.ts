@@ -115,19 +115,14 @@ export async function vote(pollId: string, optionId: string, multiSelect: boolea
   if (!multiSelect) {
     await supabase.from('poll_votes').delete().eq('poll_id', pollId).eq('user_id', userId);
   } else {
-    // 複数選択: 既存に同じ option があれば取り消し
-    const { data: existing } = await supabase
-      .from('poll_votes')
-      .select('option_id')
-      .eq('poll_id', pollId)
-      .eq('user_id', userId)
-      .eq('option_id', optionId)
-      .maybeSingle();
-    if (existing) {
-      await supabase.from('poll_votes').delete()
-        .eq('poll_id', pollId).eq('user_id', userId).eq('option_id', optionId);
-      return;
-    }
+    // 複数選択: 同じ option があれば DELETE で取り消し、無ければ INSERT。
+    // 旧版は SELECT → DELETE/INSERT の 2-3 RTT だったが、DELETE の returning で
+    // 「消えたか」判定して 1 RTT (取り消し時) / 2 RTT (新規) に最適化。
+    const { data: deleted } = await supabase
+      .from('poll_votes').delete()
+      .eq('poll_id', pollId).eq('user_id', userId).eq('option_id', optionId)
+      .select('option_id');
+    if (deleted && deleted.length > 0) return;
   }
   await supabase.from('poll_votes').insert({ poll_id: pollId, option_id: optionId, user_id: userId });
 }

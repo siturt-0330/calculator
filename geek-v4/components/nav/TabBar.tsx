@@ -30,18 +30,37 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const bottomPad = Math.max(insets.bottom, 8);
   const { unreadCount } = useNotifications();
 
+  // Web の glass-morphism: backdrop-filter で背後の content をぼかしつつ薄い alpha 背景。
+  // BlurView は web で no-op なので明示的に CSS を当てる。
+  const webGlassStyle =
+    Platform.OS === 'web'
+      ? // RN-web は backdrop-filter を直接通すので any キャストで as object 渡し
+        ({
+          backdropFilter: 'blur(20px) saturate(140%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+          backgroundColor: 'rgba(10,10,10,0.72)',
+        } as object)
+      : null;
+
   return (
     <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
       <BlurView
         intensity={Platform.OS === 'ios' ? TABBAR.bgBlur : 0}
         tint="dark"
-        style={{
-          paddingBottom: bottomPad,
-          backgroundColor:
-            Platform.OS === 'ios' ? 'rgba(10,10,10,0.72)' : 'rgba(10,10,10,0.96)',
-          borderTopWidth: 1,
-          borderTopColor: C.border,
-        }}
+        style={[
+          {
+            paddingBottom: bottomPad,
+            backgroundColor:
+              Platform.OS === 'ios'
+                ? 'rgba(10,10,10,0.72)'
+                : Platform.OS === 'web'
+                  ? 'transparent'
+                  : 'rgba(10,10,10,0.96)',
+            borderTopWidth: 1,
+            borderTopColor: C.border,
+          },
+          webGlassStyle,
+        ]}
       >
         <View style={{ flexDirection: 'row', height: TABBAR.height }}>
           {state.routes.map((route, index) => {
@@ -67,6 +86,25 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
                   // badge が icon の右上に -6px はみ出るので明示的に visible 指定。
                   style={{ alignItems: 'center', gap: TABBAR.labelGap, marginTop: 6, overflow: 'visible' }}
                 >
+                  {/* 上端に小さい accent ドット — active タブだけ点灯 */}
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: -6,
+                      width: 4,
+                      height: 4,
+                      borderRadius: 2,
+                      backgroundColor: focused ? C.accent : 'transparent',
+                      ...(focused
+                        ? {
+                            shadowColor: C.accent,
+                            shadowOpacity: 0.8,
+                            shadowRadius: 6,
+                            shadowOffset: { width: 0, height: 0 },
+                          }
+                        : {}),
+                    }}
+                  />
                   <View style={{ overflow: 'visible' }}>
                     <TabIcon tab={tab} focused={focused} />
                     {tab === 'mypage' && (

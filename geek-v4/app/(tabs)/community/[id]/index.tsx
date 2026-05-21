@@ -33,6 +33,7 @@ import { C, R, SP, SHADOW } from '../../../../design/tokens';
 import { T } from '../../../../design/typography';
 import { SPRING_TIGHT } from '../../../../design/motion';
 import { Spinner } from '../../../../components/ui/Spinner';
+import { TABBAR } from '../../../../design/tabbar';
 import { PressableScale } from '../../../../components/ui/PressableScale';
 import { EmptyState } from '../../../../components/ui/EmptyState';
 import { BackButton } from '../../../../components/nav/BackButton';
@@ -148,6 +149,22 @@ export default function CommunityDetailScreen() {
   const qc = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<TabKey>('feed');
+  // タブを開いたかの sticky フラグ。一度開いたタブは display:none でも mount を維持し、
+  // 再 fetch を避ける (keep-alive)。 初期表示時は feed タブの query しか走らない。
+  // → 4 並列の Supabase RTT を 1 つに減らし、コミュニティ詳細の first paint が大幅に軽くなる。
+  const [visitedTabs, setVisitedTabs] = useState<Record<TabKey, boolean>>({
+    feed: true,
+    threads: false,
+    spots: false,
+    events: false,
+    compose: false,
+  });
+  useEffect(() => {
+    if (!visitedTabs[activeTab]) {
+      setVisitedTabs((prev) => ({ ...prev, [activeTab]: true }));
+    }
+  }, [activeTab, visitedTabs]);
+
   // NOTE: feedSort lives inside FeedTab so changing the sort does not
   // re-render sibling tabs.
   const [descExpanded, setDescExpanded] = useState(false);
@@ -176,38 +193,55 @@ export default function CommunityDetailScreen() {
   }, [activeTab, id, router]);
 
   // -----------------------------------------------------------
-  // Join / Leave
+  // Join / Leave (optimistic — 1000 並行参加でも UI 即応)
   // -----------------------------------------------------------
+  // 旧版は RPC 完了を待ってからボタンの状態が変わっていたため、ピーク時の
+  // server-side レイテンシ (200-800ms) がそのまま体感ラグになっていた。
+  // 楽観更新で「参加中」表示を先に切り替え、失敗時のみ revert する。
   const onJoinLeave = async () => {
     if (!community || joining) return;
     setJoining(true);
-    if (community.is_member) {
-      const { error } = await leaveCommunity(community.id);
-      setJoining(false);
-      if (error) {
-        console.warn('[community] leave failed:', error);
-        show(error, 'error');
-        return;
-      }
-      show('コミュニティから抜けました', 'success');
-    } else if (community.visibility === 'request') {
-      const { error } = await requestJoinCommunity(community.id);
-      setJoining(false);
-      if (error) {
-        show(error, 'error');
-        return;
-      }
-      show('参加申請を送信しました', 'success');
-    } else {
-      const { error } = await joinCommunity(community.id);
-      setJoining(false);
-      if (error) {
-        console.warn('[community] join failed:', error);
-        show(error, 'error');
-        return;
-      }
-      show('コミュニティに参加しました', 'success');
+
+    // 楽観更新: header の is_member / member_count を即座に切り替える
+    const wasMember = community.is_member;
+    const isRequest = community.visibility === 'request';
+    if (!isRequest) {
+      qc.setQueryData(
+        ['community', id],
+        (prev: CommunityWithMembership | undefined) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            is_member: !wasMember,
+            role: !wasMember ? 'member' : null,
+            member_count: Math.max(0, prev.member_count + (wasMember ? -1 : 1)),
+          };
+        },
+      );
     }
+
+    let err: string | null = null;
+    if (wasMember) {
+      err = (await leaveCommunity(community.id)).error;
+    } else if (isRequest) {
+      err = (await requestJoinCommunity(community.id)).error;
+    } else {
+      err = (await joinCommunity(community.id)).error;
+    }
+    setJoining(false);
+
+    if (err) {
+      console.warn('[community] join/leave failed:', err);
+      show(err, 'error');
+      // 失敗時は revert (= server truth 再取得)
+      void qc.invalidateQueries({ queryKey: ['community', id] });
+      return;
+    }
+
+    if (wasMember) show('コミュニティから抜けました', 'success');
+    else if (isRequest) show('参加申請を送信しました', 'success');
+    else show('コミュニティに参加しました', 'success');
+
     // 即座にすべての関連 query を invalidate (header / マイコミュ / 投稿先候補 全部更新)
     void qc.invalidateQueries({ queryKey: ['community', id] });
     void qc.invalidateQueries({ queryKey: ['mypage-my-communities'] });
@@ -269,7 +303,7 @@ export default function CommunityDetailScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: insets.bottom + SP['20'] }}
+        contentContainerStyle={{ paddingBottom: TABBAR.height + insets.bottom + SP['10'] }}
         refreshControl={<RefreshControl tintColor={C.text2} refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {/* Top nav bar */}
@@ -492,22 +526,29 @@ export default function CommunityDetailScreen() {
         />
 
         {/* ============================================================
-            Tab content — all tabs rendered, only the active one is
-            visible. This avoids unmount/remount + refetch on every
-            tab switch (the heaviest source of jank).
+            Tab content — lazy mount: 一度開いたタブだけ mount、以降は
+            display:none で keep-alive (再 fetch を避ける)。
+            初期表示時は feed タブだけが mount され、threads / spots /
+            events の query は触られないので first paint が軽い。
             ============================================================ */}
         <View style={{ display: activeTab === 'feed' ? 'flex' : 'none' }}>
           <FeedTab communityId={id} />
         </View>
-        <View style={{ display: activeTab === 'threads' ? 'flex' : 'none' }}>
-          <ThreadsTab communityId={id} />
-        </View>
-        <View style={{ display: activeTab === 'spots' ? 'flex' : 'none' }}>
-          <SpotsTab communityId={id} canCreate={community.is_member} />
-        </View>
-        <View style={{ display: activeTab === 'events' ? 'flex' : 'none' }}>
-          <EventsTab communityId={id} canCreate={community.is_member} />
-        </View>
+        {visitedTabs.threads && (
+          <View style={{ display: activeTab === 'threads' ? 'flex' : 'none' }}>
+            <ThreadsTab communityId={id} />
+          </View>
+        )}
+        {visitedTabs.spots && (
+          <View style={{ display: activeTab === 'spots' ? 'flex' : 'none' }}>
+            <SpotsTab communityId={id} canCreate={community.is_member} />
+          </View>
+        )}
+        {visitedTabs.events && (
+          <View style={{ display: activeTab === 'events' ? 'flex' : 'none' }}>
+            <EventsTab communityId={id} canCreate={community.is_member} />
+          </View>
+        )}
         {/* compose tab navigates away in the effect above */}
       </ScrollView>
     </View>

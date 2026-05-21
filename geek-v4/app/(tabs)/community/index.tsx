@@ -2,7 +2,7 @@ import { View, Text, ScrollView, RefreshControl, Image } from 'react-native';
 import { useEffect, useState, useCallback } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, R, SP } from '../../../design/tokens';
+import { C, R, SP, SHADOW } from '../../../design/tokens';
 import { T } from '../../../design/typography';
 import { TABBAR } from '../../../design/tabbar';
 import { Icon } from '../../../constants/icons';
@@ -26,7 +26,8 @@ function timeAgo(iso: string): string {
 export default function CommunityScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user } = useAuthStore();
+  // user 以外のフィールド (hydrated 等) の変化で再 render されないよう scoped
+  const user = useAuthStore((s) => s.user);
   const [myCommunities, setMyCommunities] = useState<Community[]>([]);
   const [posts, setPosts] = useState<CommunityPostWithCommunity[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,7 +80,7 @@ export default function CommunityScreen() {
           borderBottomColor: C.border,
         }}
       >
-        <Text style={[T.h2, { flex: 1, color: C.text }]}>コミュニティ</Text>
+        <Text style={[T.h2, { flex: 1, color: C.text, letterSpacing: -0.5 }]}>コミュニティ</Text>
         <PressableScale
           onPress={() => router.push('/community/discover' as never)}
           haptic="tap"
@@ -98,6 +99,8 @@ export default function CommunityScreen() {
             gap: 4,
             backgroundColor: C.accent,
             borderRadius: R.full,
+            // primary CTA halo
+            ...SHADOW.accentGlow,
           }}
         >
           <Icon.plus size={16} color="#fff" strokeWidth={2.6} />

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useMemo } from 'react';
 import { View, Text, ScrollView, TextInput, ActivityIndicator } from 'react-native';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -6,6 +6,8 @@ import { TopBar } from '../../components/nav/TopBar';
 import { BackButton } from '../../components/nav/BackButton';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { Spinner } from '../../components/ui/Spinner';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { Icon } from '../../constants/icons';
 import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
 import {
@@ -129,6 +131,8 @@ function TabPill({ active, label, onPress }: { active: boolean; label: string; o
 // ============================================================
 function UsersTab({ bottomInset }: { bottomInset: number }) {
   const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<'recent' | 'concern' | 'trust'>('recent');
+  const [pendingSuspend, setPendingSuspend] = useState<AdminUser | null>(null);
   const qc = useQueryClient();
   const { show } = useToastStore();
 
@@ -137,6 +141,17 @@ function UsersTab({ bottomInset }: { bottomInset: number }) {
     queryFn: () => fetchAllUsers({ search, limit: 200 }),
     staleTime: 30_000,
   });
+
+  // クライアント側ソート — API 側で対応されるまでの簡易実装
+  const sorted = useMemo(() => {
+    const arr = [...(data ?? [])];
+    if (sortBy === 'concern') {
+      arr.sort((a, b) => b.concern_received_count - a.concern_received_count);
+    } else if (sortBy === 'trust') {
+      arr.sort((a, b) => a.trust_score - b.trust_score);
+    }
+    return arr;
+  }, [data, sortBy]);
 
   const suspend = useMutation({
     mutationFn: suspendUser,
@@ -159,13 +174,19 @@ function UsersTab({ bottomInset }: { bottomInset: number }) {
     if (u.account_state === 'suspended') {
       unsuspend.mutate(u.id);
     } else {
-      suspend.mutate(u.id);
+      // 凍結は破壊的アクションなので確認ダイアログを挟む
+      setPendingSuspend(u);
     }
-  }, [suspend, unsuspend]);
+  }, [unsuspend]);
 
   return (
     <View style={{ flex: 1 }}>
       <SearchInput value={search} onChange={setSearch} placeholder="ニックネームで検索…" />
+      <View style={{ flexDirection: 'row', gap: 6, paddingHorizontal: SP['4'], paddingBottom: SP['2'] }}>
+        <SortChip label="最新" active={sortBy === 'recent'} onPress={() => setSortBy('recent')} />
+        <SortChip label="通報多い順" active={sortBy === 'concern'} onPress={() => setSortBy('concern')} />
+        <SortChip label="信頼低い順" active={sortBy === 'trust'} onPress={() => setSortBy('trust')} />
+      </View>
       <ScrollView
         contentContainerStyle={{
           paddingHorizontal: SP['4'],
@@ -179,10 +200,10 @@ function UsersTab({ bottomInset }: { bottomInset: number }) {
           </View>
         ) : error ? (
           <ErrorBlock message="ユーザーを取得できませんでした" onRetry={() => void refetch()} />
-        ) : (data ?? []).length === 0 ? (
+        ) : sorted.length === 0 ? (
           <EmptyBlock label="該当するユーザーはありません" />
         ) : (
-          (data ?? []).map((u) => (
+          sorted.map((u) => (
             <UserRow
               key={u.id}
               user={u}
@@ -195,7 +216,39 @@ function UsersTab({ bottomInset }: { bottomInset: number }) {
           ))
         )}
       </ScrollView>
+      <ConfirmDialog
+        visible={pendingSuspend !== null}
+        title="ユーザーを凍結"
+        message={`「${pendingSuspend?.nickname ?? pendingSuspend?.id ?? ''}」を凍結します。投稿や反応ができなくなります。`}
+        confirmLabel="凍結する"
+        onConfirm={() => {
+          if (pendingSuspend) suspend.mutate(pendingSuspend.id);
+          setPendingSuspend(null);
+        }}
+        onCancel={() => setPendingSuspend(null)}
+        destructive
+      />
     </View>
+  );
+}
+
+function SortChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      haptic="select"
+      hitSlop={10}
+      style={{
+        paddingHorizontal: SP['3'],
+        paddingVertical: 4,
+        backgroundColor: active ? C.accentBg : C.bg3,
+        borderRadius: R.full,
+        borderWidth: 1,
+        borderColor: active ? C.accent + '55' : C.border,
+      }}
+    >
+      <Text style={[T.caption, { color: active ? C.accentLight : C.text2, fontWeight: '700' }]}>{label}</Text>
+    </PressableScale>
   );
 }
 
@@ -278,6 +331,7 @@ function UserRow({ user, busy, onToggle }: { user: AdminUser; busy: boolean; onT
 // ============================================================
 function PostsTab({ bottomInset }: { bottomInset: number }) {
   const [search, setSearch] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<AdminPost | null>(null);
   const qc = useQueryClient();
   const { show } = useToastStore();
 
@@ -320,11 +374,23 @@ function PostsTab({ bottomInset }: { bottomInset: number }) {
               key={p.id}
               post={p}
               busy={remove.isPending && remove.variables === p.id}
-              onDelete={() => remove.mutate(p.id)}
+              onDelete={() => setPendingDelete(p)}
             />
           ))
         )}
       </ScrollView>
+      <ConfirmDialog
+        visible={pendingDelete !== null}
+        title="投稿を削除"
+        message={`この投稿を削除します。本人にも他の閲覧者にも表示されなくなります。${pendingDelete?.concern_count ? `\n\n通報: ${pendingDelete.concern_count} 件` : ''}`}
+        confirmLabel="削除する"
+        onConfirm={() => {
+          if (pendingDelete) remove.mutate(pendingDelete.id);
+          setPendingDelete(null);
+        }}
+        onCancel={() => setPendingDelete(null)}
+        destructive
+      />
     </View>
   );
 }
@@ -401,26 +467,37 @@ function PostRow({ post, busy, onDelete }: { post: AdminPost; busy: boolean; onD
 function SearchInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
   return (
     <View style={{ paddingHorizontal: SP['4'], paddingBottom: SP['3'] }}>
-      <TextInput
-        value={value}
-        onChangeText={onChange}
-        placeholder={placeholder}
-        placeholderTextColor={C.text3}
-        autoCapitalize="none"
-        autoCorrect={false}
-        style={[
-          T.body,
-          {
-            color: C.text,
-            backgroundColor: C.bg3,
-            borderRadius: R.md,
-            borderWidth: 1,
-            borderColor: C.border,
-            paddingHorizontal: SP['3'],
-            paddingVertical: SP['3'],
-          },
-        ]}
-      />
+      <View style={{
+        flexDirection: 'row', alignItems: 'center', gap: SP['2'],
+        backgroundColor: C.bg3,
+        borderRadius: R.md,
+        borderWidth: 1,
+        borderColor: C.border,
+        paddingHorizontal: SP['3'],
+      }}>
+        <Icon.search size={16} color={C.text3} strokeWidth={2.2} />
+        <TextInput
+          value={value}
+          onChangeText={onChange}
+          placeholder={placeholder}
+          placeholderTextColor={C.text3}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={[
+            T.body,
+            {
+              color: C.text,
+              flex: 1,
+              paddingVertical: SP['3'],
+            },
+          ]}
+        />
+        {value.length > 0 && (
+          <PressableScale onPress={() => onChange('')} haptic="tap" hitSlop={10} style={{ padding: 4 }}>
+            <Icon.close size={14} color={C.text3} strokeWidth={2.4} />
+          </PressableScale>
+        )}
+      </View>
     </View>
   );
 }

@@ -18,20 +18,21 @@ async function getMyLikes(postIds: string[]): Promise<Record<string, boolean>> {
   return map;
 }
 
-async function toggle(postId: string): Promise<void> {
+// 既知の現在状態 (キャッシュ由来) を受け取り、SELECT を省略して 1 RTT で toggle する。
+// 1000 並行ユーザー時にも各 like 操作が server に 1 リクエストしか出さない。
+// 不一致時 (キャッシュ stale) は onError で revert される。
+async function toggle({ postId, wasLiked }: { postId: string; wasLiked: boolean }): Promise<void> {
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) throw new Error('Not authenticated');
-  const { data: existing } = await supabase
-    .from('likes')
-    .select('post_id')
-    .eq('user_id', userId)
-    .eq('post_id', postId)
-    .maybeSingle();
-  if (existing) {
+  if (wasLiked) {
     await supabase.from('likes').delete().eq('user_id', userId).eq('post_id', postId);
   } else {
-    await supabase.from('likes').insert({ user_id: userId, post_id: postId });
+    // upsert で race condition (連打) を吸収。重複 PK は無視されエラーにならない。
+    const { error } = await supabase
+      .from('likes')
+      .upsert({ user_id: userId, post_id: postId }, { onConflict: 'user_id,post_id', ignoreDuplicates: true });
+    if (error) throw error;
   }
 }
 
@@ -49,10 +50,17 @@ export function useLike() {
 
   const { mutateAsync } = useMutation({
     mutationFn: toggle,
-    onMutate: async (postId: string) => {
+    onMutate: async ({ postId }: { postId: string; wasLiked: boolean }) => {
       await qc.cancelQueries({ queryKey: ['my-likes'] });
       const prevLikes = qc.getQueriesData({ queryKey: ['my-likes'] });
-      const wasLiked = !!(prevLikes[0]?.[1] as Record<string, boolean> | undefined)?.[postId];
+      // 任意の my-likes キャッシュから当該 postId の状態を確認
+      let wasLiked = false;
+      for (const [, d] of prevLikes) {
+        if ((d as Record<string, boolean> | undefined)?.[postId]) {
+          wasLiked = true;
+          break;
+        }
+      }
 
       qc.setQueriesData({ queryKey: ['my-likes'] }, (old: Record<string, boolean> | undefined) => {
         const next = { ...(old ?? {}) };
@@ -89,5 +97,16 @@ export function useLike() {
     },
   });
 
-  return { toggle: (postId: string) => mutateAsync(postId).catch(() => {}) };
+  // toggle() のシグネチャは旧来通り postId のみ — wasLiked はキャッシュから自動判定
+  return {
+    toggle: (postId: string) => {
+      // キャッシュから wasLiked を判定 (mutation 内で再判定するが、SQL 側にも渡す)
+      let wasLiked = false;
+      const cached = qc.getQueriesData<Record<string, boolean> | undefined>({ queryKey: ['my-likes'] });
+      for (const [, d] of cached) {
+        if (d?.[postId]) { wasLiked = true; break; }
+      }
+      return mutateAsync({ postId, wasLiked }).catch(() => {});
+    },
+  };
 }

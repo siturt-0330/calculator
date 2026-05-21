@@ -18,6 +18,13 @@ const FG: Record<string, string> = {
   error: C.red,
   warn: C.amber,
 };
+// 各 variant の色をうっすらボーダーに反映 → ピル全体に意味色のニュアンス
+const BORDER: Record<string, string> = {
+  info: C.border,
+  success: C.green + '44',
+  error: C.red + '44',
+  warn: C.amber + '44',
+};
 
 // Toast item with smooth slide-down + fade in (FadeInUp 220ms) and
 // slide-up + fade out (FadeOutUp 180ms). Pill-shaped with soft elevation.
@@ -38,8 +45,8 @@ export function ToastItem({ toast, onDismiss }: { toast: ToastType; onDismiss: (
           paddingVertical: SP['3'],
           gap: SP['3'],
           borderWidth: 1,
-          borderColor: C.border,
-          ...SHADOW.card,
+          borderColor: BORDER[toast.variant] ?? C.border,
+          ...SHADOW.cardPress,
         },
       ]}
     >

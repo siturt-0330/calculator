@@ -30,8 +30,17 @@ export default function FriendsScreen() {
       <BackButton />
 
       <View style={{ gap: SP['1'] }}>
-        <Text style={[T.display, { color: C.text }]}>友達作り</Text>
-        <Text style={[T.body, { color: C.text2 }]}>同好の士を見つけよう</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+          <Text style={[T.display, { color: C.text }]}>友達作り</Text>
+          <View style={{
+            paddingHorizontal: SP['2'], paddingVertical: 2,
+            backgroundColor: C.amberBg, borderRadius: R.sm,
+            borderWidth: 1, borderColor: C.amber + '55',
+          }}>
+            <Text style={[T.caption, { color: C.amber, fontWeight: '700' }]}>準備中</Text>
+          </View>
+        </View>
+        <Text style={[T.body, { color: C.text2 }]}>同好の士を見つけよう（近日対応）</Text>
       </View>
 
       <View style={{

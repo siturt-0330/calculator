@@ -1,15 +1,17 @@
 import { useState, useMemo, useEffect } from 'react';
-import { View, Text, FlatList, ScrollView, TextInput, useWindowDimensions, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, TextInput, useWindowDimensions, RefreshControl } from 'react-native';
+import { FlashList, type ListRenderItem } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { useBBS } from '../../hooks/useBBS';
+import type { BBSThread } from '../../types/models';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { HighlightedText } from '../../components/ui/HighlightedText';
 import { ThreadCardSkeleton } from '../../components/ui/Skeleton';
 import { Icon } from '../../constants/icons';
-import { C, R, SP } from '../../design/tokens';
+import { C, R, SP, SHADOW } from '../../design/tokens';
 import { T, FONT } from '../../design/typography';
 import { TABBAR } from '../../design/tabbar';
 import { formatRelative } from '../../lib/utils/date';
@@ -193,7 +195,7 @@ export default function BBSScreen() {
       <View style={{ alignItems: 'center', backgroundColor: C.bg, paddingTop: insets.top }}>
         <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'] }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: SP['3'], paddingBottom: SP['2'] }}>
-            <Text style={{ fontFamily: FONT.display, fontSize: 26, color: C.text, letterSpacing: -0.3, flex: 1 }}>
+            <Text style={{ fontFamily: FONT.display, fontSize: 28, color: C.text, letterSpacing: -0.5, flex: 1 }}>
               掲示板
             </Text>
             <PressableScale
@@ -203,6 +205,8 @@ export default function BBSScreen() {
                 flexDirection: 'row', alignItems: 'center', gap: 4,
                 paddingHorizontal: SP['3'], paddingVertical: SP['2'],
                 backgroundColor: C.accent, borderRadius: R.full,
+                // primary CTA: soft halo
+                ...SHADOW.accentGlow,
               }}
             >
               <Icon.plus size={16} color="#fff" strokeWidth={2.6} />
@@ -323,8 +327,12 @@ export default function BBSScreen() {
         </View>
       </View>
 
-      {/* スレッドリスト */}
-      <FlatList
+      {/* ヘッダー / リスト境界の hairline — 他タブ画面 (community, mypage) と統一 */}
+      <View style={{ height: 1, backgroundColor: C.divider }} />
+
+      {/* スレッドリスト — FlashList で virtualization。FlatList より recycle が
+          効くので長い検索結果でも体感が滑らかになる。 */}
+      <FlashList
         data={filtered}
         keyExtractor={({ item }) => item.id}
         refreshControl={
@@ -333,21 +341,23 @@ export default function BBSScreen() {
         // 検索中に keyboard を表示したままスレッドをタップ → 1 タップで遷移したい
         // ('handled': タップが処理されたら keyboard を閉じる)
         keyboardShouldPersistTaps="handled"
-        // 長いリストでオフスクリーンの subview を unmount し、メモリ・描画コストを下げる。
-        // FlatList の windowSize / maxToRenderPerBatch も控えめにしてフレーム drop を抑える。
+        // viewport 外で +250px 先読み — スクロール中の白セル防止
+        drawDistance={250}
+        // 大量にあるスレッドカードを virtualization で省メモリ化
         removeClippedSubviews
-        initialNumToRender={8}
-        maxToRenderPerBatch={8}
-        windowSize={11}
+        // タイトル 2 行 + メタ情報 1 行で大体 110px くらい
+        estimatedItemSize={110}
+        // フリック時の慣性減速を速める
+        decelerationRate="fast"
         contentContainerStyle={{
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
-          alignItems: 'center',
         }}
-        renderItem={({ item: { item } }) => {
+        renderItem={(({ item: row }) => {
+          const item = row.item;
           const catColor = item.category ? (CATEGORY_COLORS[item.category] ?? C.accent) : C.accent;
           const community = item.community_id ? communityMeta[item.community_id] : undefined;
           return (
-            <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'], paddingBottom: SP['3'] }}>
+            <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'], paddingBottom: SP['3'], alignSelf: 'center' }}>
               <PressableScale
                 onPress={() => {
                   if (debounced) recordCtr(debounced, item.id);
@@ -462,7 +472,7 @@ export default function BBSScreen() {
               </PressableScale>
             </View>
           );
-        }}
+        }) as ListRenderItem<{ item: BBSThread; score: number }>}
         ListEmptyComponent={
           loading ? (
             <View>

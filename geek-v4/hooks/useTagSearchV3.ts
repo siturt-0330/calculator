@@ -40,9 +40,17 @@ async function fetchTrendingTagNames(): Promise<string[]> {
 }
 
 export function useTagSearchV3() {
-  const { nodes, hydrate: hydrateGraph } = useTagGraphStore();
-  const { cooccur, tagPopularity, hydrate: hydrateCooccur, ensureFresh } = useTagCooccurStore();
-  const { likedTags, blockedTags } = useTagFilterStore();
+  // Field-scoped selectors — whole-store destructure was causing this hook
+  // (consumed by autocomplete input) to re-build n-gram / trie / PMI indexes
+  // whenever an unrelated store field changed.
+  const nodes = useTagGraphStore((s) => s.nodes);
+  const hydrateGraph = useTagGraphStore((s) => s.hydrate);
+  const cooccur = useTagCooccurStore((s) => s.cooccur);
+  const tagPopularity = useTagCooccurStore((s) => s.tagPopularity);
+  const hydrateCooccur = useTagCooccurStore((s) => s.hydrate);
+  const ensureFresh = useTagCooccurStore((s) => s.ensureFresh);
+  const likedTags = useTagFilterStore((s) => s.likedTags);
+  const blockedTags = useTagFilterStore((s) => s.blockedTags);
   const aggregate = useSearchSignalsStore((s) => s.aggregate);
   const getBoosts = useSearchClickStore((s) => s.getBoosts);
   const hydrateClicks = useSearchClickStore((s) => s.hydrate);

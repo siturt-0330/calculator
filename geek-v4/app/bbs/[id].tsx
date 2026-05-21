@@ -285,6 +285,12 @@ export default function BBSThreadScreen() {
         estimatedItemSize={120}
         // 返信入力中に >>N ボタンを 1 タップで操作できるよう keyboard を保持
         keyboardShouldPersistTaps="handled"
+        // スワイプフリック時の慣性減速を速める (スクロール感がキビキビになる)
+        decelerationRate="fast"
+        // viewport 外で +250px 先読み (スクロール中の白セル防止)
+        drawDistance={250}
+        // 長いスレッドではオフスクリーンセルを unmount してメモリ/描画コスト削減
+        removeClippedSubviews
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.accent} />
         }

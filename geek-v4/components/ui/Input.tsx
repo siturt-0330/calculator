@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useState } from 'react';
 import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react-native';
-import { View, TextInput, Text, type TextInputProps, type ViewStyle } from 'react-native';
+import { Platform, View, TextInput, Text, type TextInputProps, type ViewStyle } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -65,6 +65,12 @@ export const Input = forwardRef<TextInput, Props>(function Input(
             gap: SP['2'],
           },
           aBorder,
+          // Web: focus 時に CSS box-shadow で柔らかい halo を出す。
+          // RN-Native は Animated.View に shadow を当てると静的計算しか効かないので web 限定。
+          Platform.OS === 'web' && focused && !showError
+            ? // RN-web は box-shadow を直接通す
+              ({ boxShadow: '0 0 0 4px rgba(124,106,247,0.18)' } as object)
+            : null,
         ]}
       >
         {IconComp && (

@@ -138,9 +138,16 @@ export default function SearchScreen() {
   // Reset on every new debounced query.
   const [, setNextOffset] = useState<number>(0);
 
-  const { nodes, hydrate: hydrateGraph } = useTagGraphStore();
+  // 全 store destructure はキーストロークごとの toast / signal / cooccur 更新で
+  // search.tsx 全体が再 render される原因。fields ごとに subscribe する。
+  const nodes = useTagGraphStore((s) => s.nodes);
+  const hydrateGraph = useTagGraphStore((s) => s.hydrate);
   const lang = useLanguageStore((s) => s.lang);
-  const { history, hydrate: hydrateHist, add: addHist, remove: removeHist, clear: clearHist } = useSearchHistoryStore();
+  const history = useSearchHistoryStore((s) => s.history);
+  const hydrateHist = useSearchHistoryStore((s) => s.hydrate);
+  const addHist = useSearchHistoryStore((s) => s.add);
+  const removeHist = useSearchHistoryStore((s) => s.remove);
+  const clearHist = useSearchHistoryStore((s) => s.clear);
   // 保存検索
   const { searches: savedSearches } = useSavedSearches();
   const { mutateAsync: createSavedSearchMut } = useCreateSavedSearch();
@@ -159,9 +166,15 @@ export default function SearchScreen() {
     () => savedSearches.some((s) => s.query === debounced.trim()),
     [savedSearches, debounced],
   );
-  const { hydrate: hydrateSignals, record: recordSignal, aggregate } = useSearchSignalsStore();
-  const { likedTags, blockedTags } = useTagFilterStore();
-  const { cooccur, tagPopularity, hydrate: hydrateCooccur, ensureFresh: ensureCooccur } = useTagCooccurStore();
+  const hydrateSignals = useSearchSignalsStore((s) => s.hydrate);
+  const recordSignal = useSearchSignalsStore((s) => s.record);
+  const aggregate = useSearchSignalsStore((s) => s.aggregate);
+  const likedTags = useTagFilterStore((s) => s.likedTags);
+  const blockedTags = useTagFilterStore((s) => s.blockedTags);
+  const cooccur = useTagCooccurStore((s) => s.cooccur);
+  const tagPopularity = useTagCooccurStore((s) => s.tagPopularity);
+  const hydrateCooccur = useTagCooccurStore((s) => s.hydrate);
+  const ensureCooccur = useTagCooccurStore((s) => s.ensureFresh);
   const likedSet = useMemo(() => new Set(likedTags), [likedTags]);
   const blockedSet = useMemo(() => new Set(blockedTags), [blockedTags]);
 

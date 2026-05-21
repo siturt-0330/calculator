@@ -18,6 +18,7 @@ import { Button } from '../../../../../components/ui/Button';
 import { Icon } from '../../../../../constants/icons';
 import { useToastStore } from '../../../../../stores/toastStore';
 import { createEvent } from '../../../../../lib/api/communities';
+import { TABBAR } from '../../../../../design/tabbar';
 
 // "YYYY-MM-DDTHH:MM" な local datetime → Date
 function parseLocalDateTime(s: string): Date | null {
@@ -106,7 +107,7 @@ export default function CreateEventScreen() {
       <ScrollView
         contentContainerStyle={{
           paddingHorizontal: SP['4'],
-          paddingBottom: insets.bottom + SP['10'],
+          paddingBottom: TABBAR.height + insets.bottom + SP['10'],
           gap: SP['4'],
         }}
         keyboardShouldPersistTaps="handled"

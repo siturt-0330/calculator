@@ -2,9 +2,14 @@ import { useTagFilterStore } from '../stores/tagFilterStore';
 import { useToastStore } from '../stores/toastStore';
 import { impact, Haptics } from '../lib/haptics';
 
+// Selectors are scoped to a single store-field per call so that toast
+// show/dismiss cycles (very frequent) don't re-render every consumer of
+// useBlock. action refs from zustand are stable across renders.
 export function useBlock() {
-  const { addBlocked, removeBlocked, blockedTags } = useTagFilterStore();
-  const { show } = useToastStore();
+  const addBlocked = useTagFilterStore((s) => s.addBlocked);
+  const removeBlocked = useTagFilterStore((s) => s.removeBlocked);
+  const blockedTags = useTagFilterStore((s) => s.blockedTags);
+  const show = useToastStore((s) => s.show);
 
   const blockTag = (tagName: string) => {
     impact(Haptics.ImpactFeedbackStyle.Medium);

@@ -42,7 +42,9 @@ export function useBBSReplyReactions(replyIds: string[]) {
         (payload) => {
           const row = (payload.new ?? payload.old) as { reply_id?: string } | null;
           if (row?.reply_id && idSet.has(row.reply_id)) {
-            qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
+            // 全 KEY_PREFIX 総当たりではなく、現在の sortedKey のクエリだけを invalidate
+            // (他の BBS スレッドが同時に開かれている場合に巻き込まない)
+            qc.invalidateQueries({ queryKey: [KEY_PREFIX, sortedKey] });
           }
         },
       ),

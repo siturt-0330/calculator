@@ -1,3 +1,11 @@
+// ============================================================
+// Icon registry — only icons actually rendered somewhere.
+// ============================================================
+// lucide-react-native の tree-shaking 効きを最大化するため、
+// 名前付き import で「実際に使う」アイコンだけを並べる。
+// 未使用エントリは bundle に乗らないようにここから除外する。
+// (棚卸し: Icon.foo の grep 結果 vs このマップで突き合わせ)
+// ============================================================
 import {
   Home, Compass, Plus, MessageSquare, User,
   Bell, SlidersHorizontal, Search,
@@ -5,14 +13,15 @@ import {
   Calendar, MapPin, ShoppingBag, Users,
   Ban, Lock, Shield, AlertTriangle, CheckCircle2, XCircle,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
-  X, Check, Minus,
-  Camera, Image as ImageIcon, Video, Mic,
-  Sparkles, TrendingUp, Award, Flag,
+  X, Check,
+  Camera, Image as ImageIcon,
+  Sparkles, Award, Flag,
   Settings, LogOut, HelpCircle, Info,
-  ArrowLeft, ArrowRight, ArrowUp, ArrowDown, ArrowUpLeft,
-  Eye, EyeOff, Edit3, Trash2, Copy,
-  Send, Smile, Hash, AtSign, Phone, Gamepad2, Swords, Clock,
-  Users2, Globe2, UserPlus,
+  ArrowLeft, ArrowUpLeft,
+  Eye, EyeOff, Edit3, Trash2,
+  Send, Hash, AtSign, Phone, Clock,
+  Users2, Globe2,
+  Gamepad2,
 } from 'lucide-react-native';
 
 export const Icon = {
@@ -22,15 +31,16 @@ export const Icon = {
   calendar: Calendar, map: MapPin, goods: ShoppingBag, friends: Users,
   block: Ban, lock: Lock, shield: Shield, warn: AlertTriangle, check: CheckCircle2, fail: XCircle,
   chevronL: ChevronLeft, chevronR: ChevronRight, chevronD: ChevronDown, chevronU: ChevronUp,
-  close: X, ok: Check, plus: Plus, minus: Minus,
-  camera: Camera, image: ImageIcon, video: Video, mic: Mic,
-  sparkles: Sparkles, trending: TrendingUp, award: Award, flag: Flag,
+  close: X, ok: Check, plus: Plus,
+  camera: Camera, image: ImageIcon,
+  sparkles: Sparkles, award: Award, flag: Flag,
   settings: Settings, logout: LogOut, help: HelpCircle, info: Info,
-  arrowL: ArrowLeft, arrowR: ArrowRight, arrowU: ArrowUp, arrowD: ArrowDown, arrowUL: ArrowUpLeft,
-  eye: Eye, eyeOff: EyeOff, edit: Edit3, trash: Trash2, copy: Copy,
-  send: Send, emoji: Smile, hash: Hash, at: AtSign, phone: Phone,
-  game: Gamepad2, swords: Swords, clock: Clock,
-  community: Users2, globe: Globe2, userPlus: UserPlus,
+  arrowL: ArrowLeft, arrowUL: ArrowUpLeft,
+  eye: Eye, eyeOff: EyeOff, edit: Edit3, trash: Trash2,
+  send: Send, hash: Hash, at: AtSign, phone: Phone, clock: Clock,
+  community: Users2, globe: Globe2,
+  // TabIcon.tsx の TabKey 'game' から参照されている (dead route だが型に存在)
+  game: Gamepad2,
 } as const;
 
 export type IconName = keyof typeof Icon;

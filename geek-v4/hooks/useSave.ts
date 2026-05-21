@@ -17,21 +17,20 @@ async function getMySaves(postIds: string[]): Promise<Record<string, boolean>> {
   return map;
 }
 
-async function toggle(postId: string): Promise<boolean> {
+// SELECT を省略して 1 RTT で完了。wasSaved は呼び出し側 (キャッシュ) が知っている。
+// unique 制約で race condition (連打) を吸収。
+async function toggle({ postId, wasSaved }: { postId: string; wasSaved: boolean }): Promise<boolean> {
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) throw new Error('Not authenticated');
-  const { data: existing } = await supabase
-    .from('saves')
-    .select('post_id')
-    .eq('user_id', userId)
-    .eq('post_id', postId)
-    .maybeSingle();
-  if (existing) {
+  if (wasSaved) {
     await supabase.from('saves').delete().eq('user_id', userId).eq('post_id', postId);
     return false;
   } else {
-    await supabase.from('saves').insert({ user_id: userId, post_id: postId });
+    const { error } = await supabase
+      .from('saves')
+      .upsert({ user_id: userId, post_id: postId }, { onConflict: 'user_id,post_id', ignoreDuplicates: true });
+    if (error) throw error;
     return true;
   }
 }
@@ -47,11 +46,12 @@ export function useSaves(postIds: string[]) {
 
 export function useSave() {
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  // scoped selector — avoid re-render on every toast push/dismiss
+  const show = useToastStore((s) => s.show);
 
   const { mutateAsync } = useMutation({
     mutationFn: toggle,
-    onMutate: async (postId: string) => {
+    onMutate: async ({ postId }: { postId: string; wasSaved: boolean }) => {
       await qc.cancelQueries({ queryKey: ['my-saves'] });
       qc.setQueriesData({ queryKey: ['my-saves'] }, (old: Record<string, boolean> | undefined) => {
         const next = { ...(old ?? {}) };
@@ -72,5 +72,15 @@ export function useSave() {
     },
   });
 
-  return { toggle: (postId: string) => mutateAsync(postId).catch(() => {}) };
+  return {
+    toggle: (postId: string) => {
+      // 現在の保存状態を React Query キャッシュから取得
+      let wasSaved = false;
+      const cached = qc.getQueriesData<Record<string, boolean> | undefined>({ queryKey: ['my-saves'] });
+      for (const [, d] of cached) {
+        if (d?.[postId]) { wasSaved = true; break; }
+      }
+      return mutateAsync({ postId, wasSaved }).catch(() => {});
+    },
+  };
 }

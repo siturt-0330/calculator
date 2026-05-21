@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { View, Text } from 'react-native';
+import Animated, { FadeInDown, Layout } from 'react-native-reanimated';
 import { PressableScale } from '../ui/PressableScale';
 import { useTagSearchV3 } from '../../hooks/useTagSearchV3';
 import { useSearchClickStore } from '../../stores/searchClickStore';
@@ -77,7 +78,10 @@ export function TagInputSuggestions({
   const borderFor= variant === 'blocked' ? 'rgba(255,107,122,0.4)' : C.accentSoft;
 
   return (
-    <View style={{
+    <Animated.View
+      entering={FadeInDown.duration(180)}
+      layout={Layout.springify().damping(20)}
+      style={{
       padding: SP['2'],
       backgroundColor: C.bg2,
       borderRadius: R.md,
@@ -164,6 +168,6 @@ export function TagInputSuggestions({
           </View>
         </>
       )}
-    </View>
+    </Animated.View>
   );
 }

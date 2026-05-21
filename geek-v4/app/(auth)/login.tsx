@@ -1,6 +1,7 @@
 import { View, Text, KeyboardAvoidingView, Platform, ScrollView, TextInput } from 'react-native';
 import { useState, useRef } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, R, SP } from '../../design/tokens';
@@ -131,6 +132,16 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={{ flex: 1, backgroundColor: C.bg }}
     >
+      {/* Auth screens get a soft top-down accent wash so they feel like a
+          "branded" surface instead of a flat form. Very low opacity — the dark
+          theme stays dominant. pointerEvents: 'none' で tap を吸わない。 */}
+      <LinearGradient
+        colors={['rgba(124,106,247,0.10)', 'rgba(10,10,10,0)']}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 320 }}
+        pointerEvents="none"
+      />
       <ScrollView
         contentContainerStyle={{
           flexGrow: 1,
@@ -142,7 +153,7 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={{ marginBottom: SP['6'] }}>
-          <Text style={[T.display, { color: C.text, marginBottom: SP['2'] }]}>Geek</Text>
+          <Text style={[T.display, { color: C.text, marginBottom: SP['2'], letterSpacing: -0.6 }]}>Geek</Text>
           <Text style={[T.body, { color: C.text2 }]}>好きを、匿名で、安心して続ける。</Text>
         </View>
 

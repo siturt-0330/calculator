@@ -44,19 +44,16 @@ export async function saveToCollection(postId: string, collectionId: string | nu
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) throw new Error('Not authenticated');
-  // upsert: 既存の save があれば collection_id 更新
-  const { data: existing } = await supabase
+  // upsert で 1 RTT 化 (旧 SELECT → UPDATE/INSERT の 2 RTT を半減)。
+  // 大量ユーザーが同時に「コレクションに保存」を押しても server roundtrip が
+  // 線形にしか増えない。
+  const { error } = await supabase
     .from('saves')
-    .select('post_id')
-    .eq('user_id', userId)
-    .eq('post_id', postId)
-    .maybeSingle();
-  if (existing) {
-    await supabase.from('saves').update({ collection_id: collectionId })
-      .eq('user_id', userId).eq('post_id', postId);
-  } else {
-    await supabase.from('saves').insert({ user_id: userId, post_id: postId, collection_id: collectionId });
-  }
+    .upsert(
+      { user_id: userId, post_id: postId, collection_id: collectionId },
+      { onConflict: 'user_id,post_id' },
+    );
+  if (error) throw error;
 }
 
 export async function fetchPostsInCollection(collectionId: string | 'uncategorized'): Promise<string[]> {

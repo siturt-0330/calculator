@@ -190,17 +190,32 @@ export default function ProfileEditScreen() {
           </Text>
         </View>
 
-        <Input
-          label="ニックネーム（自分用）"
-          icon={Icon.mypage}
-          value={nickname}
-          onChangeText={setNickname}
-          placeholder="例: ぽけオタク"
-          maxLength={20}
-          // 改行キーで直接保存 — フォームを下までスクロールせず済む
-          returnKeyType="done"
-          onSubmitEditing={() => { void save(); }}
-        />
+        <View style={{ gap: SP['1'] }}>
+          <Input
+            label="ニックネーム（自分用）"
+            icon={Icon.mypage}
+            value={nickname}
+            onChangeText={setNickname}
+            placeholder="例: ぽけオタク"
+            maxLength={20}
+            // 改行キーで直接保存 — フォームを下までスクロールせず済む
+            returnKeyType="done"
+            onSubmitEditing={() => { void save(); }}
+          />
+          {/* 文字数カウンタ — 「2〜20文字」の範囲が一目で分かる */}
+          <Text style={[T.caption, {
+            color: Array.from(nickname.trim()).length > 20
+              ? C.amber
+              : Array.from(nickname.trim()).length >= 2
+                ? C.text3
+                : C.text3,
+            textAlign: 'right',
+            paddingRight: SP['1'],
+            fontVariant: ['tabular-nums'],
+          }]}>
+            {Array.from(nickname.trim()).length}/20
+          </Text>
+        </View>
 
         {/* 絵文字アイコン選択 */}
         <View style={{ gap: SP['2'] }}>

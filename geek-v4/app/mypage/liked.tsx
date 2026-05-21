@@ -1,4 +1,5 @@
-import { View, Text, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -59,50 +60,75 @@ export default function LikedPosts() {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator color={C.accent} />
         </View>
+      ) : items.length === 0 ? (
+        <View style={{ padding: SP['4'] }}>
+          <EmptyState
+            icon={Icon.heart}
+            title="まだ いいね した投稿はありません"
+            message="気になる投稿のハートをタップすると、ここに集まります"
+            actionLabel="フィードを見る"
+            onAction={() => router.push('/(tabs)/feed' as never)}
+            tone="pink"
+          />
+        </View>
       ) : (
-        <ScrollView
-          contentContainerStyle={{ padding: SP['4'], paddingBottom: insets.bottom + SP['10'], gap: SP['2'] }}
-        >
-          {items.length === 0 ? (
-            <EmptyState
-              icon={Icon.heart}
-              title="いいねした投稿はありません"
-              message="気に入った投稿のハートを押すとここに表示されます"
-              tone="pink"
-            />
-          ) : (
-            items.map((p) => (
-              <PressableScale
-                key={p.id}
-                onPress={() => router.push(`/post/${p.id}` as never)}
-                haptic="tap"
-                style={{
-                  padding: SP['3'],
-                  backgroundColor: C.bg2,
-                  borderRadius: R.lg,
-                  borderWidth: 1,
-                  borderColor: C.border,
-                  gap: SP['2'],
-                }}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-                  <Avatar size={20} anonymous />
-                  <Text style={[T.caption, { color: C.accent }]}>
-                    {p.tag_names[0] ? `#${p.tag_names[0]}` : '#雑談'}
-                  </Text>
-                  <Text style={[T.caption, { color: C.text3 }]}>· {formatRelative(p.created_at)}</Text>
-                  <View style={{ flex: 1 }} />
-                  <ObsidianSaveButton note={postToObsidianNote(p as never)} size={16} />
-                </View>
-                <Text style={[T.body, { color: C.text }]} numberOfLines={3}>{p.content}</Text>
-                <View style={{ flexDirection: 'row', gap: SP['3'] }}>
-                  <Text style={[T.caption, { color: C.pink }]}>♥ {p.likes_count}</Text>
-                  <Text style={[T.caption, { color: C.text3 }]}>💬 {p.comments_count}</Text>
-                </View>
-              </PressableScale>
-            ))
+        // 100 件まで取得し得るので virtualization (FlashList) で描画コスト削減。
+        // 元は ScrollView + .map() で全件を初回 mount 時に作っていた。
+        <FlashList
+          data={items}
+          keyExtractor={(p) => p.id}
+          // 3 行 numberOfLines + メタ 2 行 で約 140px
+          estimatedItemSize={140}
+          drawDistance={250}
+          removeClippedSubviews
+          decelerationRate="fast"
+          contentContainerStyle={{ padding: SP['4'], paddingBottom: insets.bottom + SP['10'] }}
+          ListHeaderComponent={
+            // 件数ヘッダー — 「30 件 / 100 件まで保存」のように上限も示す
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingHorizontal: SP['1'],
+              paddingBottom: SP['2'],
+              gap: SP['2'],
+            }}>
+              <Text style={[T.smallM, { color: C.text2, fontWeight: '700' }]}>
+                {items.length} 件
+              </Text>
+              <Text style={[T.caption, { color: C.text3 }]}>· 新しい順</Text>
+            </View>
+          }
+          ItemSeparatorComponent={() => <View style={{ height: SP['2'] }} />}
+          renderItem={({ item: p }) => (
+            <PressableScale
+              onPress={() => router.push(`/post/${p.id}` as never)}
+              haptic="tap"
+              style={{
+                padding: SP['3'],
+                backgroundColor: C.bg2,
+                borderRadius: R.lg,
+                borderWidth: 1,
+                borderColor: C.border,
+                gap: SP['2'],
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+                <Avatar size={20} anonymous />
+                <Text style={[T.caption, { color: C.accent }]}>
+                  {p.tag_names[0] ? `#${p.tag_names[0]}` : '#雑談'}
+                </Text>
+                <Text style={[T.caption, { color: C.text3 }]}>· {formatRelative(p.created_at)}</Text>
+                <View style={{ flex: 1 }} />
+                <ObsidianSaveButton note={postToObsidianNote(p as never)} size={16} />
+              </View>
+              <Text style={[T.body, { color: C.text }]} numberOfLines={3}>{p.content}</Text>
+              <View style={{ flexDirection: 'row', gap: SP['3'] }}>
+                <Text style={[T.caption, { color: C.pink }]}>♥ {p.likes_count}</Text>
+                <Text style={[T.caption, { color: C.text3 }]}>💬 {p.comments_count}</Text>
+              </View>
+            </PressableScale>
           )}
-        </ScrollView>
+        />
       )}
     </View>
   );
