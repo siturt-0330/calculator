@@ -239,10 +239,36 @@ export default function TagDetailScreen() {
               title="まだ投稿がありません"
               message={`#${name} に最初の投稿をしてみよう`}
               actionLabel="投稿する"
-              onAction={() => router.push('/post/create' as never)}
+              onAction={() => router.push(`/post/create?prefill_tag=${encodeURIComponent(name)}` as never)}
             />
           }
         />
+      )}
+
+      {/* 既存投稿がある場合の FAB — このタグで投稿 */}
+      {!isLoading && posts.length > 0 && (
+        <PressableScale
+          onPress={() => router.push(`/post/create?prefill_tag=${encodeURIComponent(name)}` as never)}
+          haptic="confirm"
+          accessibilityLabel={`#${name} に投稿する`}
+          accessibilityRole="button"
+          style={{
+            position: 'absolute',
+            right: SP['4'],
+            bottom: insets.bottom + SP['4'],
+            width: 56, height: 56,
+            borderRadius: 28,
+            backgroundColor: C.accent,
+            alignItems: 'center', justifyContent: 'center',
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.3,
+            shadowRadius: 12,
+            elevation: 6,
+          }}
+        >
+          <Icon.plus size={26} color="#fff" strokeWidth={2.6} />
+        </PressableScale>
       )}
     </View>
   );

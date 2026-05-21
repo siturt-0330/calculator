@@ -475,7 +475,8 @@ function AnonPostCardInner({
         )}
       </View>
 
-      {/* アクション行 */}
+      {/* アクション行 — hitSlop で 44pt 以上の tap target を確保 (icon 自体は 20-22 だが
+          押下範囲を上下左右 +10 まで広げて誤タップ/反応しない問題を解消) */}
       <View style={{
         flexDirection: 'row',
         alignItems: 'center',
@@ -483,19 +484,37 @@ function AnonPostCardInner({
         paddingBottom: 0,
         gap: SP['4'],
       }}>
-        <PressableScale onPress={onLike} haptic="pop" style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}>
+        <PressableScale
+          onPress={onLike}
+          haptic="pop"
+          hitSlop={10}
+          accessibilityLabel={liked ? 'いいね済み' : 'いいね'}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}
+        >
           <Heart size={22} color={liked ? C.pink : C.text2} fill={liked ? C.pink : 'transparent'} strokeWidth={2.2} />
           {likesCount > 0 && (
             <Text style={[T.smallM, { color: liked ? C.pink : C.text2 }]}>{likesCount}</Text>
           )}
         </PressableScale>
-        <PressableScale onPress={onComment} haptic="tap" style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}>
+        <PressableScale
+          onPress={onComment}
+          haptic="tap"
+          hitSlop={10}
+          accessibilityLabel="コメントを開く"
+          style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}
+        >
           <Comment size={22} color={C.text2} strokeWidth={2.2} />
           {commentsCount > 0 && (
             <Text style={[T.smallM, { color: C.text2 }]}>{commentsCount}</Text>
           )}
         </PressableScale>
-        <PressableScale onPress={onConcern} haptic="warn" style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}>
+        <PressableScale
+          onPress={onConcern}
+          haptic="warn"
+          hitSlop={10}
+          accessibilityLabel={concerned ? '気になる済み' : '気になる'}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}
+        >
           <Warn size={20} color={concerned ? C.amber : C.text3} fill={concerned ? C.amber + '44' : 'transparent'} strokeWidth={2.2} />
           {concernCount > 0 && (
             <Text style={[T.smallM, { color: concerned ? C.amber : C.text3 }]}>{concernCount}</Text>
@@ -504,6 +523,8 @@ function AnonPostCardInner({
         <PressableScale
           onPress={() => setMemePickerOpen(true)}
           haptic="tap"
+          hitSlop={10}
+          accessibilityLabel="リアクションを選ぶ"
           style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}
         >
           <Text style={{ fontSize: 18 }}>🪶</Text>
@@ -515,10 +536,22 @@ function AnonPostCardInner({
         </PressableScale>
         <View style={{ flex: 1 }} />
         <ObsidianSaveButton note={postToObsidianNote(post)} />
-        <PressableScale onPress={onShare} haptic="tap" style={{ padding: 2 }}>
+        <PressableScale
+          onPress={onShare}
+          haptic="tap"
+          hitSlop={10}
+          accessibilityLabel="共有"
+          style={{ padding: 2 }}
+        >
           <Share size={20} color={C.text2} strokeWidth={2.2} />
         </PressableScale>
-        <PressableScale onPress={onSave} haptic="tap" style={{ padding: 2 }}>
+        <PressableScale
+          onPress={onSave}
+          haptic="tap"
+          hitSlop={10}
+          accessibilityLabel={saved ? '保存済み' : '保存'}
+          style={{ padding: 2 }}
+        >
           <Save size={20} color={saved ? C.amber : C.text2} fill={saved ? C.amber : 'transparent'} strokeWidth={2.2} />
         </PressableScale>
       </View>

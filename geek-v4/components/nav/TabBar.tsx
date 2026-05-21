@@ -63,9 +63,11 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
             return (
               <HapticTab key={route.key} focused={focused} onPress={onPress}>
                 <View
-                  style={{ alignItems: 'center', gap: TABBAR.labelGap, marginTop: 6 }}
+                  // Android では子要素の overflow が dimensions を超えると clip される。
+                  // badge が icon の右上に -6px はみ出るので明示的に visible 指定。
+                  style={{ alignItems: 'center', gap: TABBAR.labelGap, marginTop: 6, overflow: 'visible' }}
                 >
-                  <View>
+                  <View style={{ overflow: 'visible' }}>
                     <TabIcon tab={tab} focused={focused} />
                     {tab === 'mypage' && (
                       <NotificationBadge count={unreadCount} top={-3} right={-6} />

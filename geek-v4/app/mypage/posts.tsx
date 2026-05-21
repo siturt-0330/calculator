@@ -52,9 +52,10 @@ export default function MyPosts() {
     enabled: !!user,
   });
 
-  const { mutate: deletePost } = useMutation({
+  const { mutate: deletePost, isPending: deleting } = useMutation({
     mutationFn: async (id: string) => {
-      await supabase.from('posts').delete().eq('id', id);
+      const { error } = await supabase.from('posts').delete().eq('id', id);
+      if (error) throw error;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['my-posts'] });
@@ -141,12 +142,14 @@ export default function MyPosts() {
         visible={!!deleteId}
         title="この投稿を削除しますか？"
         message="削除した投稿は元に戻せません。"
-        confirmLabel="削除する"
+        confirmLabel={deleting ? '削除中…' : '削除する'}
         cancelLabel="キャンセル"
         destructive
         onCancel={() => setDeleteId(null)}
         onConfirm={() => {
-          if (deleteId) deletePost(deleteId);
+          // 連打で複数 mutation が走らないよう isPending 中はスキップ
+          if (!deleteId || deleting) return;
+          deletePost(deleteId);
           setDeleteId(null);
         }}
       />

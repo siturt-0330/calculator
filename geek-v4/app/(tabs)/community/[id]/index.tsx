@@ -20,12 +20,18 @@ import {
   ActivityIndicator,
   type ListRenderItem,
 } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { C, R, SP, SHADOW } from '../../../../design/tokens';
 import { T } from '../../../../design/typography';
+import { SPRING_TIGHT } from '../../../../design/motion';
 import { Spinner } from '../../../../components/ui/Spinner';
 import { PressableScale } from '../../../../components/ui/PressableScale';
 import { EmptyState } from '../../../../components/ui/EmptyState';
@@ -435,8 +441,11 @@ export default function CommunityDetailScreen() {
           {/* Description (collapsible) */}
           {safeDesc.length > 0 && (
             <Pressable
-              onPress={() => setDescExpanded((v) => !v)}
-              style={{ alignSelf: 'stretch' }}
+              // 説明が短ければ tap しても何も起きないので、Press 領域は変えるが
+              // 「タップで展開」アフォーダンスは "もっと見る" が見えるときだけ。
+              onPress={() => safeDesc.length > 80 && setDescExpanded((v) => !v)}
+              style={{ alignSelf: 'stretch', paddingVertical: 2 }}
+              hitSlop={6}
             >
               <Text
                 style={[T.body, { color: C.text2, textAlign: 'center' }]}
@@ -447,14 +456,14 @@ export default function CommunityDetailScreen() {
               {safeDesc.length > 80 && (
                 <Text
                   style={{
-                    color: C.text3,
+                    color: C.accent,
                     fontSize: 12,
-                    fontWeight: '600',
+                    fontWeight: '700',
                     marginTop: 4,
                     textAlign: 'center',
                   }}
                 >
-                  {descExpanded ? '閉じる' : '...もっと見る'}
+                  {descExpanded ? '閉じる' : 'もっと見る ↓'}
                 </Text>
               )}
             </Pressable>
@@ -472,55 +481,15 @@ export default function CommunityDetailScreen() {
         </View>
 
         {/* ============================================================
-            Tab bar — bottom border 区切り + active underline
+            Tab bar — bottom border 区切り + sliding active underline
             (hairline 区切り line は border で兼ねる)
+            アクティブ tab の下に走る underline を spring で滑らかに移動させる。
+            5 等分されているので 1 セグメント幅は全幅 / 5。
             ============================================================ */}
-        <View
-          style={{
-            flexDirection: 'row',
-            borderBottomWidth: 1,
-            borderBottomColor: C.border,
-            backgroundColor: C.bg,
-          }}
-        >
-          {TABS.map((t) => {
-            const active = activeTab === t.key;
-            return (
-              <Pressable
-                key={t.key}
-                onPress={() => setActiveTab(t.key)}
-                style={{
-                  flex: 1,
-                  alignItems: 'center',
-                  paddingTop: SP['3'],
-                  paddingBottom: 0,
-                }}
-              >
-                <Text
-                  style={[
-                    T.smallM,
-                    {
-                      color: active ? C.text : C.text2,
-                      fontWeight: active ? '700' : '600',
-                    },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {t.label}
-                </Text>
-                <View
-                  style={{
-                    height: 3,
-                    width: '60%',
-                    backgroundColor: active ? C.accent : 'transparent',
-                    borderRadius: 1.5,
-                    marginTop: SP['2'],
-                  }}
-                />
-              </Pressable>
-            );
-          })}
-        </View>
+        <CommunityTabBar
+          activeTab={activeTab}
+          onChange={setActiveTab}
+        />
 
         {/* ============================================================
             Tab content — all tabs rendered, only the active one is
@@ -576,12 +545,18 @@ function SubscribeButton({
           borderWidth: 1.5,
           borderColor: C.border2,
           paddingVertical: SP['3'],
-          opacity: loading ? 0.5 : 1,
+          opacity: loading ? 0.6 : 1,
         }}
       >
-        <Icon.bell size={15} color={C.text2} strokeWidth={2.2} />
-        <Text style={[T.bodyB, { color: C.text2, fontWeight: '700' }]}>参加中</Text>
-        <Icon.chevronD size={13} color={C.text3} strokeWidth={2.2} />
+        {loading ? (
+          <ActivityIndicator size="small" color={C.text2} />
+        ) : (
+          <Icon.bell size={15} color={C.text2} strokeWidth={2.2} />
+        )}
+        <Text style={[T.bodyB, { color: C.text2, fontWeight: '700' }]}>
+          {loading ? '処理中…' : '参加中'}
+        </Text>
+        {!loading && <Icon.chevronD size={13} color={C.text3} strokeWidth={2.2} />}
       </PressableScale>
     );
   }
@@ -608,6 +583,90 @@ function SubscribeButton({
         {loading ? '処理中…' : isRequestVisibility ? '参加を申請する' : 'コミュニティに参加する'}
       </Text>
     </PressableScale>
+  );
+}
+
+// ============================================================
+// Community tab bar — 5 等分 + sliding underline
+// ============================================================
+function CommunityTabBar({
+  activeTab,
+  onChange,
+}: {
+  activeTab: TabKey;
+  onChange: (k: TabKey) => void;
+}) {
+  const [barW, setBarW] = useState(0);
+  const segW = barW / TABS.length;
+  const idx = TABS.findIndex((t) => t.key === activeTab);
+  const x = useSharedValue(0);
+
+  useEffect(() => {
+    if (segW > 0) x.value = withSpring(idx * segW, SPRING_TIGHT);
+  }, [idx, segW, x]);
+
+  const underlineStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: x.value + segW * 0.2 }],
+    width: segW * 0.6,
+  }));
+
+  return (
+    <View
+      onLayout={(e) => setBarW(e.nativeEvent.layout.width)}
+      style={{
+        flexDirection: 'row',
+        borderBottomWidth: 1,
+        borderBottomColor: C.border,
+        backgroundColor: C.bg,
+        position: 'relative',
+      }}
+    >
+      {TABS.map((t) => {
+        const active = activeTab === t.key;
+        return (
+          <Pressable
+            key={t.key}
+            onPress={() => onChange(t.key)}
+            style={{
+              flex: 1,
+              alignItems: 'center',
+              paddingTop: SP['3'],
+              paddingBottom: SP['3'] + 3, // underline 分の余白
+            }}
+          >
+            <Text
+              style={[
+                T.smallM,
+                {
+                  color: active ? C.text : C.text2,
+                  fontWeight: active ? '700' : '600',
+                },
+              ]}
+              numberOfLines={1}
+            >
+              {t.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+      {/* sliding underline — 全 tab に対する絶対配置で animate */}
+      {segW > 0 && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            {
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              height: 3,
+              borderRadius: 1.5,
+              backgroundColor: C.accent,
+            },
+            underlineStyle,
+          ]}
+        />
+      )}
+    </View>
   );
 }
 

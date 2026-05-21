@@ -107,14 +107,12 @@ export default function SignupScreen() {
   };
 
   const handleSkipPhone = () => {
-    // 電話番号を入力済みのまま「スキップして登録」を押すと silent data loss になる
-    // ので軽い確認 (toast 2 段) を入れる
+    // 電話番号入力済みでスキップする時は warning toast を表示しつつそのまま登録
+    // 旧実装はタップを 2 回必要にしていたが、phone を空にしてもボタンラベルが
+    // 変わらないので「効いてないのでは？」という誤解を招いていた。
     const digits = phone.replace(/\D/g, '');
     if (digits.length > 0) {
-      show('電話番号がスキップされます。もう一度タップで確定。', 'warn');
-      // 2 度目のタップを判別するため state を一瞬切り替える
-      setPhone('');
-      return;
+      show('電話番号なしで登録します。', 'info');
     }
     submitSignup('');
   };

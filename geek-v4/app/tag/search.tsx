@@ -102,6 +102,11 @@ export default function TagSearchScreen() {
             onChangeText={setQuery}
             placeholder="タグを検索..."
             autoFocus
+            onSubmit={() => {
+              // Enter で確定 — 最上位ヒットが 1 件あれば即遷移
+              const top = tags[0];
+              if (top) router.push(`/tag/${top.name}`);
+            }}
           />
         </View>
       </View>
@@ -115,11 +120,30 @@ export default function TagSearchScreen() {
           data={tags}
           keyExtractor={(item) => item.id}
           renderItem={renderTag}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           ListEmptyComponent={
             <View style={{ padding: SP['12'], alignItems: 'center', gap: SP['3'] }}>
               <Text style={[T.body, { color: C.text3, textAlign: 'center' }]}>
                 {debouncedQuery ? `「${debouncedQuery}」に一致するタグがありません` : 'タグがありません'}
               </Text>
+              {/* 入力中の文字列がある場合は「そのタグを開く」 — 新規タグページに直接遷移 */}
+              {debouncedQuery.trim().length > 0 && didYouMean.length === 0 && (
+                <PressableScale
+                  onPress={() => router.push(`/tag/${encodeURIComponent(debouncedQuery.trim())}`)}
+                  haptic="confirm"
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 6,
+                    paddingHorizontal: SP['4'], paddingVertical: SP['2'],
+                    backgroundColor: C.accent,
+                    borderRadius: R.full,
+                  }}
+                >
+                  <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>
+                    #{debouncedQuery.trim()} を開く
+                  </Text>
+                </PressableScale>
+              )}
               {didYouMean.length > 0 && (
                 <View style={{ alignItems: 'center', gap: 6 }}>
                   <Text style={[T.small, { color: C.text3 }]}>もしかして:</Text>

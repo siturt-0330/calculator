@@ -66,6 +66,8 @@ export function Button({
     height,
     paddingHorizontal: px,
     borderRadius: R.lg,
+    // primary variant の LinearGradient が border radius に追従するように clip
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',

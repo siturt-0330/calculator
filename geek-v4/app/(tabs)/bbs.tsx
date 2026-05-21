@@ -230,9 +230,18 @@ export default function BBSScreen() {
               style={[T.body, { flex: 1, color: C.text, paddingVertical: 0 }]}
               autoCorrect={false}
               autoCapitalize="none"
+              returnKeyType="search"
+              onSubmitEditing={() => setDebounced(search.trim())}
+              // 検索バーは常に focusable に — focus が即外れる/連続入力で消える bug を防ぐ
+              blurOnSubmit={false}
             />
             {search.length > 0 && (
-              <PressableScale onPress={() => setSearch('')} haptic="tap">
+              <PressableScale
+                onPress={() => setSearch('')}
+                haptic="tap"
+                hitSlop={12}
+                accessibilityLabel="検索をクリア"
+              >
                 <Icon.close size={16} color={C.text3} strokeWidth={2.2} />
               </PressableScale>
             )}
@@ -240,7 +249,12 @@ export default function BBSScreen() {
         </View>
 
         {/* カテゴリ (横スクロール) */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          // keyboard が出てる時にカテゴリをタップしてもまず select し、必要なら閉じる。
+          // ('handled': 子の onPress が処理した時のみ keyboard を閉じる)
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{
             gap: 6, paddingHorizontal: SP['4'], paddingBottom: SP['2'],
           }}
@@ -253,6 +267,8 @@ export default function BBSScreen() {
                 key={cat}
                 onPress={() => setCategory(cat)}
                 haptic="select"
+                hitSlop={6}
+                accessibilityLabel={`カテゴリ ${cat}${active ? ' (選択中)' : ''}`}
                 style={{
                   paddingHorizontal: SP['3'], paddingVertical: 6,
                   backgroundColor: active ? color : C.bg2,
@@ -285,6 +301,8 @@ export default function BBSScreen() {
                 key={s.v}
                 onPress={() => setSort(s.v)}
                 haptic="tap"
+                hitSlop={10}
+                accessibilityLabel={`並び替え ${s.label}${active ? ' (選択中)' : ''}`}
                 style={{
                   flexDirection: 'row', alignItems: 'center', gap: 3,
                   paddingHorizontal: 8, paddingVertical: 4,
@@ -312,6 +330,9 @@ export default function BBSScreen() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.accent} />
         }
+        // 検索中に keyboard を表示したままスレッドをタップ → 1 タップで遷移したい
+        // ('handled': タップが処理されたら keyboard を閉じる)
+        keyboardShouldPersistTaps="handled"
         // 長いリストでオフスクリーンの subview を unmount し、メモリ・描画コストを下げる。
         // FlatList の windowSize / maxToRenderPerBatch も控えめにしてフレーム drop を抑える。
         removeClippedSubviews

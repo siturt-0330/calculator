@@ -110,7 +110,12 @@ export default function BBSCreateScreen() {
       notify(Haptics.NotificationFeedbackType.Warning);
       return;
     }
-    await mutateAsync();
+    try {
+      await mutateAsync();
+    } catch {
+      // onError 内で error state を立てているのでここでは握り潰す
+      // (await の throw が unhandled rejection になるのを防ぐ)
+    }
   };
 
   return (
@@ -137,7 +142,12 @@ export default function BBSCreateScreen() {
           label="投稿"
           onPress={handleSubmit}
           loading={isPending}
-          disabled={!title.trim()}
+          disabled={
+            !title.trim()
+            || title.trim().length > 50
+            || (visibility === 'community_only' && !selectedCommunityId)
+            || isPending
+          }
           size="sm"
         />
       </View>

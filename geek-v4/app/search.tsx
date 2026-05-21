@@ -28,6 +28,7 @@ import { findClosest, findClosestK } from '../lib/search/typoCorrect';
 import { generateVariants, previewVariants } from '../lib/search/variants';
 import { useLanguageStore } from '../stores/languageStore';
 import { useSavedSearches, useCreateSavedSearch, useDeleteSavedSearch } from '../hooks/useSavedSearches';
+import { useToastStore } from '../stores/toastStore';
 import { logEvent } from '../lib/personalize';
 import { searchTags as searchTagsV2 } from '../lib/search/tagSearchV2';
 import { useTagSearchV3 } from '../hooks/useTagSearchV3';
@@ -144,12 +145,15 @@ export default function SearchScreen() {
   const { searches: savedSearches } = useSavedSearches();
   const { mutateAsync: createSavedSearchMut } = useCreateSavedSearch();
   const { mutateAsync: deleteSavedSearchMut } = useDeleteSavedSearch();
+  const showToast = useToastStore((s) => s.show);
   const saveCurrentQuery = () => {
     if (!debounced.trim()) return;
-    createSavedSearchMut({ query: debounced }).catch(() => {});
+    createSavedSearchMut({ query: debounced })
+      .then(() => showToast('検索を保存しました', 'success'))
+      .catch(() => showToast('保存に失敗しました', 'error'));
   };
   const removeSavedSearchFn = (id: string) => {
-    deleteSavedSearchMut(id).catch(() => {});
+    deleteSavedSearchMut(id).catch(() => showToast('削除に失敗しました', 'error'));
   };
   const isCurrentSaved = useMemo(
     () => savedSearches.some((s) => s.query === debounced.trim()),
@@ -419,9 +423,13 @@ export default function SearchScreen() {
     return findClosestK(kw, allTagsQ.data, 4, 0.45);
   }, [parsedQuery, allTagsQ.data]);
 
-  // 検索 commit
+  // 検索 commit — Enter で即時 flush + history 追加
   const commit = () => {
-    if (debounced) addHist(debounced);
+    const trimmed = q.trim();
+    if (!trimmed) return;
+    // debounce を待たずに即時反映 (mobile では入力中の Enter で爆速検索 UX)
+    if (trimmed !== debounced) setDebounced(trimmed);
+    addHist(trimmed);
   };
 
   // Reset pagination cursor whenever the active query changes.
@@ -515,11 +523,14 @@ export default function SearchScreen() {
               placeholder="検索"
               placeholderTextColor={C.text3}
               onSubmitEditing={commit}
+              returnKeyType="search"
+              blurOnSubmit={false}
               autoFocus
               autoCorrect={false}
               autoCapitalize="none"
               keyboardAppearance="dark"
               selectionColor={C.accent}
+              accessibilityLabel="検索キーワード入力"
               style={[T.body, { color: C.text, paddingVertical: 0 }]}
             />
             {/* ゴースト予測補完 */}
@@ -538,7 +549,13 @@ export default function SearchScreen() {
             )}
           </View>
           {q.length > 0 && (
-            <PressableScale onPress={() => setQ('')} haptic="tap">
+            <PressableScale
+              onPress={() => { setQ(''); setDebounced(''); }}
+              haptic="tap"
+              hitSlop={10}
+              accessibilityLabel="入力をクリア"
+              accessibilityRole="button"
+            >
               <Icon.close size={16} color={C.text3} strokeWidth={2.2} />
             </PressableScale>
           )}

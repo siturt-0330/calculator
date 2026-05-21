@@ -45,7 +45,7 @@ const VISIBILITY_OPTIONS: VisibilityOption[] = [
 
 export default function CreatePost() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ community_id?: string }>();
+  const params = useLocalSearchParams<{ community_id?: string; prefill_tag?: string }>();
   const insets = useSafeAreaInsets();
   const { show } = useToastStore();
 
@@ -122,6 +122,11 @@ export default function CreatePost() {
   // mount-once だけ走らせる — 後から手動で外せるよう pre-fill 後は触らない.
   useEffect(() => {
     const cid = typeof params.community_id === 'string' ? params.community_id : undefined;
+    const preTag = typeof params.prefill_tag === 'string' ? params.prefill_tag.trim() : '';
+    if (preTag) {
+      // 重複は addTag 側のロジックで防がれるが、mount-once の段階で素直に追加.
+      setTags((prev) => (prev.includes(preTag) ? prev : [...prev, preTag].slice(0, 5)));
+    }
     if (!cid) return;
     let cancelled = false;
     (async () => {
@@ -208,21 +213,36 @@ export default function CreatePost() {
   }, [content, tags, sourceUrl, kind, anonymous, visibility]);
 
   const pickImage = async () => {
-    const r = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: 'images',
-      allowsMultipleSelection: true,
-      quality: 0.85,
-      selectionLimit: 4,
-    });
-    if (!r.canceled) {
-      setImages(r.assets.map((a) => a.uri).slice(0, 4));
-      hap.tap();
+    try {
+      const r = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: 'images',
+        allowsMultipleSelection: true,
+        quality: 0.85,
+        selectionLimit: 4,
+      });
+      if (!r.canceled) {
+        setImages(r.assets.map((a) => a.uri).slice(0, 4));
+        hap.tap();
+      }
+    } catch (e) {
+      console.warn('[post/create] pick image failed:', e);
+      show('画像の取得に失敗しました', 'error');
     }
   };
 
   const addTag = () => {
     const t = tagInput.trim().replace(/^#/, '');
-    if (!t || tags.includes(t) || tags.length >= 5) return;
+    if (!t) return;
+    // deepNormalize 同一視で重複を防ぐ ("ポケモン" vs "ぽけもん" など)
+    const nq = deepNormalize(t);
+    if (tags.some((x) => deepNormalize(x) === nq)) {
+      setTagInput('');
+      return;
+    }
+    if (tags.length >= 5) {
+      show('タグは最大 5 個までです', 'warn');
+      return;
+    }
     setTags([...tags, t]);
     setTagInput('');
     hap.select();
@@ -445,14 +465,21 @@ export default function CreatePost() {
             )}
           </View>
 
-          {/* 本文 */}
-          <TextArea
-            placeholder="このタグについて、語ろう"
-            value={content}
-            onChangeText={setContent}
-            maxLength={2000}
-            autoFocus
-          />
+          {/* 本文 — 文字数カウンタ付き */}
+          <View style={{ gap: SP['1'] }}>
+            <TextArea
+              placeholder="このタグについて、語ろう"
+              value={content}
+              onChangeText={setContent}
+              maxLength={2000}
+              autoFocus
+            />
+            {content.length > 0 && (
+              <Text style={[T.caption, { color: content.length >= 1900 ? C.amber : C.text3, alignSelf: 'flex-end' }]}>
+                {content.length} / 2000
+              </Text>
+            )}
+          </View>
 
           {/* 出典URL */}
           <View style={{ gap: SP['2'] }}>

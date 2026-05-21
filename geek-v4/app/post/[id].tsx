@@ -87,8 +87,11 @@ export default function PostDetailScreen() {
       setText('');
       safeHaptic(Haptics.NotificationFeedbackType.Success);
     },
-    onError: () => {
+    onError: (e: unknown) => {
+      // 失敗時は haptic だけだとユーザーには無反応に見える — トーストでも明示
       safeHaptic(Haptics.NotificationFeedbackType.Error);
+      const msg = e instanceof Error ? e.message : '';
+      show(msg ? `送信に失敗しました: ${msg}` : '送信に失敗しました', 'error');
     },
   });
 
@@ -126,7 +129,9 @@ export default function PostDetailScreen() {
 
   const handleSend = async () => {
     if (!text.trim() || isPending) return;
-    await submitReply(text.trim());
+    // mutateAsync は失敗時に reject するが、onError でトーストを出すので
+    // ここでは握り潰して UI を壊さない (unhandled rejection 防止)
+    await submitReply(text.trim()).catch(() => {});
   };
 
   if (postLoading) {
@@ -139,10 +144,24 @@ export default function PostDetailScreen() {
 
   if (postError || !post) {
     return (
-      <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: SP['6'] }}>
-        <Text style={[T.body, { color: C.text2, textAlign: 'center' }]}>投稿を取得できませんでした</Text>
-        <PressableScale onPress={() => router.back()} haptic="tap" style={{ marginTop: SP['4'] }}>
-          <Text style={[T.small, { color: C.accent }]}>戻る</Text>
+      <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: SP['6'], gap: SP['3'] }}>
+        <Text style={{ fontSize: 48 }}>📭</Text>
+        <Text style={[T.h3, { color: C.text, textAlign: 'center' }]}>投稿を取得できませんでした</Text>
+        <Text style={[T.small, { color: C.text3, textAlign: 'center' }]}>
+          通信エラーまたは削除された投稿の可能性があります
+        </Text>
+        <PressableScale
+          onPress={() => router.back()}
+          haptic="tap"
+          hitSlop={10}
+          style={{
+            marginTop: SP['2'],
+            paddingHorizontal: SP['5'], paddingVertical: SP['3'],
+            backgroundColor: C.bg3, borderRadius: R.full,
+            borderWidth: 1, borderColor: C.border,
+          }}
+        >
+          <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>戻る</Text>
         </PressableScale>
       </View>
     );
@@ -190,7 +209,13 @@ export default function PostDetailScreen() {
       {/* ヘッダー */}
       <View style={{ width: '100%', maxWidth: MAX_W }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: SP['3'], paddingTop: insets.top + SP['2'], paddingBottom: SP['2'] }}>
-          <PressableScale onPress={() => router.back()} haptic="tap" style={{ padding: SP['2'] }}>
+          <PressableScale
+            onPress={() => router.back()}
+            haptic="tap"
+            hitSlop={12}
+            accessibilityLabel="戻る"
+            style={{ padding: SP['2'] }}
+          >
             <BackIcon size={22} color={C.text} strokeWidth={2.2} />
           </PressableScale>
           <Text style={[T.smallM, { color: C.text3, marginLeft: SP['2'] }]}>📝 投稿</Text>
@@ -293,6 +318,8 @@ export default function PostDetailScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderReply}
         estimatedItemSize={72}
+        // 入力 focus 中でも 1 タップで戻るボタン/タグ/類似投稿に届くように
+        keyboardShouldPersistTaps="handled"
         ListHeaderComponent={<ListHeader />}
         ListEmptyComponent={
           repliesLoading ? (
@@ -335,6 +362,8 @@ export default function PostDetailScreen() {
               placeholderTextColor={C.text3}
               multiline
               maxLength={500}
+              keyboardAppearance="dark"
+              selectionColor={C.accent}
               style={[T.body, { color: C.text, maxHeight: 100, minHeight: 24, paddingVertical: 0 }]}
             />
             {text.length > 0 && (
