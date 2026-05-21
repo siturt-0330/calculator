@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Geek Admin",
+    "slug": "geek-admin",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "geek-admin",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0a0a"
+    },
+    "plugins": ["expo-router", "expo-font", "expo-secure-store"],
+    "experiments": { "typedRoutes": false },
+    "web": { "bundler": "metro", "output": "single" }
+  }
+}
