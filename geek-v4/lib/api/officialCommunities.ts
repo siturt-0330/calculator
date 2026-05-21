@@ -1,6 +1,29 @@
 import { supabase } from '../supabase';
+import type { Community } from './communities';
 
 export type OfficialFeature = 'qna' | 'calendar' | 'map';
+
+// ----------------------------------------------------------------
+// 自分が official_admin として管理している公式コミュニティ一覧
+// ----------------------------------------------------------------
+export async function fetchMyOfficialCommunities(): Promise<Community[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  const { data, error } = await supabase
+    .from('communities')
+    .select('*')
+    .eq('is_official', true)
+    .eq('official_admin_user_id', user.id)
+    .order('last_post_at', { ascending: false, nullsFirst: false });
+  if (error) {
+    console.warn('[officialCommunities] fetchMyOfficialCommunities failed:', error.message);
+    return [];
+  }
+  return (data ?? []) as Community[];
+}
+
+export type VerificationStatus = 'unverified' | 'pending' | 'verified' | 'failed';
+export type VerificationMethod = 'well-known' | 'meta-tag' | 'dns-txt';
 
 export type OfficialApplication = {
   id: string;
@@ -17,6 +40,10 @@ export type OfficialApplication = {
   reviewed_at: string | null;
   reviewer_notes: string;
   created_at: string;
+  verification_token?: string;
+  verification_status?: VerificationStatus;
+  verification_method?: VerificationMethod | null;
+  verification_attempted_at?: string | null;
 };
 
 export type AdminPendingApp = {
@@ -35,6 +62,10 @@ export type AdminPendingApp = {
   purpose: string;
   requested_features: OfficialFeature[];
   created_at: string;
+  verification_token?: string;
+  verification_status?: VerificationStatus;
+  verification_method?: VerificationMethod | null;
+  verification_attempted_at?: string | null;
 };
 
 // ----------------------------------------------------------------
@@ -78,6 +109,28 @@ export async function fetchMyApplications(communityId: string): Promise<Official
     .order('created_at', { ascending: false });
   if (error) throw error;
   return (data ?? []) as OfficialApplication[];
+}
+
+// 単一の申請を取得 (RLS により本人 or admin のみ)
+export async function fetchApplication(applicationId: string): Promise<OfficialApplication | null> {
+  const { data, error } = await supabase
+    .from('official_community_applications')
+    .select('*')
+    .eq('id', applicationId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as OfficialApplication) ?? null;
+}
+
+// URL 所有確認 (edge function 呼び出し)
+export async function verifyOfficialUrl(
+  applicationId: string,
+): Promise<{ status: 'verified' | 'failed'; method?: string }> {
+  const { data, error } = await supabase.functions.invoke('verify-official-url', {
+    body: { application_id: applicationId },
+  });
+  if (error) throw new Error(error.message || '検証に失敗しました');
+  return data as { status: 'verified' | 'failed'; method?: string };
 }
 
 // ----------------------------------------------------------------

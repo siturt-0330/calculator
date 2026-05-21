@@ -19,6 +19,13 @@ import { NotificationBadge } from '../../components/ui/NotificationBadge';
 import { useToastStore } from '../../stores/toastStore';
 import { useFeedStore } from '../../stores/feedStore';
 import { AnonPostCard } from '../../components/feed/AnonPostCard';
+import { AdCard } from '../../components/feed/AdCard';
+import type { Ad } from '../../lib/api/ads';
+
+// フィード上の item — 通常 post か広告アイテム (__ad マーカー付き)
+type AdItem = { __ad: true; ad: Ad; position: number; matchedTags: string[]; key: string };
+type FeedItem = Post | AdItem;
+const isAdItem = (it: FeedItem): it is AdItem => (it as AdItem).__ad === true;
 import { ScopeToggle } from '../../components/feed/ScopeToggle';
 import { BlockedTagBanner } from '../../components/feed/BlockedTagBanner';
 import { logEvent } from '../../lib/personalize';
@@ -36,7 +43,7 @@ import type { Post } from '../../types/models';
 export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { posts, reasonsMap, communitiesByPost, loading, refreshing, refresh, loadMore } = useFeed();
+  const { posts, reasonsMap, communitiesByPost, ads, interestTags, loading, refreshing, refresh, loadMore } = useFeed();
   const { blockedCount } = useTagFilter();
   const likedTags = useTagFilterStore((s) => s.likedTags);
   const scope = useFeedStore((s) => s.scope);
@@ -63,7 +70,7 @@ export default function FeedScreen() {
   const { unreadCount } = useNotifications();
   const { share } = useShare();
   const { report } = useReport();
-  const listRef = useRef<FlashList<Post>>(null);
+  const listRef = useRef<FlashList<FeedItem>>(null);
   const [reportPostId, setReportPostId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -148,21 +155,56 @@ export default function FeedScreen() {
     return dict;
   }, [posts, toggleLike, toggleConcern, toggleSave, toggleReact, share, router, handleAddTag, myConcerns]);
 
+  // -------------------------------------------------------------------
+  // posts + ads を 1 つの混在配列にマージ
+  // -------------------------------------------------------------------
+  // 8 件ごとに 1 つ広告を差し込む (8, 17, 26, ...) — ads が足りなければそこで終わり。
+  // ad item は __ad プレフィックス + index の安定 key を持つ (ad.id が同じでも
+  // 別ポジションに同一広告が出る場合に React のキー衝突を避ける)。
+  const feedItems = useMemo<FeedItem[]>(() => {
+    if (ads.length === 0) return posts;
+    const result: FeedItem[] = [];
+    let adIdx = 0;
+    posts.forEach((p, i) => {
+      result.push(p);
+      // i==7 の後 (= 8 番目を push し終わったタイミング) で広告を挿入
+      if ((i + 1) % 8 === 0 && adIdx < ads.length) {
+        const ad = ads[adIdx];
+        if (ad) {
+          const matched = ad.target_tags.filter((t) => interestTags.includes(t));
+          result.push({
+            __ad: true,
+            ad,
+            position: result.length,  // 挿入直後のフィード位置
+            matchedTags: matched,
+            key: `__ad:${ad.id}:${i}`,
+          });
+        }
+        adIdx++;
+      }
+    });
+    return result;
+  }, [posts, ads, interestTags]);
+
   const renderItem = useCallback(
-    ({ item }: { item: Post }) => {
-      const h = handlersByPostId[item.id];
+    ({ item }: { item: FeedItem }) => {
+      if (isAdItem(item)) {
+        return <AdCard ad={item.ad} position={item.position} matchedTags={item.matchedTags} />;
+      }
+      const post = item;
+      const h = handlersByPostId[post.id];
       if (!h) return null;
       return (
         <AnonPostCard
-          post={item}
-          liked={!!myLikes[item.id]}
-          concerned={!!myConcerns[item.id]}
-          saved={!!mySaves[item.id]}
-          reactions={reactionsByPost[item.id] ?? []}
-          addedTags={addedTagsByPost[item.id] ?? []}
-          poll={polls[item.id]}
-          reason={reasonsMap[item.id]}
-          communities={communitiesByPost[item.id] ?? []}
+          post={post}
+          liked={!!myLikes[post.id]}
+          concerned={!!myConcerns[post.id]}
+          saved={!!mySaves[post.id]}
+          reactions={reactionsByPost[post.id] ?? []}
+          addedTags={addedTagsByPost[post.id] ?? []}
+          poll={polls[post.id]}
+          reason={reasonsMap[post.id]}
+          communities={communitiesByPost[post.id] ?? []}
           onLike={h.onLike}
           onConcern={h.onConcern}
           onComment={h.onComment}
@@ -300,9 +342,10 @@ export default function FeedScreen() {
 
       <FlashList
         ref={listRef}
-        data={posts}
+        data={feedItems}
         renderItem={renderItem}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => (isAdItem(item) ? item.key : item.id)}
+        getItemType={(item) => (isAdItem(item) ? 'ad' : 'post')}
         estimatedItemSize={300}
         ListHeaderComponent={ListHeader}
         refreshControl={

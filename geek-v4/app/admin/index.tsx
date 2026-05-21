@@ -591,6 +591,43 @@ function DashboardTab({ stats, onJumpReports }: { stats: { totalUsers: number; t
         </PressableScale>
       </View>
 
+      {/* 広告管理 */}
+      <SectionHeader label="広告管理" />
+      <View style={{ paddingHorizontal: SP['4'] }}>
+        <PressableScale
+          onPress={() => router.push('/admin/ads' as never)}
+          haptic="tap"
+          style={[{
+            padding: SP['3'],
+            backgroundColor: C.bg2,
+            borderRadius: R.lg,
+            borderWidth: 1,
+            borderColor: C.border,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: SP['3'],
+          }, SHADOW.card]}
+        >
+          <View
+            style={{
+              width: 40, height: 40, borderRadius: 20,
+              backgroundColor: C.accentBg,
+              alignItems: 'center', justifyContent: 'center',
+              borderWidth: 1, borderColor: C.accent + '55',
+            }}
+          >
+            <Icon.sparkles size={18} color={C.accentLight} strokeWidth={2.4} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[T.bodyB, { color: C.text }]}>タグターゲティング広告</Text>
+            <Text style={[T.caption, { color: C.text3 }]}>
+              広告の作成・編集と配信実績の確認
+            </Text>
+          </View>
+          <Icon.chevronR size={18} color={C.text3} strokeWidth={2.2} />
+        </PressableScale>
+      </View>
+
       {/* Top reported */}
       <SectionHeader
         label="Top Reported"

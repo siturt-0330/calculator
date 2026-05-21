@@ -13,6 +13,8 @@ import type { Post } from '../types/models';
 import { useQuery as useReactQuery } from '@tanstack/react-query';
 import { getEvents, computeProfile, rankFeed } from '../lib/personalize';
 import type { FeedEvent, RankableCandidate, RankReason } from '../lib/personalize';
+import { fetchTargetedAds, type Ad } from '../lib/api/ads';
+import { useAdPreferencesStore } from '../stores/adPreferencesStore';
 
 // React Query の persist cache は JSON 経由なので Set を直接保存できない (空の {} になる)。
 // 配列で返して使い側で Set に包む。
@@ -172,6 +174,36 @@ export function useFeed() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rawPosts, sort, likedTags, blockedTags, signals.tagFreq, signals.recentTags, trendingTags, ctrBoosts, profile]);
 
+  // ----------------------------------------------------------------
+  // タグターゲティング広告 — プライバシー保護 (個人 id は送らず、タグだけで配信)
+  // ----------------------------------------------------------------
+  // ユーザーが opt-out した場合は fetch 自体をスキップする。
+  // 興味タグは tagFreq の上位 10 件 (関心度の高い順)。
+  // exclude は blockedTags そのまま渡す。
+  const personalizedAds = useAdPreferencesStore((s) => s.personalizedAds);
+  const interestTags = useMemo(() => {
+    return Object.entries(signals.tagFreq)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 10)
+      .map(([t]) => t);
+  }, [signals.tagFreq]);
+  // クエリキーが「興味タグの中身」で安定するよう、文字列で hash 化する。
+  const interestTagsKey = interestTags.join('|');
+  const blockedTagsKey = blockedTags.join('|');
+  const adsQ = useReactQuery<Ad[]>({
+    queryKey: ['ads', interestTagsKey, blockedTagsKey],
+    queryFn: () => fetchTargetedAds(interestTags, blockedTags, 3),
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    enabled: personalizedAds,
+  });
+  // ads 配列を ID hash で安定化 — 同じ id の集合が返ってくる限り
+  // 参照が変わらず、下流の useMemo (feed の merge 等) が無駄に再評価されない。
+  const adsIdHash = (adsQ.data ?? []).map((a) => a.id).join('|');
+  const ads: Ad[] = useMemo(() => adsQ.data ?? [], [adsIdHash]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const loadMore = useCallback(() => {
     if (hasNextPage && !isFetching) fetchNextPage();
   }, [hasNextPage, isFetching, fetchNextPage]);
@@ -280,5 +312,5 @@ export function useFeed() {
     };
   }, [firstPageKey, firstPageIds, qc]);
 
-  return { posts, reasonsMap, communitiesByPost, loading: isLoading, refreshing, refresh, loadMore };
+  return { posts, reasonsMap, communitiesByPost, ads, interestTags, loading: isLoading, refreshing, refresh, loadMore };
 }

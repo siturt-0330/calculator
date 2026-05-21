@@ -75,7 +75,9 @@ export type BBSReply = {
 
 export type Notification = {
   id: string;
-  type: 'like' | 'comment' | 'follow' | 'event';
+  // 'official_post' は公式コミュニティ管理者投稿 (migration 0035 のトリガー由来)。
+  // tag_name にはコミュニティ名が入る — 遷移時に name→id でルックアップする。
+  type: 'like' | 'comment' | 'follow' | 'reply' | 'event' | 'official_post';
   tag_name: string | null;
   message: string;
   read: boolean;

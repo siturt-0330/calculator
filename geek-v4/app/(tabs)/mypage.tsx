@@ -8,6 +8,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useNotifications } from '../../hooks/useNotifications';
 import { supabase } from '../../lib/supabase';
 import { fetchMyCommunities, type Community } from '../../lib/api/communities';
+import { fetchMyOfficialCommunities } from '../../lib/api/officialCommunities';
 import { sanitizeUrl } from '../../lib/sanitize';
 import { computeTrustBreakdown } from '../../lib/trust/score';
 import { Avatar } from '../../components/ui/Avatar';
@@ -62,6 +63,15 @@ export default function MypageScreen() {
     staleTime: 60_000,
   });
   const communityCount = myCommunities.length;
+
+  // 公式コミュニティを管理しているかどうか — Geek Official 行を出すか判定
+  const { data: officialCommunities = [] } = useQuery<Community[]>({
+    queryKey: ['my-official-communities', user?.id],
+    queryFn: fetchMyOfficialCommunities,
+    enabled: !!user,
+    staleTime: 60_000,
+  });
+  const hasOfficial = officialCommunities.length > 0;
 
   // 運営からの未読メッセージ件数。 head:true + count:'exact' で行データを転送せず
   // 件数だけ取得 — mypage Row の数字バッジ表示用。
@@ -234,6 +244,17 @@ export default function MypageScreen() {
             right={unreadAdminMessages > 0 ? <Pill text={String(unreadAdminMessages)} /> : undefined}
             onPress={() => router.push('/mypage/messages' as never)}
           />
+          {hasOfficial && (
+            <>
+              <RowDivider />
+              <Row
+                icon={Icon.shield}
+                label="Geek Official"
+                right={<AccentPill text={`${officialCommunities.length}`} />}
+                onPress={() => router.push('/official' as never)}
+              />
+            </>
+          )}
         </Section>
 
         {/* ───────── セクション: アカウント ───────── */}
@@ -632,6 +653,26 @@ function Pill({ text }: { text: string }) {
       }}
     >
       <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{text}</Text>
+    </View>
+  );
+}
+
+function AccentPill({ text }: { text: string }) {
+  return (
+    <View
+      style={{
+        minWidth: 22,
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: R.full,
+        backgroundColor: C.accentBg,
+        borderWidth: 1,
+        borderColor: C.accent + '66',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text style={{ color: C.accentLight, fontSize: 11, fontWeight: '800', letterSpacing: 0.3 }}>{text}</Text>
     </View>
   );
 }

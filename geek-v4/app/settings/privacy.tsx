@@ -4,6 +4,7 @@ import { TopBar } from '../../components/nav/TopBar';
 import { BackButton } from '../../components/nav/BackButton';
 import { Divider } from '../../components/ui/Divider';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useAdPreferencesStore } from '../../stores/adPreferencesStore';
 import { useToastStore } from '../../stores/toastStore';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -13,6 +14,8 @@ export default function PrivacyScreen() {
   const insets = useSafeAreaInsets();
   const concernsPrivate = useSettingsStore((s) => s.concernsPrivate);
   const updateSettings = useSettingsStore((s) => s.update);
+  const personalizedAds = useAdPreferencesStore((s) => s.personalizedAds);
+  const setPersonalizedAds = useAdPreferencesStore((s) => s.setPersonalizedAds);
   const showToast = useToastStore((s) => s.show);
   const Lock = Icon.lock;
 
@@ -25,6 +28,13 @@ export default function PrivacyScreen() {
       desc: 'ON: 投稿主に届かず、自分のフィルタ用にだけ機能。OFF: 公開され、評価に影響します',
       value: concernsPrivate,
       set: (v: boolean) => updateSettings('concernsPrivate', v),
+      pending: false,
+    },
+    {
+      label: '興味タグに基づく広告を表示する',
+      desc: 'OFF にすると、フィード内に広告が一切表示されなくなります。個人 ID は広告主に送信されません',
+      value: personalizedAds,
+      set: (v: boolean) => setPersonalizedAds(v),
       pending: false,
     },
     {

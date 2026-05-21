@@ -5,6 +5,7 @@ import { TopBar } from '../../components/nav/TopBar';
 import { BackButton } from '../../components/nav/BackButton';
 import { Divider } from '../../components/ui/Divider';
 import { PressableScale } from '../../components/ui/PressableScale';
+import { PushNotificationToggle } from '../../components/ui/PushNotificationToggle';
 import { useSettingsStore, isInQuietHours } from '../../stores/settingsStore';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -84,6 +85,9 @@ export default function NotificationsSettingsScreen() {
             thumbColor="#fff"
           />
         </View>
+
+        {/* Web Push (ブラウザ通知) — native では何も描画されない */}
+        <PushNotificationToggle />
 
         {/* おやすみ時間 (Quiet hours) */}
         <View style={{

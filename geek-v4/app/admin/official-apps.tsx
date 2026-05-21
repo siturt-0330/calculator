@@ -161,7 +161,8 @@ export default function AdminOfficialAppsScreen() {
                   {a.purpose}
                 </Text>
 
-                <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <VerificationBadge status={a.verification_status} />
                   {a.requested_features.map((f) => (
                     <View
                       key={f}
@@ -216,6 +217,19 @@ export default function AdminOfficialAppsScreen() {
                 <DetailRow label="所属組織" value={openApp.applicant_organization} />
                 {openApp.applicant_email && <DetailRow label="メール" value={openApp.applicant_email} />}
                 {openApp.applicant_url && <DetailRow label="URL" value={openApp.applicant_url} />}
+                {openApp.applicant_url && (
+                  <View style={{ gap: 4 }}>
+                    <Text style={[T.caption, { color: C.text3, letterSpacing: 0.6 }]}>URL 所有確認</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <VerificationBadge status={openApp.verification_status} />
+                      {openApp.verification_method && (
+                        <Text style={[T.caption, { color: C.text3 }]}>
+                          method: {openApp.verification_method}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                )}
                 <DetailRow label="メンバー / 投稿" value={`${openApp.member_count} 人 / ${openApp.post_count} 投稿`} />
                 <DetailRow label="申請日" value={new Date(openApp.created_at).toLocaleString('ja-JP')} />
                 <View style={{ gap: 4 }}>
@@ -398,6 +412,45 @@ function DetailRow({ label, value }: { label: string; value: string }) {
     <View style={{ gap: 2 }}>
       <Text style={[T.caption, { color: C.text3, letterSpacing: 0.6 }]}>{label}</Text>
       <Text style={[T.body, { color: C.text }]}>{value}</Text>
+    </View>
+  );
+}
+
+function VerificationBadge({ status }: { status: string | undefined }) {
+  const s = status ?? 'unverified';
+  let label: string;
+  let bg: string;
+  let fg: string;
+  let border: string;
+  if (s === 'verified') {
+    label = '✓ URL確認済み';
+    bg = C.greenBg;
+    fg = C.green;
+    border = C.green + '66';
+  } else if (s === 'failed') {
+    label = '確認失敗';
+    bg = C.amberBg;
+    fg = C.amber;
+    border = C.amber + '66';
+  } else {
+    // unverified / pending
+    label = '未確認';
+    bg = C.bg3;
+    fg = C.text3;
+    border = C.border;
+  }
+  return (
+    <View
+      style={{
+        paddingHorizontal: SP['2'],
+        paddingVertical: 2,
+        backgroundColor: bg,
+        borderRadius: R.sm,
+        borderWidth: 1,
+        borderColor: border,
+      }}
+    >
+      <Text style={{ color: fg, fontSize: 10, fontWeight: '700' }}>{label}</Text>
     </View>
   );
 }

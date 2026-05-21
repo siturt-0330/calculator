@@ -1,4 +1,5 @@
 import { View, Text, Platform } from 'react-native';
+import { memo } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { C } from '../../design/tokens';
@@ -108,8 +109,9 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   );
 }
 
-// 個別の「ピル」型タブ
-function TabPill({
+// 個別の「ピル」型タブ — memo 化して unreadCount 変更時に
+// mypage 以外の pill が再 render しないようにする
+const TabPill = memo(function TabPill({
   tab,
   focused,
   badgeCount = 0,
@@ -158,4 +160,4 @@ function TabPill({
       )}
     </View>
   );
-}
+});
