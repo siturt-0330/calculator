@@ -63,6 +63,26 @@ export default function MypageScreen() {
   });
   const communityCount = myCommunities.length;
 
+  // 運営からの未読メッセージ件数。 head:true + count:'exact' で行データを転送せず
+  // 件数だけ取得 — mypage Row の数字バッジ表示用。
+  // 同じ queryKey を messages.tsx 側の optimistic update でも触っているので、
+  // 既読化したらバッジは即座に減る。
+  const { data: unreadAdminMessages = 0 } = useQuery<number>({
+    queryKey: ['admin-messages-unread-count', user?.id],
+    queryFn: async () => {
+      if (!user) return 0;
+      const { count, error } = await supabase
+        .from('admin_messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('recipient_id', user.id)
+        .is('read_at', null);
+      if (error) return 0;
+      return count ?? 0;
+    },
+    enabled: !!user,
+    staleTime: 60_000,
+  });
+
   const accountAge = user?.created_at
     ? Math.floor((Date.now() - new Date(user.created_at).getTime()) / (1000 * 60 * 60 * 24))
     : 0;
@@ -205,6 +225,14 @@ export default function MypageScreen() {
             icon={Icon.save}
             label="保存した投稿"
             onPress={() => router.push('/mypage/saved' as never)}
+          />
+          <RowDivider />
+          {/* 運営からの DM 受信箱 — 未読があれば数字 pill */}
+          <Row
+            icon={Icon.send}
+            label="運営からのメッセージ"
+            right={unreadAdminMessages > 0 ? <Pill text={String(unreadAdminMessages)} /> : undefined}
+            onPress={() => router.push('/mypage/messages' as never)}
           />
         </Section>
 
