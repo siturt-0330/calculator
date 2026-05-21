@@ -39,10 +39,13 @@ begin
     return;
   end if;
 
-  -- 0024 の auth.uid() 要求 trigger を一時的に無効化 (seed 実行時のみ)
+  -- 0024 / 0026 の auth.uid() 要求 trigger を一時的に無効化 (seed 実行時のみ)
+  -- communities INSERT → handle_new_community trigger 経由で community_members
+  -- にも INSERT されるので、両方の auth.uid() ガードを外す必要がある。
   alter table public.communities disable trigger communities_set_created_by;
+  alter table public.community_members disable trigger community_members_normalize_insert;
 
-  -- 公式コミュニティを作成
+  -- 公式コミュニティを作成 (handle_new_community trigger が自動で owner も追加)
   begin
     insert into public.communities (
       name, description,
@@ -64,13 +67,15 @@ begin
   exception when others then
     -- trigger は必ず戻す
     alter table public.communities enable trigger communities_set_created_by;
+    alter table public.community_members enable trigger community_members_normalize_insert;
     raise;
   end;
 
   -- trigger を元に戻す
   alter table public.communities enable trigger communities_set_created_by;
+  alter table public.community_members enable trigger community_members_normalize_insert;
 
-  -- 管理者をオーナーとして登録
+  -- 念のため: handle_new_community で挿入されなかった場合の保険
   insert into public.community_members (community_id, user_id, role)
   values (v_community_id, v_admin_user_id, 'owner')
   on conflict (community_id, user_id) do nothing;
