@@ -183,6 +183,7 @@ export default function CreateCommunityScreen() {
       setLocalIconUri(croppedUri);
       setLocalIconBlob(prepared.blob);
       setLocalIconMime(prepared.mime);
+      show('アイコンを切り抜きました', 'success');
     } catch (e) {
       console.warn('[community/create] pick icon failed:', e);
       show('画像の取得に失敗しました', 'error');

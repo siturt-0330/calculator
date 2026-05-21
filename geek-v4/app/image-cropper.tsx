@@ -214,11 +214,13 @@ export default function ImageCropperScreen() {
       let cropW = cropDiameter * srcPerScreenX;
       let cropH = cropDiameter * srcPerScreenY;
 
-      // clamp — 画像外には出さない
-      cropX = Math.max(0, Math.min(cropX, rotatedNatW));
-      cropY = Math.max(0, Math.min(cropY, rotatedNatH));
-      cropW = Math.max(1, Math.min(cropW, rotatedNatW - cropX));
-      cropH = Math.max(1, Math.min(cropH, rotatedNatH - cropY));
+      // clamp — 画像外には出さない、最低 16px 確保
+      cropX = Math.max(0, Math.min(cropX, rotatedNatW - 16));
+      cropY = Math.max(0, Math.min(cropY, rotatedNatH - 16));
+      cropW = Math.max(16, Math.min(cropW, rotatedNatW - cropX));
+      cropH = Math.max(16, Math.min(cropH, rotatedNatH - cropY));
+
+      console.log('[image-cropper] crop rect:', { cropX, cropY, cropW, cropH, rotation, rotatedNatW, rotatedNatH });
 
       const actions: ImageManipulator.Action[] = [];
       if (rotation !== 0) actions.push({ rotate: rotation });
@@ -232,15 +234,44 @@ export default function ImageCropperScreen() {
       });
       actions.push({ resize: { width: 512, height: 512 } });
 
-      const result = await ImageManipulator.manipulateAsync(sourceUri, actions, {
-        compress: 0.85,
-        format: ImageManipulator.SaveFormat.JPEG,
-      });
-      resolveCropper(result.uri);
+      let croppedUri: string | null = null;
+      try {
+        const result = await ImageManipulator.manipulateAsync(sourceUri, actions, {
+          compress: 0.85,
+          format: ImageManipulator.SaveFormat.JPEG,
+        });
+        croppedUri = result.uri;
+        console.log('[image-cropper] manipulate ok:', result.uri);
+      } catch (innerErr) {
+        console.warn('[image-cropper] manipulateAsync failed, attempting center-square fallback:', innerErr);
+        // フォールバック: 画像の中心を正方形 crop する (transform 情報は捨てる)
+        const side = Math.min(rotatedNatW, rotatedNatH);
+        const fallbackX = Math.round((rotatedNatW - side) / 2);
+        const fallbackY = Math.round((rotatedNatH - side) / 2);
+        try {
+          const fb = await ImageManipulator.manipulateAsync(
+            sourceUri,
+            [
+              ...(rotation !== 0 ? [{ rotate: rotation }] as ImageManipulator.Action[] : []),
+              { crop: { originX: fallbackX, originY: fallbackY, width: side, height: side } },
+              { resize: { width: 512, height: 512 } },
+            ],
+            { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG },
+          );
+          croppedUri = fb.uri;
+        } catch (fbErr) {
+          console.warn('[image-cropper] fallback also failed, using source as-is:', fbErr);
+          // 最終 fallback: source をそのまま返す
+          croppedUri = sourceUri;
+        }
+      }
+
+      resolveCropper(croppedUri);
       router.back();
     } catch (e) {
       console.warn('[image-cropper] crop failed:', e);
-      resolveCropper(null);
+      // クロップ失敗時もサーバ送信は成立させたい (UX 上「無反応」が最悪) ので source を返す
+      resolveCropper(sourceUri || null);
       router.back();
     } finally {
       setBusy(false);
@@ -400,28 +431,33 @@ export default function ImageCropperScreen() {
           </Text>
         </PressableScale>
 
-        {/* 次へ */}
+        {/* 次へ — 明確な CTA ボタン */}
         <PressableScale
           onPress={handleNext}
           haptic="confirm"
           disabled={busy || !imageSize}
-          hitSlop={8}
+          hitSlop={12}
           style={{
-            paddingHorizontal: SP['3'],
+            paddingHorizontal: SP['5'],
             paddingVertical: SP['3'],
-            width: 80,
-            alignItems: 'flex-end',
+            minWidth: 100,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: busy ? 'rgba(255,255,255,0.15)' : C.accent,
+            borderRadius: 24,
+            opacity: !imageSize ? 0.5 : 1,
           }}
         >
-          <Text
-            style={{
-              color: busy ? C.text3 : C.accent,
-              fontSize: 18,
-              fontWeight: '700',
-            }}
-          >
-            {busy ? '処理中…' : '次へ'}
-          </Text>
+          {busy ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <ActivityIndicator size="small" color="#fff" />
+              <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>処理中…</Text>
+            </View>
+          ) : (
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 0.3 }}>
+              この範囲で決定
+            </Text>
+          )}
         </PressableScale>
       </View>
     </View>
