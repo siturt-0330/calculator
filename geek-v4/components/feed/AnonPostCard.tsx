@@ -29,6 +29,49 @@ import { ObsidianSaveButton } from '../ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
 import type { PostCommunityRef } from '../../lib/api/posts';
 
+// 画像アスペクト比のモジュールレベルキャッシュ — FlashList のリサイクルで
+// カードがアンマウント/マウントされるたびに getSize() で再フェッチ (= ネットワーク往復)
+// していたのが原因でスクロールが固まる症状が出ていた。
+// URL をキーに永続キャッシュすることで、一度測ったサムネは再測定しない。
+const _aspectCache = new Map<string, number>();
+// 同時 getSize 数を制限する小さなキュー (モバイルだと並列ネットワークが
+// 詰まると JS thread が長くブロックされるため)
+const _pending = new Set<string>();
+const _MAX_CONCURRENT = 3;
+const _queue: Array<() => void> = [];
+function _drain() {
+  while (_pending.size < _MAX_CONCURRENT && _queue.length > 0) {
+    const task = _queue.shift();
+    if (task) task();
+  }
+}
+function measureAspect(url: string, measureUri: string, cb: (ratio: number) => void) {
+  const cached = _aspectCache.get(url);
+  if (cached !== undefined) { cb(cached); return; }
+  if (_pending.has(url)) { _queue.push(() => measureAspect(url, measureUri, cb)); return; }
+  const start = () => {
+    _pending.add(url);
+    RNImage.getSize(
+      measureUri,
+      (w, h) => {
+        _pending.delete(url);
+        const ratio = h > 0 && w > 0 ? Math.max(0.5, Math.min(2.0, w / h)) : 1;
+        _aspectCache.set(url, ratio);
+        cb(ratio);
+        _drain();
+      },
+      () => {
+        _pending.delete(url);
+        _aspectCache.set(url, 1);
+        cb(1);
+        _drain();
+      },
+    );
+  };
+  if (_pending.size < _MAX_CONCURRENT) start();
+  else _queue.push(start);
+}
+
 function shortHost(url: string): string {
   try {
     const u = new URL(url);
@@ -143,31 +186,31 @@ function AnonPostCardInner({
   // フィードでは数 MB の画像を 4 枚並べると合計 10MB 超 → モバイル/3G で
   // 「画像が出るまで真っ暗 (= 親 View の C.bg しか見えない)」現象が起きる。
   // → thumbedUrl 経由の 720px サムネで getSize を呼ぶ。アスペクト比は同じ。
-  const [imgAspects, setImgAspects] = useState<Record<string, number>>({});
+  // モジュールレベルキャッシュからシード — 同 URL を一度測れば後はゼロコスト
+  const [imgAspects, setImgAspects] = useState<Record<string, number>>(() => {
+    const seed: Record<string, number> = {};
+    for (const u of mediaUrls) {
+      if (!u) continue;
+      const r = _aspectCache.get(u);
+      if (r !== undefined) seed[u] = r;
+    }
+    return seed;
+  });
   useEffect(() => {
     if (mediaUrls.length === 0) return;
     let alive = true;
     for (const url of mediaUrls) {
       if (!url) continue;
-      // 既に解決済みのものは再取得しない (state を closure 経由で参照)
-      setImgAspects((prev) => {
-        if (prev[url] !== undefined) return prev;
-        // サムネ URL で getSize を呼ぶ — フル画像のダウンロード回避
-        const measureUri = thumbedUrl(url, 720);
-        RNImage.getSize(
-          measureUri,
-          (w, h) => {
-            if (!alive || h <= 0 || w <= 0) return;
-            const ratio = Math.max(0.5, Math.min(2.0, w / h));
-            setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: ratio }));
-          },
-          () => {
-            if (!alive) return;
-            // 失敗時は 1:1 で fallback
-            setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: 1 }));
-          },
-        );
-        return prev;
+      // キャッシュヒット時は getSize を呼ばない
+      if (_aspectCache.has(url)) {
+        const r = _aspectCache.get(url)!;
+        setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: r }));
+        continue;
+      }
+      const measureUri = thumbedUrl(url, 720);
+      measureAspect(url, measureUri, (ratio) => {
+        if (!alive) return;
+        setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: ratio }));
       });
     }
     return () => {

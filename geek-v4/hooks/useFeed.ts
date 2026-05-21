@@ -180,6 +180,13 @@ export function useFeed() {
   // ので、firstPageIds (上位 30 件 = 最も活発な投稿) を deps にして安定化する。
   // 下に scroll しても再 subscribe しない — fetch 経由の値が staleTime 後に更新される。
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // UPDATE event coalescing — multiple postgres_changes UPDATE events within
+  // 250ms are merged into a single setQueriesData call.  Previously each
+  // UPDATE re-allocated the entire pages/posts tree which thrashed React
+  // during scroll. Now we buffer partial updates by id and flush them on
+  // rAF after a short debounce.
+  const updateBuffer = useRef<Map<string, Partial<Post>>>(new Map());
+  const updateFlushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const visiblePostIdsRef = useRef<Set<string>>(new Set());
   // 現在表示中の全 post id を ref に同期 (UPDATE handler の client-side filter 用)
   useEffect(() => {
@@ -208,18 +215,37 @@ export function useFeed() {
           const updated = payload.new as Partial<Post> & { id: string };
           // 念のためクライアント側でも再チェック (filter が反映遅延した場合の保険)
           if (!visiblePostIdsRef.current.has(updated.id)) return;
-          qc.setQueriesData({ queryKey: ['feed'] }, (data: unknown) => {
-            if (!data || typeof data !== 'object') return data;
-            const old = data as { pages?: Array<{ posts: Post[] }> };
-            if (!old.pages) return data;
-            return {
-              ...old,
-              pages: old.pages.map((p) => ({
-                ...p,
-                posts: p.posts.map((post) => (post.id === updated.id ? { ...post, ...updated } : post)),
-              })),
-            };
-          });
+          // バッファに溜めて 250ms debounce で一括反映 — スクロール中に
+          // 大量の UPDATE が来ても React 再 render は 1 回に集約される
+          const existing = updateBuffer.current.get(updated.id);
+          updateBuffer.current.set(updated.id, { ...(existing ?? {}), ...updated });
+          if (updateFlushTimer.current) return;
+          updateFlushTimer.current = setTimeout(() => {
+            updateFlushTimer.current = null;
+            const patches = updateBuffer.current;
+            if (patches.size === 0) return;
+            updateBuffer.current = new Map();
+            qc.setQueriesData({ queryKey: ['feed'] }, (data: unknown) => {
+              if (!data || typeof data !== 'object') return data;
+              const old = data as { pages?: Array<{ posts: Post[] }> };
+              if (!old.pages) return data;
+              // どの page にも該当 id が無ければ早期 return で参照を維持
+              let touched = false;
+              const newPages = old.pages.map((p) => {
+                let pageTouched = false;
+                const newPosts = p.posts.map((post) => {
+                  const patch = patches.get(post.id);
+                  if (!patch) return post;
+                  pageTouched = true;
+                  return { ...post, ...patch };
+                });
+                if (!pageTouched) return p;
+                touched = true;
+                return { ...p, posts: newPosts };
+              });
+              return touched ? { ...old, pages: newPages } : data;
+            });
+          }, 250);
         },
       ).on(
         'postgres_changes',
@@ -238,6 +264,8 @@ export function useFeed() {
     return () => {
       detach();
       if (pendingTimer.current) clearTimeout(pendingTimer.current);
+      if (updateFlushTimer.current) clearTimeout(updateFlushTimer.current);
+      updateBuffer.current.clear();
     };
   }, [firstPageKey, firstPageIds, qc]);
 
