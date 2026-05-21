@@ -1,4 +1,15 @@
 import { supabase } from '../supabase';
+import { GOSSIP_TRENDING_BLOCKLIST_SET } from '../../stores/tagFilterStore';
+
+// トレンドからは無条件に「人が不幸になる」「スキャンダル」「事件報道」系を除外する。
+// ユーザーがブロック設定していなくても trending には絶対に出さない (プロダクト方針)。
+function isGossipBlocked(tag: string): boolean {
+  if (GOSSIP_TRENDING_BLOCKLIST_SET.has(tag)) return true;
+  // 部分一致のセーフティネット — "○○事件" "○○炎上" "○○逮捕" のような派生も弾く
+  const triggers = ['炎上', '逮捕', '訃報', '不倫', '浮気', '熱愛', 'スキャンダル', 'スクープ', '事件', '殺人', '死亡', '訴訟', '謝罪'];
+  for (const trig of triggers) if (tag.includes(trig)) return true;
+  return false;
+}
 
 export type TrendingTag = {
   name: string;
@@ -28,6 +39,8 @@ export async function fetchTrendingTags(limit = 8): Promise<TrendingTag[]> {
   for (const row of (data ?? []) as Array<{ tag_names: string[]; created_at: string }>) {
     const ts = new Date(row.created_at).getTime();
     for (const tag of row.tag_names ?? []) {
+      // ゴシップ/事件/不幸系は trending から無条件で除外
+      if (isGossipBlocked(tag)) continue;
       const cur = counts[tag] ?? { recent: 0, prev: 0, oldest: ts, newest: ts };
       if (ts >= splitAt) cur.recent += 1;
       else cur.prev += 1;

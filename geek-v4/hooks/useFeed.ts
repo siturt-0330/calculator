@@ -8,6 +8,7 @@ import { useFeedStore } from '../stores/feedStore';
 import { useSearchSignalsStore } from '../stores/searchSignalsStore';
 import { useSearchClickStore } from '../stores/searchClickStore';
 import { smartSort } from '../lib/feed/smartRank';
+import { GOSSIP_TRENDING_BLOCKLIST_SET } from '../stores/tagFilterStore';
 import type { Post } from '../types/models';
 import { useQuery as useReactQuery } from '@tanstack/react-query';
 import { getEvents, computeProfile, rankFeed } from '../lib/personalize';
@@ -24,8 +25,18 @@ async function fetchTrendingTagList(): Promise<string[]> {
     .order('created_at', { ascending: false })
     .limit(200);
   const counts: Record<string, number> = {};
+  // ゴシップ/事件報道系のキーワード — 部分一致でもブロック
+  const gossipTriggers = ['炎上', '逮捕', '訃報', '不倫', '浮気', '熱愛', 'スキャンダル', 'スクープ', '事件', '殺人', '死亡', '訴訟', '謝罪'];
+  const isGossip = (tag: string) => {
+    if (GOSSIP_TRENDING_BLOCKLIST_SET.has(tag)) return true;
+    for (const trig of gossipTriggers) if (tag.includes(trig)) return true;
+    return false;
+  };
   for (const row of (data ?? []) as Array<{ tag_names: string[] }>) {
-    for (const t of row.tag_names ?? []) counts[t] = (counts[t] ?? 0) + 1;
+    for (const t of row.tag_names ?? []) {
+      if (isGossip(t)) continue;
+      counts[t] = (counts[t] ?? 0) + 1;
+    }
   }
   return Object.entries(counts).filter(([, c]) => c >= 2).map(([t]) => t);
 }
