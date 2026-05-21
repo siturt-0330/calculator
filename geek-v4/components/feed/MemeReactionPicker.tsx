@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Modal, View, Text, ScrollView, TextInput, ActivityIndicator } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '../ui/PressableScale';
 import { Icon } from '../../constants/icons';
@@ -139,7 +140,9 @@ export function MemeReactionPicker({
 
           {/* カスタム作成エリア */}
           {showCustomInput ? (
-            <View style={{
+            <Animated.View
+              entering={FadeIn.duration(160)}
+              style={{
               gap: SP['2'],
               padding: SP['3'],
               backgroundColor: C.bg3,
@@ -202,7 +205,7 @@ export function MemeReactionPicker({
                   )}
                 </PressableScale>
               </View>
-            </View>
+            </Animated.View>
           ) : (
             <PressableScale
               onPress={() => setShowCustomInput(true)}

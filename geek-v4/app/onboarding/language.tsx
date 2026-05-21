@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/Button';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { BackButton } from '../../components/nav/BackButton';
 import { useLanguageStore, LANG_OPTIONS, type Lang } from '../../stores/languageStore';
+import { StepProgress } from './_progress';
 
 export default function LanguageOnboarding() {
   const insets = useSafeAreaInsets();
@@ -27,7 +28,10 @@ export default function LanguageOnboarding() {
           gap: SP['5'],
         }}
       >
-        <BackButton />
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <BackButton />
+          <StepProgress step={1} />
+        </View>
         {/* タイトル */}
         <View style={{ alignItems: 'center', gap: SP['2'] }}>
           <Text style={{ fontSize: 56 }}>🌏</Text>

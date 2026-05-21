@@ -14,8 +14,17 @@ import { useTagGraphStore } from '../../stores/tagGraphStore';
 import { BackButton } from '../../components/nav/BackButton';
 import { Icon } from '../../constants/icons';
 import { buildTagSuggestions, REASON_LABEL } from '../../lib/utils/tagSuggest';
+import { StepProgress } from './_progress';
 
-const SUGGESTED = ['ポケモン', 'アニメ', '漫画', 'ゲーム', 'コスプレ', 'アイドル', 'VTuber', '声優', '鉄道', 'カメラ'];
+// カテゴリ別おすすめ (フラットな一列より、ユーザーが自分の興味領域を見つけやすい)。
+// 「3 つ以上選んでね」のガイドに沿って 各カテゴリ 4-6 個を出す。
+const SUGGESTED_GROUPS: { label: string; emoji: string; tags: string[] }[] = [
+  { label: 'アニメ・マンガ', emoji: '📺', tags: ['アニメ', '漫画', '声優', 'ジャンプ', 'なろう'] },
+  { label: 'ゲーム', emoji: '🎮', tags: ['ポケモン', 'スプラトゥーン', '原神', 'FF', 'マイクラ', 'スマブラ'] },
+  { label: 'アイドル・VTuber', emoji: '🎤', tags: ['VTuber', 'アイドル', 'ホロライブ', 'にじさんじ', 'K-POP'] },
+  { label: '創作・コスプレ', emoji: '🎨', tags: ['コスプレ', 'イラスト', '同人', '小説', '写真'] },
+  { label: 'その他の推し活', emoji: '✨', tags: ['鉄道', 'カメラ', '舞台', '映画', 'ガジェット'] },
+];
 
 export default function LikedTagsScreen() {
   const [input, setInput] = useState('');
@@ -51,12 +60,44 @@ export default function LikedTagsScreen() {
         }}
         keyboardShouldPersistTaps="handled"
       >
-        <BackButton />
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <BackButton />
+          <StepProgress step={3} />
+        </View>
         <View style={{ gap: SP['2'] }}>
           <Text style={[T.h1, { color: C.text }]}>好きなタグを選ぼう</Text>
           <Text style={[T.body, { color: C.text2 }]}>
-            選んだタグの投稿が優先して表示されます。後から変更できます。
+            選んだタグの投稿が優先して表示されます。3 つ以上選ぶとフィードが自分専用になります。
           </Text>
+          {/* 選択数カウンタ — 一目で残りの目標が分かる */}
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: SP['2'],
+            marginTop: SP['1'],
+          }}>
+            <View style={{
+              paddingHorizontal: SP['2'],
+              paddingVertical: 2,
+              borderRadius: R.full,
+              backgroundColor: likedTags.length >= 3 ? C.greenBg : C.accentBg,
+              borderWidth: 1,
+              borderColor: (likedTags.length >= 3 ? C.green : C.accent) + '55',
+            }}>
+              <Text style={[T.caption, {
+                color: likedTags.length >= 3 ? C.green : C.accent,
+                fontWeight: '700',
+                fontVariant: ['tabular-nums'],
+              }]}>
+                {likedTags.length >= 3 ? `✓ ${likedTags.length} 個選択中` : `${likedTags.length} / 3 個`}
+              </Text>
+            </View>
+            {likedTags.length < 3 && (
+              <Text style={[T.caption, { color: C.text3 }]}>
+                あと {3 - likedTags.length} 個でおすすめ
+              </Text>
+            )}
+          </View>
         </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: SP['2'] }}>
@@ -99,18 +140,27 @@ export default function LikedTagsScreen() {
           variant="liked"
         />
 
-        <View style={{ gap: SP['2'] }}>
-          <Text style={[T.smallM, { color: C.text3 }]}>おすすめ</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-            {SUGGESTED.map((t) => (
-              <TagPill
-                key={t}
-                name={t}
-                state={likedTags.includes(t) ? 'liked' : 'normal'}
-                onPress={() => add(t)}
-              />
-            ))}
-          </View>
+        {/* カテゴリ別おすすめ — フラット一覧より興味領域が見つけやすい */}
+        <View style={{ gap: SP['3'] }}>
+          <Text style={[T.smallM, { color: C.text3 }]}>カテゴリから探す</Text>
+          {SUGGESTED_GROUPS.map((g) => (
+            <View key={g.label} style={{ gap: SP['2'] }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={{ fontSize: 14 }}>{g.emoji}</Text>
+                <Text style={[T.smallM, { color: C.text2, fontWeight: '700' }]}>{g.label}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
+                {g.tags.map((t) => (
+                  <TagPill
+                    key={t}
+                    name={t}
+                    state={likedTags.includes(t) ? 'liked' : 'normal'}
+                    onPress={() => add(t)}
+                  />
+                ))}
+              </View>
+            </View>
+          ))}
         </View>
 
         {/* タグツリーから「これもどうですか？」 (常時表示) */}

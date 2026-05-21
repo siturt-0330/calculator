@@ -64,8 +64,10 @@ export default function LikedPosts() {
         <View style={{ padding: SP['4'] }}>
           <EmptyState
             icon={Icon.heart}
-            title="いいねした投稿はありません"
-            message="気に入った投稿のハートを押すとここに表示されます"
+            title="まだ いいね した投稿はありません"
+            message="気になる投稿のハートをタップすると、ここに集まります"
+            actionLabel="フィードを見る"
+            onAction={() => router.push('/(tabs)/feed' as never)}
             tone="pink"
           />
         </View>
@@ -81,6 +83,21 @@ export default function LikedPosts() {
           removeClippedSubviews
           decelerationRate="fast"
           contentContainerStyle={{ padding: SP['4'], paddingBottom: insets.bottom + SP['10'] }}
+          ListHeaderComponent={
+            // 件数ヘッダー — 「30 件 / 100 件まで保存」のように上限も示す
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingHorizontal: SP['1'],
+              paddingBottom: SP['2'],
+              gap: SP['2'],
+            }}>
+              <Text style={[T.smallM, { color: C.text2, fontWeight: '700' }]}>
+                {items.length} 件
+              </Text>
+              <Text style={[T.caption, { color: C.text3 }]}>· 新しい順</Text>
+            </View>
+          }
           ItemSeparatorComponent={() => <View style={{ height: SP['2'] }} />}
           renderItem={({ item: p }) => (
             <PressableScale

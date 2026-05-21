@@ -1,4 +1,5 @@
 import { Text, Linking, Platform } from 'react-native';
+import { memo, useMemo } from 'react';
 import type { TextStyle, StyleProp } from 'react-native';
 import { C } from '../../design/tokens';
 import { sanitizeUrl } from '../../lib/sanitize';
@@ -45,7 +46,10 @@ function parse(input: string): Segment[] {
   return segments;
 }
 
-export function MarkdownText({
+// 同じ text を含む大量カードのスクロール時、parse の regex 走査が毎フレーム走るのを防ぐ。
+// FlashList で 100 投稿表示中に親が re-render すると 100 回 regex が回っていた。
+// memo (props 比較) + useMemo (parse 結果キャッシュ) で本文不変時の cost を 0 に。
+export const MarkdownText = memo(function MarkdownText({
   text,
   style,
   numberOfLines,
@@ -54,7 +58,7 @@ export function MarkdownText({
   style?: StyleProp<TextStyle>;
   numberOfLines?: number;
 }) {
-  const segs = parse(text);
+  const segs = useMemo(() => parse(text), [text]);
 
   const open = (url: string) => {
     // パーサ regex は https? のみ通すが、defense-in-depth で再検証
@@ -99,4 +103,4 @@ export function MarkdownText({
       })}
     </Text>
   );
-}
+});

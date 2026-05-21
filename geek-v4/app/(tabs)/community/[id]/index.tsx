@@ -193,38 +193,55 @@ export default function CommunityDetailScreen() {
   }, [activeTab, id, router]);
 
   // -----------------------------------------------------------
-  // Join / Leave
+  // Join / Leave (optimistic — 1000 並行参加でも UI 即応)
   // -----------------------------------------------------------
+  // 旧版は RPC 完了を待ってからボタンの状態が変わっていたため、ピーク時の
+  // server-side レイテンシ (200-800ms) がそのまま体感ラグになっていた。
+  // 楽観更新で「参加中」表示を先に切り替え、失敗時のみ revert する。
   const onJoinLeave = async () => {
     if (!community || joining) return;
     setJoining(true);
-    if (community.is_member) {
-      const { error } = await leaveCommunity(community.id);
-      setJoining(false);
-      if (error) {
-        console.warn('[community] leave failed:', error);
-        show(error, 'error');
-        return;
-      }
-      show('コミュニティから抜けました', 'success');
-    } else if (community.visibility === 'request') {
-      const { error } = await requestJoinCommunity(community.id);
-      setJoining(false);
-      if (error) {
-        show(error, 'error');
-        return;
-      }
-      show('参加申請を送信しました', 'success');
-    } else {
-      const { error } = await joinCommunity(community.id);
-      setJoining(false);
-      if (error) {
-        console.warn('[community] join failed:', error);
-        show(error, 'error');
-        return;
-      }
-      show('コミュニティに参加しました', 'success');
+
+    // 楽観更新: header の is_member / member_count を即座に切り替える
+    const wasMember = community.is_member;
+    const isRequest = community.visibility === 'request';
+    if (!isRequest) {
+      qc.setQueryData(
+        ['community', id],
+        (prev: CommunityWithMembership | undefined) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            is_member: !wasMember,
+            role: !wasMember ? 'member' : null,
+            member_count: Math.max(0, prev.member_count + (wasMember ? -1 : 1)),
+          };
+        },
+      );
     }
+
+    let err: string | null = null;
+    if (wasMember) {
+      err = (await leaveCommunity(community.id)).error;
+    } else if (isRequest) {
+      err = (await requestJoinCommunity(community.id)).error;
+    } else {
+      err = (await joinCommunity(community.id)).error;
+    }
+    setJoining(false);
+
+    if (err) {
+      console.warn('[community] join/leave failed:', err);
+      show(err, 'error');
+      // 失敗時は revert (= server truth 再取得)
+      void qc.invalidateQueries({ queryKey: ['community', id] });
+      return;
+    }
+
+    if (wasMember) show('コミュニティから抜けました', 'success');
+    else if (isRequest) show('参加申請を送信しました', 'success');
+    else show('コミュニティに参加しました', 'success');
+
     // 即座にすべての関連 query を invalidate (header / マイコミュ / 投稿先候補 全部更新)
     void qc.invalidateQueries({ queryKey: ['community', id] });
     void qc.invalidateQueries({ queryKey: ['mypage-my-communities'] });

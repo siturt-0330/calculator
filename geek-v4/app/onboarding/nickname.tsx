@@ -11,6 +11,7 @@ import { Icon } from '../../constants/icons';
 import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
 import { supabase } from '../../lib/supabase';
+import { StepProgress } from './_progress';
 
 export default function NicknameScreen() {
   const [nickname, setNickname] = useState('');
@@ -100,7 +101,10 @@ export default function NicknameScreen() {
           gap: SP['6'],
         }}
       >
-        <BackButton />
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <BackButton />
+          <StepProgress step={2} />
+        </View>
         <View style={{ gap: SP['2'] }}>
           <Text style={[T.h1, { color: C.text }]}>ニックネームを決めよう</Text>
           <Text style={[T.body, { color: C.text2 }]}>
@@ -125,16 +129,27 @@ export default function NicknameScreen() {
             keyboardAppearance="dark"
             selectionColor={C.accent}
           />
-          {tooShort && (
-            <Text style={[T.caption, { color: C.amber, paddingLeft: SP['1'] }]}>
-              あと {2 - charCount} 文字以上必要です
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SP['1'] }}>
+            {/* 警告メッセージ — 文字数が範囲外のときだけ左に出す */}
+            {tooShort ? (
+              <Text style={[T.caption, { color: C.amber }]}>
+                あと {2 - charCount} 文字以上必要です
+              </Text>
+            ) : tooLong ? (
+              <Text style={[T.caption, { color: C.amber }]}>
+                20 文字までにしてください
+              </Text>
+            ) : (
+              // spacer — 右側の文字カウンタを常に右端に固定する
+              <View />
+            )}
+            <Text style={[T.caption, {
+              color: charCount > 20 ? C.amber : charCount >= 2 ? C.text2 : C.text3,
+              fontVariant: ['tabular-nums'],
+            }]}>
+              {charCount}/20
             </Text>
-          )}
-          {tooLong && (
-            <Text style={[T.caption, { color: C.amber, paddingLeft: SP['1'] }]}>
-              20 文字までにしてください（現在 {charCount} 文字）
-            </Text>
-          )}
+          </View>
         </View>
         <View style={{ flex: 1 }} />
         <Button

@@ -68,9 +68,16 @@ export function PressableScale({
   // RN Web の Pressable はデフォルトで cursor を変更しないため、disabled でない
   // 全ての tappable な要素は手のアイコンに変わるべき (即時の視覚フィードバック → 体感速度 up)。
   // touch device では cursor は無視されるので React Native への副作用無し。
+  //
+  // Web 限定で transition も付与: scale-spring の onPressOut から戻る間に opacity が
+  // ほんの少し沈むのでタップフィードバックが豪華に見える。touch device には影響しない。
   const webCursorStyle =
     Platform.OS === 'web' && !disabled
-      ? ({ cursor: 'pointer' } as Record<string, unknown>)
+      ? ({
+          cursor: 'pointer',
+          transition: 'opacity 120ms ease, filter 160ms ease',
+          WebkitTapHighlightColor: 'transparent',
+        } as Record<string, unknown>)
       : null;
 
   return (

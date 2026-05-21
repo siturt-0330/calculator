@@ -16,7 +16,7 @@ import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { NotificationBadge } from '../../components/ui/NotificationBadge';
 import { MypageSkeleton } from '../../components/ui/Skeleton';
 import { Icon } from '../../constants/icons';
-import { C, R, SP } from '../../design/tokens';
+import { C, R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { TABBAR } from '../../design/tabbar';
 import { OBSIDIAN_AVAILABLE } from '../../lib/obsidian';
@@ -140,9 +140,11 @@ export default function MypageScreen() {
               borderRadius: R.full,
               borderWidth: 1,
               borderColor: C.border2,
+              // 控えめなインタラクションだが micro-interaction で「押せる」感を強化
+              backgroundColor: C.bg2,
             }}
           >
-            <Text style={[T.smallM, { color: C.text2 }]}>プロフィールを編集</Text>
+            <Text style={[T.smallM, { color: C.text2, letterSpacing: 0.3 }]}>プロフィールを編集</Text>
           </PressableScale>
         </View>
 
@@ -384,6 +386,8 @@ function PrimaryAction({
         alignItems: 'center',
         justifyContent: 'center',
         gap: 6,
+        // solid (= primary) のみ accent halo を付与
+        ...(solid ? SHADOW.accentGlow : {}),
       }}
     >
       <I size={16} color={iconColor} strokeWidth={2.4} />

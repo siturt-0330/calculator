@@ -43,31 +43,28 @@ export async function fetchReactionsForReplies(replyIds: string[]): Promise<Reac
   return result;
 }
 
+// post_reactions と同じ 1-RTT toggle パターン (旧 SELECT → DELETE/INSERT の半分)
 export async function toggleBBSReplyReaction(replyId: string, meme: string): Promise<boolean> {
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) throw new Error('Not authenticated');
 
-  const { data: existing } = await supabase
+  const { data: deleted } = await supabase
     .from('bbs_reply_reactions')
-    .select('reply_id')
+    .delete()
     .eq('reply_id', replyId)
     .eq('user_id', userId)
     .eq('meme', meme)
-    .maybeSingle();
+    .select('reply_id');
 
-  if (existing) {
-    await supabase
-      .from('bbs_reply_reactions')
-      .delete()
-      .eq('reply_id', replyId)
-      .eq('user_id', userId)
-      .eq('meme', meme);
-    return false;
-  } else {
-    await supabase
-      .from('bbs_reply_reactions')
-      .insert({ reply_id: replyId, user_id: userId, meme });
-    return true;
-  }
+  if (deleted && deleted.length > 0) return false;
+
+  const { error } = await supabase
+    .from('bbs_reply_reactions')
+    .upsert(
+      { reply_id: replyId, user_id: userId, meme },
+      { onConflict: 'reply_id,user_id,meme', ignoreDuplicates: true },
+    );
+  if (error) throw error;
+  return true;
 }

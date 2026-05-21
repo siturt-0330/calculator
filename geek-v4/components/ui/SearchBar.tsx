@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { TextInput } from 'react-native';
+import { Platform, TextInput } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -56,6 +56,11 @@ export function SearchBar({
           borderWidth: 1.5,
         },
         aBorder,
+        // Web: focus 中はうっすら accent halo を出して「アクティブ」を強調
+        Platform.OS === 'web' && focused
+          ? // RN-web は box-shadow を直接通す
+            ({ boxShadow: '0 0 0 4px rgba(124,106,247,0.18)' } as object)
+          : null,
       ]}
     >
       <Search size={18} color={C.text3} strokeWidth={2.2} />

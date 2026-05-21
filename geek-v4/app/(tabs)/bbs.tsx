@@ -11,7 +11,7 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { HighlightedText } from '../../components/ui/HighlightedText';
 import { ThreadCardSkeleton } from '../../components/ui/Skeleton';
 import { Icon } from '../../constants/icons';
-import { C, R, SP } from '../../design/tokens';
+import { C, R, SP, SHADOW } from '../../design/tokens';
 import { T, FONT } from '../../design/typography';
 import { TABBAR } from '../../design/tabbar';
 import { formatRelative } from '../../lib/utils/date';
@@ -195,7 +195,7 @@ export default function BBSScreen() {
       <View style={{ alignItems: 'center', backgroundColor: C.bg, paddingTop: insets.top }}>
         <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'] }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: SP['3'], paddingBottom: SP['2'] }}>
-            <Text style={{ fontFamily: FONT.display, fontSize: 26, color: C.text, letterSpacing: -0.3, flex: 1 }}>
+            <Text style={{ fontFamily: FONT.display, fontSize: 28, color: C.text, letterSpacing: -0.5, flex: 1 }}>
               掲示板
             </Text>
             <PressableScale
@@ -205,6 +205,8 @@ export default function BBSScreen() {
                 flexDirection: 'row', alignItems: 'center', gap: 4,
                 paddingHorizontal: SP['3'], paddingVertical: SP['2'],
                 backgroundColor: C.accent, borderRadius: R.full,
+                // primary CTA: soft halo
+                ...SHADOW.accentGlow,
               }}
             >
               <Icon.plus size={16} color="#fff" strokeWidth={2.6} />
@@ -324,6 +326,9 @@ export default function BBSScreen() {
           <Text style={[T.caption, { color: C.text3 }]}>{filtered.length.toLocaleString('ja-JP')}件</Text>
         </View>
       </View>
+
+      {/* ヘッダー / リスト境界の hairline — 他タブ画面 (community, mypage) と統一 */}
+      <View style={{ height: 1, backgroundColor: C.divider }} />
 
       {/* スレッドリスト — FlashList で virtualization。FlatList より recycle が
           効くので長い検索結果でも体感が滑らかになる。 */}

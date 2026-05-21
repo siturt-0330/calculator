@@ -1,8 +1,10 @@
+import { useState, useMemo } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, SP, R } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { BackButton } from '../../components/nav/BackButton';
+import { PressableScale } from '../../components/ui/PressableScale';
 import { Icon } from '../../constants/icons';
 
 const GOODS = [
@@ -13,9 +15,18 @@ const GOODS = [
   { title: 'フィギュア 1/7スケール', tag: 'フィギュア', type: '交換', price: '交換希望', color: C.green },
 ];
 
+type GoodsFilter = 'すべて' | '譲渡' | '交換';
+
 export default function GoodsScreen() {
   const insets = useSafeAreaInsets();
   const GoodsIcon = Icon.goods;
+  const [filter, setFilter] = useState<GoodsFilter>('すべて');
+
+  // 「準備中」段階の demo データなので filter はクライアント側のみで動く
+  const items = useMemo(() => {
+    if (filter === 'すべて') return GOODS;
+    return GOODS.filter((g) => g.type === filter);
+  }, [filter]);
 
   return (
     <ScrollView
@@ -30,30 +41,55 @@ export default function GoodsScreen() {
       <BackButton />
 
       <View style={{ gap: SP['1'] }}>
-        <Text style={[T.display, { color: C.text }]}>グッズ</Text>
-        <Text style={[T.body, { color: C.text2 }]}>譲渡・交換</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+          <Text style={[T.display, { color: C.text }]}>グッズ</Text>
+          <View style={{
+            paddingHorizontal: SP['2'], paddingVertical: 2,
+            backgroundColor: C.amberBg, borderRadius: R.sm,
+            borderWidth: 1, borderColor: C.amber + '55',
+          }}>
+            <Text style={[T.caption, { color: C.amber, fontWeight: '700' }]}>準備中</Text>
+          </View>
+        </View>
+        <Text style={[T.body, { color: C.text2 }]}>譲渡・交換（近日対応）</Text>
       </View>
 
       <View style={{ flexDirection: 'row', gap: SP['2'] }}>
-        {(['すべて', '譲渡', '交換'] as const).map((label) => (
-          <View
-            key={label}
-            style={{
-              paddingHorizontal: SP['4'],
-              paddingVertical: SP['2'],
-              backgroundColor: label === 'すべて' ? C.accent : C.bg2,
-              borderRadius: R.full,
-              borderWidth: 1,
-              borderColor: label === 'すべて' ? C.accent : C.border,
-            }}
-          >
-            <Text style={[T.small, { color: label === 'すべて' ? '#fff' : C.text2 }]}>{label}</Text>
-          </View>
-        ))}
+        {(['すべて', '譲渡', '交換'] as const).map((label) => {
+          const active = filter === label;
+          return (
+            <PressableScale
+              key={label}
+              onPress={() => setFilter(label)}
+              haptic="select"
+              hitSlop={10}
+              style={{
+                paddingHorizontal: SP['4'],
+                paddingVertical: SP['2'],
+                backgroundColor: active ? C.accent : C.bg2,
+                borderRadius: R.full,
+                borderWidth: 1,
+                borderColor: active ? C.accent : C.border,
+              }}
+            >
+              <Text style={[T.small, { color: active ? '#fff' : C.text2, fontWeight: active ? '700' : '500' }]}>{label}</Text>
+            </PressableScale>
+          );
+        })}
       </View>
 
       <View style={{ gap: SP['3'] }}>
-        {GOODS.map((g, i) => (
+        {items.length === 0 && (
+          <View style={{
+            padding: SP['8'],
+            alignItems: 'center',
+            gap: SP['2'],
+          }}>
+            <Text style={{ fontSize: 32 }}>📦</Text>
+            <Text style={[T.body, { color: C.text2 }]}>該当するグッズがありません</Text>
+          </View>
+        )}
+        {items.map((g, i) => (
           <View
             key={i}
             style={{

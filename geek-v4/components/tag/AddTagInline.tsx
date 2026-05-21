@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { View, Text, TextInput, Platform } from 'react-native';
+import { View, Text, TextInput, Platform, ActivityIndicator } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { PressableScale } from '../ui/PressableScale';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -51,24 +52,28 @@ export function AddTagInline({ onSubmit }: { onSubmit: (tag: string) => Promise<
   }
 
   return (
-    <View style={{
+    <Animated.View
+      entering={FadeIn.duration(150)}
+      style={{
       flexDirection: 'row',
       alignItems: 'center',
       gap: SP['2'],
       backgroundColor: C.bg3,
       borderRadius: R.full,
       borderWidth: 1,
-      borderColor: C.border2,
+      borderColor: value.trim() ? C.accent : C.border2,
       paddingHorizontal: SP['3'],
       paddingVertical: 2,
       minWidth: 160,
     }}>
-      <Text style={[T.small, { color: C.text3 }]}>#</Text>
+      <Text style={[T.small, { color: value.trim() ? C.accent : C.text3 }]}>#</Text>
       <TextInput
         value={value}
         onChangeText={setValue}
         placeholder="例: ネタバレ"
         placeholderTextColor={C.text4}
+        keyboardAppearance="dark"
+        selectionColor={C.accent}
         style={[T.small, { color: C.text, flex: 1, paddingVertical: 4, minWidth: 80 }]}
         autoFocus
         maxLength={30}
@@ -76,11 +81,13 @@ export function AddTagInline({ onSubmit }: { onSubmit: (tag: string) => Promise<
         onSubmitEditing={submit}
       />
       <PressableScale onPress={submit} haptic="confirm" disabled={busy || !value.trim()}>
-        <Send size={14} color={value.trim() ? C.accent : C.text4} strokeWidth={2.4} />
+        {busy
+          ? <ActivityIndicator size="small" color={C.accent} />
+          : <Send size={14} color={value.trim() ? C.accent : C.text4} strokeWidth={2.4} />}
       </PressableScale>
-      <PressableScale onPress={() => { setOpen(false); setValue(''); }} haptic="tap">
+      <PressableScale onPress={() => { setOpen(false); setValue(''); }} haptic="tap" disabled={busy}>
         <Close size={14} color={C.text3} strokeWidth={2.4} />
       </PressableScale>
-    </View>
+    </Animated.View>
   );
 }

@@ -1,4 +1,5 @@
 import { View, Text, ScrollView, KeyboardAvoidingView, Platform, Image, ActivityIndicator } from 'react-native';
+import Animated, { FadeIn, FadeInDown, Layout } from 'react-native-reanimated';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -395,7 +396,17 @@ export default function CreateCommunityScreen() {
 
         {/* 名前 */}
         <View style={{ gap: SP['2'] }}>
-          <Text style={[T.smallM, { color: C.text2 }]}>名前 (2 - 40 文字)</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
+            <Text style={[T.smallB, { color: C.text2 }]}>名前</Text>
+            <Text style={[T.caption, { color: C.red }]}>*</Text>
+            <View style={{ flex: 1 }} />
+            <Text style={[T.caption, { color: name.length > 38 ? C.amber : C.text3 }]}>
+              {name.length} / 40
+            </Text>
+          </View>
+          <Text style={[T.caption, { color: C.text3 }]}>
+            短く・覚えやすい名前。後から変更できます (2 - 40 文字)
+          </Text>
           <Input
             value={name}
             onChangeText={setName}
@@ -410,7 +421,9 @@ export default function CreateCommunityScreen() {
             <Text style={[T.caption, { color: C.text3 }]}>類似名を検索中…</Text>
           )}
           {!checking && similar.length > 0 && (
-            <View
+            <Animated.View
+              entering={FadeInDown.duration(200)}
+              layout={Layout.springify().damping(20)}
               style={{
                 padding: SP['3'],
                 backgroundColor: C.amberBg,
@@ -473,20 +486,21 @@ export default function CreateCommunityScreen() {
                   <Icon.chevronR size={16} color={C.text3} strokeWidth={2} />
                 </PressableScale>
               ))}
-            </View>
+            </Animated.View>
           )}
         </View>
 
         {/* 説明 */}
         <View style={{ gap: SP['2'] }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={[T.smallM, { color: C.text2, flex: 1 }]}>説明 (任意 / 最大 500 文字)</Text>
-            {description.length > 0 && (
-              <Text style={[T.caption, { color: description.length >= 480 ? C.amber : C.text3 }]}>
-                {description.length} / 500
-              </Text>
-            )}
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
+            <Text style={[T.smallB, { color: C.text2, flex: 1 }]}>説明（任意）</Text>
+            <Text style={[T.caption, { color: description.length >= 480 ? C.amber : C.text3 }]}>
+              {description.length} / 500
+            </Text>
           </View>
+          <Text style={[T.caption, { color: C.text3 }]}>
+            どんな話をする場所か、ひと言で
+          </Text>
           <Input
             value={description}
             onChangeText={setDescription}
@@ -502,12 +516,15 @@ export default function CreateCommunityScreen() {
 
         {/* タグ — autocomplete */}
         <View style={{ gap: SP['2'] }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}>
-            <Text style={[T.smallM, { color: C.text2, flex: 1 }]}>タグ (最大 10 個)</Text>
-            {tags.length > 0 && (
-              <Text style={[T.caption, { color: C.text3 }]}>{tags.length} / 10</Text>
-            )}
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
+            <Text style={[T.smallB, { color: C.text2, flex: 1 }]}>タグ（任意）</Text>
+            <Text style={[T.caption, { color: tags.length >= 10 ? C.amber : C.text3 }]}>
+              {tags.length} / 10
+            </Text>
           </View>
+          <Text style={[T.caption, { color: C.text3 }]}>
+            関連するタグを追加すると検索で見つかりやすくなります
+          </Text>
 
           {/* 選択済み pills (上に表示) */}
           {tags.length > 0 && (
@@ -555,7 +572,9 @@ export default function CreateCommunityScreen() {
 
           {/* サジェスト一覧 (input が空でない時のみ) */}
           {tagInput.trim().length > 0 && (tagSuggestions.length > 0 || showCreateNewTag) && (
-            <View
+            <Animated.View
+              entering={FadeInDown.duration(180)}
+              layout={Layout.springify().damping(20)}
               style={{
                 backgroundColor: C.bg2,
                 borderRadius: R.lg,
@@ -617,20 +636,16 @@ export default function CreateCommunityScreen() {
                   </Text>
                 </PressableScale>
               )}
-            </View>
-          )}
-
-          {/* 補助文言 */}
-          {tags.length === 0 && tagInput.trim().length === 0 && (
-            <Text style={[T.caption, { color: C.text3 }]}>
-              関連するタグを追加すると検索で見つかりやすくなります
-            </Text>
+            </Animated.View>
           )}
         </View>
 
         {/* 公開設定 */}
         <View style={{ gap: SP['2'] }}>
-          <Text style={[T.smallM, { color: C.text2 }]}>公開設定</Text>
+          <Text style={[T.smallB, { color: C.text2 }]}>公開設定</Text>
+          <Text style={[T.caption, { color: C.text3 }]}>
+            誰が参加できるかを選択。後から変更可
+          </Text>
           {VISIBILITY_OPTIONS.map((opt) => {
             const isClosed = opt.value !== 'open';
             const isSelected = isClosed

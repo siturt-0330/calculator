@@ -6,12 +6,15 @@ import {
 import {
   Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold,
 } from '@expo-google-fonts/inter';
+// Orbitron — sci-fi/futuristic display font for "Geek" branding
+import { Orbitron_700Bold, Orbitron_900Black } from '@expo-google-fonts/orbitron';
 
 export function useAppFonts(): boolean {
   const [loaded, error] = useFonts({
     Syne_600SemiBold, Syne_700Bold,
     NotoSansJP_400Regular, NotoSansJP_500Medium, NotoSansJP_700Bold,
     Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold,
+    Orbitron_700Bold, Orbitron_900Black,
   });
 
   // フォント失敗はシステムフォントにフォールバック（アプリは止めない）

@@ -134,7 +134,8 @@ export async function fetchMyCommunityFeed(limit = 30): Promise<CommunityPostWit
     return [];
   }
 
-  // author の nickname を一括で取得
+  // author の nickname を一括で取得 (community_posts.author_id は auth.users への FK
+  // なので Supabase の embed では結べない — RTT は 1 増えるが、id .in() で 1 リクエスト)
   const authorIds = Array.from(new Set((data ?? []).map((p) => p.author_id)));
   let nickMap: Record<string, string> = {};
   if (authorIds.length > 0) {

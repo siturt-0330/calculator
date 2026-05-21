@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, RefreshControl } from 'react-native';
+import { View, Text, RefreshControl, Platform } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -28,7 +28,7 @@ import { PressableScale } from '../../components/ui/PressableScale';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Icon } from '../../constants/icons';
-import { C, SP } from '../../design/tokens';
+import { C, SP, SHADOW } from '../../design/tokens';
 import { FONT } from '../../design/typography';
 import { TABBAR } from '../../design/tabbar';
 import type { Post } from '../../types/models';
@@ -215,17 +215,46 @@ export default function FeedScreen() {
               backgroundColor: C.accent,
               alignItems: 'center', justifyContent: 'center',
               marginRight: SP['3'],
+              // primary CTA halo を付けて「最も主要な action」をひと目で示す
+              ...SHADOW.accentGlow,
             }}
           >
             <Plus size={20} color="#fff" strokeWidth={2.6} />
           </PressableScale>
-          <Text style={{
-            flex: 1,
-            fontFamily: FONT.display,
-            fontSize: 28,
-            color: C.text,
-            letterSpacing: -0.5,
-          }}>
+          {/* Geek brand wordmark — Orbitron Black + accent gradient (web) + glow */}
+          <Text
+            allowFontScaling={false}
+            style={[
+              {
+                flex: 1,
+                fontFamily: 'Orbitron_900Black',
+                fontSize: 30,
+                lineHeight: 34,
+                letterSpacing: 2,
+                color: C.text,
+              },
+              Platform.OS === 'web'
+                ? // RN-web 経由で CSS gradient text を効かせる (as object キャストで十分通る)
+                  ({
+                    backgroundImage:
+                      'linear-gradient(110deg, #b794f4 0%, #7c6af7 35%, #67c1ff 75%, #6ee7b7 100%)',
+                    backgroundClip: 'text',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    color: 'transparent',
+                    textShadow:
+                      '0 0 14px rgba(124,106,247,0.55), 0 0 28px rgba(103,193,255,0.25)',
+                    transform: 'skewX(-4deg)',
+                  } as object)
+                : {
+                    color: C.accent,
+                    textShadowColor: C.accent + '88',
+                    textShadowOffset: { width: 0, height: 0 },
+                    textShadowRadius: 10,
+                    transform: [{ skewX: '-4deg' }],
+                  },
+            ]}
+          >
             Geek
           </Text>
           <PressableScale
@@ -265,6 +294,9 @@ export default function FeedScreen() {
         />
         </View>
       </View>
+
+      {/* ヘッダーとリストの境界を 1px の hairline で示す — 他タブ画面と統一感 */}
+      <View style={{ height: 1, backgroundColor: C.divider }} />
 
       <FlashList
         ref={listRef}

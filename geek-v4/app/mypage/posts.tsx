@@ -79,13 +79,27 @@ export default function MyPosts() {
             <EmptyState
               icon={Icon.edit}
               title="まだ投稿していません"
-              message="最初の投稿をしてみよう"
+              message="最初の一投をしてみよう"
               actionLabel="投稿する"
               onAction={() => router.push('/post/create' as never)}
               tone="accent"
             />
           ) : (
-            items.map((p) => (
+            <>
+              {/* 件数ヘッダー — 一覧の全体像が一目で分かる。新しい順で表示中であることも明示。 */}
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingHorizontal: SP['1'],
+                marginBottom: SP['1'],
+                gap: SP['2'],
+              }}>
+                <Text style={[T.smallM, { color: C.text2, fontWeight: '700' }]}>
+                  全 {items.length} 件
+                </Text>
+                <Text style={[T.caption, { color: C.text3 }]}>· 新しい順</Text>
+              </View>
+              {items.map((p) => (
               <View
                 key={p.id}
                 style={{
@@ -133,7 +147,8 @@ export default function MyPosts() {
                   </PressableScale>
                 </View>
               </View>
-            ))
+            ))}
+            </>
           )}
         </ScrollView>
       )}

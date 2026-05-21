@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView, Alert, Image } from 'react-native';
+import Animated, { FadeIn, FadeInDown, Layout } from 'react-native-reanimated';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAutoTagSuggest } from '../../hooks/useAutoTagSuggest';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -150,12 +151,17 @@ export default function CreatePost() {
   type CWCat = 'none' | 'spoiler' | 'nsfw' | 'violence' | 'sensitive';
   const [cwCategory, setCwCategory] = useState<CWCat>('none');
   const [cwText, setCwText] = useState('');
+  const [showCw, setShowCw] = useState(false);
   // Poll
   const [showPoll, setShowPoll] = useState(false);
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState<string[]>(['', '']);
   const [pollMulti, setPollMulti] = useState(false);
   const [pollHours, setPollHours] = useState<number | null>(24);
+  // 詳細セクション (出典 URL / 投稿カテゴリ) の expander
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  // 下書き保存状態の小さな indicator
+  const [draftSaving, setDraftSaving] = useState(false);
 
   // 内容から自動タグ提案 (debounce 600ms)
   const [debouncedContent, setDebouncedContent] = useState('');
@@ -197,17 +203,20 @@ export default function CreatePost() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // 変更があるたびに draft を保存 (debounce 500ms)
+  // 変更があるたびに draft を保存 (debounce 500ms) — 「保存中…」を一瞬出して安心感
   useEffect(() => {
+    const hasContent = content.trim() || tags.length > 0 || sourceUrl.trim();
+    if (!hasContent) {
+      void AsyncStorage.removeItem(DRAFT_KEY);
+      return;
+    }
+    setDraftSaving(true);
     const t = setTimeout(() => {
-      const hasContent = content.trim() || tags.length > 0 || sourceUrl.trim();
-      if (!hasContent) {
-        void AsyncStorage.removeItem(DRAFT_KEY);
-        return;
-      }
       void AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({
         content, tags, sourceUrl, kind, anonymous, visibility,
-      }));
+      })).finally(() => {
+        setDraftSaving(false);
+      });
     }, 500);
     return () => clearTimeout(t);
   }, [content, tags, sourceUrl, kind, anonymous, visibility]);
@@ -362,6 +371,16 @@ export default function CreatePost() {
   const Hash = Icon.hash;
   const CommunityIcon = Icon.community;
 
+  // 投稿可否の inline 表示用: 「なぜ押せない」を 1 行で示す
+  const submitBlockedReason = (() => {
+    if (!content.trim() && images.length === 0) return '本文か画像を入力してください';
+    if (tags.length === 0) return 'タグを 1 つ以上 追加してください';
+    if (kind === 'fact' && !sourceUrl.trim()) return '「事実」投稿には出典URLが必要です';
+    if ((visibility === 'community_only' || visibility === 'community_public')
+        && selectedCommunityIds.length < 1) return '投稿先コミュニティを選んでください';
+    return null;
+  })();
+
   return (
     <KeyboardAware>
       <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -369,104 +388,47 @@ export default function CreatePost() {
           title="投稿"
           left={<BackButton />}
           right={
-            <Button
-              label="投稿"
-              onPress={onPost}
-              loading={posting}
-              disabled={posting || tags.length === 0 || !content.trim()}
-              size="sm"
-              fullWidth={false}
-            />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+              {draftSaving && (
+                <Animated.Text
+                  entering={FadeIn.duration(150)}
+                  style={[T.caption, { color: C.text3 }]}
+                >
+                  下書き保存中…
+                </Animated.Text>
+              )}
+              <Button
+                label="投稿"
+                onPress={onPost}
+                loading={posting}
+                disabled={posting || !!submitBlockedReason}
+                size="sm"
+                fullWidth={false}
+              />
+            </View>
           }
         />
 
         <ScrollView
           contentContainerStyle={{
             padding: SP['4'],
-            gap: SP['4'],
-            paddingBottom: insets.bottom + SP['10'],
+            gap: SP['5'],
+            paddingBottom: insets.bottom + SP['16'],
           }}
           keyboardShouldPersistTaps="handled"
         >
-          {/* 投稿カテゴリ */}
+          {/* ===== 本文 + 画像 ===== */}
           <View style={{ gap: SP['2'] }}>
-            <Text style={[T.smallM, { color: C.text2 }]}>この投稿は…</Text>
-            <View style={{ flexDirection: 'row', gap: SP['2'], flexWrap: 'wrap' }}>
-              {(Object.keys(POST_KIND_META) as PostKind[]).map((k) => {
-                const m = POST_KIND_META[k];
-                const active = kind === k;
-                return (
-                  <PressableScale
-                    key={k}
-                    onPress={() => setKind(k)}
-                    haptic="select"
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 4,
-                      paddingHorizontal: SP['3'],
-                      paddingVertical: SP['2'],
-                      borderRadius: R.full,
-                      backgroundColor: active ? m.bg : C.bg3,
-                      borderWidth: 1.5,
-                      borderColor: active ? m.fg : C.border,
-                    }}
-                  >
-                    <Text style={{ fontSize: 14 }}>{m.emoji}</Text>
-                    <Text style={[T.smallM, { color: active ? m.fg : C.text2 }]}>{m.label}</Text>
-                  </PressableScale>
-                );
-              })}
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
+              <Text style={[T.smallB, { color: C.text2 }]}>本文</Text>
+              <Text style={[T.caption, { color: C.red }]}>*</Text>
+              <View style={{ flex: 1 }} />
+              {content.length > 0 && (
+                <Text style={[T.caption, { color: content.length >= 1900 ? C.amber : C.text3 }]}>
+                  {content.length} / 2000
+                </Text>
+              )}
             </View>
-            {kind === 'fact' && (
-              <Text style={[T.caption, { color: C.text3 }]}>
-                ⚠ 「事実」を選んだ場合は出典URLが必須です
-              </Text>
-            )}
-            {kind === 'wip' && (
-              <Text style={[T.caption, { color: C.green }]}>
-                💡 未完成の作品は拡散リミット推奨。安心して試せます
-              </Text>
-            )}
-          </View>
-
-          {/* 画像 */}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-            {images.map((uri) => (
-              <View key={uri} style={{ position: 'relative' }}>
-                <ProgressiveImage uri={uri} width={80} height={80} radius={12} />
-                <PressableScale
-                  onPress={() => setImages(images.filter((u) => u !== uri))}
-                  style={{
-                    position: 'absolute',
-                    top: -6, right: -6,
-                    width: 24, height: 24, borderRadius: 12,
-                    backgroundColor: C.bg,
-                    alignItems: 'center', justifyContent: 'center',
-                    borderWidth: 1, borderColor: C.border,
-                  }}
-                >
-                  <X size={14} color={C.text} strokeWidth={2.4} />
-                </PressableScale>
-              </View>
-            ))}
-            {images.length < 4 && (
-              <PressableScale
-                onPress={pickImage}
-                style={{
-                  width: 80, height: 80, borderRadius: 12,
-                  backgroundColor: C.bg3,
-                  alignItems: 'center', justifyContent: 'center',
-                  borderWidth: 1, borderColor: C.border,
-                }}
-              >
-                <Cam size={22} color={C.text3} strokeWidth={2.2} />
-              </PressableScale>
-            )}
-          </View>
-
-          {/* 本文 — 文字数カウンタ付き */}
-          <View style={{ gap: SP['1'] }}>
             <TextArea
               placeholder="このタグについて、語ろう"
               value={content}
@@ -474,35 +436,86 @@ export default function CreatePost() {
               maxLength={2000}
               autoFocus
             />
-            {content.length > 0 && (
-              <Text style={[T.caption, { color: content.length >= 1900 ? C.amber : C.text3, alignSelf: 'flex-end' }]}>
-                {content.length} / 2000
+
+            {/* 画像 — TextArea の直下に置いて「本文ブロック」のグループ感を出す */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'], marginTop: SP['1'] }}>
+              {images.map((uri, idx) => (
+                <Animated.View
+                  key={uri}
+                  entering={FadeIn.duration(180)}
+                  style={{ position: 'relative' }}
+                >
+                  <ProgressiveImage uri={uri} width={80} height={80} radius={12} />
+                  {/* 並び番号 */}
+                  {images.length > 1 && (
+                    <View style={{
+                      position: 'absolute', bottom: 4, left: 4,
+                      paddingHorizontal: 6, paddingVertical: 1,
+                      borderRadius: R.full,
+                      backgroundColor: 'rgba(0,0,0,0.7)',
+                    }}>
+                      <Text style={{ fontSize: 10, color: '#fff', fontWeight: '700' }}>
+                        {idx + 1}
+                      </Text>
+                    </View>
+                  )}
+                  <PressableScale
+                    onPress={() => setImages(images.filter((u) => u !== uri))}
+                    haptic="warn"
+                    style={{
+                      position: 'absolute',
+                      top: -6, right: -6,
+                      width: 24, height: 24, borderRadius: 12,
+                      backgroundColor: C.bg,
+                      alignItems: 'center', justifyContent: 'center',
+                      borderWidth: 1, borderColor: C.border,
+                    }}
+                  >
+                    <X size={14} color={C.text} strokeWidth={2.4} />
+                  </PressableScale>
+                </Animated.View>
+              ))}
+              {images.length < 4 && (
+                <PressableScale
+                  onPress={pickImage}
+                  haptic="tap"
+                  style={{
+                    width: 80, height: 80, borderRadius: 12,
+                    backgroundColor: C.bg3,
+                    alignItems: 'center', justifyContent: 'center',
+                    borderWidth: 1, borderStyle: 'dashed', borderColor: C.border2,
+                    gap: 2,
+                  }}
+                >
+                  <Cam size={22} color={C.text3} strokeWidth={2.2} />
+                  <Text style={[T.caption, { color: C.text3, fontSize: 9 }]}>
+                    {images.length === 0 ? '画像 / 4' : `+${4 - images.length}`}
+                  </Text>
+                </PressableScale>
+              )}
+            </View>
+          </View>
+
+          {/* ===== タグ ===== */}
+          <View style={{ gap: SP['2'] }}>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
+              <Text style={[T.smallB, { color: C.text2 }]}>タグ</Text>
+              <Text style={[T.caption, { color: C.red }]}>*</Text>
+              <View style={{ flex: 1 }} />
+              <Text style={[T.caption, { color: tags.length >= 5 ? C.amber : C.text3 }]}>
+                {tags.length} / 5
               </Text>
-            )}
-          </View>
-
-          {/* 出典URL */}
-          <View style={{ gap: SP['2'] }}>
-            <Text style={[T.smallM, { color: C.text2 }]}>
-              出典URL {kind === 'fact' ? '（必須）' : '（任意・あると信頼度UP）'}
+            </View>
+            <Text style={[T.caption, { color: C.text3 }]}>
+              関連する話題のタグで、見つけてもらいやすくしよう
             </Text>
-            <Input
-              placeholder="https://..."
-              value={sourceUrl}
-              onChangeText={setSourceUrl}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-            />
-          </View>
-
-          {/* タグ */}
-          <View style={{ gap: SP['2'] }}>
-            <Text style={[T.smallM, { color: C.text2 }]}>タグ（必須・最大 5 個）</Text>
 
             {/* AI 自動タグ提案 (本文から推測) */}
             {autoTagSuggestions.length > 0 && tags.length < 5 && (
-              <View style={{
+              <Animated.View
+                entering={FadeInDown.duration(220)}
+                layout={Layout.springify().damping(20)}
+                style={{
                 padding: SP['2'],
                 backgroundColor: 'rgba(124,177,255,0.10)',
                 borderRadius: R.md,
@@ -543,7 +556,7 @@ export default function CreatePost() {
                     </PressableScale>
                   ))}
                 </View>
-              </View>
+              </Animated.View>
             )}
 
             {/* mobile では「+ 追加」ボタンが無いと「return key を押せばいい」 が分からない
@@ -606,77 +619,102 @@ export default function CreatePost() {
             </View>
           </View>
 
-          {/* コンテンツ警告 (CW) */}
+          {/* ===== 公開範囲 (2x2 grid) — 視覚的に大きく印象づける ===== */}
           <View style={{ gap: SP['2'] }}>
-            <Text style={[T.smallM, { color: C.text2 }]}>⚠️ コンテンツ警告 (任意)</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-              {([
-                { v: 'none', label: 'なし', emoji: '🟢' },
-                { v: 'spoiler', label: 'ネタバレ', emoji: '🤐' },
-                { v: 'nsfw', label: 'センシティブ', emoji: '🔞' },
-                { v: 'violence', label: '暴力的', emoji: '⚠️' },
-                { v: 'sensitive', label: '注意', emoji: '🛡️' },
-              ] as { v: CWCat; label: string; emoji: string }[]).map((opt) => {
-                const active = cwCategory === opt.v;
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
+              <Text style={[T.smallB, { color: C.text2 }]}>公開範囲</Text>
+              <Text style={[T.caption, { color: C.red }]}>*</Text>
+            </View>
+            <Text style={[T.caption, { color: C.text3 }]}>
+              だれに見せる投稿か。後から変更できません
+            </Text>
+            {/* 2 列グリッド: 縦の長さを 1/2 に圧縮 */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -SP['1'], marginTop: SP['1'] }}>
+              {VISIBILITY_OPTIONS.map((opt) => {
+                const active = visibility === opt.value;
                 return (
-                  <PressableScale
-                    key={opt.v}
-                    onPress={() => setCwCategory(opt.v)}
-                    haptic="select"
-                    style={{
-                      flexDirection: 'row', alignItems: 'center', gap: 4,
-                      paddingHorizontal: SP['3'], paddingVertical: SP['2'],
-                      borderRadius: R.full,
-                      backgroundColor: active ? C.amberBg : C.bg3,
-                      borderWidth: 1.5,
-                      borderColor: active ? C.amber : C.border,
-                    }}
-                  >
-                    <Text style={{ fontSize: 13 }}>{opt.emoji}</Text>
-                    <Text style={[T.smallM, { color: active ? C.amber : C.text2 }]}>{opt.label}</Text>
-                  </PressableScale>
+                  <View key={opt.value} style={{ width: '50%', padding: SP['1'] }}>
+                    <PressableScale
+                      onPress={() => setVisibility(opt.value)}
+                      haptic="select"
+                      scaleValue={0.97}
+                      style={{
+                        minHeight: 96,
+                        gap: 6,
+                        paddingHorizontal: SP['3'],
+                        paddingVertical: SP['3'],
+                        borderRadius: R.lg,
+                        backgroundColor: active ? C.accent + '18' : C.bg2,
+                        borderWidth: 1.5,
+                        borderColor: active ? C.accent : C.border,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={{ fontSize: 20 }}>{opt.emoji}</Text>
+                        {active && (
+                          <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                            <View style={{
+                              width: 18, height: 18, borderRadius: 9,
+                              backgroundColor: C.accent,
+                              alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              <Icon.ok size={11} color="#fff" strokeWidth={3} />
+                            </View>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[T.smallB, { color: active ? C.accentLight : C.text }]} numberOfLines={2}>
+                        {opt.label}
+                      </Text>
+                      <Text style={[T.caption, { color: C.text3, fontSize: 10, lineHeight: 14 }]} numberOfLines={2}>
+                        {opt.desc}
+                      </Text>
+                    </PressableScale>
+                  </View>
                 );
               })}
             </View>
-            {cwCategory !== 'none' && (
-              <Input
-                placeholder="警告の詳細 (任意) 例: 鬼滅 無限城編のネタバレを含みます"
-                value={cwText}
-                onChangeText={setCwText}
-                maxLength={120}
-              />
-            )}
           </View>
 
-          {/* 投票 */}
+          {/* ===== 投票 (collapsible) ===== */}
           <View style={{ gap: SP['2'] }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-              <Text style={[T.smallM, { color: C.text2 }]}>📊 投票を追加 (任意)</Text>
-              <View style={{ flex: 1 }} />
-              <PressableScale
-                onPress={() => setShowPoll((v) => !v)}
-                haptic="tap"
-                style={{
-                  paddingHorizontal: SP['3'], paddingVertical: 4,
-                  borderRadius: R.full,
-                  backgroundColor: showPoll ? C.accent : C.bg3,
-                  borderWidth: 1,
-                  borderColor: showPoll ? C.accent : C.border,
-                }}
-              >
-                <Text style={[T.caption, { color: showPoll ? '#fff' : C.text }]}>
-                  {showPoll ? '✓ 投票あり' : '+ 投票を追加'}
-                </Text>
-              </PressableScale>
-            </View>
-            {showPoll && (
-              <View style={{
-                padding: SP['3'],
-                backgroundColor: C.bg3,
+            <PressableScale
+              onPress={() => setShowPoll((v) => !v)}
+              haptic="tap"
+              scaleValue={0.99}
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: SP['2'],
+                paddingHorizontal: SP['3'], paddingVertical: SP['3'],
                 borderRadius: R.md,
-                borderWidth: 1, borderColor: C.border,
-                gap: SP['2'],
-              }}>
+                backgroundColor: showPoll ? C.accent + '15' : C.bg2,
+                borderWidth: 1,
+                borderColor: showPoll ? C.accent : C.border,
+              }}
+            >
+              <Text style={{ fontSize: 16 }}>📊</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[T.smallB, { color: showPoll ? C.accentLight : C.text }]}>
+                  投票を追加
+                </Text>
+                <Text style={[T.caption, { color: C.text3 }]}>
+                  {showPoll ? '質問と選択肢を入力 (下) ・最大 6 個' : 'みんなに聞いてみたいことがあれば'}
+                </Text>
+              </View>
+              <Text style={[T.caption, { color: showPoll ? C.accent : C.text3, fontWeight: '700' }]}>
+                {showPoll ? '閉じる' : '＋ 追加'}
+              </Text>
+            </PressableScale>
+            {showPoll && (
+              <Animated.View
+                entering={FadeInDown.duration(180)}
+                layout={Layout.springify().damping(20)}
+                style={{
+                  padding: SP['3'],
+                  backgroundColor: C.bg3,
+                  borderRadius: R.md,
+                  borderWidth: 1, borderColor: C.border,
+                  gap: SP['2'],
+                }}>
                 <Input
                   placeholder="質問 (例: 鬼滅で一番強い柱は？)"
                   value={pollQuestion}
@@ -756,61 +794,17 @@ export default function CreatePost() {
                     </PressableScale>
                   ))}
                 </View>
-              </View>
+              </Animated.View>
             )}
           </View>
 
-          {/* 公開範囲 — 4-way audience selector */}
-          <View style={{ gap: SP['2'] }}>
-            <Text style={[T.smallM, { color: C.text2 }]}>公開範囲</Text>
-            <View style={{ gap: SP['2'] }}>
-              {VISIBILITY_OPTIONS.map((opt) => {
-                const active = visibility === opt.value;
-                return (
-                  <PressableScale
-                    key={opt.value}
-                    onPress={() => setVisibility(opt.value)}
-                    haptic="select"
-                    scaleValue={0.985}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: SP['3'],
-                      paddingHorizontal: SP['3'],
-                      paddingVertical: SP['3'],
-                      borderRadius: R.lg,
-                      backgroundColor: active ? C.accent + '15' : C.bg2,
-                      borderWidth: 1.5,
-                      borderColor: active ? C.accent : C.border,
-                    }}
-                  >
-                    <Text style={{ fontSize: 26, width: 32, textAlign: 'center' }}>{opt.emoji}</Text>
-                    <View style={{ flex: 1, gap: 2 }}>
-                      <Text style={[T.bodyB, { color: active ? C.accentLight : C.text }]} numberOfLines={1}>
-                        {opt.label}
-                      </Text>
-                      <Text style={[T.caption, { color: C.text3 }]} numberOfLines={2}>
-                        {opt.desc}
-                      </Text>
-                    </View>
-                    {active && (
-                      <View style={{
-                        width: 22, height: 22, borderRadius: 11,
-                        backgroundColor: C.accent,
-                        alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        <Icon.ok size={14} color="#fff" strokeWidth={2.8} />
-                      </View>
-                    )}
-                  </PressableScale>
-                );
-              })}
-            </View>
-          </View>
-
-          {/* コミュニティを選ぶ (multi-picker) — visibility が community 系のときだけ */}
+          {/* ===== コミュニティ (visibility が community 系のときだけ) ===== */}
           {showCommunityPicker && (
-            <View style={{ gap: SP['2'] }}>
+            <Animated.View
+              entering={FadeInDown.duration(200)}
+              layout={Layout.springify().damping(20)}
+              style={{ gap: SP['2'] }}
+            >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
                 <CommunityIcon size={14} color={C.text2} strokeWidth={2.2} />
                 <Text style={[T.smallM, { color: C.text2, flex: 1 }]}>
@@ -963,10 +957,186 @@ export default function CreatePost() {
                   })
                 )}
               </View>
-            </View>
+            </Animated.View>
           )}
 
-          {/* 匿名トグル */}
+          {/* ===== コンテンツ警告 (CW) — collapsible ===== */}
+          <View style={{ gap: SP['2'] }}>
+            <PressableScale
+              onPress={() => {
+                const next = !showCw;
+                setShowCw(next);
+                // 折りたたみ時は category をリセット (誤って残らないように)
+                if (!next) setCwCategory('none');
+              }}
+              haptic="tap"
+              scaleValue={0.99}
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: SP['2'],
+                paddingHorizontal: SP['3'], paddingVertical: SP['3'],
+                borderRadius: R.md,
+                backgroundColor: showCw ? C.amberBg : C.bg2,
+                borderWidth: 1,
+                borderColor: showCw ? C.amber : C.border,
+              }}
+            >
+              <Text style={{ fontSize: 16 }}>⚠️</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[T.smallB, { color: showCw ? C.amber : C.text }]}>
+                  コンテンツ警告 (CW)
+                </Text>
+                <Text style={[T.caption, { color: C.text3 }]}>
+                  {showCw
+                    ? cwCategory !== 'none'
+                      ? `現在: ${cwCategory === 'spoiler' ? 'ネタバレ' : cwCategory === 'nsfw' ? 'センシティブ' : cwCategory === 'violence' ? '暴力的' : '注意'}`
+                      : 'カテゴリを選択 (下)'
+                    : 'ネタバレ・センシティブ等を含む場合'}
+                </Text>
+              </View>
+              <Text style={[T.caption, { color: showCw ? C.amber : C.text3, fontWeight: '700' }]}>
+                {showCw ? '閉じる' : '＋ 追加'}
+              </Text>
+            </PressableScale>
+            {showCw && (
+              <Animated.View
+                entering={FadeInDown.duration(180)}
+                layout={Layout.springify().damping(20)}
+                style={{ gap: SP['2'] }}
+              >
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {([
+                    { v: 'spoiler', label: 'ネタバレ', emoji: '🤐' },
+                    { v: 'nsfw', label: 'センシティブ', emoji: '🔞' },
+                    { v: 'violence', label: '暴力的', emoji: '⚠️' },
+                    { v: 'sensitive', label: '注意', emoji: '🛡️' },
+                  ] as { v: Exclude<CWCat, 'none'>; label: string; emoji: string }[]).map((opt) => {
+                    const active = cwCategory === opt.v;
+                    return (
+                      <PressableScale
+                        key={opt.v}
+                        onPress={() => setCwCategory(active ? 'none' : opt.v)}
+                        haptic="select"
+                        style={{
+                          flexDirection: 'row', alignItems: 'center', gap: 4,
+                          paddingHorizontal: SP['3'], paddingVertical: SP['2'],
+                          borderRadius: R.full,
+                          backgroundColor: active ? C.amberBg : C.bg3,
+                          borderWidth: 1.5,
+                          borderColor: active ? C.amber : C.border,
+                        }}
+                      >
+                        <Text style={{ fontSize: 13 }}>{opt.emoji}</Text>
+                        <Text style={[T.smallM, { color: active ? C.amber : C.text2 }]}>{opt.label}</Text>
+                      </PressableScale>
+                    );
+                  })}
+                </View>
+                {cwCategory !== 'none' && (
+                  <Input
+                    placeholder="警告の詳細 (任意) 例: 鬼滅 無限城編のネタバレを含みます"
+                    value={cwText}
+                    onChangeText={setCwText}
+                    maxLength={120}
+                  />
+                )}
+              </Animated.View>
+            )}
+          </View>
+
+          {/* ===== 詳細を追加 (kind + sourceUrl) — 全部一度に見せない ===== */}
+          <View style={{ gap: SP['2'] }}>
+            <PressableScale
+              onPress={() => setShowAdvanced((v) => !v)}
+              haptic="tap"
+              scaleValue={0.99}
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: SP['2'],
+                paddingHorizontal: SP['3'], paddingVertical: SP['3'],
+                borderRadius: R.md,
+                backgroundColor: showAdvanced ? C.bg3 : C.bg2,
+                borderWidth: 1,
+                borderColor: C.border,
+              }}
+            >
+              <Text style={{ fontSize: 16 }}>{POST_KIND_META[kind].emoji}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[T.smallB, { color: C.text }]}>
+                  詳細を追加
+                </Text>
+                <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
+                  種別: {POST_KIND_META[kind].label}{sourceUrl ? ' · 出典あり' : ''}
+                </Text>
+              </View>
+              <Text style={[T.caption, { color: C.text3, fontWeight: '700' }]}>
+                {showAdvanced ? '閉じる' : '開く'}
+              </Text>
+            </PressableScale>
+            {showAdvanced && (
+              <Animated.View
+                entering={FadeInDown.duration(180)}
+                layout={Layout.springify().damping(20)}
+                style={{ gap: SP['3'] }}
+              >
+                {/* 投稿カテゴリ chips */}
+                <View style={{ gap: SP['2'] }}>
+                  <Text style={[T.caption, { color: C.text3 }]}>この投稿は…</Text>
+                  <View style={{ flexDirection: 'row', gap: SP['2'], flexWrap: 'wrap' }}>
+                    {(Object.keys(POST_KIND_META) as PostKind[]).map((k) => {
+                      const m = POST_KIND_META[k];
+                      const active = kind === k;
+                      return (
+                        <PressableScale
+                          key={k}
+                          onPress={() => setKind(k)}
+                          haptic="select"
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 4,
+                            paddingHorizontal: SP['3'],
+                            paddingVertical: SP['2'],
+                            borderRadius: R.full,
+                            backgroundColor: active ? m.bg : C.bg3,
+                            borderWidth: 1.5,
+                            borderColor: active ? m.fg : C.border,
+                          }}
+                        >
+                          <Text style={{ fontSize: 14 }}>{m.emoji}</Text>
+                          <Text style={[T.smallM, { color: active ? m.fg : C.text2 }]}>{m.label}</Text>
+                        </PressableScale>
+                      );
+                    })}
+                  </View>
+                  {kind === 'fact' && (
+                    <Text style={[T.caption, { color: C.amber }]}>
+                      ⚠ 「事実」を選んだ場合は出典URLが必須です
+                    </Text>
+                  )}
+                  {kind === 'wip' && (
+                    <Text style={[T.caption, { color: C.green }]}>
+                      💡 未完成の作品は拡散リミット推奨。安心して試せます
+                    </Text>
+                  )}
+                </View>
+                {/* 出典 URL */}
+                <View style={{ gap: SP['2'] }}>
+                  <Text style={[T.caption, { color: C.text3 }]}>
+                    出典URL {kind === 'fact' ? '（必須）' : '（任意・あると信頼度UP）'}
+                  </Text>
+                  <Input
+                    placeholder="https://..."
+                    value={sourceUrl}
+                    onChangeText={setSourceUrl}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="url"
+                  />
+                </View>
+              </Animated.View>
+            )}
+          </View>
+
+          {/* ===== 匿名トグル ===== */}
           <View
             style={{
               flexDirection: 'row',
@@ -979,14 +1149,40 @@ export default function CreatePost() {
               borderColor: C.border,
             }}
           >
+            <Text style={{ fontSize: 18 }}>{anonymous ? '🕶️' : '👤'}</Text>
             <View style={{ flex: 1 }}>
               <Text style={[T.bodyB, { color: C.text }]}>匿名で投稿</Text>
               <Text style={[T.small, { color: C.text3 }]}>
-                誰が投稿したか他のユーザーには分かりません
+                {anonymous
+                  ? '誰が投稿したか他のユーザーには分かりません'
+                  : 'プロフィールに紐付けて公開します'}
               </Text>
             </View>
             <Toggle value={anonymous} onChange={setAnonymous} />
           </View>
+
+          {/* ===== 投稿不可の理由 (inline) ===== */}
+          {submitBlockedReason && (content.length > 0 || images.length > 0 || tags.length > 0) && (
+            <Animated.View
+              entering={FadeIn.duration(180)}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: SP['2'],
+                paddingHorizontal: SP['3'],
+                paddingVertical: SP['2'],
+                backgroundColor: C.amberBg,
+                borderRadius: R.md,
+                borderWidth: 1,
+                borderColor: C.amber + '40',
+              }}
+            >
+              <Icon.warn size={14} color={C.amber} strokeWidth={2.4} />
+              <Text style={[T.caption, { color: C.amber, fontWeight: '600', flex: 1 }]}>
+                {submitBlockedReason}
+              </Text>
+            </Animated.View>
+          )}
         </ScrollView>
       </View>
     </KeyboardAware>

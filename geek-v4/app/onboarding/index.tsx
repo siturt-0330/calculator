@@ -107,11 +107,16 @@ export default function OnboardingIndex() {
           })}
         </View>
 
-        <Button
-          label="はじめる / Start"
-          onPress={() => router.push('/onboarding/language' as never)}
-          haptic="confirm"
-        />
+        <View style={{ gap: SP['2'] }}>
+          <Button
+            label="はじめる / Start"
+            onPress={() => router.push('/onboarding/language' as never)}
+            haptic="confirm"
+          />
+          <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
+            約 1 分のセットアップ・あとから変更できます
+          </Text>
+        </View>
       </ScrollView>
     </View>
   );

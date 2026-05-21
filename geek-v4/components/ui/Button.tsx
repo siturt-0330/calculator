@@ -3,7 +3,7 @@ import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { PressableScale } from './PressableScale';
-import { C, SP, R } from '../../design/tokens';
+import { C, SP, R, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
@@ -62,6 +62,11 @@ export function Button({
     <Text style={[textStyle, { color: textColor }]}>{label}</Text>
   );
 
+  // Primary CTA gets a soft accent halo so it reads as the "do this" affordance.
+  // Disabled / loading state drops the glow so we don't draw attention to a
+  // dead button.
+  const primaryGlow = variant === 'primary' && !isDisabled ? SHADOW.accentGlow : null;
+
   const containerStyle: ViewStyle = {
     height,
     paddingHorizontal: px,
@@ -77,6 +82,7 @@ export function Button({
     ...(variant === 'secondary' ? { backgroundColor: C.bg3 } : {}),
     ...(variant === 'ghost' ? { backgroundColor: 'transparent' } : {}),
     ...(variant === 'danger' ? { backgroundColor: C.bg3 } : {}),
+    ...(primaryGlow ?? {}),
     ...(style ?? {}),
   };
 

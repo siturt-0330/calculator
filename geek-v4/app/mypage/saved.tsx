@@ -95,8 +95,10 @@ export default function SavedPosts() {
         <View style={{ padding: SP['4'] }}>
           <EmptyState
             icon={Icon.save}
-            title="保存した投稿はありません"
-            message="気になる投稿の保存アイコンを押すとここに表示されます"
+            title="まだ保存した投稿はありません"
+            message="気になる投稿はブックマークしておけば後でじっくり読めます"
+            actionLabel="フィードを見る"
+            onAction={() => router.push('/(tabs)/feed' as never)}
             tone="amber"
           />
         </View>

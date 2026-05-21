@@ -172,6 +172,25 @@ export default function PlanScreen() {
         <Text style={[T.caption, { color: C.text3, textAlign: 'center', marginTop: SP['2'] }]}>
           いつでも切り替え可能・初回登録は無料
         </Text>
+
+        {/* 決済システムは準備中である旨を明示 — 「課金したつもりが何も起きない」
+            silent UX 不信感を防ぐ。リリース予定も載せて期待値を整える。 */}
+        <View style={{
+          marginTop: SP['2'],
+          padding: SP['3'],
+          backgroundColor: C.amberBg,
+          borderRadius: R.md,
+          borderWidth: 1,
+          borderColor: C.amber + '44',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: SP['2'],
+        }}>
+          <Text style={{ fontSize: 16 }}>🚧</Text>
+          <Text style={[T.caption, { color: C.amber, flex: 1, lineHeight: 16 }]}>
+            決済システムは準備中です。現在はプラン切替のみ動作します（請求は発生しません）。
+          </Text>
+        </View>
       </ScrollView>
 
       <ConfirmDialog

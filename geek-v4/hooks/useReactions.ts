@@ -27,6 +27,8 @@ export function useReactions(postIds: string[]) {
     // 全 post_reactions の UPDATE を受け取ると、画面に出てない投稿の反応まで毎回
     // 配信されて fanout がスケールしない。
     const serverIds = postIds.slice(0, 30);
+    // O(1) lookup — payload filter で取りこぼした行をクライアント側で確実に弾く。
+    const idSet = new Set(postIds);
     return attachChannel(`reactions:${sortedKey.slice(0, 64)}`, (ch) =>
       ch.on(
         'postgres_changes',
@@ -38,18 +40,12 @@ export function useReactions(postIds: string[]) {
         },
         (payload) => {
           const row = (payload.new ?? payload.old) as { post_id?: string } | null;
-          if (!row?.post_id) return;
-          // 影響を受ける post を含むクエリだけを refetch
-          // (KEY_PREFIX で全 reactions キーを invalidate すると、画面上の
-          //  関係ない post まで refetch されて UI がチカチカする)
-          qc.invalidateQueries({
-            predicate: (query) => {
-              const k = query.queryKey;
-              if (!Array.isArray(k) || k[0] !== KEY_PREFIX) return false;
-              const ids = typeof k[1] === 'string' ? k[1] : '';
-              return ids.split(',').includes(row.post_id!);
-            },
-          });
+          if (!row?.post_id || !idSet.has(row.post_id)) return;
+          // 現在のリストの query だけを refetch。
+          // predicate で全 reactions キーを総当たりすると 1000+ ユーザー時に
+          // 各クライアントが他人の subscriptions まで巻き込む可能性があった。
+          // 自分の view の sortedKey 一致だけにスコープする。
+          qc.invalidateQueries({ queryKey: [KEY_PREFIX, sortedKey] });
         },
       ),
     );

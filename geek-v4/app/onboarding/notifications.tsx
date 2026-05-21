@@ -9,6 +9,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useToastStore } from '../../stores/toastStore';
 import { supabase } from '../../lib/supabase';
+import { StepProgress } from './_progress';
 
 export default function NotificationsOnboarding() {
   const insets = useSafeAreaInsets();
@@ -87,11 +88,15 @@ export default function NotificationsOnboarding() {
       }}
     >
       <View style={{ flex: 1, gap: SP['4'] }}>
+        {/* 最後のステップ — 進捗 5/5 を表示して達成感を演出 */}
+        <View style={{ alignItems: 'flex-end' }}>
+          <StepProgress step={5} />
+        </View>
         <View style={{ gap: SP['2'] }}>
-          <Text style={[T.h1, { color: C.text }]}>通知を受け取ろう</Text>
+          <Text style={[T.h1, { color: C.text }]}>もうすぐ完了！通知を受け取ろう</Text>
           <Text style={[T.body, { color: C.text2 }]}>
             誰が「いいね」したかは通知しません。タグの動向だけお知らせします。
-            一度設定すれば次回から聞きません。
+            あとから設定で変更できます。
           </Text>
         </View>
 
