@@ -20,7 +20,8 @@ import { TopBar } from '../../components/nav/TopBar';
 import { useToastStore } from '../../stores/toastStore';
 import { hap } from '../../design/haptics';
 import { createPost, type PostVisibility } from '../../lib/api/posts';
-import { discoverCommunities, fetchCommunity, type Community } from '../../lib/api/communities';
+import { fetchCommunity, fetchMyCommunities, type Community } from '../../lib/api/communities';
+import { deepNormalize } from '../../lib/search/tokenize';
 import { useDebounce } from '../../hooks/useDebounce';
 import { checkContent } from '../../lib/ai/checkContent';
 import { C, R, SP } from '../../design/tokens';
@@ -80,15 +81,19 @@ export default function CreatePost() {
     }
   }, [showCommunityPicker]);
 
-  // コミュニティ検索 — picker が開いている時のみ走らせる
+  // コミュニティ選択 — 投稿先は「自分が参加しているコミュニティ」のみに限定
+  // (③ community_only / ④ community_public いずれもメンバー外には投稿できない方針)
+  // picker が開いた時に my communities を一括取得 → debounce 検索は client 側で
+  // deepNormalize 含めて filter (server roundtrip 1 回で済む + hiragana/katakana 揺れ吸収)
+  const [myCommunities, setMyCommunities] = useState<Community[]>([]);
   useEffect(() => {
     if (!showCommunityPicker) return;
     let cancelled = false;
     setCommunityLoading(true);
-    void discoverCommunities({ query: debouncedCommunityQuery.trim() || undefined, limit: 20 })
+    void fetchMyCommunities()
       .then((data) => {
         if (cancelled) return;
-        setCommunityResults(data);
+        setMyCommunities(data);
       })
       .finally(() => {
         if (!cancelled) setCommunityLoading(false);
@@ -96,7 +101,21 @@ export default function CreatePost() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedCommunityQuery, showCommunityPicker]);
+  }, [showCommunityPicker]);
+
+  // 検索クエリで filter (deepNormalize で揺れ吸収)
+  useEffect(() => {
+    const q = deepNormalize(debouncedCommunityQuery.trim());
+    if (!q) {
+      setCommunityResults(myCommunities);
+      return;
+    }
+    const filtered = myCommunities.filter((c) => {
+      const hay = deepNormalize(`${c.name} ${c.description ?? ''}`);
+      return hay.includes(q);
+    });
+    setCommunityResults(filtered);
+  }, [debouncedCommunityQuery, myCommunities]);
 
   // ?community_id=X 付きで遷移してきた場合は、対応するコミュニティを自動選択し
   // visibility を 'community_public' に切り替える (community 詳細の「投稿」タブ等から).
@@ -822,7 +841,7 @@ export default function CreatePost() {
 
               {/* 検索 input */}
               <Input
-                placeholder="コミュニティを検索"
+                placeholder="参加中のコミュニティを検索"
                 value={communityQuery}
                 onChangeText={setCommunityQuery}
                 icon={Icon.search}
@@ -843,12 +862,21 @@ export default function CreatePost() {
                     <Text style={[T.caption, { color: C.text3 }]}>検索中…</Text>
                   </View>
                 ) : communityResults.length === 0 ? (
-                  <View style={{ padding: SP['4'], alignItems: 'center', gap: 4 }}>
-                    <Text style={[T.caption, { color: C.text3 }]}>
-                      {communityQuery.trim()
-                        ? '一致するコミュニティが見つかりません'
-                        : 'コミュニティ名で検索してください'}
-                    </Text>
+                  <View style={{ padding: SP['4'], alignItems: 'center', gap: 6 }}>
+                    {myCommunities.length === 0 ? (
+                      <>
+                        <Text style={[T.body, { color: C.text2, textAlign: 'center' }]}>
+                          まだコミュニティに参加していません
+                        </Text>
+                        <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
+                          参加してから、そのコミュニティに投稿できます
+                        </Text>
+                      </>
+                    ) : (
+                      <Text style={[T.caption, { color: C.text3 }]}>
+                        「{communityQuery.trim()}」 と一致する参加中コミュニティがありません
+                      </Text>
+                    )}
                   </View>
                 ) : (
                   communityResults.map((c, idx) => {
