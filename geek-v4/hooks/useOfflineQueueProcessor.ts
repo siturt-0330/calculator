@@ -120,10 +120,9 @@ export function useOfflineQueueProcessor() {
       }
       if (processedCount > 0) {
         show(`📡 オフライン中のアクション ${processedCount} 件を同期しました`, 'success');
-        // 関連クエリを更新
-        qc.invalidateQueries({ queryKey: ['feed'] });
+        // パフォーマンス監査: feed / post-comments は realtime が自動更新するので明示
+        // invalidate は不要。自分の状態と bbs-replies だけ最新化する。
         qc.invalidateQueries({ queryKey: ['my-likes'] });
-        qc.invalidateQueries({ queryKey: ['post-comments'] });
         qc.invalidateQueries({ queryKey: ['bbs-replies'] });
       }
       processingRef.current = false;

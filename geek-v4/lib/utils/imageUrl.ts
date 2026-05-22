@@ -26,15 +26,33 @@ const SUPABASE_PUBLIC_RENDER = '/storage/v1/render/image/public/';
  * 既に render endpoint や width クエリが付いている、または Supabase 以外の URL は
  * そのまま返す (二重変換 / 壊れた URL 防止)。
  */
-export function thumbedUrl(url: string | null | undefined, width = 720): string {
+export function thumbedUrl(
+  url: string | null | undefined,
+  width = 720,
+  opts: { quality?: number; format?: 'webp' | 'avif' | 'origin' } = {},
+): string {
   if (!url) return '';
-  // Supabase Storage public URL のみ対象 (path が `/storage/v1/object/public/`)
   if (!url.includes(SUPABASE_PUBLIC_OBJECT)) return url;
-  // 既に render endpoint なら追記しない (width クエリだけ無ければ足す)
-  // ただし通常は `getPublicUrl` 由来なので /object/public/ で入ってくる
   const rendered = url.replace(SUPABASE_PUBLIC_OBJECT, SUPABASE_PUBLIC_RENDER);
-  // 既に width が付いていれば触らない
   if (/[?&]width=/.test(rendered)) return rendered;
+  const quality = opts.quality ?? 75;
+  const format = opts.format ?? 'webp';   // ★ デフォルトを WebP に (JPEG 比 25-30% 軽量)
   const sep = rendered.includes('?') ? '&' : '?';
-  return `${rendered}${sep}width=${width}&quality=75&resize=cover`;
+  return `${rendered}${sep}width=${width}&quality=${quality}&resize=cover&format=${format}`;
+}
+
+/**
+ * Web responsive image 用の srcset/sizes を生成。
+ * Instagram 並みの帯域最適化: 端末 DPR / viewport に応じて Supabase が適サイズを返す。
+ */
+export function thumbedSrcSet(
+  url: string | null | undefined,
+  widths: readonly number[] = [320, 480, 720, 1080],
+): { srcSet: string; sizes: string } | null {
+  if (!url) return null;
+  if (!url.includes(SUPABASE_PUBLIC_OBJECT)) return null;
+  const srcSet = widths.map((w) => `${thumbedUrl(url, w)} ${w}w`).join(', ');
+  // 「画面幅以下なら viewport 100%、それ以上は最大 720px」
+  const sizes = '(max-width: 720px) 100vw, 720px';
+  return { srcSet, sizes };
 }

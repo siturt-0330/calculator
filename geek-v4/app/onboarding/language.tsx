@@ -12,7 +12,11 @@ import { StepProgress } from './_progress';
 export default function LanguageOnboarding() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { lang, setLang, autoTranslate, setAutoTranslate } = useLanguageStore();
+  // selector化 — `hydrated` 変化で onboarding が無駄に再描画されるのを防ぐ
+  const lang = useLanguageStore((s) => s.lang);
+  const setLang = useLanguageStore((s) => s.setLang);
+  const autoTranslate = useLanguageStore((s) => s.autoTranslate);
+  const setAutoTranslate = useLanguageStore((s) => s.setAutoTranslate);
 
   const select = (l: Lang) => {
     setLang(l);

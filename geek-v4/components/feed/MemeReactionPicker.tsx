@@ -4,11 +4,14 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '../ui/PressableScale';
 import { Icon } from '../../constants/icons';
-import { MEMES } from '../../lib/memes';
+// memes 辞書 (~3KB) は dynamic import で起動 bundle から除外。
+// モーダルを開いたタイミング (visible=true) で初めて読み込む。
 import { useUserStamps, useCreateUserStamp } from '../../hooks/useUserStamps';
 import { useToastStore } from '../../stores/toastStore';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
+
+type MemeCategory = { category: string; items: string[] };
 
 export function MemeReactionPicker({
   visible,
@@ -42,6 +45,19 @@ export function MemeReactionPicker({
   useEffect(() => {
     if (visible) setRecentLocalPicks(new Set());
   }, [visible]);
+
+  // memes 辞書 (~3KB) は visible になったタイミングで遅延ロード — 初回 bundle
+  // から外し、モーダルが開かれない限りパースしないことで cold start を軽くする。
+  // Metro/Hermes 環境では require() ベースの遅延ロードが最も互換性が高い。
+  const [memes, setMemes] = useState<MemeCategory[]>([]);
+  useEffect(() => {
+    if (!visible || memes.length > 0) return;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mod = require('../../lib/memes') as { MEMES: MemeCategory[] };
+      setMemes(mod.MEMES);
+    } catch { /* noop */ }
+  }, [visible, memes.length]);
 
   // 公開ユーザースタンプを use_count 降順で取得 → "みんなの" カテゴリ
   const popularUserStamps = useMemo(
@@ -236,8 +252,8 @@ export function MemeReactionPicker({
                 onPick={handlePick}
               />
             )}
-            {/* 定型スタンプ */}
-            {MEMES.map((cat) => (
+            {/* 定型スタンプ — dynamic import 中は何も描画しない */}
+            {memes.map((cat) => (
               <CategoryRow
                 key={cat.category}
                 title={cat.category}

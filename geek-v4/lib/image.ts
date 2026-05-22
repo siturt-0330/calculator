@@ -17,6 +17,128 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 
+// ============================================================
+// Web 専用: Canvas API で直接 crop + resize + rotate
+// ============================================================
+// ImageManipulator を bypass して純粋な Canvas で処理することで、
+// HEIC / 巨大画像 / Safari Canvas memory error を確実に回避する。
+// 結果は data: URL (revoke されない) で返るので、後段で確実に扱える。
+//
+// アルゴリズム:
+//   1. <img> に sourceUri をロード
+//   2. 中間 canvas を rotation 後の自然サイズで生成し、画像を回転して描画
+//   3. 出力 canvas (512x512) に crop rect を drawImage で転送
+//   4. canvas.toDataURL('image/jpeg', 0.85) で data URL 化
+//
+// 引数の crop rect は **rotation 適用後の自然座標系** で渡す
+// (cropper の handleNext で計算されたもの)
+export async function cropImageOnWebCanvas(input: {
+  sourceUri: string;
+  imageSize: { w: number; h: number };
+  rotation: 0 | 90 | 180 | 270;
+  cropX: number;
+  cropY: number;
+  cropW: number;
+  cropH: number;
+  outSize?: number; // default 512
+  quality?: number; // default 0.85
+}): Promise<string> {
+  const { sourceUri, imageSize, rotation, cropX, cropY, cropW, cropH } = input;
+  const outSize = input.outSize ?? 512;
+  const quality = input.quality ?? 0.85;
+
+  // 1) 画像を <img> で読み込み
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    // blob:/data: 以外は CORS フラグを立てる (将来 https URL を渡す可能性に備えて)
+    if (!sourceUri.startsWith('blob:') && !sourceUri.startsWith('data:')) {
+      el.crossOrigin = 'anonymous';
+    }
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('Image load failed'));
+    el.src = sourceUri;
+  });
+
+  // 2) 回転後の自然サイズ
+  const swap = rotation === 90 || rotation === 270;
+  const rotatedNatW = swap ? imageSize.h : imageSize.w;
+  const rotatedNatH = swap ? imageSize.w : imageSize.h;
+
+  // 3) 中間 canvas (rotation 適用後の自然サイズ)
+  const interCanvas = document.createElement('canvas');
+  interCanvas.width = rotatedNatW;
+  interCanvas.height = rotatedNatH;
+  const ictx = interCanvas.getContext('2d');
+  if (!ictx) throw new Error('canvas 2d context unavailable');
+  ictx.save();
+  // 中心を原点に → 回転 → 元画像中心が原点に来るよう描画
+  ictx.translate(rotatedNatW / 2, rotatedNatH / 2);
+  if (rotation !== 0) ictx.rotate((rotation * Math.PI) / 180);
+  ictx.drawImage(img, -imageSize.w / 2, -imageSize.h / 2, imageSize.w, imageSize.h);
+  ictx.restore();
+
+  // 4) crop rect を出力 canvas に転送 (clamp で安全側に)
+  const safeX = Math.max(0, Math.min(cropX, rotatedNatW - 1));
+  const safeY = Math.max(0, Math.min(cropY, rotatedNatH - 1));
+  const safeW = Math.max(1, Math.min(cropW, rotatedNatW - safeX));
+  const safeH = Math.max(1, Math.min(cropH, rotatedNatH - safeY));
+
+  const outCanvas = document.createElement('canvas');
+  outCanvas.width = outSize;
+  outCanvas.height = outSize;
+  const octx = outCanvas.getContext('2d');
+  if (!octx) throw new Error('out canvas 2d context unavailable');
+  // 高品質補間
+  octx.imageSmoothingEnabled = true;
+  octx.imageSmoothingQuality = 'high';
+  octx.drawImage(interCanvas, safeX, safeY, safeW, safeH, 0, 0, outSize, outSize);
+
+  // 5) JPEG data URL を生成
+  return outCanvas.toDataURL('image/jpeg', quality);
+}
+
+// ============================================================
+// Web 専用: 高解像度画像を表示用にダウンサンプル
+// ============================================================
+// iPhone カメラの 4032x3024 等を Animated.Image にそのまま渡すと
+// gesture (pan/pinch) が極端に重くなる。事前に 1024x1024 程度の
+// preview data URL を生成して、それを画面表示に使う。
+// crop 計算は元画像 (imageSize) で行うので、preview のサイズは表示用のみ。
+export async function makeWebPreviewDataUrl(
+  sourceUri: string,
+  maxEdge = 1024,
+): Promise<string> {
+  // Canvas で同サイズに drawImage して JPEG 化
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    if (!sourceUri.startsWith('blob:') && !sourceUri.startsWith('data:')) {
+      el.crossOrigin = 'anonymous';
+    }
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('Image load failed (preview)'));
+    el.src = sourceUri;
+  });
+  const aspect = img.width / img.height;
+  let outW: number;
+  let outH: number;
+  if (aspect >= 1) {
+    outW = Math.min(maxEdge, img.width);
+    outH = Math.round(outW / aspect);
+  } else {
+    outH = Math.min(maxEdge, img.height);
+    outW = Math.round(outH * aspect);
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('preview canvas 2d context unavailable');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'medium'; // preview なので medium で十分
+  ctx.drawImage(img, 0, 0, outW, outH);
+  return canvas.toDataURL('image/jpeg', 0.8);
+}
+
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const ALLOWED_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif']);
 
@@ -126,7 +248,9 @@ export async function prepareImageUpload(
       // magic byte の二重確認 (data: URL の mime ヘッダ偽装防止)
       const detectedMagic = detectImageTypeFromBytes(bytes.subarray(0, 12));
       const finalMime = detectedMagic ?? mime;
-      const blob = new Blob([bytes], { type: finalMime });
+      // Uint8Array → BlobPart: TS 5.x lib.dom.d.ts では Uint8Array<ArrayBufferLike>
+      // が ArrayBufferView<ArrayBuffer> と互換でないため、明示的に narrowing する。
+      const blob = new Blob([bytes as BlobPart], { type: finalMime });
       return { blob, mime: finalMime, ext: safeExtension(finalMime), size: bytes.byteLength, uri };
     }
   }

@@ -13,10 +13,12 @@
       "resizeMode": "cover",
       "backgroundColor": "#0a0a0a"
     },
+    "jsEngine": "hermes",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "app.geek.v4",
       "buildNumber": "1",
+      "jsEngine": "hermes",
       "infoPlist": {
         "UIBackgroundModes": [
           "remote-notification"
@@ -37,6 +39,7 @@
       },
       "package": "app.geek.v4",
       "versionCode": 1,
+      "jsEngine": "hermes",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",

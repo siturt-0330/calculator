@@ -1,8 +1,16 @@
-import 'react-native-url-polyfill/auto';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import { ENV } from './env';
+
+// react-native-url-polyfill は iOS/Android の Hermes / JSC で必要
+// (URL/URLSearchParams が部分的にしか実装されていないため)。
+// Web には標準 URL があるので polyfill は不要 — Platform 分岐で
+// バンドルから外して Web bundle を軽量化する。
+if (Platform.OS !== 'web') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require('react-native-url-polyfill/auto');
+}
 
 // Web: localStorage を Promise ラップ。SSR/Node では in-memory にフォールバック。
 const memoryStore = new Map<string, string>();

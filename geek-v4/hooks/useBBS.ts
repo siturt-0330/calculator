@@ -10,7 +10,9 @@ export function useBBS() {
     queryKey: ['bbs-threads'],
     queryFn: fetchThreads,
     staleTime: 30_000,
-    refetchOnMount: 'always',  // タブを開き直すたびに最新を取得
+    // パフォーマンス監査: 'always' は staleTime を無視して毎マウント refetch するため
+    // タブ切替時に必ず網絡 RTT 発生。staleTime 30s に従う default 動作に変更。
+    // 新規スレッド検知は realtime subscription (下の attachChannel) でカバー済み。
   });
 
   const { mutateAsync: create } = useMutation({

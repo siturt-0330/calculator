@@ -1,5 +1,5 @@
-import { memo, useEffect, useState } from 'react';
-import { View, Text, Linking, Platform, ActivityIndicator, Image as RNImage } from 'react-native';
+import { memo, useEffect, useMemo, useState } from 'react';
+import { View, Text, Linking, Platform, ActivityIndicator, Image as RNImage, StyleSheet } from 'react-native';
 import { Icon } from '../../constants/icons';
 import type { Post } from '../../types/models';
 import { useLanguageStore } from '../../stores/languageStore';
@@ -30,13 +30,13 @@ import { postToObsidianNote } from '../../hooks/useObsidian';
 import type { PostCommunityRef } from '../../lib/api/posts';
 import { OfficialBadge } from '../community/OfficialBadge';
 
-// 画像アスペクト比のモジュールレベルキャッシュ — FlashList のリサイクルで
-// カードがアンマウント/マウントされるたびに getSize() で再フェッチ (= ネットワーク往復)
-// していたのが原因でスクロールが固まる症状が出ていた。
-// URL をキーに永続キャッシュすることで、一度測ったサムネは再測定しない。
-const _aspectCache = new Map<string, number>();
-// 同時 getSize 数を制限する小さなキュー (モバイルだと並列ネットワークが
-// 詰まると JS thread が長くブロックされるため)
+// 画像アスペクト比のモジュールレベルキャッシュ。
+// パフォーマンス監査: 旧版は無制限キャッシュで長時間スクロール後にメモリ蓄積。
+// TTL (1h) + size cap (500 件) で LRU 風に古い entry を削除する。
+type AspectEntry = { ratio: number; ts: number };
+const _aspectCache = new Map<string, AspectEntry>();
+const _ASPECT_TTL_MS = 60 * 60 * 1000; // 1h
+const _ASPECT_MAX_SIZE = 500;
 const _pending = new Set<string>();
 const _MAX_CONCURRENT = 3;
 const _queue: Array<() => void> = [];
@@ -46,9 +46,23 @@ function _drain() {
     if (task) task();
   }
 }
+function _trimAspectCache() {
+  if (_aspectCache.size < _ASPECT_MAX_SIZE) return;
+  // 古い順に半数を削除 (LRU 風)
+  const sorted = Array.from(_aspectCache.entries()).sort((a, b) => a[1].ts - b[1].ts);
+  const removeCount = Math.floor(_ASPECT_MAX_SIZE / 2);
+  for (let i = 0; i < removeCount; i++) {
+    const entry = sorted[i];
+    if (entry) _aspectCache.delete(entry[0]);
+  }
+}
 function measureAspect(url: string, measureUri: string, cb: (ratio: number) => void) {
   const cached = _aspectCache.get(url);
-  if (cached !== undefined) { cb(cached); return; }
+  const now = Date.now();
+  if (cached && now - cached.ts < _ASPECT_TTL_MS) {
+    cb(cached.ratio);
+    return;
+  }
   if (_pending.has(url)) { _queue.push(() => measureAspect(url, measureUri, cb)); return; }
   const start = () => {
     _pending.add(url);
@@ -57,13 +71,15 @@ function measureAspect(url: string, measureUri: string, cb: (ratio: number) => v
       (w, h) => {
         _pending.delete(url);
         const ratio = h > 0 && w > 0 ? Math.max(0.5, Math.min(2.0, w / h)) : 1;
-        _aspectCache.set(url, ratio);
+        _trimAspectCache();
+        _aspectCache.set(url, { ratio, ts: Date.now() });
         cb(ratio);
         _drain();
       },
       () => {
         _pending.delete(url);
-        _aspectCache.set(url, 1);
+        _trimAspectCache();
+        _aspectCache.set(url, { ratio: 1, ts: Date.now() });
         cb(1);
         _drain();
       },
@@ -80,6 +96,239 @@ function shortHost(url: string): string {
   } catch {
     return url;
   }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Module-level StyleSheet — 静的な inline style を一度だけ作って共有する。
+// メモ: React Native の StyleSheet.create は数値 ID へ凍結するので、
+//   子コンポーネントに渡したときに `===` で参照同値判定されやすくなり、
+//   各カードの re-render 時の reconciliation コストが大幅に下がる。
+// 動的な (props/state に依存する) style は useMemo か per-item ファクトリで処理する。
+// ────────────────────────────────────────────────────────────────────
+const STYLES = StyleSheet.create({
+  // 低信頼バナー
+  lowTrustBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SP['2'],
+    paddingHorizontal: SP['3'],
+    paddingVertical: SP['2'],
+    backgroundColor: C.amberBg,
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderColor: C.amber + '44',
+    marginBottom: SP['2'],
+  },
+  lowTrustText: { color: C.amber, flex: 1 },
+
+  // ヘッダー
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SP['2'],
+  },
+  officialAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: C.accentBg,
+    borderWidth: 1.5,
+    borderColor: C.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  officialMeta: { flex: 1, minWidth: 0 },
+  officialNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  officialName: { color: C.text, fontWeight: '700' },
+  officialSub: { color: C.text3 },
+  anonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+    flexWrap: 'wrap',
+  },
+  anonLabel: { color: C.text },
+  anonRelative: { color: C.text3 },
+  morePress: { padding: 2 },
+
+  // コミュニティピル
+  communityWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: SP['2'],
+  },
+  communityChipBase: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    height: 22,
+    borderRadius: R.full,
+    backgroundColor: C.bg3,
+    borderWidth: 1,
+  },
+  communityChipText: { fontSize: 11, color: C.text2, fontWeight: '600' },
+
+  // CW
+  cwBox: {
+    marginTop: SP['2'],
+    paddingHorizontal: SP['4'],
+    paddingVertical: SP['4'],
+    backgroundColor: C.bg3,
+    borderRadius: R.lg,
+    borderWidth: 1,
+    borderColor: C.amber,
+    alignItems: 'center',
+    gap: SP['1'],
+  },
+  cwEmoji: { fontSize: 32 },
+  cwLabel: { color: C.amber, fontWeight: '700' },
+  cwWarning: { color: C.text2, textAlign: 'center' },
+  cwTap: { color: C.accent, marginTop: 4 },
+
+  // メディア
+  mediaWrap: { gap: SP['2'], marginTop: SP['2'] },
+  mediaItemBase: {
+    width: '100%',
+    backgroundColor: C.bg2,
+    borderRadius: R.md,
+    overflow: 'hidden',
+  },
+
+  // 本文
+  bodyInner: { paddingTop: SP['2'], paddingBottom: SP['1'] },
+  bodyText: { color: C.text, lineHeight: 22 },
+  translatedBadge: {
+    marginTop: SP['1'],
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    backgroundColor: 'rgba(124,177,255,0.13)',
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: 'rgba(124,177,255,0.4)',
+  },
+  translatedBadgeText: { fontSize: 9, color: '#7CB1FF', fontWeight: '700' },
+
+  // 翻訳ボタン
+  translateRow: { flexDirection: 'row', gap: SP['2'], paddingBottom: SP['1'] },
+  translateBtn: {
+    paddingHorizontal: SP['2'],
+    paddingVertical: 4,
+    backgroundColor: 'rgba(124,177,255,0.13)',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(124,177,255,0.4)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  translateBtnEmoji: { fontSize: 10 },
+  translateBtnLabel: { fontSize: 10, color: '#7CB1FF', fontWeight: '700' },
+
+  // 出典
+  sourceBtn: {
+    marginTop: SP['2'],
+    paddingHorizontal: SP['3'],
+    paddingVertical: SP['2'],
+    backgroundColor: C.bg3,
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderColor: C.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SP['2'],
+  },
+  sourceEmoji: { fontSize: 14 },
+  sourceText: { color: C.text2, flex: 1 },
+
+  // タグ群
+  tagsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingTop: SP['2'],
+    gap: SP['2'],
+    alignItems: 'center',
+  },
+
+  // アクション行
+  actionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: SP['2'],
+    paddingBottom: 0,
+    gap: SP['4'],
+  },
+  actionPress: { flexDirection: 'row', alignItems: 'center', gap: SP['1'] },
+  commentCount: { color: C.text2 },
+  reactionEmoji: { fontSize: 18 },
+  spacer: { flex: 1 },
+  iconBtn: { padding: 2 },
+
+  // リアクション表示行
+  reactionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    paddingTop: SP['2'],
+  },
+  reactionPillBase: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: SP['2'],
+    paddingVertical: 4,
+    borderRadius: R.full,
+    borderWidth: 1,
+  },
+  reactionOverflowPill: {
+    paddingHorizontal: SP['2'],
+    paddingVertical: 4,
+    backgroundColor: C.bg3,
+    borderRadius: R.full,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  reactionOverflowText: { fontSize: 11, color: C.text3, fontWeight: '700' },
+});
+
+// ────────────────────────────────────────────────────────────────────
+// Per-item / 動的 style ファクトリ — map 内で呼ばれるので useMemo は使わず、
+// あらかじめ static base に差分だけ重ねた小オブジェクトを返す。
+// この差分オブジェクト自体は毎 render 新規になるが、
+//   - スタイル合成は配列 [base, diff] で行うので diff のキーだけが reconcile される
+//   - base 側 (StyleSheet ID) は安定なので reconciliation コストは差分分のみ
+// ────────────────────────────────────────────────────────────────────
+
+function communityChipBorder(isOfficial: boolean): { borderColor: string } {
+  return { borderColor: isOfficial ? C.accent + '66' : C.border };
+}
+
+function mediaItemAspect(aspect: number): { aspectRatio: number } {
+  return { aspectRatio: aspect };
+}
+
+function reactionPillColors(mine: boolean): { backgroundColor: string; borderColor: string } {
+  return {
+    backgroundColor: mine ? C.accentBg : C.bg3,
+    borderColor: mine ? C.accent : C.border,
+  };
+}
+
+function reactionPillLabel(mine: boolean): { fontSize: number; color: string; fontWeight: '700' } {
+  return { fontSize: 11, color: mine ? C.accentLight : C.text2, fontWeight: '700' };
+}
+
+function reactionPillCount(mine: boolean): { fontSize: number; color: string; fontWeight: '700' } {
+  return { fontSize: 10, color: mine ? C.accentLight : C.text3, fontWeight: '700' };
 }
 
 type AnonPostCardProps = {
@@ -193,7 +442,7 @@ function AnonPostCardInner({
     for (const u of mediaUrls) {
       if (!u) continue;
       const r = _aspectCache.get(u);
-      if (r !== undefined) seed[u] = r;
+      if (r !== undefined) seed[u] = r.ratio;
     }
     return seed;
   });
@@ -205,7 +454,7 @@ function AnonPostCardInner({
       // キャッシュヒット時は getSize を呼ばない
       if (_aspectCache.has(url)) {
         const r = _aspectCache.get(url)!;
-        setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: r }));
+        setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: r.ratio }));
         continue;
       }
       const measureUri = thumbedUrl(url, 720);
@@ -238,11 +487,10 @@ function AnonPostCardInner({
     }
   };
 
-  // Twitter/Threads-style full-width row: no outer rounded card, just a
-  // hairline divider between posts. Looks more "premium feed" than a
-  // floating-card grid on tall screens.
-  return (
-    <View style={{
+  // ── 動的 style: props/state に依存するもののみ useMemo 化 ──
+  // ルート Container — lowTrust によって border の色が変わるのみ
+  const containerStyle = useMemo(
+    () => ({
       backgroundColor: C.bg,
       borderBottomWidth: 1,
       borderBottomColor: lowTrust ? C.amber + '44' : C.divider,
@@ -250,21 +498,41 @@ function AnonPostCardInner({
       paddingTop: SP['3'],
       paddingBottom: SP['3'],
       maxWidth: 720,
-      alignSelf: 'center',
-      width: '100%',
-    }}>
+      alignSelf: 'center' as const,
+      width: '100%' as const,
+    }),
+    [lowTrust],
+  );
+
+  // 本文 Text/Markdown 用 — T.body と body color を結合
+  const bodyTextStyle = useMemo(() => [T.body, STYLES.bodyText], []);
+
+  // Like ラベル/カウント色
+  const likeCountTextStyle = useMemo(() => ({ color: liked ? C.pink : C.text2 }), [liked]);
+
+  // Concern ラベル/カウント色
+  const concernCountTextStyle = useMemo(
+    () => ({ color: concerned ? C.amber : C.text3 }),
+    [concerned],
+  );
+
+  // Reaction カウント色 — 自分のリアクション有無で変わる
+  const hasMyReaction = myReactionsForPost.length > 0;
+  const reactionCountTextStyle = useMemo(
+    () => ({ color: hasMyReaction ? C.accent : C.text3 }),
+    [hasMyReaction],
+  );
+
+  // Twitter/Threads-style full-width row: no outer rounded card, just a
+  // hairline divider between posts. Looks more "premium feed" than a
+  // floating-card grid on tall screens.
+  return (
+    <View style={containerStyle}>
       {/* 低信頼バナー */}
       {lowTrust && (
-        <View style={{
-          flexDirection: 'row', alignItems: 'center', gap: SP['2'],
-          paddingHorizontal: SP['3'], paddingVertical: SP['2'],
-          backgroundColor: C.amberBg,
-          borderRadius: R.md,
-          borderWidth: 1, borderColor: C.amber + '44',
-          marginBottom: SP['2'],
-        }}>
+        <View style={STYLES.lowTrustBanner}>
           <Warn size={14} color={C.amber} strokeWidth={2.2} />
-          <Text style={[T.caption, { color: C.amber, flex: 1 }]}>
+          <Text style={[T.caption, STYLES.lowTrustText]}>
             この投稿に「気になる」が多く付いています ({concernCount})
           </Text>
         </View>
@@ -272,24 +540,11 @@ function AnonPostCardInner({
 
       {/* ヘッダー: アバター / 匿 · 時刻 / ⋯
           公式コミュ管理者の投稿は de-anonymize して 実名 · 所属 を表示 */}
-      <View style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: SP['2'],
-      }}>
+      <View style={STYLES.headerRow}>
         {post.official_author ? (
           // 公式管理者: ✓ shield アクセント色のアバター
           <View
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 18,
-              backgroundColor: C.accentBg,
-              borderWidth: 1.5,
-              borderColor: C.accent,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
+            style={STYLES.officialAvatar}
             accessibilityLabel="公式管理者"
           >
             <Icon.shield size={18} color={C.accent} strokeWidth={2.4} />
@@ -298,28 +553,28 @@ function AnonPostCardInner({
           <Avatar size={36} anonymous />
         )}
         {post.official_author ? (
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
+          <View style={STYLES.officialMeta}>
+            <View style={STYLES.officialNameRow}>
+              <Text style={[T.smallM, STYLES.officialName]} numberOfLines={1}>
                 {post.official_author.name || '公式管理者'}
               </Text>
               <PostKindBadge kind={post.kind ?? 'opinion'} size="sm" />
             </View>
-            <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
+            <Text style={[T.caption, STYLES.officialSub]} numberOfLines={1}>
               {post.official_author.organization
                 ? `${post.official_author.organization} · ${formatRelative(post.created_at)}`
                 : formatRelative(post.created_at)}
             </Text>
           </View>
         ) : (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, flexWrap: 'wrap' }}>
-            <Text style={[T.smallM, { color: C.text }]}>匿</Text>
+          <View style={STYLES.anonRow}>
+            <Text style={[T.smallM, STYLES.anonLabel]}>匿</Text>
             <TrustBadge score={post.trust_score_at_post} />
-            <Text style={[T.small, { color: C.text3 }]}>· {formatRelative(post.created_at)}</Text>
+            <Text style={[T.small, STYLES.anonRelative]}>· {formatRelative(post.created_at)}</Text>
             <PostKindBadge kind={post.kind ?? 'opinion'} size="sm" />
           </View>
         )}
-        <PressableScale onPress={onMore} hitSlop={8} style={{ padding: 2 }}>
+        <PressableScale onPress={onMore} hitSlop={8} style={STYLES.morePress}>
           <More size={20} color={C.text3} strokeWidth={2.2} />
         </PressableScale>
       </View>
@@ -327,31 +582,15 @@ function AnonPostCardInner({
       {/* コミュニティピル — レコメンド理由 chip は UI 雑味の元なので非表示
           (ランキングロジックは裏で動き続ける、表示するのが分かりづらいだけ) */}
       {communities.length > 0 && (
-        <View style={{
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: 6,
-          marginTop: SP['2'],
-        }}>
+        <View style={STYLES.communityWrap}>
           {communities.map((c) => (
             <PressableScale
               key={c.community_id}
               onPress={() => onCommunityPress?.(c.community_id)}
               haptic="tap"
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 4,
-                paddingHorizontal: 8,
-                paddingVertical: 3,
-                height: 22,
-                borderRadius: R.full,
-                backgroundColor: C.bg3,
-                borderWidth: 1,
-                borderColor: c.is_official ? C.accent + '66' : C.border,
-              }}
+              style={[STYLES.communityChipBase, communityChipBorder(!!c.is_official)]}
             >
-              <Text style={{ fontSize: 11, color: C.text2, fontWeight: '600' }}>
+              <Text style={STYLES.communityChipText}>
                 {`\u{1F3E0} ${c.icon_emoji} ${c.name}`}
               </Text>
               {c.is_official && <OfficialBadge size="sm" iconOnly />}
@@ -365,30 +604,20 @@ function AnonPostCardInner({
         <PressableScale
           onPress={() => setCwRevealed(true)}
           haptic="tap"
-          style={{
-            marginTop: SP['2'],
-            paddingHorizontal: SP['4'],
-            paddingVertical: SP['4'],
-            backgroundColor: C.bg3,
-            borderRadius: R.lg,
-            borderWidth: 1,
-            borderColor: C.amber,
-            alignItems: 'center',
-            gap: SP['1'],
-          }}
+          style={STYLES.cwBox}
         >
-          <Text style={{ fontSize: 32 }}>
+          <Text style={STYLES.cwEmoji}>
             {cwCategory === 'spoiler' ? '🤐' : cwCategory === 'nsfw' ? '🔞' : cwCategory === 'violence' ? '⚠️' : '🛡️'}
           </Text>
-          <Text style={[T.smallM, { color: C.amber, fontWeight: '700' }]}>
+          <Text style={[T.smallM, STYLES.cwLabel]}>
             {cwCategory === 'spoiler' ? 'ネタバレ' : cwCategory === 'nsfw' ? 'センシティブな内容' : cwCategory === 'violence' ? '暴力的描写' : '注意'}
           </Text>
           {post.content_warning && (
-            <Text style={[T.caption, { color: C.text2, textAlign: 'center' }]}>
+            <Text style={[T.caption, STYLES.cwWarning]}>
               {post.content_warning}
             </Text>
           )}
-          <Text style={[T.caption, { color: C.accent, marginTop: 4 }]}>タップして表示</Text>
+          <Text style={[T.caption, STYLES.cwTap]}>タップして表示</Text>
         </PressableScale>
       )}
 
@@ -398,7 +627,7 @@ function AnonPostCardInner({
           外側カードの paddingHorizontal に揃え、premium feel の rounded corners */}
       {hasMedia && !isCwHidden && (
         <DoubleTapHeart onDoubleTap={onLike}>
-          <View style={{ gap: SP['2'], marginTop: SP['2'] }}>
+          <View style={STYLES.mediaWrap}>
             {mediaUrls.map((url, i) => {
               // ロード中は 4:3 (1.333) で仮置き → 解決後に真のアスペクト比へ差し替え
               // (1:1 だとレイアウトが大きく跳ねるので 4:3 が無難)
@@ -407,13 +636,7 @@ function AnonPostCardInner({
               return (
                 <View
                   key={url}
-                  style={{
-                    width: '100%',
-                    aspectRatio: aspect,
-                    backgroundColor: C.bg2,
-                    borderRadius: R.md,
-                    overflow: 'hidden',
-                  }}
+                  style={[STYLES.mediaItemBase, mediaItemAspect(aspect)]}
                 >
                   <ProgressiveImage
                     uri={url}
@@ -438,28 +661,21 @@ function AnonPostCardInner({
             onLongPress={useQuickReaction ? () => setMemePickerOpen(true) : undefined}
             haptic="tap"
           >
-            <View style={{ paddingTop: SP['2'], paddingBottom: SP['1'] }}>
+            <View style={STYLES.bodyInner}>
               {useMarkdown ? (
                 <MarkdownText
                   text={displayContent}
-                  style={[T.body, { color: C.text, lineHeight: 22 }]}
+                  style={bodyTextStyle}
                   numberOfLines={hasMedia ? 3 : 8}
                 />
               ) : (
-                <Text style={[T.body, { color: C.text, lineHeight: 22 }]} numberOfLines={hasMedia ? 3 : 8}>
+                <Text style={bodyTextStyle} numberOfLines={hasMedia ? 3 : 8}>
                   {displayContent}
                 </Text>
               )}
               {isShowingTranslation && (
-                <View style={{
-                  marginTop: SP['1'],
-                  paddingHorizontal: 6, paddingVertical: 2,
-                  backgroundColor: 'rgba(124,177,255,0.13)',
-                  borderRadius: 4,
-                  alignSelf: 'flex-start',
-                  borderWidth: 1, borderColor: 'rgba(124,177,255,0.4)',
-                }}>
-                  <Text style={{ fontSize: 9, color: '#7CB1FF', fontWeight: '700' }}>
+                <View style={STYLES.translatedBadge}>
+                  <Text style={STYLES.translatedBadgeText}>
                     🌏 AI translated · tap to see original
                   </Text>
                 </View>
@@ -468,21 +684,15 @@ function AnonPostCardInner({
           </PressableScale>
           {/* 翻訳ボタン (lang ≠ ja) */}
           {canTranslate && (
-            <View style={{ flexDirection: 'row', gap: SP['2'], paddingBottom: SP['1'] }}>
+            <View style={STYLES.translateRow}>
               {translated ? (
                 <PressableScale
                   onPress={() => setShowOriginal((v) => !v)}
                   haptic="tap"
-                  style={{
-                    paddingHorizontal: SP['2'], paddingVertical: 4,
-                    backgroundColor: 'rgba(124,177,255,0.13)',
-                    borderRadius: 999,
-                    borderWidth: 1, borderColor: 'rgba(124,177,255,0.4)',
-                    flexDirection: 'row', alignItems: 'center', gap: 3,
-                  }}
+                  style={STYLES.translateBtn}
                 >
-                  <Text style={{ fontSize: 10 }}>🌏</Text>
-                  <Text style={{ fontSize: 10, color: '#7CB1FF', fontWeight: '700' }}>
+                  <Text style={STYLES.translateBtnEmoji}>🌏</Text>
+                  <Text style={STYLES.translateBtnLabel}>
                     {showOriginal ? 'Show translation' : 'Show original'}
                   </Text>
                 </PressableScale>
@@ -491,20 +701,14 @@ function AnonPostCardInner({
                   onPress={doTranslate}
                   haptic="tap"
                   disabled={translating}
-                  style={{
-                    paddingHorizontal: SP['2'], paddingVertical: 4,
-                    backgroundColor: 'rgba(124,177,255,0.13)',
-                    borderRadius: 999,
-                    borderWidth: 1, borderColor: 'rgba(124,177,255,0.4)',
-                    flexDirection: 'row', alignItems: 'center', gap: 3,
-                  }}
+                  style={STYLES.translateBtn}
                 >
                   {translating ? (
                     <ActivityIndicator size="small" color="#7CB1FF" />
                   ) : (
-                    <Text style={{ fontSize: 10 }}>🌏</Text>
+                    <Text style={STYLES.translateBtnEmoji}>🌏</Text>
                   )}
-                  <Text style={{ fontSize: 10, color: '#7CB1FF', fontWeight: '700' }}>
+                  <Text style={STYLES.translateBtnLabel}>
                     {translating ? 'Translating...' : `Translate to ${lang.toUpperCase()}`}
                   </Text>
                 </PressableScale>
@@ -519,15 +723,9 @@ function AnonPostCardInner({
         useOgPreview ? (
           <LinkPreviewCard url={post.source_url} />
         ) : (
-          <PressableScale onPress={openSource} haptic="tap" style={{
-            marginTop: SP['2'],
-            paddingHorizontal: SP['3'], paddingVertical: SP['2'],
-            backgroundColor: C.bg3, borderRadius: R.md,
-            borderWidth: 1, borderColor: C.border,
-            flexDirection: 'row', alignItems: 'center', gap: SP['2'],
-          }}>
-            <Text style={{ fontSize: 14 }}>🔗</Text>
-            <Text style={[T.caption, { color: C.text2, flex: 1 }]} numberOfLines={1}>
+          <PressableScale onPress={openSource} haptic="tap" style={STYLES.sourceBtn}>
+            <Text style={STYLES.sourceEmoji}>🔗</Text>
+            <Text style={[T.caption, STYLES.sourceText]} numberOfLines={1}>
               出典: {shortHost(post.source_url)}
             </Text>
           </PressableScale>
@@ -538,13 +736,7 @@ function AnonPostCardInner({
       {poll && !isCwHidden && <PollCard poll={poll} />}
 
       {/* タグ群（2つ目以降 + 他人が追加したタグ + 追加ボタン） */}
-      <View style={{
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        paddingTop: SP['2'],
-        gap: SP['2'],
-        alignItems: 'center',
-      }}>
+      <View style={STYLES.tagsRow}>
         {tagNames.slice(1).map((tag) => (
           <TagPill key={tag} name={tag} state="normal" onPress={() => onTagPress(tag)} />
         ))}
@@ -558,23 +750,17 @@ function AnonPostCardInner({
 
       {/* アクション行 — hitSlop で 44pt 以上の tap target を確保 (icon 自体は 20-22 だが
           押下範囲を上下左右 +10 まで広げて誤タップ/反応しない問題を解消) */}
-      <View style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingTop: SP['2'],
-        paddingBottom: 0,
-        gap: SP['4'],
-      }}>
+      <View style={STYLES.actionsRow}>
         <PressableScale
           onPress={onLike}
           haptic="pop"
           hitSlop={10}
           accessibilityLabel={liked ? 'いいね済み' : 'いいね'}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}
+          style={STYLES.actionPress}
         >
           <Heart size={22} color={liked ? C.pink : C.text2} fill={liked ? C.pink : 'transparent'} strokeWidth={2.2} />
           {likesCount > 0 && (
-            <Text style={[T.smallM, { color: liked ? C.pink : C.text2 }]}>{likesCount}</Text>
+            <Text style={[T.smallM, likeCountTextStyle]}>{likesCount}</Text>
           )}
         </PressableScale>
         <PressableScale
@@ -582,11 +768,11 @@ function AnonPostCardInner({
           haptic="tap"
           hitSlop={10}
           accessibilityLabel="コメントを開く"
-          style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}
+          style={STYLES.actionPress}
         >
           <Comment size={22} color={C.text2} strokeWidth={2.2} />
           {commentsCount > 0 && (
-            <Text style={[T.smallM, { color: C.text2 }]}>{commentsCount}</Text>
+            <Text style={[T.smallM, STYLES.commentCount]}>{commentsCount}</Text>
           )}
         </PressableScale>
         <PressableScale
@@ -594,11 +780,11 @@ function AnonPostCardInner({
           haptic="warn"
           hitSlop={10}
           accessibilityLabel={concerned ? '気になる済み' : '気になる'}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}
+          style={STYLES.actionPress}
         >
           <Warn size={20} color={concerned ? C.amber : C.text3} fill={concerned ? C.amber + '44' : 'transparent'} strokeWidth={2.2} />
           {concernCount > 0 && (
-            <Text style={[T.smallM, { color: concerned ? C.amber : C.text3 }]}>{concernCount}</Text>
+            <Text style={[T.smallM, concernCountTextStyle]}>{concernCount}</Text>
           )}
         </PressableScale>
         <PressableScale
@@ -606,23 +792,23 @@ function AnonPostCardInner({
           haptic="tap"
           hitSlop={10}
           accessibilityLabel="リアクションを選ぶ"
-          style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}
+          style={STYLES.actionPress}
         >
-          <Text style={{ fontSize: 18 }}>🪶</Text>
+          <Text style={STYLES.reactionEmoji}>🪶</Text>
           {reactionsList.length > 0 && (
-            <Text style={[T.smallM, { color: myReactionsForPost.length > 0 ? C.accent : C.text3 }]}>
+            <Text style={[T.smallM, reactionCountTextStyle]}>
               {reactionsList.reduce((a, r) => a + r.count, 0)}
             </Text>
           )}
         </PressableScale>
-        <View style={{ flex: 1 }} />
+        <View style={STYLES.spacer} />
         <ObsidianSaveButton note={postToObsidianNote(post)} />
         <PressableScale
           onPress={onShare}
           haptic="tap"
           hitSlop={10}
           accessibilityLabel="共有"
-          style={{ padding: 2 }}
+          style={STYLES.iconBtn}
         >
           <Share size={20} color={C.text2} strokeWidth={2.2} />
         </PressableScale>
@@ -631,7 +817,7 @@ function AnonPostCardInner({
           haptic="tap"
           hitSlop={10}
           accessibilityLabel={saved ? '保存済み' : '保存'}
-          style={{ padding: 2 }}
+          style={STYLES.iconBtn}
         >
           <Save size={20} color={saved ? C.amber : C.text2} fill={saved ? C.amber : 'transparent'} strokeWidth={2.2} />
         </PressableScale>
@@ -639,27 +825,18 @@ function AnonPostCardInner({
 
       {/* リアクション表示行 */}
       {reactionsList.length > 0 && (
-        <View style={{
-          flexDirection: 'row', flexWrap: 'wrap', gap: 4,
-          paddingTop: SP['2'],
-        }}>
+        <View style={STYLES.reactionsRow}>
           {reactionsList.slice(0, 8).map((r) => (
             <PressableScale
               key={r.meme}
               onPress={() => onReact(r.meme)}
               haptic="tap"
-              style={{
-                flexDirection: 'row', alignItems: 'center', gap: 4,
-                paddingHorizontal: SP['2'], paddingVertical: 4,
-                backgroundColor: r.mine ? C.accentBg : C.bg3,
-                borderRadius: R.full,
-                borderWidth: 1, borderColor: r.mine ? C.accent : C.border,
-              }}
+              style={[STYLES.reactionPillBase, reactionPillColors(r.mine)]}
             >
-              <Text style={{ fontSize: 11, color: r.mine ? C.accentLight : C.text2, fontWeight: '700' }}>
+              <Text style={reactionPillLabel(r.mine)}>
                 {r.meme}
               </Text>
-              <Text style={{ fontSize: 10, color: r.mine ? C.accentLight : C.text3, fontWeight: '700' }}>
+              <Text style={reactionPillCount(r.mine)}>
                 {r.count}
               </Text>
             </PressableScale>
@@ -668,14 +845,9 @@ function AnonPostCardInner({
             <PressableScale
               onPress={() => setMemePickerOpen(true)}
               haptic="tap"
-              style={{
-                paddingHorizontal: SP['2'], paddingVertical: 4,
-                backgroundColor: C.bg3,
-                borderRadius: R.full,
-                borderWidth: 1, borderColor: C.border,
-              }}
+              style={STYLES.reactionOverflowPill}
             >
-              <Text style={{ fontSize: 11, color: C.text3, fontWeight: '700' }}>
+              <Text style={STYLES.reactionOverflowText}>
                 +{reactionsList.length - 8}
               </Text>
             </PressableScale>

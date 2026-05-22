@@ -62,6 +62,9 @@
     # クロスオリジン埋め込み禁止 (clickjacking 防御)
     Cross-Origin-Opener-Policy   = "same-origin"
     Cross-Origin-Resource-Policy = "same-site"
+    # パフォーマンス: 主要 origin への preconnect で TCP+TLS handshake 1 RTT 削減
+    # Supabase REST + Storage CDN + Realtime (wss) の同一ドメインを preconnect
+    Link = "<https://migpiwdlpwpvehzvdjyh.supabase.co>; rel=preconnect; crossorigin, <https://migpiwdlpwpvehzvdjyh.supabase.co>; rel=dns-prefetch, <https://fonts.gstatic.com>; rel=preconnect; crossorigin"
 
 # Long-cache hashed Expo assets (file names contain content hashes)
 [[headers]]
