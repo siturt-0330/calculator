@@ -288,8 +288,32 @@ export default function ImageCropperScreen() {
           );
           croppedUri = toFinalUri(fb);
         } catch (fbErr) {
-          console.warn('[image-cropper] fallback also failed, using source as-is:', fbErr);
-          croppedUri = sourceUri;
+          console.warn('[image-cropper] manipulator fallback also failed:', fbErr);
+          // ★★ 最終 fallback (iPhone Safari 「Load failed」対策):
+          //   manipulator が完全に失敗した = Canvas で画像が描けない (HEIC, 巨大画像, etc)
+          //   → FileReader で raw blob を data URL に変換して返す。
+          //     cropper は無効化されるが、少なくとも元画像をアップロードできる状態に。
+          //   blob: URL が router.back() 後に revoke される問題も、
+          //   ここで data URL 化することで回避できる。
+          if (Platform.OS === 'web') {
+            try {
+              const res = await fetch(sourceUri);
+              const blob = await res.blob();
+              const dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result as string);
+                reader.onerror = () => reject(new Error('FileReader.onerror'));
+                reader.readAsDataURL(blob);
+              });
+              croppedUri = dataUrl;
+              console.log('[image-cropper] FileReader fallback ok, dataUrl size:', dataUrl.length);
+            } catch (frErr) {
+              console.warn('[image-cropper] FileReader fallback failed:', frErr);
+              croppedUri = sourceUri; // 最終手段
+            }
+          } else {
+            croppedUri = sourceUri;
+          }
         }
       }
 
