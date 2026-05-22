@@ -147,8 +147,7 @@ export default function CreateCommunityScreen() {
         const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!perm.granted) {
           show('写真へのアクセス権限が必要です', 'warn');
-          setIconLoading(false);
-          return;
+          return;  // finally で loading 解除される
         }
       }
       const r = await ImagePicker.launchImageLibraryAsync({
@@ -157,16 +156,25 @@ export default function CreateCommunityScreen() {
         quality: 1,
       });
       if (r.canceled || !r.assets[0]) {
-        setIconLoading(false);
-        return;
+        return;  // finally で loading 解除される
       }
       const asset = r.assets[0];
       // 自前の circular cropper を開いて切り抜く
       // 注: openCropper 中は loading state を一度解除しないと
       //     UI 上 spinner が出っぱなしになるので setIconLoading(false) する
       setIconLoading(false);
-      const croppedUri = await openCropper(asset.uri);
-      if (!croppedUri) return; // cancelled
+      let croppedUri: string | null = null;
+      try {
+        croppedUri = await openCropper(asset.uri);
+      } catch (cropErr) {
+        console.warn('[community/create] cropper threw:', cropErr);
+        show('画像の切り抜きでエラーが発生しました', 'error');
+        return;
+      }
+      if (!croppedUri) {
+        // cancel or timeout
+        return;
+      }
       setIconLoading(true);
       // prepareImageUpload: EXIF 除去 + magic byte 検証 + size check (5MB)
       let prepared;
@@ -178,8 +186,9 @@ export default function CreateCommunityScreen() {
           quality: 0.85,
         });
       } catch (e) {
-        show(e instanceof Error ? e.message : '画像処理に失敗しました', 'warn');
-        setIconLoading(false);
+        console.warn('[community/create] prepareImageUpload failed:', e);
+        const msg = e instanceof Error ? e.message : '画像処理に失敗しました';
+        show(msg, 'warn');
         return;
       }
       setLocalIconUri(croppedUri);
@@ -188,8 +197,10 @@ export default function CreateCommunityScreen() {
       show('アイコンを切り抜きました', 'success');
     } catch (e) {
       console.warn('[community/create] pick icon failed:', e);
-      show('画像の取得に失敗しました', 'error');
+      const msg = e instanceof Error ? e.message : '';
+      show(msg ? `画像の取得に失敗しました: ${msg}` : '画像の取得に失敗しました', 'error');
     } finally {
+      // 必ず loading 解除 — エラー / cancel / 成功すべてで
       setIconLoading(false);
     }
   };

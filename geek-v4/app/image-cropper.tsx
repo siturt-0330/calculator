@@ -65,6 +65,16 @@ export default function ImageCropperScreen() {
     }
   }, [sourceUri, router]);
 
+  // unmount 時の safety: 「次へ」「戻る」を経由せずに画面が消えた場合 (例: ブラウザ back,
+  // refresh, 他画面への deeplink 等) でも pending promise を必ず resolve(null) する。
+  // これをやらないと caller の `await openCropper(...)` が永久 hang して
+  // 「アイコン選択ボタンが反応しない」現象になる。
+  useEffect(() => {
+    return () => {
+      resolveCropper(null);
+    };
+  }, []);
+
   // 自然画像サイズ取得 — Image.getSize は web/native 両対応
   useEffect(() => {
     if (!sourceUri) return;
