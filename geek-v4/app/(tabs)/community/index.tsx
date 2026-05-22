@@ -1,5 +1,5 @@
 import { View, Text, ScrollView, RefreshControl, Image } from 'react-native';
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useMemo } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -10,35 +10,32 @@ import { Icon } from '../../../constants/icons';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { OfficialBadge } from '../../../components/community/OfficialBadge';
+import { AnonPostCard } from '../../../components/feed/AnonPostCard';
 import {
   fetchMyCommunities,
-  fetchMyCommunityFeed,
+  fetchMyCommunityPostsRich,
   subscribeToMyCommunityChanges,
+  type CommunityMetaLite,
 } from '../../../lib/api/communities';
 import { useAuthStore } from '../../../stores/authStore';
-
-function timeAgo(iso: string): string {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return '';
-  const diff = Math.max(0, Date.now() - t) / 1000;
-  if (diff < 60) return 'たった今';
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 時間前`;
-  if (diff < 7 * 86400) return `${Math.floor(diff / 86400)} 日前`;
-  return new Date(iso).toLocaleDateString('ja-JP');
-}
+import { useLike, useLikes } from '../../../hooks/useLike';
+import { useConcern, useConcerns } from '../../../hooks/useConcern';
+import { useSave, useSaves } from '../../../hooks/useSave';
+import { useShare } from '../../../hooks/useShare';
+import { useReactions, useReactionToggle } from '../../../hooks/useReactions';
+import { useAddedTags, useAddTag } from '../../../hooks/useAddedTags';
+import { usePolls } from '../../../hooks/usePolls';
+import { useToastStore } from '../../../stores/toastStore';
+import type { Post } from '../../../types/models';
 
 export default function CommunityScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const qc = useQueryClient();
+  const { show: showToast } = useToastStore();
 
-  // React Query 化 — 旧 useState+useEffect だと:
-  //   - 別画面で join しても戻った時に古いリストが見える (stale)
-  //   - ネットワーク失敗時の自動 retry がない
-  //   - キャッシュ統一されておらず複数画面で重複 fetch
-  // を解決する。
+  // 参加コミュ一覧 (横スクロール用) — React Query
   const myCommunitiesQuery = useQuery({
     queryKey: ['my-communities', user?.id],
     queryFn: fetchMyCommunities,
@@ -47,35 +44,41 @@ export default function CommunityScreen() {
     gcTime: 5 * 60_000,
   });
 
+  // 所属コミュ最新投稿 (AnonPostCard 互換の Post[] + community メタ)
+  // 監査指摘: 旧版はシンプルな body/image_url カードで表示し、いいね/コメ
+  // ント/保存/リアクション等の操作ができなかった。コミュ詳細画面の FeedTab
+  // と同じ AnonPostCard で描画して、機能完全な投稿カードを出す。
   const feedQuery = useQuery({
-    queryKey: ['my-community-feed', user?.id],
-    queryFn: () => fetchMyCommunityFeed(40),
+    queryKey: ['my-community-feed-rich', user?.id],
+    queryFn: () => fetchMyCommunityPostsRich(40),
     enabled: !!user,
     staleTime: 30_000,
     gcTime: 5 * 60_000,
   });
 
   const myCommunities = myCommunitiesQuery.data ?? [];
-  const posts = feedQuery.data ?? [];
+  const posts: Post[] = feedQuery.data?.posts ?? [];
+  const communityByPost: Record<string, CommunityMetaLite> =
+    feedQuery.data?.communityByPost ?? {};
   const loading = myCommunitiesQuery.isLoading || feedQuery.isLoading;
   const refreshing = myCommunitiesQuery.isFetching && !myCommunitiesQuery.isLoading;
 
-  // realtime: 自分が別画面で join/leave した時に即時反映
+  // realtime: 別画面で join/leave 時に即時反映
   useEffect(() => {
     if (!user?.id) return;
     const sub = subscribeToMyCommunityChanges(user.id, () => {
       qc.invalidateQueries({ queryKey: ['my-communities', user.id] });
-      qc.invalidateQueries({ queryKey: ['my-community-feed', user.id] });
+      qc.invalidateQueries({ queryKey: ['my-community-feed-rich', user.id] });
     });
     return () => sub.unsubscribe();
   }, [user?.id, qc]);
 
-  // タブ復帰時に refetch (ただし staleTime 内ならキャッシュ使用)
+  // タブ復帰時に refetch
   useFocusEffect(
     useCallback(() => {
       if (!user?.id) return;
       void qc.invalidateQueries({ queryKey: ['my-communities', user.id] });
-      void qc.invalidateQueries({ queryKey: ['my-community-feed', user.id] });
+      void qc.invalidateQueries({ queryKey: ['my-community-feed-rich', user.id] });
     }, [user?.id, qc]),
   );
 
@@ -83,9 +86,38 @@ export default function CommunityScreen() {
     if (!user?.id) return;
     await Promise.all([
       qc.invalidateQueries({ queryKey: ['my-communities', user.id] }),
-      qc.invalidateQueries({ queryKey: ['my-community-feed', user.id] }),
+      qc.invalidateQueries({ queryKey: ['my-community-feed-rich', user.id] }),
     ]);
   }, [user?.id, qc]);
+
+  // ----- AnonPostCard 用の hooks (FeedTab と同じパターン) -----
+  const postIds = useMemo(() => posts.map((p) => p.id), [posts]);
+  const { toggle: toggleLike } = useLike();
+  const { toggle: toggleConcern } = useConcern();
+  const { toggle: toggleSave } = useSave();
+  const { toggle: toggleReact } = useReactionToggle();
+  const { share } = useShare();
+  const { addTag } = useAddTag();
+  const { data: myLikes = {} } = useLikes(postIds);
+  const { data: myConcerns = {} } = useConcerns(postIds);
+  const { data: mySaves = {} } = useSaves(postIds);
+  const { data: reactionsByPost = {} } = useReactions(postIds);
+  const { data: addedTagsByPost = {} } = useAddedTags(postIds);
+  const { polls } = usePolls(postIds);
+
+  const handleAddTag = useCallback(
+    async (postId: string, tag: string) => {
+      try {
+        await addTag(postId, tag);
+        showToast(`#${tag} を追加しました`, 'success');
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : '';
+        if (msg.includes('duplicate')) showToast('そのタグは既に追加されています', 'warn');
+        else showToast('追加に失敗しました', 'error');
+      }
+    },
+    [addTag, showToast],
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -268,10 +300,10 @@ export default function CommunityScreen() {
         {/* 区切り */}
         <View style={{ height: 1, backgroundColor: C.divider, marginHorizontal: SP['4'] }} />
 
-        {/* 最新投稿フィード */}
-        <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['4'], gap: SP['3'] }}>
+        {/* 最新投稿フィード — AnonPostCard でフル機能表示 */}
+        <View style={{ paddingTop: SP['2'] }}>
           {posts.length === 0 ? (
-            <View style={{ paddingTop: SP['10'] }}>
+            <View style={{ paddingTop: SP['10'], paddingHorizontal: SP['4'] }}>
               <EmptyState
                 icon={Icon.community}
                 title={myCommunities.length === 0 ? 'コミュニティに参加しよう' : 'まだ投稿がありません'}
@@ -317,74 +349,80 @@ export default function CommunityScreen() {
               )}
             </View>
           ) : (
-            posts.map((p) => (
-              <PressableScale
-                // 監査指摘: 同じ post が複数コミュに attach されると key={p.id} で衝突する。
-                // community_id を合成 key にして React の重複警告と稀ちらつきを回避。
-                key={`${p.community_id}:${p.id}`}
-                onPress={() => router.push(`/community/${p.community_id}` as never)}
-                haptic="tap"
-                scaleValue={0.985}
-                style={{
-                  backgroundColor: C.bg2,
-                  borderRadius: R.lg,
-                  borderWidth: 1,
-                  borderColor: C.border,
-                  padding: SP['3'],
-                  gap: SP['2'],
-                }}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-                  <View
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 16,
-                      backgroundColor: p.community?.icon_url
-                        ? C.bg3
-                        : (p.community?.icon_color ?? C.accent),
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {p.community?.icon_url ? (
-                      <Image source={{ uri: p.community.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                    ) : (
-                      <Text style={{ fontSize: 16 }}>{p.community?.icon_emoji ?? '👥'}</Text>
-                    )}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                      <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
-                        {p.community?.name ?? 'コミュニティ'}
+            posts.map((p) => {
+              const community = communityByPost[p.id];
+              return (
+                <View key={`${community?.id ?? 'no-community'}:${p.id}`}>
+                  {/* どのコミュ経由か分かるよう、カード上にミニピル表示 */}
+                  {community && (
+                    <PressableScale
+                      onPress={() => router.push(`/community/${community.id}` as never)}
+                      haptic="tap"
+                      hitSlop={6}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        marginHorizontal: SP['4'],
+                        marginTop: SP['3'],
+                        marginBottom: -SP['1'],
+                        paddingHorizontal: SP['2'],
+                        paddingVertical: 4,
+                        backgroundColor: community.is_official ? C.accentBg : C.bg3,
+                        borderRadius: R.full,
+                        alignSelf: 'flex-start',
+                        borderWidth: 1,
+                        borderColor: community.is_official ? C.accent : C.border,
+                      }}
+                    >
+                      {community.icon_url ? (
+                        <Image
+                          source={{ uri: community.icon_url }}
+                          style={{ width: 14, height: 14, borderRadius: 7 }}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <Text style={{ fontSize: 11 }}>{community.icon_emoji}</Text>
+                      )}
+                      <Text style={[T.caption, {
+                        color: community.is_official ? C.accent : C.text2,
+                        fontWeight: '700',
+                        fontSize: 10,
+                      }]}>
+                        {community.name}
                       </Text>
-                      {p.community?.is_official && <OfficialBadge size="sm" />}
-                    </View>
-                    <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
-                      {p.official_author
-                        ? `${p.official_author.name || '公式管理者'}${p.official_author.organization ? ` · ${p.official_author.organization}` : ''} · ${timeAgo(p.created_at)}`
-                        : `${p.author_nickname ?? '匿名'} · ${timeAgo(p.created_at)}`}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={[T.body, { color: C.text }]} numberOfLines={4}>
-                  {p.body}
-                </Text>
-                {p.image_url && (
-                  <Image
-                    source={{ uri: p.image_url }}
-                    style={{
-                      width: '100%',
-                      aspectRatio: 16 / 9,
-                      borderRadius: R.md,
-                      backgroundColor: C.bg3,
-                    }}
-                    resizeMode="cover"
+                      {community.is_official && (
+                        <View style={{
+                          width: 12, height: 12, borderRadius: 6,
+                          backgroundColor: C.accent,
+                          alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          <Icon.check size={8} color="#fff" strokeWidth={3} />
+                        </View>
+                      )}
+                    </PressableScale>
+                  )}
+                  <AnonPostCard
+                    post={p}
+                    liked={!!myLikes[p.id]}
+                    concerned={!!myConcerns[p.id]}
+                    saved={!!mySaves[p.id]}
+                    reactions={reactionsByPost[p.id] ?? []}
+                    addedTags={addedTagsByPost[p.id] ?? []}
+                    poll={polls[p.id]}
+                    onLike={() => toggleLike(p.id)}
+                    onConcern={() => toggleConcern(p.id, !!myConcerns[p.id])}
+                    onComment={() => router.push(`/post/${p.id}` as never)}
+                    onSave={() => toggleSave(p.id)}
+                    onShare={() => share(`Geek の投稿 #${p.tag_names[0] ?? '雑談'}`, `/post/${p.id}`)}
+                    onTagPress={(name) => router.push(`/tag/${encodeURIComponent(name)}` as never)}
+                    onMore={() => { /* report flow: 別途実装 */ }}
+                    onReact={(meme) => toggleReact(p.id, meme)}
+                    onAddTag={(tag) => { void handleAddTag(p.id, tag); }}
                   />
-                )}
-              </PressableScale>
-            ))
+                </View>
+              );
+            })
           )}
         </View>
       </ScrollView>

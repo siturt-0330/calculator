@@ -256,8 +256,8 @@ export default function PostDetailScreen() {
                 <Text style={[T.caption, { color: C.text3 }]}>📍 投稿先:</Text>
                 {postCommunities.map((c) => (
                   <PressableScale
-                    key={c.id}
-                    onPress={() => router.push(`/community/${c.id}` as never)}
+                    key={c.community_id}
+                    onPress={() => router.push(`/community/${c.community_id}` as never)}
                     haptic="tap"
                     hitSlop={6}
                     accessibilityLabel={`${c.name} コミュニティへ移動`}

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Image, View, Text, type ImageProps, type StyleProp, type ViewStyle } from 'react-native';
+import { Image, View, Text, type ImageProps, type ImageStyle, type StyleProp, type ViewStyle } from 'react-native';
 import { C, R } from '../../design/tokens';
 
 // ============================================================
@@ -60,7 +60,8 @@ export function RemoteImage({
     <Image
       {...rest}
       source={{ uri }}
-      style={[{ backgroundColor: fallbackBg, borderRadius: R.md }, style]}
+      // ViewStyle / ImageStyle の共通プロパティだけ使う前提で cast
+      style={[{ backgroundColor: fallbackBg, borderRadius: R.md }, style as StyleProp<ImageStyle>]}
       resizeMode={resizeMode}
       onError={() => setErrored(true)}
       accessibilityLabel={label}

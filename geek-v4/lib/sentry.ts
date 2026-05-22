@@ -51,9 +51,12 @@ export function initSentry() {
       // 既定の Breadcrumbs integration を削除し、error/warning レベルだけ取る
       // カスタム設定で再挿入する。Sentry SDK のバージョン差を吸収するため
       // try/catch で defensive に。
-      integrations: (defaultIntegrations: { name?: string }[] = []) => {
+      // 型は Sentry SDK の Integration[] だが、SDK バージョン差を吸収するため
+      // 内部では緩い型で扱い、最後に unknown 経由で戻す。
+      integrations: (defaultIntegrations) => {
         try {
-          const filtered = defaultIntegrations.filter(
+          const list = defaultIntegrations as unknown as { name?: string }[];
+          const filtered = list.filter(
             (i) => i?.name !== 'Breadcrumbs' && i?.name !== 'ReactNativeBreadcrumbs',
           );
           const SentryAny = Sentry as unknown as {
@@ -68,7 +71,7 @@ export function initSentry() {
           } else if (SentryAny.Breadcrumbs) {
             filtered.push(new SentryAny.Breadcrumbs(opts) as { name?: string });
           }
-          return filtered;
+          return filtered as unknown as typeof defaultIntegrations;
         } catch {
           // 失敗しても最低限 default の動作は保つ
           return defaultIntegrations;
