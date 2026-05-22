@@ -143,15 +143,59 @@ export async function prepareImageUpload(
   }
 
   if (Platform.OS === 'web') {
-    // ----- Web: fetch + Blob 経路 -----
-    const res = await fetch(cleanUri);
-    const blob = await res.blob();
-    if (blob.size > maxSizeBytes) {
-      throw new Error(`画像が大きすぎます (${Math.round(blob.size / 1024)}KB / 上限 ${Math.round(maxSizeBytes / 1024)}KB)`);
+    // ----- Web: 多段フォールバック -----
+    // iPhone Safari の「Load failed」エラーを根本的に潰すため、複数の経路を順に試す:
+    //   Path 1: manipulator で最適化済みの cleanUri を fetch + magic byte 検証 (理想)
+    //   Path 2: 元の uri を直接 fetch (HEIC や Canvas 不可な形式向け)
+    //   Path 3: 失敗時に明確なエラーメッセージで throw
+    const pathErrors: string[] = [];
+
+    // Path 1: 最適化済み URI を fetch
+    try {
+      const res = await fetch(cleanUri);
+      if (!res.ok) throw new Error(`fetch status ${res.status}`);
+      const blob = await res.blob();
+      if (blob.size === 0) throw new Error('empty blob (Safari blob URL may be revoked)');
+      if (blob.size > maxSizeBytes) {
+        throw new Error(`画像が大きすぎます (${Math.round(blob.size / 1024)}KB / 上限 ${Math.round(maxSizeBytes / 1024)}KB)`);
+      }
+      const detected = await detectImageType(blob);
+      if (!detected) throw new Error('magic byte 判定不能');
+      return { blob, mime: detected, ext: safeExtension(detected), size: blob.size, uri: cleanUri };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('[prepareImageUpload] Path 1 (cleanUri fetch) failed:', msg);
+      pathErrors.push(`P1: ${msg}`);
     }
-    const detected = await detectImageType(blob);
-    if (!detected) throw new Error('画像形式を判定できませんでした');
-    return { blob, mime: detected, ext: safeExtension(detected), size: blob.size, uri: cleanUri };
+
+    // Path 2: 元 uri を直接 fetch (manipulator/Canvas を経由しない)
+    // HEIC や巨大画像で manipulator が失敗するケース向け
+    try {
+      const res = await fetch(uri);
+      if (!res.ok) throw new Error(`fetch status ${res.status}`);
+      const blob = await res.blob();
+      if (blob.size === 0) throw new Error('empty blob');
+      if (blob.size > maxSizeBytes) {
+        throw new Error(`画像が大きすぎます (${Math.round(blob.size / 1024)}KB / 上限 ${Math.round(maxSizeBytes / 1024)}KB)`);
+      }
+      // magic で判定失敗時は Blob.type を fallback、最終的に image/jpeg
+      const detected = (await detectImageType(blob)) ?? (blob.type as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif') ?? 'image/jpeg';
+      const finalMime: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' =
+        (detected === 'image/jpeg' || detected === 'image/png' || detected === 'image/webp' || detected === 'image/gif')
+          ? detected
+          : 'image/jpeg';
+      console.log('[prepareImageUpload] Path 2 (raw fetch) ok, mime:', finalMime, 'size:', blob.size);
+      return { blob, mime: finalMime, ext: safeExtension(finalMime), size: blob.size, uri };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('[prepareImageUpload] Path 2 (raw uri fetch) failed:', msg);
+      pathErrors.push(`P2: ${msg}`);
+    }
+
+    // 全部失敗 → 詳細なエラーメッセージで throw
+    throw new Error(
+      `画像の準備に失敗しました。HEIC 形式の写真を選んでいないか確認してください。(${pathErrors.join(' / ')})`,
+    );
   }
 
   // ----- Native (iOS / Android): FormData 経路 -----
