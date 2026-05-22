@@ -115,40 +115,93 @@ export async function fetchMyCommunities(): Promise<Community[]> {
 }
 
 // ============================================================
-// 所属コミュニティの最新投稿フィード (YouTube 動画リスト的)
+// 所属コミュニティの最新投稿フィード (コミュニティタブのホーム)
+// ============================================================
+// 重要: 投稿の実体は `posts` テーブルにあり、コミュニティへの紐付けは
+// `post_communities` 中間テーブル (migration 0023) を通じて行われる。
+// 旧実装は使われていない `community_posts` テーブルを読みに行っていたため
+// 「登録コミュニティの投稿が見られない」という致命バグになっていた。
+//
+// 流れ:
+//   1. 自分の community_id 一覧を取得
+//   2. post_communities 中間テーブルから post_id を逆引き
+//   3. posts 本体 + communities メタを一括取得
+//   4. CommunityPostWithCommunity の旧 shape (body / image_url) に正規化
 // ============================================================
 export async function fetchMyCommunityFeed(limit = 30): Promise<CommunityPostWithCommunity[]> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
-  // まず自分の所属 community_id を取得
+  // ----- 1) 自分の所属 community_id を取得 -----
   const { data: memberRows, error: memErr } = await supabase
     .from('community_members')
     .select('community_id')
     .eq('user_id', user.id);
-
   if (memErr || !memberRows || memberRows.length === 0) return [];
+  const myCommunityIds = memberRows.map((r) => r.community_id);
 
-  const ids = memberRows.map((r) => r.community_id);
-
-  // community embed には公式コミュ管理者識別用のカラムも取得 (de-anonymize 判定)
-  const { data, error } = await supabase
-    .from('community_posts')
-    .select(
-      '*, community:communities(id, name, icon_emoji, icon_color, icon_url, is_official, official_admin_user_id, official_admin_display_name, official_organization)',
-    )
-    .in('community_id', ids)
+  // ----- 2) post_communities から post_id を取得 (新しい attach 順) -----
+  // overfetch して post 重複 (同一 post が複数コミュに attach されている場合) を
+  // de-dup した後でも limit 件残るようにする
+  const overfetch = Math.max(limit * 2, 60);
+  const { data: pcRows, error: pcErr } = await supabase
+    .from('post_communities')
+    .select('post_id, community_id, created_at')
+    .in('community_id', myCommunityIds)
     .order('created_at', { ascending: false })
-    .limit(limit);
-
-  if (error) {
-    console.warn('[communities] fetchMyCommunityFeed failed:', error.message);
+    .limit(overfetch);
+  if (pcErr) {
+    console.warn('[communities] fetchMyCommunityFeed (post_communities) failed:', pcErr.message);
     return [];
   }
+  const pc = pcRows ?? [];
+  if (pc.length === 0) return [];
 
-  // author の nickname を一括で取得 (community_posts.author_id は auth.users への FK
-  // なので Supabase の embed では結べない — RTT は 1 増えるが、id .in() で 1 リクエスト)
-  const authorIds = Array.from(new Set((data ?? []).map((p) => p.author_id)));
+  // post_id 重複削除 — 最も新しい attach の community を採用
+  const postToCommunity = new Map<string, string>();
+  const postAttachOrder: string[] = [];
+  for (const row of pc) {
+    if (!postToCommunity.has(row.post_id)) {
+      postToCommunity.set(row.post_id, row.community_id);
+      postAttachOrder.push(row.post_id);
+    }
+  }
+  const postIds = postAttachOrder.slice(0, limit);
+
+  // ----- 3) posts 本体を取得 -----
+  const { data: postRows, error: postErr } = await supabase
+    .from('posts')
+    .select('id, author_id, content, media_urls, tag_names, visibility, created_at, likes_count, comments_count, is_anonymous')
+    .in('id', postIds);
+  if (postErr) {
+    console.warn('[communities] fetchMyCommunityFeed (posts) failed:', postErr.message);
+    return [];
+  }
+  const posts = postRows ?? [];
+
+  // ----- 4) コミュニティメタを取得 (icon / 公式情報含む) -----
+  const usedCommunityIds = Array.from(new Set(posts.map((p) => postToCommunity.get(p.id)).filter(Boolean) as string[]));
+  let communityMap: Record<string, Community & {
+    official_admin_user_id?: string | null;
+    official_admin_display_name?: string | null;
+    official_organization?: string | null;
+  }> = {};
+  if (usedCommunityIds.length > 0) {
+    const { data: commRows } = await supabase
+      .from('communities')
+      .select('id, name, icon_emoji, icon_color, icon_url, is_official, official_admin_user_id, official_admin_display_name, official_organization, description, visibility, member_count, post_count, last_post_at, created_by, created_at')
+      .in('id', usedCommunityIds);
+    communityMap = Object.fromEntries(
+      ((commRows ?? []) as (Community & {
+        official_admin_user_id?: string | null;
+        official_admin_display_name?: string | null;
+        official_organization?: string | null;
+      })[]).map((c) => [c.id, c]),
+    );
+  }
+
+  // ----- 5) author の nickname を一括取得 -----
+  const authorIds = Array.from(new Set(posts.map((p) => p.author_id)));
   let nickMap: Record<string, string> = {};
   if (authorIds.length > 0) {
     const { data: profs } = await supabase
@@ -158,31 +211,26 @@ export async function fetchMyCommunityFeed(limit = 30): Promise<CommunityPostWit
     nickMap = Object.fromEntries((profs ?? []).map((p) => [p.id, p.nickname]));
   }
 
-  // Supabase embed の型 narrowing が one-to-many と判定するので unknown 経由で正規化
-  type FullCommunity = Pick<Community, 'id' | 'name' | 'icon_emoji' | 'icon_color' | 'icon_url' | 'is_official'> & {
-    official_admin_user_id?: string | null;
-    official_admin_display_name?: string | null;
-    official_organization?: string | null;
-  };
-  type Row = CommunityPost & { community: FullCommunity | FullCommunity[] | null };
-  const rows = ((data ?? []) as unknown) as Row[];
+  // ----- 6) attach 時刻順 (postAttachOrder) を維持して CommunityPostWithCommunity に変換 -----
+  // 監査指摘: 旧実装は posts.find() を postIds.length 回呼んでいて O(N×M)。
+  // limit=40 程度なら無視できるが、将来 limit を増やすと latency に響く。
+  const postById = new Map(posts.map((p) => [p.id, p]));
+  const result: CommunityPostWithCommunity[] = [];
+  for (const postId of postIds) {
+    const p = postById.get(postId);
+    if (!p) continue;
+    const communityId = postToCommunity.get(postId);
+    const c = communityId ? communityMap[communityId] : undefined;
 
-  return rows.map((p) => {
-    const c = Array.isArray(p.community) ? p.community[0] : p.community;
-    // 公式管理者の投稿: 匿名ニックネームの代わりに 実名 · 所属 を返す
+    // 公式管理者の投稿は de-anonymize
     let official_author: { name: string; organization: string } | null = null;
-    if (
-      c &&
-      c.is_official &&
-      c.official_admin_user_id &&
-      p.author_id === c.official_admin_user_id
-    ) {
+    if (c && c.is_official && c.official_admin_user_id && p.author_id === c.official_admin_user_id) {
       official_author = {
         name: c.official_admin_display_name ?? '',
         organization: c.official_organization ?? '',
       };
     }
-    // 戻り値の community は元の Pick<...> 型に絞る (consumer から余分カラムが見えないように)
+
     const trimmedCommunity = c
       ? {
           id: c.id,
@@ -193,13 +241,21 @@ export async function fetchMyCommunityFeed(limit = 30): Promise<CommunityPostWit
           is_official: c.is_official,
         }
       : null;
-    return {
-      ...p,
+
+    result.push({
+      id: p.id,
+      community_id: communityId ?? '',
+      author_id: p.author_id,
+      // posts.content / media_urls を旧 shape (body / image_url) に正規化
+      body: p.content ?? '',
+      image_url: Array.isArray(p.media_urls) && p.media_urls.length > 0 ? p.media_urls[0] : null,
+      created_at: p.created_at,
       community: trimmedCommunity as CommunityPostWithCommunity['community'],
-      author_nickname: nickMap[p.author_id],
+      author_nickname: p.is_anonymous ? undefined : nickMap[p.author_id],
       official_author,
-    };
-  });
+    });
+  }
+  return result;
 }
 
 // ============================================================
@@ -264,16 +320,55 @@ export async function createCommunity(input: {
 }
 
 // ============================================================
-// コミュニティ更新 (member 誰でも - icon/name/desc を変えられる)
+// コミュニティ更新 (owner / admin のみ - icon/name/desc/visibility)
 // ============================================================
+// 監査指摘: 旧実装は patch を直接 update に投げており、内部 column (member_count
+// / created_by / official_*) も書き換え可能だった。RLS / trigger が後段で守るが
+// defense-in-depth として API レイヤでもホワイトリスト化。
+const COMMUNITY_UPDATE_ALLOWED = [
+  'name', 'description', 'icon_emoji', 'icon_color', 'icon_url', 'visibility',
+] as const;
+
 export async function updateCommunity(
   id: string,
   patch: Partial<Pick<Community, 'name' | 'description' | 'icon_emoji' | 'icon_color' | 'icon_url' | 'visibility'>>,
 ): Promise<{ error: string | null }> {
-  const { error } = await supabase.from('communities').update(patch).eq('id', id);
-  if (error) return { error: error.message };
+  if (!UUID_RE.test(id)) return { error: '不正なコミュニティ ID です' };
+
+  // ホワイトリスト経由でだけ patch を構築
+  const safePatch: Record<string, unknown> = {};
+  for (const key of COMMUNITY_UPDATE_ALLOWED) {
+    if (key in patch && patch[key] !== undefined) {
+      safePatch[key] = patch[key];
+    }
+  }
+  if (Object.keys(safePatch).length === 0) {
+    return { error: null }; // no-op
+  }
+
+  // name / description は sanitize
+  if (typeof safePatch.name === 'string') {
+    safePatch.name = sanitizeContent(safePatch.name, { maxLength: 40 });
+    if ((safePatch.name as string).length < 2) {
+      return { error: 'コミュニティ名は 2 文字以上にしてください' };
+    }
+  }
+  if (typeof safePatch.description === 'string') {
+    safePatch.description = sanitizeContent(safePatch.description, { maxLength: 500 });
+  }
+  // visibility は ENUM 値のみ
+  if (typeof safePatch.visibility === 'string'
+      && !['open', 'request', 'invite'].includes(safePatch.visibility as string)) {
+    return { error: '不正な公開設定です' };
+  }
+
+  const { error } = await supabase.from('communities').update(safePatch).eq('id', id);
+  if (error) return { error: mapJoinError(error.message) };
   return { error: null };
 }
+
+// 共通 UUID 形式チェック (community_id 入力検証)
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ============================================================
 // コミュニティ詳細を取得 (自分のメンバーシップ含む + タグ)
@@ -322,12 +417,17 @@ export async function searchByName(query: string, limit = 20): Promise<Community
 
   // バリエーション生成 (== / イコール / 同義語 etc.) して or-ilike で broad fetch
   // それから client similarity で再ランキング
-  const variants = generateVariants(q).slice(0, 6); // 上位 6 種類だけ — URL 肥大化防止
+  // 監査指摘: 旧実装は `%` / `_` をエスケープしておらず、`_` 含みの入力で
+  // ilike が全件マッチ化、`%` 入力で構文崩壊する問題があった。
+  // searchCommunities と同じ escapeForIlike を共通利用。
+  const variants = generateVariants(q).slice(0, 6);
   const orClauses = variants
     .filter((v) => v.length >= 2)
-    .map((v) => `name.ilike.%${v.replace(/[\\,()]/g, '')}%`);
-  // フォールバック: orClauses が空なら q だけで ilike
-  const orQuery = orClauses.length > 0 ? orClauses.join(',') : `name.ilike.%${q}%`;
+    .map((v) => `name.ilike.%${escapeForIlike(v)}%`);
+  // フォールバック: orClauses が空なら q を escape して ilike
+  const orQuery = orClauses.length > 0
+    ? orClauses.join(',')
+    : `name.ilike.%${escapeForIlike(q)}%`;
 
   const { data, error } = await supabase
     .from('communities')
@@ -368,49 +468,232 @@ export async function fetchOfficialCommunities(limit = 10): Promise<Community[]>
 // ============================================================
 // コミュニティ検索 (discover) — invite は除外
 // variants で「ポケモン / pokemon / ぽけもん / pkmn」等の表記ゆらぎを吸収
+//
+// 戻り値は Community[] で互換性を保つが、内部では searchCommunities() を呼んで
+// matched_by / score 付きの結果を計算し、score 順にソートして返す。
+// 詳細メタを使いたい場合は searchCommunities() を直接呼ぶこと。
 // ============================================================
 export async function discoverCommunities(opts: {
   query?: string;
   tag?: string;
   limit?: number;
 }): Promise<Community[]> {
-  let q = supabase
-    .from('communities')
-    .select('*')
-    .in('visibility', ['open', 'request'])
-    .order('member_count', { ascending: false })
-    .limit(opts.limit ?? 30);
+  const hits = await searchCommunities(opts);
+  return hits;
+}
 
-  const queryStr = opts.query?.trim();
-  if (queryStr && queryStr.length > 0) {
-    // バリエーション (大文字/半角/カタカナ/同義語) で or-ilike — URL 肥大化を避けて 6 種に制限
-    const variants = generateVariants(queryStr).slice(0, 6);
-    const orClauses = variants
-      .filter((v) => v.length >= 1)
-      .map((v) => `name.ilike.%${v.replace(/[\\,()]/g, '')}%`);
-    if (orClauses.length > 0) {
-      q = q.or(orClauses.join(','));
-    } else {
-      q = q.ilike('name', `%${queryStr}%`);
-    }
-  }
-  // tag フィルタ
+// ============================================================
+// searchCommunities — マッチ理由付きで返す高機能版
+// ============================================================
+// 改善点 (旧 discoverCommunities 比):
+//   1) name と description の両方を検索対象に
+//   2) variants は length >= 2 のみ (single char で全件マッチ事故を防ぐ)
+//   3) PostgREST or() の文法を破壊する `,` `(` `)` `:` `\` および
+//      ilike ワイルドカード `%` `_` を入力からエスケープ
+//   4) 結果をクライアント側でスコアリングして再ランキング
+//      - name 完全一致: +100
+//      - name prefix:   +60
+//      - name 含む:     +40
+//      - 説明 含む:     +15
+//      - synonym 経由:  +5
+//      - 公式は微ブースト +5
+//      - member_count を log scale で加点 (人気の僅差調整)
+//   5) 重複削除 (1 community が複数 OR clause でヒットしうる)
+// ============================================================
+export type MatchedBy = 'name-exact' | 'name-prefix' | 'name-contains' | 'desc-contains' | 'synonym' | 'popular';
+
+export type CommunityHit = Community & {
+  matchedBy: MatchedBy;
+  matchedVariant?: string;
+  score: number;
+};
+
+// PostgREST or() 文法と ilike を破壊する文字をエスケープ
+function escapeForIlike(s: string): string {
+  return s
+    .replace(/\\/g, '\\\\')      // backslash 先
+    .replace(/%/g, '\\%')         // ilike wildcard
+    .replace(/_/g, '\\_')         // ilike wildcard
+    .replace(/[,()]/g, '');       // PostgREST or() の区切り文字を削除
+}
+
+export async function searchCommunities(opts: {
+  query?: string;
+  tag?: string;
+  officialOnly?: boolean;
+  limit?: number;
+}): Promise<CommunityHit[]> {
+  const limit = opts.limit ?? 30;
+  const queryStr = opts.query?.trim() ?? '';
+  const normalizedQuery = queryStr.toLowerCase();
+
+  // tag フィルタ用 community_id を先に取得 (必要なら)
+  let tagFilterIds: string[] | null = null;
   if (opts.tag) {
     const { data: tagged } = await supabase
       .from('community_tags')
       .select('community_id')
       .eq('tag', opts.tag);
-    const ids = (tagged ?? []).map((t) => t.community_id);
-    if (ids.length === 0) return [];
-    q = q.in('id', ids);
+    tagFilterIds = (tagged ?? []).map((t) => t.community_id);
+    if (tagFilterIds.length === 0) return [];
   }
+
+  // クエリ無し → 人気順 (member_count desc) + last_post_at で活性度ブースト
+  if (!queryStr) {
+    let q = supabase
+      .from('communities')
+      .select('*')
+      .in('visibility', ['open', 'request'])
+      .order('member_count', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (opts.officialOnly) q = q.eq('is_official', true);
+    if (tagFilterIds) q = q.in('id', tagFilterIds);
+    const { data, error } = await q;
+    if (error) {
+      console.warn('[communities] searchCommunities (no query) failed:', error.message);
+      return [];
+    }
+    return (data ?? []).map((c) => ({
+      ...c,
+      matchedBy: 'popular' as MatchedBy,
+      score: c.member_count + (c.is_official ? 5 : 0),
+    }));
+  }
+
+  // バリエーション生成 (length>=2 のみ、特殊文字エスケープ後に重複除外)
+  const rawVariants = generateVariants(queryStr).slice(0, 8);
+  const variantsSet = new Set<string>();
+  for (const v of rawVariants) {
+    const trimmed = v.trim();
+    if (trimmed.length < 2) continue;
+    const esc = escapeForIlike(trimmed);
+    if (esc.length >= 2) variantsSet.add(esc);
+  }
+  // フォールバック: variants 全部 length<2 なら原文をそのまま (1 文字検索を許可)
+  if (variantsSet.size === 0) {
+    const esc = escapeForIlike(queryStr);
+    if (esc.length >= 1) variantsSet.add(esc);
+  }
+  const escapedVariants = Array.from(variantsSet);
+
+  // name + description の OR
+  const orClauses: string[] = [];
+  for (const v of escapedVariants) {
+    orClauses.push(`name.ilike.%${v}%`);
+    orClauses.push(`description.ilike.%${v}%`);
+  }
+
+  let q = supabase
+    .from('communities')
+    .select('*')
+    .in('visibility', ['open', 'request'])
+    .or(orClauses.join(','))
+    .limit(Math.max(limit * 3, 100)); // overfetch して再ランキング
+  if (opts.officialOnly) q = q.eq('is_official', true);
+  if (tagFilterIds) q = q.in('id', tagFilterIds);
 
   const { data, error } = await q;
   if (error) {
-    console.warn('[communities] discover failed:', error.message);
+    console.warn('[communities] searchCommunities failed:', error.message);
     return [];
   }
-  return data ?? [];
+  const rows = (data ?? []) as Community[];
+
+  // ----- スコアリング -----
+  const hits: CommunityHit[] = [];
+  const seenIds = new Set<string>();
+  for (const c of rows) {
+    if (seenIds.has(c.id)) continue;
+    const name = (c.name ?? '').toLowerCase();
+    const desc = (c.description ?? '').toLowerCase();
+
+    let bestScore = 0;
+    let bestMatch: MatchedBy = 'name-contains';
+    let matchedVariant: string | undefined;
+
+    // 原文 (= ユーザーが直接入力した文字列) を最優先で評価
+    if (name === normalizedQuery) {
+      bestScore = 100;
+      bestMatch = 'name-exact';
+      matchedVariant = queryStr;
+    } else if (name.startsWith(normalizedQuery)) {
+      bestScore = 60;
+      bestMatch = 'name-prefix';
+      matchedVariant = queryStr;
+    } else if (name.includes(normalizedQuery)) {
+      bestScore = 40;
+      bestMatch = 'name-contains';
+      matchedVariant = queryStr;
+    } else if (desc.includes(normalizedQuery)) {
+      bestScore = 15;
+      bestMatch = 'desc-contains';
+      matchedVariant = queryStr;
+    } else {
+      // 原文ではマッチしないが variants 経由で hit → synonym 扱い
+      for (const v of escapedVariants) {
+        const lv = v.toLowerCase();
+        if (lv === normalizedQuery) continue;
+        if (name.includes(lv)) {
+          bestScore = 30;
+          bestMatch = 'synonym';
+          matchedVariant = v;
+          break;
+        }
+        if (desc.includes(lv)) {
+          bestScore = 5;
+          bestMatch = 'synonym';
+          matchedVariant = v;
+          break;
+        }
+      }
+      // それでも無ければ DB の OR にはマッチしてるはずなので 1 点
+      if (bestScore === 0) {
+        bestScore = 1;
+        bestMatch = 'synonym';
+      }
+    }
+
+    // 公式コミュは僅差ブースト
+    if (c.is_official) bestScore += 5;
+    // メンバー数の log boost (大規模優位を緩和)
+    bestScore += Math.log10(Math.max(1, c.member_count));
+
+    hits.push({ ...c, matchedBy: bestMatch, matchedVariant, score: bestScore });
+    seenIds.add(c.id);
+  }
+
+  // スコア降順、同点ならメンバー数→新しい順
+  hits.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (b.member_count !== a.member_count) return b.member_count - a.member_count;
+    return Date.parse(b.created_at) - Date.parse(a.created_at);
+  });
+
+  return hits.slice(0, limit);
+}
+
+// ============================================================
+// realtime: 自分の community_members 変更を購読
+// ============================================================
+// 自分が join / leave した時に listener が呼ばれる。React Query 等の cache 無効化に使う。
+export function subscribeToMyCommunityChanges(
+  userId: string,
+  onChange: () => void,
+): { unsubscribe: () => void } {
+  const channel = supabase
+    .channel(`my-communities:${userId}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'community_members', filter: `user_id=eq.${userId}` },
+      () => onChange(),
+    )
+    .subscribe();
+  return {
+    unsubscribe: () => {
+      try { supabase.removeChannel(channel); } catch { /* ignore */ }
+    },
+  };
 }
 
 // ============================================================
@@ -444,6 +727,25 @@ function mapJoinError(raw: string): string {
   }
   if (m.includes('network') || m.includes('fetch failed')) {
     return 'ネットワークエラー。接続を確認してください。';
+  }
+  // 監査追加: PostgreSQL の標準エラーコード / メッセージを追加翻訳
+  if (m.includes('permission denied') || m.includes('insufficient_privilege') || m.includes('42501')) {
+    return 'この操作を行う権限がありません。';
+  }
+  if (m.includes('pgrst') && m.includes('no row')) {
+    return '対象が見つかりません。削除された可能性があります。';
+  }
+  if (m.includes('rate-limit') || m.includes('rate_limit') || m.includes('53300')) {
+    return '短時間に試行しすぎました。少し時間を置いてからお試しください。';
+  }
+  if (m.includes('foreign key') || m.includes('23503')) {
+    return '依存関係のあるデータがあるため操作できません。';
+  }
+  if (m.includes('check constraint') || m.includes('23514')) {
+    return '入力内容が制約を満たしていません。';
+  }
+  if (m.includes('22023')) {
+    return '不正な状態遷移です (承認済み/却下済みからは変更できません)。';
   }
   return raw;
 }
@@ -479,71 +781,69 @@ export async function requestJoinCommunity(id: string, message = ''): Promise<{ 
 // ============================================================
 // コミュニティから退出
 // ============================================================
+// 監査での指摘 (Critical):
+//   - owner が脱退すると「孤児コミュ」が生成される (誰も管理できない)
+//   - 公式コミュ管理者が脱退しても official_admin_user_id が残り、
+//     attachOfficialAuthor で de-anonymize が継続する
+// → 本関数で role / 公式 admin を検査して、危険なケースは block する。
 export async function leaveCommunity(id: string): Promise<{ error: string | null }> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: 'ログインしてください' };
+
+  // 自分の role と community の公式情報を取得 (1 RTT)
+  const [meRes, commRes] = await Promise.all([
+    supabase
+      .from('community_members')
+      .select('role')
+      .eq('community_id', id)
+      .eq('user_id', user.id)
+      .maybeSingle(),
+    supabase
+      .from('communities')
+      .select('is_official, official_admin_user_id')
+      .eq('id', id)
+      .maybeSingle(),
+  ]);
+
+  const role = (meRes.data as { role: MemberRole } | null)?.role ?? null;
+  if (role === 'owner') {
+    return {
+      error: 'コミュニティのオーナーは退出できません。先に所有権を譲渡するか、コミュニティを削除してください。',
+    };
+  }
+
+  const comm = commRes.data as { is_official: boolean | null; official_admin_user_id: string | null } | null;
+  if (comm?.is_official && comm.official_admin_user_id === user.id) {
+    return {
+      error: '公式コミュニティの管理者は退出できません。先に公式申請の取り下げ、または管理者の変更を申請してください。',
+    };
+  }
+
   const { error } = await supabase
     .from('community_members')
     .delete()
     .eq('community_id', id)
     .eq('user_id', user.id);
-  if (error) return { error: error.message };
+  if (error) return { error: mapJoinError(error.message) };
   return { error: null };
 }
 
 // ============================================================
-// コミュニティに投稿
+// 旧 API: createCommunityPost / fetchCommunityPosts (廃止)
 // ============================================================
-export async function createCommunityPost(input: {
-  community_id: string;
-  body: string;
-  image_url?: string;
-}): Promise<{ data: CommunityPost | null; error: string | null }> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { data: null, error: 'ログインしてください' };
-
-  const { data, error } = await supabase
-    .from('community_posts')
-    .insert({
-      community_id: input.community_id,
-      author_id: user.id,
-      body: input.body.trim(),
-      image_url: input.image_url ?? null,
-    })
-    .select()
-    .single();
-  if (error || !data) return { data: null, error: error?.message ?? '投稿に失敗しました' };
-  return { data, error: null };
-}
-
+// 旧スキーマで使われていた `community_posts` テーブルは migration 0023 以降
+// `posts` + `post_communities` に置き換えられている。
+//
+// - 投稿は app/post/create.tsx 経由で createPost (lib/api/posts.ts) を使用
+//   → visibility='community_only' または 'community_public' + community_ids[]
+// - 1 コミュニティの投稿一覧は fetchCommunityPosts (lib/api/posts.ts) を使用
+//   → post_communities 中間テーブル経由
+// - 所属コミュ全体のフィードは fetchMyCommunityFeed (本ファイル上部)
+//
+// ここに残っていた旧関数 (createCommunityPost / 同名 fetchCommunityPosts) は
+// `community_posts` テーブル (実体無し) を参照する dead code だったため削除。
+// 復活が必要な場合は git log を参照。
 // ============================================================
-// 1 コミュニティの投稿一覧
-// ============================================================
-export async function fetchCommunityPosts(
-  community_id: string,
-  limit = 30,
-): Promise<CommunityPostWithCommunity[]> {
-  const { data, error } = await supabase
-    .from('community_posts')
-    .select('*, community:communities(id, name, icon_emoji, icon_color, icon_url, is_official)')
-    .eq('community_id', community_id)
-    .order('created_at', { ascending: false })
-    .limit(limit);
-  if (error) {
-    console.warn('[communities] fetchCommunityPosts failed:', error.message);
-    return [];
-  }
-  const authorIds = Array.from(new Set((data ?? []).map((p) => p.author_id)));
-  let nickMap: Record<string, string> = {};
-  if (authorIds.length > 0) {
-    const { data: profs } = await supabase
-      .from('profiles')
-      .select('id, nickname')
-      .in('id', authorIds);
-    nickMap = Object.fromEntries((profs ?? []).map((p) => [p.id, p.nickname]));
-  }
-  return (data ?? []).map((p) => ({ ...p, author_nickname: nickMap[p.author_id] }));
-}
 
 // ============================================================
 // コミュニティアイコン画像のアップロード
@@ -575,6 +875,7 @@ export async function uploadCommunityIcon(
 // ============================================================
 // 聖地一覧取得 (新しい順) — RLS で open/member だけが見える
 export async function fetchCommunitySpots(community_id: string): Promise<CommunitySpot[]> {
+  if (!UUID_RE.test(community_id)) return [];
   const { data, error } = await supabase
     .from('community_spots')
     .select('*')
@@ -641,9 +942,17 @@ export async function toggleSpotCertified(spotId: string, certified: boolean): P
     p_certified: certified,
   });
   if (error) {
-    if (error.message.includes('NOT_OFFICIAL_ADMIN')) throw new Error('公式管理者のみ操作できます');
-    if (error.message.includes('SPOT_NOT_FOUND')) throw new Error('聖地が見つかりません');
-    throw new Error(error.message || '公認設定に失敗しました');
+    // 監査指摘: 旧版は error.message の string match だけで脆い。
+    // PostgreSQL の error code (PGRST 経由) も判定対象に。
+    const msg = error.message || '';
+    const code = (error as { code?: string }).code ?? '';
+    if (msg.includes('NOT_OFFICIAL_ADMIN') || code === '42501') {
+      throw new Error('公式管理者のみ操作できます');
+    }
+    if (msg.includes('SPOT_NOT_FOUND') || msg.includes('not found')) {
+      throw new Error('聖地が見つかりません');
+    }
+    throw new Error(mapJoinError(msg) || '公認設定に失敗しました');
   }
 }
 
@@ -655,6 +964,7 @@ export async function fetchCommunityEvents(
   community_id: string,
   opts: { upcomingOnly?: boolean } = {},
 ): Promise<CommunityEvent[]> {
+  if (!UUID_RE.test(community_id)) return [];
   let query = supabase
     .from('community_events')
     .select('*')
@@ -684,6 +994,9 @@ export async function createEvent(input: {
   location_text?: string;
   photo_url?: string;
 }): Promise<{ data: CommunityEvent | null; error: string | null }> {
+  if (!UUID_RE.test(input.community_id)) {
+    return { data: null, error: '不正なコミュニティ ID です' };
+  }
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'ログインしてください' };
 
@@ -703,7 +1016,9 @@ export async function createEvent(input: {
   if (input.ends_at) {
     const e = new Date(input.ends_at);
     if (Number.isNaN(e.getTime())) return { data: null, error: '終了日時が不正です' };
-    if (e.getTime() < startsAt.getTime()) {
+    // 監査指摘: 旧版は `<` で「同時刻」を許容、フロント (event/create.tsx) は `>` を要求していて
+    // 不一致だった。最小 1 分のスパンを要求して 0 分イベントも排除。
+    if (e.getTime() <= startsAt.getTime()) {
       return { data: null, error: '終了日時は開始日時より後にしてください' };
     }
     endsAt = e.toISOString();

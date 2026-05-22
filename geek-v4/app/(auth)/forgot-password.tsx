@@ -12,17 +12,27 @@ import { Icon } from '../../constants/icons';
 
 // パスワードリセット完了画面の URL を組み立てる。
 //   - Web: 現在の origin + /reset-password (Netlify SPA fallback で OK)
-//   - Native: scheme://reset-password — Supabase ダッシュボードの
-//     Authentication → URL Configuration → Redirect URLs に登録が必要。
+//   - Native: Universal Links (https://geek.app/reset-password) を使う
+//     iOS: associatedDomains "applinks:geek.app" (app.json で設定済)
+//     Android: intentFilters の autoVerify + assetlinks.json (docs/UNIVERSAL_LINKS.md)
 //
-// 重要: ここの URL が Supabase ダッシュボードの "Redirect URLs" に登録されて
-// いないと、メール内のリンクは無効化される。
+// 旧実装は geek:// scheme を使っていたが、悪意あるアプリが同じ scheme を
+// 登録するとリカバリ token を奪われる (URL scheme hijacking) ため、
+// HTTPS の Universal Links / App Links に統一する。
+//
+// 重要: 同じ URL が Supabase ダッシュボードの
+// Authentication → URL Configuration → Redirect URLs に登録されている必要がある:
+//   - https://geek.app/reset-password
+//   - http://localhost:8081/reset-password (開発用)
+//   - https://*.geek.app/reset-password (preview)
 function buildResetRedirectUrl(): string {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     return `${window.location.origin}/reset-password`;
   }
-  // Native: app.json の "scheme": "geek" を使う
-  return 'geek://reset-password';
+  // Native: Universal Links / App Links 経由で web 版に着地。
+  // 端末に Geek アプリがインストールされていれば自動的にアプリで開かれる
+  // (Associated Domains / Digital Asset Links により検証された場合のみ)。
+  return 'https://geek.app/reset-password';
 }
 
 export default function ForgotPasswordScreen() {

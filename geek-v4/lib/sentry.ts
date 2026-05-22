@@ -47,6 +47,33 @@ export function initSentry() {
       // PII / token を Sentry に流出させないよう sample rate を絞る + scrub
       tracesSampleRate: 0.05,
       sendDefaultPii: false,
+      // console.log / console.warn 経由の PII リークを防ぐ:
+      // 既定の Breadcrumbs integration を削除し、error/warning レベルだけ取る
+      // カスタム設定で再挿入する。Sentry SDK のバージョン差を吸収するため
+      // try/catch で defensive に。
+      integrations: (defaultIntegrations: { name?: string }[] = []) => {
+        try {
+          const filtered = defaultIntegrations.filter(
+            (i) => i?.name !== 'Breadcrumbs' && i?.name !== 'ReactNativeBreadcrumbs',
+          );
+          const SentryAny = Sentry as unknown as {
+            breadcrumbsIntegration?: (opts: unknown) => unknown;
+            Breadcrumbs?: new (opts: unknown) => unknown;
+          };
+          // console: false で console.* を breadcrumb として取らない
+          const opts = { console: false, dom: false, fetch: true, history: true, xhr: true };
+          const factory = SentryAny.breadcrumbsIntegration;
+          if (typeof factory === 'function') {
+            filtered.push(factory(opts) as { name?: string });
+          } else if (SentryAny.Breadcrumbs) {
+            filtered.push(new SentryAny.Breadcrumbs(opts) as { name?: string });
+          }
+          return filtered;
+        } catch {
+          // 失敗しても最低限 default の動作は保つ
+          return defaultIntegrations;
+        }
+      },
       beforeSend(event) {
         try {
           if (event.message) event.message = redact(event.message);

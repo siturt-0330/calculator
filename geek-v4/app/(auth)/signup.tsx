@@ -12,6 +12,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 import { Icon } from '../../constants/icons';
+import { validatePassword } from '../../lib/passwordPolicy';
 
 // 初回ユーザーの障壁を最小化するため、
 //   - ステップ 1: メール + パスワード (必須)
@@ -47,13 +48,10 @@ export default function SignupScreen() {
       show('メールアドレスの形式が正しくありません。', 'warn');
       return;
     }
-    if (password.length < 8) {
-      show('パスワードは 8 文字以上にしてください。', 'warn');
-      return;
-    }
-    if (password.length > 72) {
-      // Supabase / bcrypt の上限 — 超えると cryptic エラー
-      show('パスワードは 72 文字以内にしてください。', 'warn');
+    // 8〜72 文字 + 英字 + 数字 + よくある弱パス排除
+    const pwCheck = validatePassword(password);
+    if (!pwCheck.ok) {
+      show(pwCheck.reason ?? 'パスワードがセキュリティ要件を満たしていません。', 'warn');
       return;
     }
     // ステップ切替前にキーボードを閉じる (iOS でジャンクなアニメ防止)
@@ -189,7 +187,7 @@ export default function SignupScreen() {
               />
               <Input
                 ref={passwordRef}
-                label="パスワード（8 - 72 文字）"
+                label="パスワード（8 - 72 文字 / 英字+数字）"
                 value={password}
                 onChangeText={setPassword}
                 placeholder="パスワード"

@@ -11,6 +11,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
 import { Icon } from '../../constants/icons';
+import { validatePassword } from '../../lib/passwordPolicy';
 
 // ============================================================
 // パスワードリセット完了画面
@@ -206,12 +207,10 @@ export default function ResetPasswordScreen() {
 
   const handleSubmit = async () => {
     if (phase !== 'ready' && phase !== 'updating') return;
-    if (password.length < 8) {
-      show('パスワードは 8 文字以上にしてください。', 'warn');
-      return;
-    }
-    if (password.length > 72) {
-      show('パスワードは 72 文字以内にしてください。', 'warn');
+    // 8〜72 文字 + 英字 + 数字 + よくある弱パス排除
+    const pwCheck = validatePassword(password);
+    if (!pwCheck.ok) {
+      show(pwCheck.reason ?? 'パスワードがセキュリティ要件を満たしていません。', 'warn');
       return;
     }
     if (password !== confirm) {
@@ -258,7 +257,7 @@ export default function ResetPasswordScreen() {
         <View style={{ gap: SP['2'] }}>
           <Text style={[T.h1, { color: C.text }]}>新しいパスワード</Text>
           <Text style={[T.body, { color: C.text2 }]}>
-            8〜72 文字の新しいパスワードを設定してください。
+            8〜72 文字、英字と数字を含めて設定してください。
           </Text>
         </View>
 

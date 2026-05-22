@@ -55,7 +55,10 @@
     # XSS 対策: 自分のドメイン + Supabase + Leaflet タイル + 必要な CDN だけ
     # 'unsafe-inline' は Expo Web の inline style/script に必要 (Reanimated worklet 等)
     # 'unsafe-eval' は Hermes 不使用環境で求められることがある — 一旦許可
-    Content-Security-Policy   = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://app.posthog.com https://*.sentry.io; style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://app.posthog.com https://*.sentry.io https://*.tile.openstreetmap.org; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'"
+    # CSP — 'unsafe-inline'/'unsafe-eval' は Expo Web の Reanimated worklet 等で必須。
+    # img-src の `https:` は Supabase Storage の avatar / link preview などで動的 URL を使うため許可。
+    # 追加保護: worker-src/manifest-src/upgrade-insecure-requests/frame-ancestors を明示。
+    Content-Security-Policy   = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://app.posthog.com https://*.sentry.io; style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://app.posthog.com https://*.sentry.io https://*.tile.openstreetmap.org; frame-src 'self' https://www.google.com https://maps.google.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
     # クロスオリジン埋め込み禁止 (clickjacking 防御)
     Cross-Origin-Opener-Policy   = "same-origin"
     Cross-Origin-Resource-Policy = "same-site"

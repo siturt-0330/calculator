@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView, Alert, Image } from 'react-native';
 import Animated, { FadeIn, FadeInDown, Layout } from 'react-native-reanimated';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAutoTagSuggest } from '../../hooks/useAutoTagSuggest';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -48,6 +49,7 @@ export default function CreatePost() {
   const router = useRouter();
   const params = useLocalSearchParams<{ community_id?: string; prefill_tag?: string }>();
   const insets = useSafeAreaInsets();
+  const qc = useQueryClient();
   const { show } = useToastStore();
 
   const [images, setImages] = useState<string[]>([]);
@@ -346,6 +348,17 @@ export default function CreatePost() {
       show('投稿しました', 'success');
       // 成功 → draft 削除
       void AsyncStorage.removeItem(DRAFT_KEY);
+      // 監査指摘: 投稿後にコミュニティフィードを invalidate しないため
+      // staleTime 20s 間「自分の投稿が出てこない」現象があった。
+      // 関連クエリを全部無効化して即時反映。
+      void qc.invalidateQueries({ queryKey: ['my-community-feed'] });
+      void qc.invalidateQueries({ queryKey: ['my-communities'] });
+      for (const cid of selectedCommunityIds) {
+        void qc.invalidateQueries({ queryKey: ['community', cid, 'feed'] });
+        void qc.invalidateQueries({ queryKey: ['community', cid] });
+      }
+      // ホームフィード (匿名投稿のみ表示) も念のため refresh
+      void qc.invalidateQueries({ queryKey: ['feed'] });
       router.back();
     } catch (e: unknown) {
       hap.error();

@@ -6,7 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlashList } from '@shopify/flash-list';
-import { fetchPostById } from '../../lib/api/posts';
+import { fetchPostById, fetchCommunitiesForPosts } from '../../lib/api/posts';
 import { fetchSimilarPosts } from '../../lib/api/similarPosts';
 import { fetchComments, createComment } from '../../lib/api/bbs';
 import { fetchPostAddedTags, addPostTag } from '../../lib/api/tags';
@@ -77,6 +77,18 @@ export default function PostDetailScreen() {
     enabled: !!id && !!post && (post?.tag_names?.length ?? 0) > 0,
     staleTime: 60_000,
   });
+
+  // 紐付いたコミュニティ (cross-post / community_only / community_public)
+  // 監査指摘: 投稿詳細から community への遷移経路が存在しなかった。
+  // 旧版はフィードカード (AnonPostCard) でだけピル表示していたが、直リンク
+  // やシェアから来たユーザーが community に戻れない問題があった。
+  const { data: communitiesByPost = {} } = useQuery({
+    queryKey: ['post-communities-of', id],
+    queryFn: () => fetchCommunitiesForPosts([id]),
+    enabled: !!id,
+    staleTime: 60_000,
+  });
+  const postCommunities = communitiesByPost[id] ?? [];
 
   const { show } = useToastStore();
 
@@ -238,6 +250,40 @@ export default function PostDetailScreen() {
               <ObsidianSaveButton note={postToObsidianNote(post)} size={18} />
             </View>
             <Text style={[T.body, { color: C.text, lineHeight: 24 }]}>{post.content}</Text>
+            {/* コミュニティピル (cross-post / community_*) — タップで該当コミュへ */}
+            {postCommunities.length > 0 && (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                <Text style={[T.caption, { color: C.text3 }]}>📍 投稿先:</Text>
+                {postCommunities.map((c) => (
+                  <PressableScale
+                    key={c.id}
+                    onPress={() => router.push(`/community/${c.id}` as never)}
+                    haptic="tap"
+                    hitSlop={6}
+                    accessibilityLabel={`${c.name} コミュニティへ移動`}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      paddingHorizontal: SP['2'],
+                      paddingVertical: 3,
+                      backgroundColor: c.is_official ? C.accentBg : C.bg3,
+                      borderWidth: 1,
+                      borderColor: c.is_official ? C.accent : C.border,
+                      borderRadius: R.full,
+                    }}
+                  >
+                    {c.icon_url ? null : <Text style={{ fontSize: 11 }}>{c.icon_emoji}</Text>}
+                    <Text style={[T.caption, {
+                      color: c.is_official ? C.accent : C.text2,
+                      fontWeight: '700',
+                    }]} numberOfLines={1}>
+                      {c.name}
+                    </Text>
+                  </PressableScale>
+                ))}
+              </View>
+            )}
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'], alignItems: 'center' }}>
               {Array.from(new Set(post.tag_names)).map((tag) => (
                 <TagPill key={tag} name={tag} state="normal" onPress={() => router.push(`/tag/${encodeURIComponent(tag)}` as never)} />

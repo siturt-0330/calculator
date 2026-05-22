@@ -1,7 +1,8 @@
 import { View, Text, ScrollView, RefreshControl, Image } from 'react-native';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { C, R, SP, SHADOW } from '../../../design/tokens';
 import { T } from '../../../design/typography';
 import { TABBAR } from '../../../design/tabbar';
@@ -9,8 +10,11 @@ import { Icon } from '../../../constants/icons';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { OfficialBadge } from '../../../components/community/OfficialBadge';
-import { fetchMyCommunities, fetchMyCommunityFeed } from '../../../lib/api/communities';
-import type { Community, CommunityPostWithCommunity } from '../../../lib/api/communities';
+import {
+  fetchMyCommunities,
+  fetchMyCommunityFeed,
+  subscribeToMyCommunityChanges,
+} from '../../../lib/api/communities';
 import { useAuthStore } from '../../../stores/authStore';
 
 function timeAgo(iso: string): string {
@@ -27,47 +31,65 @@ function timeAgo(iso: string): string {
 export default function CommunityScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  // user 以外のフィールド (hydrated 等) の変化で再 render されないよう scoped
   const user = useAuthStore((s) => s.user);
-  const [myCommunities, setMyCommunities] = useState<Community[]>([]);
-  const [posts, setPosts] = useState<CommunityPostWithCommunity[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const qc = useQueryClient();
 
-  const load = useCallback(async () => {
-    const [comms, feed] = await Promise.all([
-      fetchMyCommunities(),
-      fetchMyCommunityFeed(40),
-    ]);
-    setMyCommunities(comms);
-    setPosts(feed);
-  }, []);
+  // React Query 化 — 旧 useState+useEffect だと:
+  //   - 別画面で join しても戻った時に古いリストが見える (stale)
+  //   - ネットワーク失敗時の自動 retry がない
+  //   - キャッシュ統一されておらず複数画面で重複 fetch
+  // を解決する。
+  const myCommunitiesQuery = useQuery({
+    queryKey: ['my-communities', user?.id],
+    queryFn: fetchMyCommunities,
+    enabled: !!user,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+  });
 
+  const feedQuery = useQuery({
+    queryKey: ['my-community-feed', user?.id],
+    queryFn: () => fetchMyCommunityFeed(40),
+    enabled: !!user,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+  });
+
+  const myCommunities = myCommunitiesQuery.data ?? [];
+  const posts = feedQuery.data ?? [];
+  const loading = myCommunitiesQuery.isLoading || feedQuery.isLoading;
+  const refreshing = myCommunitiesQuery.isFetching && !myCommunitiesQuery.isLoading;
+
+  // realtime: 自分が別画面で join/leave した時に即時反映
   useEffect(() => {
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    load().finally(() => setLoading(false));
-  }, [user, load]);
+    if (!user?.id) return;
+    const sub = subscribeToMyCommunityChanges(user.id, () => {
+      qc.invalidateQueries({ queryKey: ['my-communities', user.id] });
+      qc.invalidateQueries({ queryKey: ['my-community-feed', user.id] });
+    });
+    return () => sub.unsubscribe();
+  }, [user?.id, qc]);
 
-  // タブ復帰時に最新化
+  // タブ復帰時に refetch (ただし staleTime 内ならキャッシュ使用)
   useFocusEffect(
     useCallback(() => {
-      if (user) void load();
-    }, [user, load]),
+      if (!user?.id) return;
+      void qc.invalidateQueries({ queryKey: ['my-communities', user.id] });
+      void qc.invalidateQueries({ queryKey: ['my-community-feed', user.id] });
+    }, [user?.id, qc]),
   );
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
-  };
+  const onRefresh = useCallback(async () => {
+    if (!user?.id) return;
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ['my-communities', user.id] }),
+      qc.invalidateQueries({ queryKey: ['my-community-feed', user.id] }),
+    ]);
+  }, [user?.id, qc]);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* 上部ヘッダ — YouTube のロゴ列に相当 */}
+      {/* 上部ヘッダ */}
       <View
         style={{
           paddingTop: insets.top + SP['2'],
@@ -86,6 +108,7 @@ export default function CommunityScreen() {
           onPress={() => router.push('/community/discover' as never)}
           haptic="tap"
           style={{ padding: SP['2'] }}
+          accessibilityLabel="コミュニティを検索"
         >
           <Icon.search size={22} color={C.text} strokeWidth={2.2} />
         </PressableScale>
@@ -100,7 +123,6 @@ export default function CommunityScreen() {
             gap: 4,
             backgroundColor: C.accent,
             borderRadius: R.full,
-            // primary CTA halo
             ...SHADOW.accentGlow,
           }}
         >
@@ -119,6 +141,25 @@ export default function CommunityScreen() {
       >
         {/* 横スクロール: 自分の所属コミュニティ */}
         <View style={{ paddingTop: SP['4'], paddingBottom: SP['3'] }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingHorizontal: SP['4'],
+              marginBottom: SP['2'],
+            }}
+          >
+            <Text style={[T.smallB, { color: C.text2, letterSpacing: 0.4, fontWeight: '700' }]}>
+              参加中
+              {myCommunities.length > 0 && (
+                <Text style={[T.smallB, { color: C.text3 }]}>  {myCommunities.length}</Text>
+              )}
+            </Text>
+            {myCommunities.length > 4 && (
+              <Text style={[T.caption, { color: C.text3 }]}>← スワイプで全部見る</Text>
+            )}
+          </View>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -185,10 +226,7 @@ export default function CommunityScreen() {
                   </View>
                   <Text
                     numberOfLines={1}
-                    style={[
-                      T.caption,
-                      { color: C.text2, marginTop: 4, textAlign: 'center' },
-                    ]}
+                    style={[T.caption, { color: C.text2, marginTop: 4, textAlign: 'center' }]}
                   >
                     {c.name}
                   </Text>
@@ -281,7 +319,9 @@ export default function CommunityScreen() {
           ) : (
             posts.map((p) => (
               <PressableScale
-                key={p.id}
+                // 監査指摘: 同じ post が複数コミュに attach されると key={p.id} で衝突する。
+                // community_id を合成 key にして React の重複警告と稀ちらつきを回避。
+                key={`${p.community_id}:${p.id}`}
                 onPress={() => router.push(`/community/${p.community_id}` as never)}
                 haptic="tap"
                 scaleValue={0.985}
@@ -294,7 +334,6 @@ export default function CommunityScreen() {
                   gap: SP['2'],
                 }}
               >
-                {/* ヘッダ行: アイコン + コミュ名 + 時刻 */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
                   <View
                     style={{
@@ -329,7 +368,6 @@ export default function CommunityScreen() {
                     </Text>
                   </View>
                 </View>
-                {/* 本文 */}
                 <Text style={[T.body, { color: C.text }]} numberOfLines={4}>
                   {p.body}
                 </Text>
