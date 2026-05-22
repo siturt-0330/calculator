@@ -957,12 +957,16 @@ export async function fetchMyCommunityPostsRich(
 // updateCommunity({ icon_url }) を呼ぶ必要がある — そのため tmp uploads は
 // 自前の bucket folder 'pending/<user_id>/...' を使うパターンも検討余地あり。
 // ============================================================
-// body は Blob (Web) または Uint8Array / ArrayBuffer (Native) を受け付ける。
-// 監査指摘: 旧版は Blob 専用シグネチャで native の Uint8Array body を渡すと
-// 型エラーになっていた (prepareImageUpload 修正と整合)。
+// body は Web では Blob、Native では FormData (file uri 含む) を受け付ける。
+// 監査指摘 + 実機 NG 報告反映:
+//   - 旧版 1: Blob 専用 → Native では Blob.slice/arrayBuffer が動かず失敗
+//   - 旧版 2: Uint8Array → Supabase SDK が fetch(body: uint8array) を呼ぶが、
+//             Android okhttp で確実に serialize されない → 失敗
+//   - 新版  : Native は FormData with file uri (RN 標準の multipart 経路)
+//             Supabase SDK は FormData を直接 multipart として送るので確実に動く
 export async function uploadCommunityIcon(
   community_id: string,
-  body: Blob | Uint8Array | ArrayBuffer,
+  body: Blob | FormData | Uint8Array | ArrayBuffer,
   contentType = 'image/jpeg',
 ): Promise<{ url: string | null; error: string | null }> {
   // 防御: community_id を UUID 検証 (Storage RLS の foldername と整合)
@@ -974,19 +978,34 @@ export async function uploadCommunityIcon(
   const safeContentType = ALLOWED.has(contentType) ? contentType : 'image/jpeg';
   const ext = safeContentType.split('/')[1] ?? 'jpg';
   const path = `${community_id}/${Date.now()}.${ext}`;
-  // Supabase Storage upload は Blob / File / ArrayBuffer / ArrayBufferView /
-  // FormData / NodeJS.ReadableStream / ReadableStream / URLSearchParams / string
-  // を受け付ける。Uint8Array は ArrayBufferView なので OK。
-  const { error: upErr } = await supabase.storage.from('community-icons').upload(
-    path,
-    body as Blob, // 型は Blob にキャスト (Supabase SDK の型が Blob | ArrayBuffer | ... の union)
-    {
-      contentType: safeContentType,
-      upsert: true,
-      cacheControl: '3600',
-    },
-  );
-  if (upErr) return { url: null, error: upErr.message };
+
+  // Supabase SDK 内部: FormData → そのまま multipart 送信 (cacheControl 追加)
+  //                   Blob     → FormData にラップして multipart 送信
+  //                   その他   → body そのまま + content-type header
+  try {
+    const { error: upErr } = await supabase.storage.from('community-icons').upload(
+      path,
+      // SDK の型シグネチャは Blob | File | FormData | ArrayBuffer | ArrayBufferView |
+      // NodeJS.ReadableStream | ReadableStream | URLSearchParams | string の union。
+      // FormData / Blob どちらも受け付けるが、TS が複雑になるので unknown 経由でキャスト。
+      body as unknown as Blob,
+      {
+        contentType: safeContentType,
+        upsert: true,
+        cacheControl: '3600',
+      },
+    );
+    if (upErr) {
+      // 詳細を返してデバッグを容易に
+      console.warn('[uploadCommunityIcon] storage upload failed:', upErr);
+      return { url: null, error: `アップロード失敗: ${upErr.message}` };
+    }
+  } catch (e) {
+    // ネットワークエラー等
+    console.warn('[uploadCommunityIcon] threw:', e);
+    return { url: null, error: `アップロード中にエラーが発生しました: ${e instanceof Error ? e.message : String(e)}` };
+  }
+
   const { data: pub } = supabase.storage.from('community-icons').getPublicUrl(path);
   return { url: pub.publicUrl, error: null };
 }

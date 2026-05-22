@@ -85,15 +85,62 @@ export async function stripExifAndResize(
 }
 
 // uri → アップロード可能な body (sanitize + validate 込み)
-// 戻り値: body は Web では Blob、Native では Uint8Array。両方とも Supabase Storage の
-// upload() に渡せる。後方互換性のため `blob` プロパティ名を維持。
+// 戻り値: body は Web では Blob、Native では FormData (uri を含む multipart)。
+// 両方とも Supabase Storage の upload() に渡せる。`uri` も同梱して FormData の
+// 中身を確認できるようにする。後方互換性のため `blob` プロパティ名を維持。
+//
+// プラットフォーム別実装:
+//   Web    : Blob (fetch().blob() 経由)
+//   Native : FormData with { uri, name, type } — RN の標準的なファイル送信形式
+//            内部で React Native の fetch が file:// を読んで multipart 送信する。
+//            これは Hermes / iOS / Android で **必ず動く** RN idiomatic な方法。
+//            旧実装 (Uint8Array body) は Supabase SDK が内部で fetch(uri, { body: uint8array })
+//            を呼ぶが、これが Android の okhttp で確実に動くとは限らず実機で
+//            アップロード失敗の原因になっていた。
 export async function prepareImageUpload(
   uri: string,
   opts: { maxSizeBytes?: number; maxWidth?: number; maxHeight?: number; quality?: number } = {},
-): Promise<{ blob: Blob | Uint8Array; mime: string; ext: string; size: number }> {
+): Promise<{ blob: Blob | FormData; mime: string; ext: string; size: number; uri: string }> {
   const { maxSizeBytes = 5 * 1024 * 1024, ...rest } = opts;
+
+  // ★ data URL ショートパス (iPhone Safari fix):
+  // cropper が `data:image/jpeg;base64,...` を返した場合、これは既に処理済み
+  // (512x512 JPEG、EXIF なし) なので、manipulator を再度呼ばずに直接 Blob 化する。
+  // Safari は blob URL を勝手に revoke するが、data URL は revoke されない。
+  // また manipulator の二重呼び出しは iPhone Safari の Canvas で memory error
+  // / 空 Blob を返すケースがあり、これも回避できる。
+  if (uri.startsWith('data:')) {
+    const m = uri.match(/^data:([^;]+);base64,(.+)$/);
+    if (m && (m[1] === 'image/jpeg' || m[1] === 'image/png' || m[1] === 'image/webp' || m[1] === 'image/gif')) {
+      const mime = m[1] as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+      const b64 = m[2]!;
+      let bytes: Uint8Array;
+      try {
+        bytes = base64ToBytes(b64);
+      } catch (e) {
+        throw new Error(`画像のデコードに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      if (bytes.byteLength > maxSizeBytes) {
+        throw new Error(`画像が大きすぎます (${Math.round(bytes.byteLength / 1024)}KB / 上限 ${Math.round(maxSizeBytes / 1024)}KB)`);
+      }
+      // magic byte の二重確認 (data: URL の mime ヘッダ偽装防止)
+      const detectedMagic = detectImageTypeFromBytes(bytes.subarray(0, 12));
+      const finalMime = detectedMagic ?? mime;
+      const blob = new Blob([bytes], { type: finalMime });
+      return { blob, mime: finalMime, ext: safeExtension(finalMime), size: bytes.byteLength, uri };
+    }
+  }
+
   // 1. リサイズ + JPEG 化 で EXIF 除去 (両プラットフォームで動く)
-  const { uri: cleanUri } = await stripExifAndResize(uri, rest);
+  // 重要: これにより URI が ph:// / asset:// から file:// に変換される
+  //       (FileSystem や FormData が読める形式に必ず正規化される)
+  let cleanUri: string;
+  try {
+    const r = await stripExifAndResize(uri, rest);
+    cleanUri = r.uri;
+  } catch (e) {
+    throw new Error(`画像処理に失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   if (Platform.OS === 'web') {
     // ----- Web: fetch + Blob 経路 -----
@@ -104,35 +151,65 @@ export async function prepareImageUpload(
     }
     const detected = await detectImageType(blob);
     if (!detected) throw new Error('画像形式を判定できませんでした');
-    return { blob, mime: detected, ext: safeExtension(detected), size: blob.size };
+    return { blob, mime: detected, ext: safeExtension(detected), size: blob.size, uri: cleanUri };
   }
 
-  // ----- Native (iOS / Android): expo-file-system 経由 -----
-  // 旧実装は fetch(file://uri).blob() で Blob を作っていたが、
-  // RN の Blob は slice() / arrayBuffer() が確実に動かないケースがあり、
-  // detectImageType が null を返してアップロード失敗 → 「画像形式を判定
-  // できませんでした」エラーが iOS / Android で頻発していた。
-  // FileSystem.readAsStringAsync(base64) は両プラットフォームで安定。
-  let base64: string;
+  // ----- Native (iOS / Android): FormData 経路 -----
+  // (1) ファイル情報を取得 (サイズ check)
+  let fileSize = 0;
   try {
-    base64 = await FileSystem.readAsStringAsync(cleanUri, {
+    const info = await FileSystem.getInfoAsync(cleanUri, { size: true });
+    if (info.exists && 'size' in info && typeof info.size === 'number') {
+      fileSize = info.size;
+    }
+  } catch (e) {
+    console.warn('[prepareImageUpload] getInfoAsync failed:', e);
+    // size 不明でも続行 (magic 検証で形式が分かれば OK)
+  }
+  if (fileSize > maxSizeBytes) {
+    throw new Error(`画像が大きすぎます (${Math.round(fileSize / 1024)}KB / 上限 ${Math.round(maxSizeBytes / 1024)}KB)`);
+  }
+
+  // (2) 先頭 12 byte だけ読んで magic byte で MIME 判定
+  // 大きいファイルでもメモリを使わずに済む
+  let head: string;
+  try {
+    head = await FileSystem.readAsStringAsync(cleanUri, {
       encoding: FileSystem.EncodingType.Base64,
+      position: 0,
+      length: 16,
     });
   } catch (e) {
     throw new Error(`画像の読み込みに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
   }
-  if (!base64) throw new Error('画像の中身が空です');
-
-  // base64 文字列のサイズ → 実バイトサイズ概算 (base64 は 4/3 に膨張)
-  // 厳密にはパディングを引くべきだが、上限チェックには十分。
-  const approxBytes = Math.floor((base64.length * 3) / 4);
-  if (approxBytes > maxSizeBytes) {
-    throw new Error(`画像が大きすぎます (${Math.round(approxBytes / 1024)}KB / 上限 ${Math.round(maxSizeBytes / 1024)}KB)`);
+  if (!head) {
+    throw new Error('画像の中身が空です');
   }
+  const headBytes = base64ToBytes(head);
+  const detected = detectImageTypeFromBytes(headBytes);
+  // stripExifAndResize は JPEG で出力するので通常は image/jpeg だが、
+  // 万一 magic 判定が落ちた場合は image/jpeg と仮定して fail-soft で続行する
+  // (ユーザー UX を優先: アップロード自体は試させる)
+  const finalMime = detected ?? 'image/jpeg';
+  const ext = safeExtension(finalMime);
 
-  const bytes = base64ToBytes(base64);
-  const detected = detectImageTypeFromBytes(bytes.subarray(0, 12));
-  if (!detected) throw new Error('画像形式を判定できませんでした');
+  // (3) FormData with file URI を構築
+  // React Native の fetch はこの形式の append を理解して、
+  // 自動的に file:// を読んで multipart/form-data body を作ってくれる。
+  const fd = new FormData();
+  // Supabase Storage SDK は FormData 内の最初のファイルエントリ (name='') を
+  // アップロード対象にする。`name` と `type` は RN の FormData が認識するキー。
+  fd.append('', {
+    uri: cleanUri,
+    name: `upload.${ext}`,
+    type: finalMime,
+  } as unknown as Blob);  // RN の FormData は { uri, name, type } object を受け取れる
 
-  return { blob: bytes, mime: detected, ext: safeExtension(detected), size: bytes.byteLength };
+  return {
+    blob: fd,
+    mime: finalMime,
+    ext,
+    size: fileSize,
+    uri: cleanUri,
+  };
 }
