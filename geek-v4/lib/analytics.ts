@@ -1,23 +1,16 @@
-import { Platform } from 'react-native';
-import { ENV } from './env';
+// ============================================================
+// Analytics — no-op implementation
+// ============================================================
+// PostHog (posthog-react-native) はバンドル肥大化のため完全除去。
+// 互換性のため initAnalytics() / track() の API シグネチャは維持し、
+// 内部実装は no-op に置き換え。既存呼び出し側 (lib/webVitals.ts 等) は
+// そのまま動作する。将来別の analytics SDK を入れる場合はここを差し替え。
+// ============================================================
 
-let posthog: { capture: (event: string, props?: Record<string, unknown>) => void } | null = null;
-
-export function initAnalytics() {
-  if (!ENV.POSTHOG_KEY) return;
-  try {
-    // PostHog は動的 import で初期化（バンドルサイズ対策）
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { PostHog } = require('posthog-react-native');
-    posthog = new PostHog(ENV.POSTHOG_KEY, { host: ENV.POSTHOG_HOST });
-  } catch {
-    // PostHog 未設定でもクラッシュさせない
-  }
+export function initAnalytics(): void {
+  // no-op
 }
 
-export function track(event: string, props?: Record<string, unknown>) {
-  if (!posthog) return;
-  try {
-    posthog.capture(event, { platform: Platform.OS, ...props });
-  } catch { /* ignore */ }
+export function track(_event: string, _props?: Record<string, unknown>): void {
+  // no-op
 }

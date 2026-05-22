@@ -20,7 +20,12 @@ import { StepProgress } from './_progress';
 
 export default function BlockedTagsScreen() {
   const [input, setInput] = useState('');
-  const { likedTags, blockedTags, addBlocked, removeBlocked } = useTagFilterStore();
+  // selector化 — `hydrated` フラグ等他 field の変化で巻き込み re-render
+  // しないよう、必要 field/action のみ subscribe する。
+  const likedTags = useTagFilterStore((s) => s.likedTags);
+  const blockedTags = useTagFilterStore((s) => s.blockedTags);
+  const addBlocked = useTagFilterStore((s) => s.addBlocked);
+  const removeBlocked = useTagFilterStore((s) => s.removeBlocked);
   const { nodes, rootIds, hydrate: hydrateGraph } = useTagGraphStore();
   const { show } = useToastStore();
   const router = useRouter();

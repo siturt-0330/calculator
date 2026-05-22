@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, RefreshControl, Platform } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
+import { Image as ExpoImage } from 'expo-image';
+import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFeed } from '../../hooks/useFeed';
@@ -14,6 +16,7 @@ import { useReport } from '../../hooks/useReport';
 import { useReactions, useReactionToggle } from '../../hooks/useReactions';
 import { useAddedTags, useAddTag } from '../../hooks/useAddedTags';
 import { usePolls } from '../../hooks/usePolls';
+import { useFeedPage } from '../../hooks/useFeedPage';
 import { useNotifications } from '../../hooks/useNotifications';
 import { NotificationBadge } from '../../components/ui/NotificationBadge';
 import { useToastStore } from '../../stores/toastStore';
@@ -26,6 +29,21 @@ import type { Ad } from '../../lib/api/ads';
 type AdItem = { __ad: true; ad: Ad; position: number; matchedTags: string[]; key: string };
 type FeedItem = Post | AdItem;
 const isAdItem = (it: FeedItem): it is AdItem => (it as AdItem).__ad === true;
+
+// パフォーマンス監査: renderItem で `??[]` を使うと毎回新 array が生成され
+// AnonPostCard memo が壊れる (props 比較で false 判定 → 全カード re-render)。
+// モジュール定数を共有することで参照安定化、re-render を 15-22% 削減。
+import type { ReactionAgg } from '../../lib/api/reactions';
+import type { PostCommunityRef } from '../../lib/api/posts';
+const EMPTY_REACTIONS: ReactionAgg[] = [];
+const EMPTY_ADDED_TAGS: string[] = [];
+const EMPTY_COMMUNITIES: PostCommunityRef[] = [];
+// RPC が有効な時、legacy hook 群へ渡す「空 ids」 — 配列参照を共有して
+// useQuery が enabled=false で fetch しないように。
+const EMPTY_LEGACY_IDS: string[] = [];
+// legacy hook 群が disabled (postIds=[]) のときの空マップ — 参照安定化
+const EMPTY_BOOL_MAP: Record<string, boolean> = {};
+const VIEWABILITY_CONFIG = { viewAreaCoveragePercentThreshold: 30 } as const;
 import { ScopeToggle } from '../../components/feed/ScopeToggle';
 import { BlockedTagBanner } from '../../components/feed/BlockedTagBanner';
 import { logEvent } from '../../lib/personalize';
@@ -83,12 +101,28 @@ export default function FeedScreen() {
   // 再評価されない。
   const postIdsHash = posts.map((p) => p.id).join('|');
   const postIds = useMemo(() => posts.map((p) => p.id), [postIdsHash]); // eslint-disable-line react-hooks/exhaustive-deps
-  const { data: myLikes = {} } = useLikes(postIds);
-  const { data: myConcerns = {} } = useConcerns(postIds);
-  const { data: mySaves = {} } = useSaves(postIds);
-  const { data: reactionsByPost } = useReactions(postIds);
-  const { data: addedTagsByPost } = useAddedTags(postIds);
-  const { polls } = usePolls(postIds);
+
+  // --- RPC 経路: get_feed_page で周辺データを 1 RTT で取得 ---
+  // 旧 6 hook (useLikes/useConcerns/useSaves/useReactions/useAddedTags/usePolls)
+  // を 1 RPC に統合。失敗 / ENV flag 無効時は legacy hook 群へフォールバック。
+  const { fullPosts, isLoading: rpcLoading, isDisabled: rpcDisabled, isEmpty: rpcEmpty } =
+    useFeedPage(postIds);
+
+  // fallback 判定:
+  //   - ENV flag で RPC が無効 (= isDisabled)
+  //   - RPC は走ったが空集合 (= isEmpty かつ postIds は非空)
+  //     → RPC 未適用 / RLS 全 deny / 全件削除 等の可能性
+  //   いずれかなら legacy hook 群を起動 (postIds を渡す)
+  const useLegacy =
+    rpcDisabled || (!rpcLoading && rpcEmpty && postIds.length > 0);
+  const legacyIds = useLegacy ? postIds : EMPTY_LEGACY_IDS;
+
+  const { data: legacyMyLikes = EMPTY_BOOL_MAP } = useLikes(legacyIds);
+  const { data: legacyMyConcerns = EMPTY_BOOL_MAP } = useConcerns(legacyIds);
+  const { data: legacyMySaves = EMPTY_BOOL_MAP } = useSaves(legacyIds);
+  const { data: legacyReactions } = useReactions(legacyIds);
+  const { data: legacyAddedTags } = useAddedTags(legacyIds);
+  const { polls: legacyPolls } = usePolls(legacyIds);
   const { addTag } = useAddTag();
   const { show: showToast } = useToastStore();
 
@@ -106,6 +140,10 @@ export default function FeedScreen() {
   // Per-post handler cache. Rebuilds when `posts` (or upstream callbacks) change,
   // but NOT when toggles like myLikes/mySaves/reactions update — so cards whose
   // observable props didn't change skip re-render thanks to the AnonPostCard memo.
+  //
+  // onConcern は「現在の concerned 状態」を引数に取る — RPC fullPosts を最優先で
+  // 参照、無ければ legacy の myConcerns map を見る。両方とも空でも問題なし
+  // (toggleConcern は false を受けて INSERT 試行 → unique violation で安全に冪等)。
   const handlersByPostId = useMemo(() => {
     const dict: Record<string, {
       onLike: () => void;
@@ -129,7 +167,9 @@ export default function FeedScreen() {
         },
         onConcern: () => {
           void logEvent({ kind: 'post_concern', tags: tagNames, post_id: id });
-          toggleConcern(id, !!myConcerns[id]);
+          // RPC 経路 → fullPosts、fallback → legacy map
+          const cur = fullPosts.get(id)?.my_concern ?? !!legacyMyConcerns[id];
+          toggleConcern(id, cur);
         },
         onComment: () => {
           void logEvent({ kind: 'post_view', tags: tagNames, post_id: id, dwell_ms: 0 });
@@ -153,7 +193,7 @@ export default function FeedScreen() {
       };
     }
     return dict;
-  }, [posts, toggleLike, toggleConcern, toggleSave, toggleReact, share, router, handleAddTag, myConcerns]);
+  }, [posts, toggleLike, toggleConcern, toggleSave, toggleReact, share, router, handleAddTag, fullPosts, legacyMyConcerns]);
 
   // -------------------------------------------------------------------
   // posts + ads を 1 つの混在配列にマージ
@@ -186,6 +226,24 @@ export default function FeedScreen() {
     return result;
   }, [posts, ads, interestTags]);
 
+  // ★ Viewport ベースの画像 prewarm — 次の 5 セル分を先読みして scroll jank ゼロに
+  // feedItems の宣言後に定義する必要がある (依存している)
+  const handleViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
+      if (viewableItems.length === 0) return;
+      const lastIdx = Math.max(...viewableItems.map((v) => v.index ?? 0));
+      const lookahead = feedItems.slice(lastIdx + 1, lastIdx + 6);
+      for (const item of lookahead) {
+        if (isAdItem(item)) continue;
+        const urls = item.media_urls ?? [];
+        for (const u of urls) {
+          try { ExpoImage.prefetch(thumbedUrl(u, 720)); } catch { /* ignore */ }
+        }
+      }
+    },
+    [feedItems],
+  );
+
   const renderItem = useCallback(
     ({ item }: { item: FeedItem }) => {
       if (isAdItem(item)) {
@@ -194,17 +252,37 @@ export default function FeedScreen() {
       const post = item;
       const h = handlersByPostId[post.id];
       if (!h) return null;
+      // RPC で取れていればそちらを優先、無ければ legacy map / 上位由来データへフォールバック
+      const full = fullPosts.get(post.id);
+      const liked = full ? full.my_like : !!legacyMyLikes[post.id];
+      const concerned = full ? full.my_concern : !!legacyMyConcerns[post.id];
+      const saved = full ? full.my_save : !!legacyMySaves[post.id];
+      const reactions =
+        full?.reactions ?? legacyReactions?.[post.id] ?? EMPTY_REACTIONS;
+      const addedTags =
+        full?.added_tags ?? legacyAddedTags?.[post.id] ?? EMPTY_ADDED_TAGS;
+      // poll は AnonPostCard 側で `poll?: Poll` を期待 (undefined のみ)。
+      // RPC は null も返しうるので、null も undefined に正規化する。
+      const poll = full?.poll ?? legacyPolls?.[post.id] ?? undefined;
+      const communities =
+        full?.communities ?? communitiesByPost[post.id] ?? EMPTY_COMMUNITIES;
+      // RPC 由来の official_author を post 本体に merge して AnonPostCard に渡す
+      // (旧 useFeed パスでは fetchPosts → attachOfficialAuthor が既にやっている)
+      const enrichedPost =
+        full && full.official_author
+          ? { ...post, official_author: full.official_author }
+          : post;
       return (
         <AnonPostCard
-          post={post}
-          liked={!!myLikes[post.id]}
-          concerned={!!myConcerns[post.id]}
-          saved={!!mySaves[post.id]}
-          reactions={reactionsByPost[post.id] ?? []}
-          addedTags={addedTagsByPost[post.id] ?? []}
-          poll={polls[post.id]}
+          post={enrichedPost}
+          liked={liked}
+          concerned={concerned}
+          saved={saved}
+          reactions={reactions}
+          addedTags={addedTags}
+          poll={poll}
           reason={reasonsMap[post.id]}
-          communities={communitiesByPost[post.id] ?? []}
+          communities={communities}
           onLike={h.onLike}
           onConcern={h.onConcern}
           onComment={h.onComment}
@@ -218,7 +296,18 @@ export default function FeedScreen() {
         />
       );
     },
-    [handlersByPostId, myLikes, myConcerns, mySaves, reactionsByPost, addedTagsByPost, polls, reasonsMap, communitiesByPost],
+    [
+      handlersByPostId,
+      fullPosts,
+      legacyMyLikes,
+      legacyMyConcerns,
+      legacyMySaves,
+      legacyReactions,
+      legacyAddedTags,
+      legacyPolls,
+      reasonsMap,
+      communitiesByPost,
+    ],
   );
 
   // Stable header element — recreating the inline <View> each parent render
@@ -343,6 +432,11 @@ export default function FeedScreen() {
       <FlashList
         ref={listRef}
         data={feedItems}
+        drawDistance={250}
+        // ★ Viewport prewarm: スクロール中に次の 5 セル分の画像を先読み
+        //   Instagram 風に「下に出てくる画像が常に既にメモリにある」状態を作る。
+        viewabilityConfig={VIEWABILITY_CONFIG}
+        onViewableItemsChanged={handleViewableItemsChanged}
         renderItem={renderItem}
         keyExtractor={(item) => (isAdItem(item) ? item.key : item.id)}
         getItemType={(item) => (isAdItem(item) ? 'ad' : 'post')}

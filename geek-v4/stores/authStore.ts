@@ -5,30 +5,40 @@ import { supabase } from '../lib/supabase';
 import type { User } from '@supabase/supabase-js';
 import { detachAllChannels } from '../lib/realtime';
 import { setUnauthorizedHandler } from '../lib/resilient';
+import { getBool, setBool, remove as storageRemove, contains as storageContains } from '../lib/storage';
 
 // onboarded 状態のローカルキャッシュ — プロフィール取得失敗時のフォールバック
+//
+// MMKV (native) / localStorage (web) を同期で叩く。AsyncStorage の bridge
+// round-trip が cold start から消えるので、 hydrate 時の onboarded 復元が
+// ~50-150ms 短縮される。
 const ONBOARDED_KEY = 'geek-v4-onboarded';
-async function getCachedOnboarded(userId: string): Promise<boolean | null> {
-  try {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const v = window.localStorage.getItem(`${ONBOARDED_KEY}:${userId}`);
-      return v === '1' ? true : v === '0' ? false : null;
-    }
-    const v = await AsyncStorage.getItem(`${ONBOARDED_KEY}:${userId}`);
-    return v === '1' ? true : v === '0' ? false : null;
-  } catch {
-    return null;
-  }
+function onboardedKey(userId: string): string {
+  return `${ONBOARDED_KEY}:${userId}`;
 }
-async function setCachedOnboarded(userId: string, onboarded: boolean) {
+function getCachedOnboardedSync(userId: string): boolean | null {
+  const v = getBool(onboardedKey(userId));
+  return v === undefined ? null : v;
+}
+function setCachedOnboardedSync(userId: string, onboarded: boolean): void {
+  setBool(onboardedKey(userId), onboarded);
+}
+
+// 旧 AsyncStorage キーから 1 度だけ MMKV へ移行 (native のみ)。
+// fire-and-forget で kick — hydrate 完了は待たない (旧ユーザーは初回起動 1 回だけ
+// MMKV に値が無いので server から正しい値を取得できる)。
+async function migrateOnboardedKey(userId: string): Promise<void> {
+  if (Platform.OS === 'web') return;
+  const key = onboardedKey(userId);
+  // 既に MMKV にあればスキップ — AsyncStorage の旧値より新しい
+  if (storageContains(key)) return;
   try {
-    const v = onboarded ? '1' : '0';
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.localStorage.setItem(`${ONBOARDED_KEY}:${userId}`, v);
-      return;
-    }
-    await AsyncStorage.setItem(`${ONBOARDED_KEY}:${userId}`, v);
-  } catch {}
+    const v = await AsyncStorage.getItem(key);
+    if (v === '1') setBool(key, true);
+    else if (v === '0') setBool(key, false);
+  } catch {
+    /* swallow */
+  }
 }
 
 type AppUser = User & {
@@ -73,18 +83,19 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
 }
 
 async function buildUser(authUser: User): Promise<AppUser> {
+  // 旧 AsyncStorage キーがあれば MMKV へ非同期 migrate (初回のみ)。
+  // hydrate 完了は待たない — 旧ユーザー初回限定の 1 回処理。
+  void migrateOnboardedKey(authUser.id);
   // プロフィール取得は 3 秒でタイムアウト → ログインを絶対詰まらせない
   const profile = await withTimeout(fetchProfile(authUser.id), 3000);
   let onboarded: boolean | undefined = profile?.onboarded;
   if (onboarded === undefined || onboarded === null) {
-    // プロフィール取得失敗 → キャッシュから復元
-    const cached = await withTimeout(getCachedOnboarded(authUser.id), 1000);
-    if (cached !== null) onboarded = cached ?? undefined;
+    // プロフィール取得失敗 → キャッシュから同期復元 (MMKV/localStorage)
+    const cached = getCachedOnboardedSync(authUser.id);
+    if (cached !== null) onboarded = cached;
   } else {
-    // 失敗してもログだけ
-    void setCachedOnboarded(authUser.id, onboarded).catch((e) =>
-      console.warn('[authStore] cache write failed:', e),
-    );
+    // 同期保存 (失敗時は内部で swallow)
+    setCachedOnboardedSync(authUser.id, onboarded);
   }
   return { ...authUser, ...(profile ?? {}), onboarded };
 }
@@ -375,12 +386,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // 全 realtime channel を強制 detach
       try { detachAllChannels(); } catch (e) { console.warn('detachAllChannels error:', e); }
       // onboarded キャッシュ + supabase auth キーを掃除
+      // - onboarded は MMKV / localStorage 経由 (同期)
+      // - supabase auth は AsyncStorage に session を持つので AsyncStorage 直叩き
+      //   (Web は localStorage)
+      try {
+        if (u) storageRemove(onboardedKey(u.id));
+      } catch {}
       try {
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          if (u) window.localStorage.removeItem(`${ONBOARDED_KEY}:${u.id}`);
           window.localStorage.removeItem('geek-v4-auth');
         } else {
-          if (u) await AsyncStorage.removeItem(`${ONBOARDED_KEY}:${u.id}`);
           await AsyncStorage.removeItem('geek-v4-auth');
         }
       } catch {}

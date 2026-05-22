@@ -15,7 +15,9 @@ export default function NotificationsOnboarding() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, setUser } = useAuthStore();
-  const settings = useSettingsStore();
+  // selector化: 全 settings store の購読をやめ、必要な action (update) のみ
+  // subscribe する。他フィールド更新による無用な re-render を防止。
+  const updateSetting = useSettingsStore((s) => s.update);
   const { show } = useToastStore();
   const [saving, setSaving] = useState(false);
 
@@ -33,10 +35,10 @@ export default function NotificationsOnboarding() {
           await Notifications.requestPermissionsAsync();
         } catch {}
       }
-      settings.update('notifyLike', allow);
-      settings.update('notifyComment', allow);
-      settings.update('notifyFollow', allow);
-      settings.update('notifyEvent', allow);
+      updateSetting('notifyLike', allow);
+      updateSetting('notifyComment', allow);
+      updateSetting('notifyFollow', allow);
+      updateSetting('notifyEvent', allow);
 
       // ★ DB update を先に await して、成功した時だけローカルを onboarded=true に
       // 旧コードは local を先に書き換えていたため、DB 失敗時に

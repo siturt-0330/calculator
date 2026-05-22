@@ -39,10 +39,28 @@ const ROWS: Row[] = [
 
 export default function NotificationsSettingsScreen() {
   const insets = useSafeAreaInsets();
-  const settings = useSettingsStore();
+  // 全 store 取得をやめて必要 field のみ subscribe — 他の field (language /
+  // dataSaver / reduceMotion 等) が更新されたとき、この screen を re-render
+  // しないようにする。settings は 15+ field あるので大幅な削減になる。
+  const pushEnabled = useSettingsStore((s) => s.pushEnabled);
+  const quietStartHour = useSettingsStore((s) => s.quietStartHour);
+  const quietEndHour = useSettingsStore((s) => s.quietEndHour);
+  const notifyLike = useSettingsStore((s) => s.notifyLike);
+  const notifyComment = useSettingsStore((s) => s.notifyComment);
+  const notifyFollow = useSettingsStore((s) => s.notifyFollow);
+  const notifyEvent = useSettingsStore((s) => s.notifyEvent);
+  const notifyReply = useSettingsStore((s) => s.notifyReply);
+  const notifyMention = useSettingsStore((s) => s.notifyMention);
+  const notifyTagNew = useSettingsStore((s) => s.notifyTagNew);
+  const notifyAnnouncement = useSettingsStore((s) => s.notifyAnnouncement);
+  const update = useSettingsStore((s) => s.update);
+  const settingsValues: Record<Row['key'], boolean> = {
+    notifyLike, notifyComment, notifyFollow, notifyEvent,
+    notifyReply, notifyMention, notifyTagNew, notifyAnnouncement,
+  };
   const [quietPickerOpen, setQuietPickerOpen] = useState<null | 'start' | 'end'>(null);
 
-  const quietActive = isInQuietHours(settings.quietStartHour, settings.quietEndHour);
+  const quietActive = isInQuietHours(quietStartHour, quietEndHour);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -67,20 +85,20 @@ export default function NotificationsSettingsScreen() {
         }}>
           <View style={{
             width: 44, height: 44, borderRadius: 22,
-            backgroundColor: settings.pushEnabled ? C.accent : C.bg3,
+            backgroundColor: pushEnabled ? C.accent : C.bg3,
             alignItems: 'center', justifyContent: 'center',
           }}>
-            <Icon.bell size={22} color={settings.pushEnabled ? '#fff' : C.text3} strokeWidth={2.2} />
+            <Icon.bell size={22} color={pushEnabled ? '#fff' : C.text3} strokeWidth={2.2} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[T.bodyM, { color: C.text, fontWeight: '700' }]}>プッシュ通知</Text>
             <Text style={[T.caption, { color: C.text3 }]}>
-              {settings.pushEnabled ? '有効' : 'すべての通知が無効化されています'}
+              {pushEnabled ? '有効' : 'すべての通知が無効化されています'}
             </Text>
           </View>
           <Switch
-            value={settings.pushEnabled}
-            onValueChange={(v) => settings.update('pushEnabled', v)}
+            value={pushEnabled}
+            onValueChange={(v) => update('pushEnabled', v)}
             trackColor={{ false: C.bg4, true: C.accent }}
             thumbColor="#fff"
           />
@@ -117,20 +135,20 @@ export default function NotificationsSettingsScreen() {
           <View style={{ flexDirection: 'row', gap: SP['2'], alignItems: 'center' }}>
             <HourPickerButton
               label="開始"
-              value={settings.quietStartHour}
+              value={quietStartHour}
               onPress={() => setQuietPickerOpen('start')}
             />
             <Text style={{ color: C.text3 }}>—</Text>
             <HourPickerButton
               label="終了"
-              value={settings.quietEndHour}
+              value={quietEndHour}
               onPress={() => setQuietPickerOpen('end')}
             />
-            {(settings.quietStartHour !== null || settings.quietEndHour !== null) && (
+            {(quietStartHour !== null || quietEndHour !== null) && (
               <PressableScale
                 onPress={() => {
-                  settings.update('quietStartHour', null);
-                  settings.update('quietEndHour', null);
+                  update('quietStartHour', null);
+                  update('quietEndHour', null);
                 }}
                 style={{ paddingHorizontal: SP['2'], paddingVertical: SP['1'] }}
               >
@@ -149,11 +167,11 @@ export default function NotificationsSettingsScreen() {
             borderWidth: 1,
             borderColor: C.border,
             overflow: 'hidden',
-            opacity: settings.pushEnabled ? 1 : 0.45,
+            opacity: pushEnabled ? 1 : 0.45,
           }}>
             {ROWS.map((r, i) => {
               const I = Icon[r.icon];
-              const value = settings[r.key];
+              const value = settingsValues[r.key];
               return (
                 <View key={r.key}>
                   <View style={{
@@ -175,10 +193,10 @@ export default function NotificationsSettingsScreen() {
                     </View>
                     <Switch
                       value={value}
-                      onValueChange={(v) => settings.update(r.key, v)}
+                      onValueChange={(v) => update(r.key, v)}
                       trackColor={{ false: C.bg4, true: C.accent }}
                       thumbColor="#fff"
-                      disabled={!settings.pushEnabled}
+                      disabled={!pushEnabled}
                     />
                   </View>
                   {i < ROWS.length - 1 && <Divider />}
@@ -192,11 +210,11 @@ export default function NotificationsSettingsScreen() {
       <HourPickerModal
         visible={quietPickerOpen !== null}
         title={quietPickerOpen === 'start' ? '開始時刻' : '終了時刻'}
-        value={quietPickerOpen === 'start' ? settings.quietStartHour : settings.quietEndHour}
+        value={quietPickerOpen === 'start' ? quietStartHour : quietEndHour}
         onClose={() => setQuietPickerOpen(null)}
         onConfirm={(h) => {
-          if (quietPickerOpen === 'start') settings.update('quietStartHour', h);
-          else if (quietPickerOpen === 'end') settings.update('quietEndHour', h);
+          if (quietPickerOpen === 'start') update('quietStartHour', h);
+          else if (quietPickerOpen === 'end') update('quietEndHour', h);
           setQuietPickerOpen(null);
         }}
       />

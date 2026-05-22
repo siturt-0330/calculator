@@ -298,9 +298,10 @@ export function useFeed() {
           // INSERT は filter 不可 (新規 id は事前に知り得ない) のため、サーバー filter を
           // かけられないが、debounce で fetch を集約することで実害は最小化される。
           if (pendingTimer.current) clearTimeout(pendingTimer.current);
+          // パフォーマンス監査: 1500ms → 3000ms に延長してバースト時の refetch を半減
           pendingTimer.current = setTimeout(() => {
             qc.invalidateQueries({ queryKey: ['feed'] });
-          }, 1500);
+          }, 3000);
         },
       ),
     );

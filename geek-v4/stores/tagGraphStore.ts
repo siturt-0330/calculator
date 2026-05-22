@@ -135,17 +135,17 @@ async function save(snapshot: { nodes: Record<string, TagNode>; rootIds: string[
   } catch {}
 }
 
-export const useTagGraphStore = create<TagGraphState>((set, get) => ({
-  nodes: {},
-  rootIds: [],
-  hydrated: false,
-
-  hydrate: async () => {
+// パフォーマンス監査: 旧版は 3+ 画面 (onboarding/liked-tags, blocked-tags, settings)
+// から並列で hydrate() が呼ばれ、毎回 AsyncStorage read + JSON parse + 全 nodes
+// reconstruct が走っていた。singleton Promise でロードを 1 回に集約する。
+let _hydratePromise: Promise<{ nodes: Record<string, TagNode>; rootIds: string[] }> | null = null;
+async function _loadOnce() {
+  if (_hydratePromise) return _hydratePromise;
+  _hydratePromise = (async () => {
     try {
       const raw = await AsyncStorage.getItem(KEY);
       if (raw) {
         const data = JSON.parse(raw) as { nodes: Record<string, TagNode>; rootIds: string[] };
-        // 旧バージョン互換: related が無いノードに [] を補填
         const nodes: Record<string, TagNode> = {};
         for (const [id, n] of Object.entries(data.nodes ?? {})) {
           nodes[id] = {
@@ -155,11 +155,23 @@ export const useTagGraphStore = create<TagGraphState>((set, get) => ({
             children: n.children ?? [],
           };
         }
-        set({ nodes, rootIds: data.rootIds ?? [], hydrated: true });
-        return;
+        return { nodes, rootIds: data.rootIds ?? [] };
       }
     } catch {}
-    set({ hydrated: true });
+    return { nodes: {}, rootIds: [] };
+  })();
+  return _hydratePromise;
+}
+
+export const useTagGraphStore = create<TagGraphState>((set, get) => ({
+  nodes: {},
+  rootIds: [],
+  hydrated: false,
+
+  hydrate: async () => {
+    if (get().hydrated) return; // 既に hydrate 済みなら no-op
+    const { nodes, rootIds } = await _loadOnce();
+    set({ nodes, rootIds, hydrated: true });
   },
 
   addNode: (label, parentId = null) => {

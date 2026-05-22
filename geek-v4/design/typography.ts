@@ -1,14 +1,18 @@
 import { TextStyle } from 'react-native';
 import { C } from './tokens';
 
+// パフォーマンス: font weight を削減 — Syne 600 / NotoSansJP 500 / Inter 500
+// を排除し、代わりに近い weight (700 / 700 / 600) を使い回す。
+// display2 は display (700Bold) に集約。ui は uiBold (600SemiBold) に集約。
+// jpM は jpB (700Bold) に集約。FONT.* の API はそのまま、参照先のみ変更。
 export const FONT = {
   display: 'Syne_700Bold',
-  display2: 'Syne_600SemiBold',
-  ui: 'Inter_500Medium',
+  display2: 'Syne_700Bold',
+  ui: 'Inter_600SemiBold',
   uiBold: 'Inter_600SemiBold',
   ui400: 'Inter_400Regular',
   jp: 'NotoSansJP_400Regular',
-  jpM: 'NotoSansJP_500Medium',
+  jpM: 'NotoSansJP_700Bold',
   jpB: 'NotoSansJP_700Bold',
 } as const;
 

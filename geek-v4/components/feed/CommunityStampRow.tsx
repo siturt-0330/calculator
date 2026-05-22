@@ -10,6 +10,7 @@
 //   - スタンプ一覧が空なら「+ コミュスタンプを作る」リンクのみ表示
 //   - スタンプ管理画面へのリンクが常時末尾
 // ============================================================
+import { memo } from 'react';
 import { View, Text } from 'react-native';
 import { useRouter } from 'expo-router';
 import { C, R, SP } from '../../design/tokens';
@@ -30,7 +31,9 @@ type Props = {
   pendingStampIds?: Set<string>;
 };
 
-export function CommunityStampRow({
+// パフォーマンス監査: コミュ詳細 FeedTab で 1 post 状態変更 → 全 post の
+// CommunityStampRow が再構成される問題。memo + shallow compare で post 単位 isolate。
+function CommunityStampRowInner({
   communityId,
   stamps,
   reactions,
@@ -199,3 +202,23 @@ export function CommunityStampRow({
     </View>
   );
 }
+
+// memo: stamps 配列は community 全体で共有なので長さ比較で OK。
+// reactions は post-specific なので長さ + 各 stamp の count/mine 簡易比較。
+export const CommunityStampRow = memo(CommunityStampRowInner, (prev, next) => {
+  if (prev.communityId !== next.communityId) return false;
+  if (prev.onReact !== next.onReact) return false;
+  if (prev.pendingStampIds !== next.pendingStampIds) return false;
+  if (prev.stamps.length !== next.stamps.length) return false;
+  if (prev.reactions.length !== next.reactions.length) return false;
+  // reactions の中身が変わったか (集計値) を浅く比較
+  for (let i = 0; i < prev.reactions.length; i++) {
+    const a = prev.reactions[i];
+    const b = next.reactions[i];
+    if (!a || !b) return false;
+    if (a.stamp.id !== b.stamp.id) return false;
+    if (a.count !== b.count) return false;
+    if (a.mine !== b.mine) return false;
+  }
+  return true;
+});
