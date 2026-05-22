@@ -395,6 +395,11 @@ function WebMapPreview({ locations }: { locations: MapLocation[] }) {
         style={{ border: 0, width: '100%', height: '100%' }}
         loading="lazy"
         title="map"
+        // 監査指摘: iframe に sandbox / referrerpolicy が無い。
+        // Google Maps Embed は scripts + same-origin が必要。
+        // allow-popups は外部マップアプリへのリンクを開ける程度に絞る。
+        sandbox="allow-scripts allow-same-origin allow-popups"
+        referrerPolicy="no-referrer"
       />
     </View>
   );

@@ -88,6 +88,93 @@ export function romajiToHiragana(s: string): string {
   return result;
 }
 
+// ひらがな → ローマ字 (検索 recall 用; "ぎーく" → "giiku" / "geek" を意識)
+// ROMAJI_HIRAGANA を逆方向に適用、長音 ー は直前母音を duplicate
+const HIRA_TO_ROMA: [string, string][] = [
+  ['きゃ', 'kya'], ['きゅ', 'kyu'], ['きょ', 'kyo'],
+  ['しゃ', 'sha'], ['しゅ', 'shu'], ['しょ', 'sho'], ['し', 'shi'],
+  ['ちゃ', 'cha'], ['ちゅ', 'chu'], ['ちょ', 'cho'], ['ち', 'chi'], ['つ', 'tsu'],
+  ['にゃ', 'nya'], ['にゅ', 'nyu'], ['にょ', 'nyo'],
+  ['ひゃ', 'hya'], ['ひゅ', 'hyu'], ['ひょ', 'hyo'],
+  ['みゃ', 'mya'], ['みゅ', 'myu'], ['みょ', 'myo'],
+  ['りゃ', 'rya'], ['りゅ', 'ryu'], ['りょ', 'ryo'],
+  ['ぎゃ', 'gya'], ['ぎゅ', 'gyu'], ['ぎょ', 'gyo'],
+  ['じゃ', 'ja'], ['じゅ', 'ju'], ['じょ', 'jo'], ['じ', 'ji'],
+  ['びゃ', 'bya'], ['びゅ', 'byu'], ['びょ', 'byo'],
+  ['ぴゃ', 'pya'], ['ぴゅ', 'pyu'], ['ぴょ', 'pyo'],
+  ['ふぁ', 'fa'], ['ふぃ', 'fi'], ['ふぇ', 'fe'], ['ふぉ', 'fo'],
+  ['か', 'ka'], ['き', 'ki'], ['く', 'ku'], ['け', 'ke'], ['こ', 'ko'],
+  ['さ', 'sa'], ['す', 'su'], ['せ', 'se'], ['そ', 'so'],
+  ['た', 'ta'], ['て', 'te'], ['と', 'to'],
+  ['な', 'na'], ['に', 'ni'], ['ぬ', 'nu'], ['ね', 'ne'], ['の', 'no'],
+  ['は', 'ha'], ['ひ', 'hi'], ['ふ', 'fu'], ['へ', 'he'], ['ほ', 'ho'],
+  ['ま', 'ma'], ['み', 'mi'], ['む', 'mu'], ['め', 'me'], ['も', 'mo'],
+  ['や', 'ya'], ['ゆ', 'yu'], ['よ', 'yo'],
+  ['ら', 'ra'], ['り', 'ri'], ['る', 'ru'], ['れ', 're'], ['ろ', 'ro'],
+  ['わ', 'wa'], ['を', 'wo'], ['ん', 'n'],
+  ['が', 'ga'], ['ぎ', 'gi'], ['ぐ', 'gu'], ['げ', 'ge'], ['ご', 'go'],
+  ['ざ', 'za'], ['ず', 'zu'], ['ぜ', 'ze'], ['ぞ', 'zo'],
+  ['だ', 'da'], ['で', 'de'], ['ど', 'do'],
+  ['ば', 'ba'], ['び', 'bi'], ['ぶ', 'bu'], ['べ', 'be'], ['ぼ', 'bo'],
+  ['ぱ', 'pa'], ['ぴ', 'pi'], ['ぷ', 'pu'], ['ぺ', 'pe'], ['ぽ', 'po'],
+  ['あ', 'a'], ['い', 'i'], ['う', 'u'], ['え', 'e'], ['お', 'o'],
+];
+
+const VOWEL_OF = { a: 'a', i: 'i', u: 'u', e: 'e', o: 'o' } as Record<string, string>;
+
+/**
+ * ひらがな (＋カタカナ) → ローマ字。
+ * 長音符「ー」は直前のローマ字母音で展開する。
+ * 入力例: "ぎーく" → "gi-ku"... ではなく → "giiku" (長音→母音 duplicate)
+ * recall を上げる目的なので strict ではない。
+ */
+export function hiraganaToRomaji(s: string): string {
+  // まずカタカナをひらがなに統一
+  let cur = s.replace(/[ァ-ヶ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+  let out = '';
+  let i = 0;
+  while (i < cur.length) {
+    // 2 文字スキャン (拗音優先)
+    const two = cur.slice(i, i + 2);
+    const found2 = HIRA_TO_ROMA.find(([k]) => k === two);
+    if (found2) {
+      out += found2[1];
+      i += 2;
+      continue;
+    }
+    const one = cur[i]!;
+    // 長音「ー」: 直前ローマ字の最後が母音ならそれを duplicate
+    if (one === 'ー' && out.length > 0) {
+      const last = out[out.length - 1]!;
+      if (VOWEL_OF[last]) out += last;
+      i++;
+      continue;
+    }
+    // 促音「っ」: 次の音の頭子音を duplicate (例: っき → kki)
+    if (one === 'っ') {
+      const next2 = cur.slice(i + 1, i + 3);
+      const nfound = HIRA_TO_ROMA.find(([k]) => k === next2) ??
+        HIRA_TO_ROMA.find(([k]) => k === cur[i + 1]);
+      if (nfound) {
+        const head = nfound[1][0]!;
+        if (head !== 'a' && head !== 'i' && head !== 'u' && head !== 'e' && head !== 'o') {
+          out += head;
+        }
+      }
+      i++;
+      continue;
+    }
+    const found1 = HIRA_TO_ROMA.find(([k]) => k === one);
+    if (found1) {
+      out += found1[1];
+    } else {
+      out += one; // 漢字や記号はそのまま
+    }
+    i++;
+  }
+  return out;
+}
+
 // 一般的な略語/同義 (有名アイドル等)
 const COMMON_SYNONYMS: Record<string, string[]> = {
   // ============ アイドル ============
@@ -332,6 +419,32 @@ export function generateVariants(query: string): string[] {
     if (kana !== lower) {
       push(kana);
       push(hiraganaToKatakana(kana));
+    }
+  }
+
+  // ★ Tier 6.5: ひらがな/カタカナ → ローマ字 (例: "ぎーく" → "geek")
+  // 「Geek」「Cake」のような英字コミュ名をひらがな入力でも見つけられるようにする
+  // 日本語→英語の音韻ヒューリスティック:
+  //   - ii → ee  (長音 /i:/ は英語で多く "ee")
+  //   - aa → a   (長音 /a:/ は英語で多く 1 つの "a")
+  //   - 末尾 ku/su/tu/fu/mu/ru → 子音だけ ("ku$" → "k")
+  if (/[ぁ-ゖァ-ヶー]/.test(original)) {
+    const literal = hiraganaToRomaji(original); // 例: "giiku"
+    if (literal && literal !== original) {
+      push(literal);
+      // 重母音を 1 つに圧縮
+      const collapsed = literal.replace(/([aiueo])\1/g, '$1'); // "giku"
+      if (collapsed !== literal) push(collapsed);
+      // 英語化 1: ii → ee  (例: "giiku" → "geeku")
+      const eeForm = literal.replace(/ii/g, 'ee');
+      if (eeForm !== literal) push(eeForm);
+      // 英語化 2: 末尾の母音子音 (ku/su/tu/fu/mu/ru/nu/gu/bu/pu) → 子音だけ
+      //   例: "geeku" → "geek", "keeku" → "keek", "kakeu" → "kake"
+      const dropTrailU = eeForm.replace(/([ksthfmrgnbpvz])u$/, '$1');
+      if (dropTrailU !== eeForm) push(dropTrailU);
+      // 同じ処理を collapsed にも適用 (recall 最大化)
+      const dropTrailU2 = collapsed.replace(/([ksthfmrgnbpvz])u$/, '$1');
+      if (dropTrailU2 !== collapsed) push(dropTrailU2);
     }
   }
 

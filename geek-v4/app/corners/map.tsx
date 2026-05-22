@@ -46,6 +46,17 @@ function buildLeafletHTML(opts: {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+<meta name="referrer" content="no-referrer" />
+<!--
+  CSP: WebView 内で任意 JS が実行できないよう発火面を限定。
+  - script-src: 自分自身 + Leaflet/MarkerCluster の CDN (unpkg)。'unsafe-inline'
+    が要るのは map 初期化用のインライン script (このファイル末尾) のため。
+    DB 由来文字列は generateHtml 側で escapeHtml/safeColor/safeNum でサニタイズ済。
+  - img-src: タイルサーバー (OSM) と data: のみ。
+  - connect-src: タイル取得のみ。fetch/XHR で外部に流出させない。
+  - frame-ancestors: 'none' (clickjacking 対策)
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com; connect-src 'self' https://*.tile.openstreetmap.org; font-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />

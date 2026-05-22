@@ -48,7 +48,24 @@ function isValidEmail(s: string): boolean {
 
 function isValidHttpsUrl(s: string): boolean {
   if (!s) return true; // optional
-  return /^https:\/\//.test(s);
+  // 監査指摘: /^https:\/\// だけだと localhost / 192.168.x.x / 空白 hostname も通る。
+  // URL parser で hostname を取り出して、TLD らしき形 (xx.yy) と private な値の弾きを行う。
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'https:') return false;
+  const host = u.hostname.toLowerCase();
+  if (!host) return false;
+  // localhost / private IP は申請 URL として無効
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return false;
+  if (/^(10\.|192\.168\.|169\.254\.)/.test(host)) return false;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return false;
+  // 最低 1 つのドットを含み TLD 部が 2 文字以上 (xn-- IDN も許可)
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(host) && !/^xn--[a-z0-9-]+\./.test(host)) return false;
+  return true;
 }
 
 export default function ApplyOfficialScreen() {
@@ -92,8 +109,10 @@ export default function ApplyOfficialScreen() {
 
   const errors = useMemo(() => {
     const e: Record<string, string | undefined> = {};
-    if (realName.length > 0 && (realName.length < 1 || realName.length > 80)) e.realName = '1〜80文字で入力';
-    if (organization.length > 0 && (organization.length < 1 || organization.length > 120)) e.organization = '1〜120文字で入力';
+    // 監査指摘: 旧 `length > 0 && (length < 1 || ...)` は常に length < 1 が
+    // false なので冗長。シンプルに上限チェックだけに。
+    if (realName.length > 80) e.realName = '80文字以内で入力';
+    if (organization.length > 120) e.organization = '120文字以内で入力';
     if (email && !isValidEmail(email)) e.email = 'メール形式が正しくありません';
     if (url && !isValidHttpsUrl(url)) e.url = 'https:// で始まる URL を入力';
     if (purpose.length > 0 && (purpose.length < 10 || purpose.length > 2000)) e.purpose = '10〜2000文字で入力';

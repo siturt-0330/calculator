@@ -5,46 +5,33 @@
 //
 // 検証方式 (順に試行):
 //   1. well-known   : GET {origin}/.well-known/geek-verify.txt にトークンが含まれているか
-//   2. meta-tag     : GET {applicant_url} の <head> に <meta name="geek-verify" content="<token>"> があるか
-//   3. dns-txt      : (今はスキップ — Edge runtime での DNS は信頼性が低いため)
+//   2. meta-tag     : GET {applicant_url} の <head> に <meta name="geek-verify" content="<token>">
 //
-// 防御:
-//   - http(s) のみ許可
+// 防御 (security_critical_fixes 0036 反映):
+//   - http(s) のみ許可 + HTTPS 推奨
 //   - private/loopback/link-local IP を block (SSRF 対策)
-//   - 5 秒タイムアウト
-//   - 500 KB までしか読まない
-//
-// 戻り値: { status: 'verified' | 'failed'; method?: 'well-known' | 'meta-tag' }
-//
-// ------------------------------------------------------------
-// デプロイ手順 (ユーザー側):
-//   1. Supabase CLI で:
-//        supabase functions deploy verify-official-url --project-ref <YOUR_REF>
-//   2. 環境変数は不要 (service role key は内部 secret で自動注入される)
-//   3. RLS により本人 + admin のみ申請を SELECT できるため、
-//      この関数は service role で更新を行う必要がある。
-// ------------------------------------------------------------
+//   - DNS リバインディング対策: 事前に Deno.resolveDns で IP を解決して検証
+//   - リダイレクト追跡: redirect: 'manual' で 3xx の Location を再検証 (最大 3 hop)
+//   - 5 秒タイムアウト + 500 KB body 上限
+//   - CORS allowlist 方式 (`*` 廃止)
+//   - エラー詳細は production では返さない
+// ============================================================
+
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
+import { buildCorsHeaders, jsonResponse, isProduction } from '../_shared/cors.ts';
 
 const FETCH_TIMEOUT_MS = 5_000;
 const MAX_BYTES = 500 * 1024; // 500 KB
+const MAX_REDIRECTS = 3;
 
 // --- SSRF 対策: private IP / loopback / link-local を block ---------
 function isBlockedHost(host: string): boolean {
-  const lower = host.toLowerCase();
+  const lower = host.toLowerCase().replace(/^\[|\]$/g, '');
   if (lower === 'localhost') return true;
-  // IPv6 loopback / private
-  if (lower === '::1' || lower === '[::1]') return true;
+  if (lower === '::1') return true;
   if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // ULA
   if (lower.startsWith('fe80')) return true; // link-local
-  // IPv4 dotted-quad check
   const m = lower.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (m) {
     const a = Number(m[1]);
@@ -52,7 +39,7 @@ function isBlockedHost(host: string): boolean {
     if (a === 10) return true;
     if (a === 127) return true;
     if (a === 0) return true;
-    if (a === 169 && b === 254) return true;          // link-local
+    if (a === 169 && b === 254) return true;          // link-local (AWS metadata)
     if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12
     if (a === 192 && b === 168) return true;          // 192.168/16
     if (a >= 224) return true;                         // multicast / reserved
@@ -72,49 +59,106 @@ function safeParseUrl(raw: string): URL | null {
   }
 }
 
-// --- 制限付き fetch (timeout + body サイズ上限) ---------------------
-async function safeFetchText(target: URL): Promise<string | null> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+// --- DNS 解決して全 IP が安全か検証 ---------------------------------
+async function resolveHostnameSafe(hostname: string): Promise<boolean> {
+  // 既に IP リテラルなら isBlockedHost が処理済み
+  const ipv4Lit = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(hostname);
+  const ipv6Lit = hostname.includes(':');
+  if (ipv4Lit || ipv6Lit) return !isBlockedHost(hostname);
+
   try {
-    const res = await fetch(target.toString(), {
-      method: 'GET',
-      redirect: 'follow',
-      signal: ctrl.signal,
-      headers: {
-        'user-agent': 'GeekVerifier/1.0 (+https://geek.app)',
-        accept: 'text/html, text/plain;q=0.9, */*;q=0.5',
-      },
-    });
-    if (!res.ok || !res.body) return null;
-    // ストリームを読みつつ MAX_BYTES で打ち切る
-    const reader = res.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        chunks.push(value);
-        total += value.byteLength;
-        if (total >= MAX_BYTES) {
-          try { await reader.cancel(); } catch { /* ignore */ }
-          break;
+    // A + AAAA を並列解決し、どれか 1 つでも private/loopback/link-local なら拒否
+    const [a, aaaa] = await Promise.allSettled([
+      Deno.resolveDns(hostname, 'A'),
+      Deno.resolveDns(hostname, 'AAAA'),
+    ]);
+    const ips: string[] = [];
+    if (a.status === 'fulfilled') ips.push(...a.value);
+    if (aaaa.status === 'fulfilled') ips.push(...aaaa.value);
+
+    if (ips.length === 0) return false;
+    for (const ip of ips) {
+      if (isBlockedHost(ip)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// --- 制限付き fetch (manual redirect + 検証 + 500KB 上限) ------------
+async function safeFetchText(target: URL): Promise<string | null> {
+  let currentUrl: URL = target;
+  let redirectCount = 0;
+
+  while (true) {
+    // 各 hop ごとに URL 形式と hostname を再検証
+    const safe = safeParseUrl(currentUrl.toString());
+    if (!safe) return null;
+
+    const dnsSafe = await resolveHostnameSafe(safe.hostname);
+    if (!dnsSafe) return null;
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(safe.toString(), {
+        method: 'GET',
+        redirect: 'manual',
+        signal: ctrl.signal,
+        headers: {
+          'user-agent': 'GeekVerifier/1.0 (+https://geek.app)',
+          accept: 'text/html, text/plain;q=0.9, */*;q=0.5',
+        },
+      });
+
+      // 3xx は手動で Location を取得して再検証
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get('location');
+        if (!location || redirectCount >= MAX_REDIRECTS) return null;
+        let next: URL;
+        try {
+          next = new URL(location, safe);
+        } catch {
+          return null;
+        }
+        currentUrl = next;
+        redirectCount++;
+        continue;
+      }
+
+      if (!res.ok || !res.body) return null;
+
+      // ストリームを読みつつ MAX_BYTES で打ち切る
+      const reader = res.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          chunks.push(value);
+          total += value.byteLength;
+          if (total >= MAX_BYTES) {
+            try { await reader.cancel(); } catch { /* ignore */ }
+            break;
+          }
         }
       }
+      const merged = new Uint8Array(Math.min(total, MAX_BYTES));
+      let offset = 0;
+      for (const c of chunks) {
+        const space = MAX_BYTES - offset;
+        if (space <= 0) break;
+        merged.set(c.subarray(0, Math.min(c.byteLength, space)), offset);
+        offset += Math.min(c.byteLength, space);
+      }
+      return new TextDecoder('utf-8', { fatal: false }).decode(merged);
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
     }
-    const merged = new Uint8Array(total);
-    let offset = 0;
-    for (const c of chunks) {
-      merged.set(c.subarray(0, Math.min(c.byteLength, MAX_BYTES - offset)), offset);
-      offset += c.byteLength;
-      if (offset >= MAX_BYTES) break;
-    }
-    return new TextDecoder('utf-8', { fatal: false }).decode(merged.subarray(0, Math.min(total, MAX_BYTES)));
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -130,10 +174,6 @@ async function tryWellKnown(applicantUrl: URL, token: string): Promise<boolean> 
 
 // --- 検証方式 2: meta-tag -------------------------------------------
 function metaTagHasToken(html: string, token: string): boolean {
-  // <meta name="geek-verify" content="<token>"> (属性順は問わない)
-  // - 大文字小文字無視
-  // - シングル / ダブルクオート両対応
-  // - 属性間の空白は \s+
   const escToken = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const patterns = [
     new RegExp(`<meta[^>]+name\\s*=\\s*["']geek-verify["'][^>]+content\\s*=\\s*["']${escToken}["']`, 'i'),
@@ -151,56 +191,68 @@ async function tryMetaTag(applicantUrl: URL, token: string): Promise<boolean> {
 // ====================================================================
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response('ok', { headers: buildCorsHeaders(req) });
   }
 
   try {
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
     const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     if (!SUPABASE_URL || !SERVICE_KEY) {
-      return jsonResponse({ status: 'failed', error: 'server-misconfigured' }, 500);
+      return jsonResponse(req, { status: 'failed', error: 'server-misconfigured' }, 500);
     }
 
-    // 認証: 呼び出し元のユーザートークンを伝播してチェック
+    // 認証
     const authHeader = req.headers.get('Authorization') ?? '';
     const userClient = createClient(SUPABASE_URL, SERVICE_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
     const { data: userRes, error: userErr } = await userClient.auth.getUser();
     if (userErr || !userRes?.user) {
-      return jsonResponse({ status: 'failed', error: 'unauthorized' }, 401);
+      return jsonResponse(req, { status: 'failed', error: 'unauthorized' }, 401);
     }
     const userId = userRes.user.id;
 
     const body = await req.json().catch(() => ({}));
     const applicationId: string | undefined = body?.application_id;
-    if (!applicationId || typeof applicationId !== 'string') {
-      return jsonResponse({ status: 'failed', error: 'bad-request' }, 400);
+    if (!applicationId || typeof applicationId !== 'string' || applicationId.length > 64) {
+      return jsonResponse(req, { status: 'failed', error: 'bad-request' }, 400);
     }
 
-    // service role でロード (RLS バイパス) — 申請者本人 or admin かは下でチェック
     const adminClient = createClient(SUPABASE_URL, SERVICE_KEY);
     const { data: app, error: appErr } = await adminClient
       .from('official_community_applications')
-      .select('id, applicant_user_id, applicant_url, verification_token, verification_status')
+      .select('id, applicant_user_id, applicant_url, verification_token, verification_status, status, verification_attempted_at')
       .eq('id', applicationId)
       .maybeSingle();
 
     if (appErr || !app) {
-      return jsonResponse({ status: 'failed', error: 'not-found' }, 404);
+      return jsonResponse(req, { status: 'failed', error: 'not-found' }, 404);
     }
 
-    // 申請者本人のみ (admin override は別フロー)
+    // 申請者本人 or admin
     if (app.applicant_user_id !== userId) {
-      // admin かどうかチェック
       const { data: isAdminRow } = await adminClient.rpc('is_admin');
       if (!isAdminRow) {
-        return jsonResponse({ status: 'failed', error: 'forbidden' }, 403);
+        return jsonResponse(req, { status: 'failed', error: 'forbidden' }, 403);
+      }
+    }
+
+    // 監査指摘: 旧実装は申請 status を見ず、rejected/approved/cancelled の
+    // 申請でも verification_status を勝手に書き換えていた。
+    // pending のみ受け付ける。
+    if (app.status !== 'pending') {
+      return jsonResponse(req, { status: 'failed', error: 'application-not-pending' }, 409);
+    }
+
+    // クールダウン: 60 秒以内の連続検証は弾く (DDoS / 課金抑制)
+    if (app.verification_attempted_at) {
+      const lastMs = Date.parse(app.verification_attempted_at);
+      if (Number.isFinite(lastMs) && Date.now() - lastMs < 60_000) {
+        return jsonResponse(req, { status: 'failed', error: 'cooldown' }, 429);
       }
     }
 
     if (!app.applicant_url || !app.verification_token) {
-      // URL or token がない申請は検証不可
       await adminClient
         .from('official_community_applications')
         .update({
@@ -208,7 +260,7 @@ serve(async (req) => {
           verification_attempted_at: new Date().toISOString(),
         })
         .eq('id', applicationId);
-      return jsonResponse({ status: 'failed', error: 'no-url-or-token' });
+      return jsonResponse(req, { status: 'failed', error: 'no-url-or-token' });
     }
 
     const target = safeParseUrl(app.applicant_url);
@@ -220,18 +272,15 @@ serve(async (req) => {
           verification_attempted_at: new Date().toISOString(),
         })
         .eq('id', applicationId);
-      return jsonResponse({ status: 'failed', error: 'invalid-url' });
+      return jsonResponse(req, { status: 'failed', error: 'invalid-url' });
     }
 
-    // 1) well-known
     let method: 'well-known' | 'meta-tag' | null = null;
     if (await tryWellKnown(target, app.verification_token)) {
       method = 'well-known';
     } else if (await tryMetaTag(target, app.verification_token)) {
-      // 2) meta-tag
       method = 'meta-tag';
     }
-    // 3) dns-txt: 現状は実装しない (Edge で DNS lookup が信頼できないため)
 
     const nowIso = new Date().toISOString();
     if (method) {
@@ -243,7 +292,7 @@ serve(async (req) => {
           verification_attempted_at: nowIso,
         })
         .eq('id', applicationId);
-      return jsonResponse({ status: 'verified', method });
+      return jsonResponse(req, { status: 'verified', method });
     } else {
       await adminClient
         .from('official_community_applications')
@@ -252,19 +301,17 @@ serve(async (req) => {
           verification_attempted_at: nowIso,
         })
         .eq('id', applicationId);
-      return jsonResponse({ status: 'failed' });
+      return jsonResponse(req, { status: 'failed' });
     }
   } catch (e) {
+    // production では詳細エラーを返さない
+    if (isProduction()) {
+      return jsonResponse(req, { status: 'failed', error: 'internal' }, 500);
+    }
     return jsonResponse(
+      req,
       { status: 'failed', error: e instanceof Error ? e.message : 'unknown' },
       500,
     );
   }
 });
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
-}

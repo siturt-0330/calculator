@@ -38,12 +38,13 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 // Deno で web-push を使う (npm: 接頭辞で Node 互換 import)
 import webpush from 'npm:web-push@3.6.7';
+import { buildCorsHeaders } from '../_shared/cors.ts';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
+// Webhook 認証用 shared secret (Supabase secret として設定):
+//   supabase secrets set PUSH_WEBHOOK_SECRET=<long-random-string>
+// Database Webhook の HTTP Headers にも同じ secret を:
+//   Authorization: Bearer <PUSH_WEBHOOK_SECRET>
+const PUSH_WEBHOOK_SECRET = Deno.env.get('PUSH_WEBHOOK_SECRET') ?? '';
 
 type NotificationRow = {
   id: string;
@@ -112,9 +113,27 @@ function titleForNotification(n: NotificationRow): string {
 }
 
 serve(async (req) => {
+  const corsHeaders = buildCorsHeaders(req);
+
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
+
+  // Webhook 認証: Database Webhook 経由でのみ呼ばれることを保証
+  // (任意 origin から偽の notifications payload を POST されないよう防御)
+  if (PUSH_WEBHOOK_SECRET) {
+    const auth = req.headers.get('authorization') ?? '';
+    const expected = `Bearer ${PUSH_WEBHOOK_SECRET}`;
+    // タイミング攻撃に対する弱い defense (定数時間比較ではないが許容)
+    if (auth !== expected) {
+      return new Response(
+        JSON.stringify({ error: 'unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
+  }
+  // PUSH_WEBHOOK_SECRET 未設定の環境は警告を出して当面通す
+  // (production では必ず設定すること)
 
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
     return new Response(

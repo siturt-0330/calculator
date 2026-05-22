@@ -1,5 +1,5 @@
 import { View, Text, ScrollView, RefreshControl, KeyboardAvoidingView, Platform, Image } from 'react-native';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn } from 'react-native-reanimated';
@@ -11,66 +11,74 @@ import { PressableScale } from '../../../components/ui/PressableScale';
 import { Skeleton, SkeletonCircle } from '../../../components/ui/Skeleton';
 import { BackButton } from '../../../components/nav/BackButton';
 import { Icon } from '../../../constants/icons';
-import { discoverCommunities, fetchOfficialCommunities, type Community } from '../../../lib/api/communities';
+import {
+  searchCommunities,
+  fetchOfficialCommunities,
+  type CommunityHit,
+  type MatchedBy,
+} from '../../../lib/api/communities';
+import { previewVariants } from '../../../lib/search/variants';
 import { OfficialBadge } from '../../../components/community/OfficialBadge';
 import { TABBAR } from '../../../design/tabbar';
+import { useDebounce } from '../../../hooks/useDebounce';
+
+// マッチ理由 → ラベル + 色
+function matchLabel(m: MatchedBy): { label: string; color: string; bg: string } | null {
+  switch (m) {
+    case 'name-exact':    return { label: '完全一致', color: '#fff', bg: C.accent };
+    case 'name-prefix':   return { label: '先頭一致', color: '#fff', bg: C.accent };
+    case 'name-contains': return null; // 普通の name match は表示しない (デフォルト)
+    case 'desc-contains': return { label: '説明にマッチ', color: C.text2, bg: C.bg3 };
+    case 'synonym':       return { label: '別名にマッチ', color: C.amber, bg: C.amberBg };
+    default:              return null;
+  }
+}
 
 export default function DiscoverCommunitiesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<Community[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [officialOnly, setOfficialOnly] = useState(false);
 
-  // 公式コミュニティ一覧 — クエリ無しの初期画面の最上部に出す horizontal scroll
+  // useDebounce で query を遅延適用 — React Query の queryKey に使う
+  // 短いクエリ (≤2 文字) は 120ms、それ以上は 180ms
+  const debounceMs = query.trim().length <= 2 ? 120 : 180;
+  const debouncedQuery = useDebounce(query, debounceMs);
+
+  // 検索結果 — React Query で in-flight 競合と stale をまとめて解決
+  const searchQ = useQuery({
+    queryKey: ['discover-search', debouncedQuery.trim(), officialOnly],
+    queryFn: () =>
+      searchCommunities({
+        query: debouncedQuery.trim() || undefined,
+        officialOnly,
+        limit: 30,
+      }),
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    placeholderData: (prev) => prev, // クエリ変化中もチラつかず前回結果を残す
+  });
+
+  // 公式コミュニティ — クエリ無し画面の上部 horizontal scroll
   const { data: officialCommunities = [] } = useQuery({
     queryKey: ['discover-official'],
     queryFn: () => fetchOfficialCommunities(10),
     staleTime: 60_000,
   });
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const data = await discoverCommunities({ query: query.trim() || undefined, limit: 30 });
-    setResults(data);
-    setLoading(false);
-  }, [query]);
-
-  useEffect(() => {
-    // 初期ロード — 人気のコミュニティ
-    void load();
-    // クエリ変更時の debounce
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // query が変わってから debounce 後に検索
-  // 短いクエリ (≤2 文字) は 100ms — autocomplete を爆速に
-  useEffect(() => {
-    const q = query.trim();
-    const delay = q.length <= 2 ? 100 : 150;
-    const t = setTimeout(() => {
-      void load();
-    }, delay);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
-  };
-
-  // 「公式のみ」フィルタ — client side で絞り込み (discoverCommunities のシグネチャを変えない)
-  const filteredResults = useMemo(
-    () => (officialOnly ? results.filter((c) => c.is_official === true) : results),
-    [results, officialOnly],
-  );
+  const results: CommunityHit[] = searchQ.data ?? [];
+  const loading = searchQ.isLoading;
+  const refreshing = searchQ.isFetching && !searchQ.isLoading;
+  const onRefresh = () => searchQ.refetch();
 
   const hasQuery = query.trim().length > 0;
   const showOfficialSection = !hasQuery && officialCommunities.length > 0;
+
+  // 「これも検索しています」preview — 同義語ピル表示用
+  const previewSyns = useMemo(() => {
+    if (!hasQuery) return [];
+    return previewVariants(query.trim(), 'ja', 3);
+  }, [query, hasQuery]);
 
   return (
     <KeyboardAvoidingView
@@ -112,7 +120,7 @@ export default function DiscoverCommunitiesScreen() {
             icon={Icon.search}
             value={query}
             onChangeText={setQuery}
-            placeholder="名前やテーマで検索"
+            placeholder="名前・説明・別名で検索"
             returnKeyType="search"
             autoFocus
             keyboardAppearance="dark"
@@ -123,6 +131,7 @@ export default function DiscoverCommunitiesScreen() {
               onPress={() => setQuery('')}
               haptic="tap"
               hitSlop={10}
+              accessibilityLabel="検索キーワードをクリア"
               style={{
                 position: 'absolute',
                 right: SP['2'],
@@ -136,7 +145,36 @@ export default function DiscoverCommunitiesScreen() {
             </PressableScale>
           )}
         </View>
-        {/* フィルタ chip 行 — 現状は「公式のみ」だけ。今後カテゴリ等が増えれば横並びで追加 */}
+
+        {/* これも検索しています (同義語プレビュー) */}
+        {previewSyns.length > 0 && (
+          <Animated.View
+            entering={FadeIn.duration(180)}
+            style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}
+          >
+            <Text style={[T.caption, { color: C.text3 }]}>これも検索:</Text>
+            {previewSyns.map((s) => (
+              <PressableScale
+                key={s}
+                onPress={() => setQuery(s)}
+                haptic="tap"
+                hitSlop={6}
+                style={{
+                  paddingHorizontal: SP['2'],
+                  paddingVertical: 3,
+                  backgroundColor: C.bg2,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  borderRadius: R.full,
+                }}
+              >
+                <Text style={[T.caption, { color: C.text2, fontWeight: '600' }]}>{s}</Text>
+              </PressableScale>
+            ))}
+          </Animated.View>
+        )}
+
+        {/* フィルタ chip 行 */}
         <View style={{ flexDirection: 'row', gap: SP['2'], flexWrap: 'wrap' }}>
           <PressableScale
             onPress={() => setOfficialOnly((v) => !v)}
@@ -161,15 +199,23 @@ export default function DiscoverCommunitiesScreen() {
             <Text
               style={[
                 T.caption,
-                {
-                  color: officialOnly ? C.accent : C.text2,
-                  fontWeight: '700',
-                },
+                { color: officialOnly ? C.accent : C.text2, fontWeight: '700' },
               ]}
             >
               公式のみ
             </Text>
           </PressableScale>
+          {/* 結果件数 + 検索中 indicator */}
+          <View style={{ flex: 1, alignItems: 'flex-end', justifyContent: 'center' }}>
+            {hasQuery && !loading && results.length > 0 && (
+              <Text style={[T.caption, { color: C.text3 }]}>
+                {results.length.toLocaleString('ja-JP')} 件
+              </Text>
+            )}
+            {(loading || refreshing) && (
+              <Text style={[T.caption, { color: C.accent }]}>検索中…</Text>
+            )}
+          </View>
         </View>
       </View>
 
@@ -184,7 +230,7 @@ export default function DiscoverCommunitiesScreen() {
           <RefreshControl tintColor={C.text2} refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {/* 公式コミュニティ セクション — クエリ無し / 公式が存在する時のみ */}
+        {/* 公式コミュニティ セクション — クエリ無し */}
         {showOfficialSection && (
           <Animated.View entering={FadeIn.duration(220)} style={{ gap: SP['2'], marginTop: SP['1'] }}>
             <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: SP['2'] }}>
@@ -277,8 +323,8 @@ export default function DiscoverCommunitiesScreen() {
           </Animated.View>
         )}
 
-        {/* セクションラベル — クエリ無しの初期表示時のみ "人気のコミュニティ" を表示 */}
-        {!hasQuery && filteredResults.length > 0 && (
+        {/* セクションラベル */}
+        {!hasQuery && results.length > 0 && (
           <Text
             style={[
               T.smallB,
@@ -295,8 +341,7 @@ export default function DiscoverCommunitiesScreen() {
           </Text>
         )}
 
-        {loading && filteredResults.length === 0 ? (
-          // skeleton 4 枚 — 「探す」画面はカードが視覚的に大きいので 3-5 枚が適量
+        {loading && results.length === 0 ? (
           Array.from({ length: 4 }).map((_, i) => (
             <View
               key={i}
@@ -319,7 +364,7 @@ export default function DiscoverCommunitiesScreen() {
               </View>
             </View>
           ))
-        ) : filteredResults.length === 0 && !loading ? (
+        ) : results.length === 0 && !loading ? (
           <View style={{ alignItems: 'center', padding: SP['10'], gap: SP['3'] }}>
             <View style={{
               width: 88, height: 88, borderRadius: 44,
@@ -382,82 +427,102 @@ export default function DiscoverCommunitiesScreen() {
             )}
           </View>
         ) : (
-          filteredResults.map((c) => (
-            <PressableScale
-              key={c.id}
-              onPress={() => router.push(`/community/${c.id}` as never)}
-              haptic="tap"
-              scaleValue={0.98}
-              style={{
-                flexDirection: 'row',
-                gap: SP['3'],
-                padding: SP['3'],
-                backgroundColor: C.bg2,
-                borderRadius: R.lg,
-                borderWidth: 1,
-                borderColor: C.border,
-                alignItems: 'center',
-              }}
-            >
-              <View
+          results.map((c) => {
+            const badge = matchLabel(c.matchedBy);
+            return (
+              <PressableScale
+                key={c.id}
+                onPress={() => router.push(`/community/${c.id}` as never)}
+                haptic="tap"
+                scaleValue={0.98}
                 style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: 26,
-                  backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
+                  flexDirection: 'row',
+                  gap: SP['3'],
+                  padding: SP['3'],
+                  backgroundColor: C.bg2,
+                  borderRadius: R.lg,
+                  borderWidth: 1,
+                  borderColor: C.border,
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  overflow: 'hidden',
                 }}
               >
-                {c.icon_url ? (
-                  <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                ) : (
-                  <Text style={{ fontSize: 26 }}>{c.icon_emoji}</Text>
-                )}
-              </View>
-              <View style={{ flex: 1, gap: 2 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
-                    {c.name}
-                  </Text>
-                  {c.is_official && <OfficialBadge size="sm" />}
-                  {c.visibility === 'request' && (
-                    <Icon.lock size={12} color={C.amber} strokeWidth={2.4} />
+                <View
+                  style={{
+                    width: 52,
+                    height: 52,
+                    borderRadius: 26,
+                    backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {c.icon_url ? (
+                    <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                  ) : (
+                    <Text style={{ fontSize: 26 }}>{c.icon_emoji}</Text>
                   )}
                 </View>
-                {c.description.length > 0 && (
-                  <Text style={[T.small, { color: C.text2 }]} numberOfLines={2}>
-                    {c.description}
-                  </Text>
-                )}
-                {/* 統計 pill — メンバー数 / 投稿数 を視覚的に分離 */}
-                <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-                  <View style={{
-                    flexDirection: 'row', alignItems: 'center', gap: 3,
-                    paddingHorizontal: 8, paddingVertical: 3,
-                    backgroundColor: C.bg3, borderRadius: R.full,
-                  }}>
-                    <Icon.community size={10} color={C.text3} strokeWidth={2.4} />
-                    <Text style={[T.caption, { color: C.text2, fontWeight: '700' }]}>
-                      {c.member_count.toLocaleString('ja-JP')}
+                <View style={{ flex: 1, gap: 2 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
+                      {c.name}
                     </Text>
+                    {c.is_official && <OfficialBadge size="sm" />}
+                    {c.visibility === 'request' && (
+                      <Icon.lock size={12} color={C.amber} strokeWidth={2.4} />
+                    )}
+                    {/* マッチ理由バッジ */}
+                    {badge && hasQuery && (
+                      <View
+                        style={{
+                          paddingHorizontal: 6,
+                          paddingVertical: 2,
+                          backgroundColor: badge.bg,
+                          borderRadius: R.sm,
+                        }}
+                      >
+                        <Text style={[T.caption, { color: badge.color, fontWeight: '700', fontSize: 10 }]}>
+                          {badge.label}
+                          {c.matchedBy === 'synonym' && c.matchedVariant
+                            ? ` · ${c.matchedVariant}`
+                            : ''}
+                        </Text>
+                      </View>
+                    )}
                   </View>
-                  <View style={{
-                    flexDirection: 'row', alignItems: 'center', gap: 3,
-                    paddingHorizontal: 8, paddingVertical: 3,
-                    backgroundColor: C.bg3, borderRadius: R.full,
-                  }}>
-                    <Icon.bbs size={10} color={C.text3} strokeWidth={2.4} />
-                    <Text style={[T.caption, { color: C.text2, fontWeight: '700' }]}>
-                      {c.post_count.toLocaleString('ja-JP')}
+                  {c.description.length > 0 && (
+                    <Text style={[T.small, { color: C.text2 }]} numberOfLines={2}>
+                      {c.description}
                     </Text>
+                  )}
+                  <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                    <View style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 3,
+                      paddingHorizontal: 8, paddingVertical: 3,
+                      backgroundColor: C.bg3, borderRadius: R.full,
+                    }}>
+                      <Icon.community size={10} color={C.text3} strokeWidth={2.4} />
+                      <Text style={[T.caption, { color: C.text2, fontWeight: '700' }]}>
+                        {c.member_count.toLocaleString('ja-JP')}
+                      </Text>
+                    </View>
+                    <View style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 3,
+                      paddingHorizontal: 8, paddingVertical: 3,
+                      backgroundColor: C.bg3, borderRadius: R.full,
+                    }}>
+                      <Icon.bbs size={10} color={C.text3} strokeWidth={2.4} />
+                      <Text style={[T.caption, { color: C.text2, fontWeight: '700' }]}>
+                        {c.post_count.toLocaleString('ja-JP')}
+                      </Text>
+                    </View>
                   </View>
                 </View>
-              </View>
-              <Icon.chevronR size={20} color={C.text3} strokeWidth={2} />
-            </PressableScale>
-          ))
+                <Icon.chevronR size={20} color={C.text3} strokeWidth={2} />
+              </PressableScale>
+            );
+          })
         )}
       </ScrollView>
     </KeyboardAvoidingView>

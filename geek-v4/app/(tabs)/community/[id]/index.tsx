@@ -270,10 +270,20 @@ export default function CommunityDetailScreen() {
     else if (isRequest) show('参加申請を送信しました', 'success');
     else show('コミュニティに参加しました', 'success');
 
-    // 即座にすべての関連 query を invalidate (header / マイコミュ / 投稿先候補 全部更新)
+    // 即座に全関連 query を invalidate
+    // 注意: queryKey は実際に各画面で使われているキーに揃えること。
+    // 過去版は ['mypage-my-communities'] / ['community-discover'] という
+    // 存在しない key を invalidate していて、コミュタブのリストが古いまま
+    // 残るバグになっていた。
     void qc.invalidateQueries({ queryKey: ['community', id] });
-    void qc.invalidateQueries({ queryKey: ['mypage-my-communities'] });
-    void qc.invalidateQueries({ queryKey: ['community-discover'] });
+    // コミュタブ index.tsx (React Query 化済) — user.id サフィックス含めて prefix 一致
+    void qc.invalidateQueries({ queryKey: ['my-communities'] });
+    void qc.invalidateQueries({ queryKey: ['my-community-feed'] });
+    // mypage の統計 (KPI: コミュ数)
+    void qc.invalidateQueries({ queryKey: ['mypage-stats'] });
+    // discover 画面
+    void qc.invalidateQueries({ queryKey: ['discover-search'] });
+    void qc.invalidateQueries({ queryKey: ['discover-official'] });
   };
 
   // -----------------------------------------------------------
