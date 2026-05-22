@@ -40,6 +40,12 @@ import { EmptyState } from '../../../../components/ui/EmptyState';
 import { BackButton } from '../../../../components/nav/BackButton';
 import { Icon } from '../../../../constants/icons';
 import { AnonPostCard } from '../../../../components/feed/AnonPostCard';
+import { CommunityStampRow } from '../../../../components/feed/CommunityStampRow';
+import {
+  useCommunityStamps,
+  useCommunityStampReactions,
+  useCommunityStampReactionToggle,
+} from '../../../../hooks/useCommunityStamps';
 import { OfficialBadge } from '../../../../components/community/OfficialBadge';
 import { useAuthStore } from '../../../../stores/authStore';
 import {
@@ -823,6 +829,18 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
   const { data: addedTagsByPost = {} } = useAddedTags(postIds);
   const { polls } = usePolls(postIds);
 
+  // ===== コミュ専用スタンプ =====
+  // このコミュで作成されたスタンプ一覧 + 各 post の集計を取得
+  const { data: communityStamps = [] } = useCommunityStamps(communityId);
+  const { data: stampReactionsByPost = {} } = useCommunityStampReactions(postIds);
+  const stampToggle = useCommunityStampReactionToggle();
+  const handleStampReact = useCallback(
+    (postId: string, stampId: string) => {
+      stampToggle.mutate({ postId, stampId });
+    },
+    [stampToggle],
+  );
+
   const handleAddTag = useCallback(
     async (postId: string, tag: string) => {
       try {
@@ -902,23 +920,31 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
       ) : (
         <View>
           {posts.map((p) => (
-            <FeedPostRow
-              key={p.id}
-              post={p}
-              liked={!!myLikes[p.id]}
-              concerned={!!myConcerns[p.id]}
-              saved={!!mySaves[p.id]}
-              reactions={reactionsByPost[p.id] ?? []}
-              addedTags={addedTagsByPost[p.id] ?? []}
-              poll={polls[p.id]}
-              toggleLike={toggleLike}
-              toggleConcern={toggleConcern}
-              toggleSave={toggleSave}
-              toggleReact={toggleReact}
-              share={share}
-              router={router}
-              handleAddTag={handleAddTag}
-            />
+            <View key={p.id}>
+              <FeedPostRow
+                post={p}
+                liked={!!myLikes[p.id]}
+                concerned={!!myConcerns[p.id]}
+                saved={!!mySaves[p.id]}
+                reactions={reactionsByPost[p.id] ?? []}
+                addedTags={addedTagsByPost[p.id] ?? []}
+                poll={polls[p.id]}
+                toggleLike={toggleLike}
+                toggleConcern={toggleConcern}
+                toggleSave={toggleSave}
+                toggleReact={toggleReact}
+                share={share}
+                router={router}
+                handleAddTag={handleAddTag}
+              />
+              {/* コミュ専用スタンプ行 (投稿カードの直下に出す) */}
+              <CommunityStampRow
+                communityId={communityId}
+                stamps={communityStamps}
+                reactions={stampReactionsByPost[p.id] ?? []}
+                onReact={(stampId) => handleStampReact(p.id, stampId)}
+              />
+            </View>
           ))}
         </View>
       )}

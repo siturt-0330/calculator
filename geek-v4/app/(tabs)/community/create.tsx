@@ -44,9 +44,9 @@ export default function CreateCommunityScreen() {
   const [description, setDescription] = useState('');
   // ローカルでアップロード待ちの画像 (URI + blob)
   const [localIconUri, setLocalIconUri] = useState<string | null>(null);
-  // Web では Blob、Native では Uint8Array が来る。両方を Supabase Storage に
+  // Web では Blob、Native では FormData が来る。両方を Supabase Storage に
   // そのまま渡せる (lib/image.ts の prepareImageUpload 戻り値型を参照)。
-  const [localIconBlob, setLocalIconBlob] = useState<Blob | Uint8Array | null>(null);
+  const [localIconBlob, setLocalIconBlob] = useState<Blob | FormData | null>(null);
   const [localIconMime, setLocalIconMime] = useState<string>('image/jpeg');
   const [iconLoading, setIconLoading] = useState(false);
   const [visibility, setVisibility] = useState<Visibility>('open');
@@ -179,6 +179,7 @@ export default function CreateCommunityScreen() {
       }
       setIconLoading(true);
       // prepareImageUpload: EXIF 除去 + magic byte 検証 + size check (5MB)
+      console.log('[community/create] preparing image:', { croppedUri });
       let prepared;
       try {
         prepared = await prepareImageUpload(croppedUri, {
@@ -187,10 +188,17 @@ export default function CreateCommunityScreen() {
           maxHeight: 512,
           quality: 0.85,
         });
+        console.log('[community/create] prepared:', {
+          mime: prepared.mime,
+          ext: prepared.ext,
+          size: prepared.size,
+          uri: prepared.uri,
+          bodyKind: prepared.blob instanceof FormData ? 'FormData' : 'Blob',
+        });
       } catch (e) {
         console.warn('[community/create] prepareImageUpload failed:', e);
         const msg = e instanceof Error ? e.message : '画像処理に失敗しました';
-        show(msg, 'warn');
+        show(`画像処理エラー: ${msg}`, 'warn');
         return;
       }
       setLocalIconUri(croppedUri);
@@ -264,13 +272,21 @@ export default function CreateCommunityScreen() {
         return;
       }
       // Step 2: アイコンアップロード — 失敗しても community は出来ているので警告だけ
+      console.log('[community/create] uploading icon, body type:', {
+        isBlob: typeof Blob !== 'undefined' && localIconBlob instanceof Blob,
+        isFormData: typeof FormData !== 'undefined' && localIconBlob instanceof FormData,
+        mime: localIconMime,
+      });
       const { url, error: upErr } = await uploadCommunityIcon(created.id, localIconBlob, localIconMime);
       if (upErr || !url) {
+        // 詳細なエラー本文を toast に出して、ユーザー → 開発者で再現しやすくする
         console.warn('[community/create] icon upload failed:', upErr);
-        show('コミュニティは作成されましたがアイコンアップロードに失敗しました。詳細画面から再設定できます。', 'warn');
+        const detail = upErr ? `\n詳細: ${upErr}` : '';
+        show(`アイコンのアップロードに失敗しました。${detail}\n後で詳細画面から再設定できます。`, 'warn');
         router.replace(`/community/${created.id}` as never);
         return;
       }
+      console.log('[community/create] icon uploaded:', url);
       // Step 3: icon_url を反映 — 失敗しても致命的ではないので警告のみ
       try {
         await updateCommunity(created.id, { icon_url: url });

@@ -18,7 +18,7 @@
 // ============================================================
 
 import { useEffect, useState, useMemo } from 'react';
-import { View, Text, Dimensions, Image, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, Dimensions, Image, StyleSheet, ActivityIndicator, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
@@ -244,17 +244,35 @@ export default function ImageCropperScreen() {
       });
       actions.push({ resize: { width: 512, height: 512 } });
 
+      // ★ 重要 (iPhone Safari fix):
+      // Web では manipulateAsync の戻り値 .uri が blob: URL になる。
+      // iPhone Safari はメモリ節約のため画面遷移 (router.back) や少し時間が
+      // 経つとこの blob URL を勝手に無効化することがあり、後段の
+      // prepareImageUpload で fetch(blob_url).blob() が空 Blob を返して
+      // 「画像形式を判定できませんでした」で失敗していた。
+      //
+      // 対策: Web では base64 出力を要求し、data:image/jpeg;base64,... の
+      //       data URL を返す。data URL は revoke されないので安全。
+      // Native は file:// URI のままで OK。
+      const useBase64 = Platform.OS === 'web';
+      const toFinalUri = (r: ImageManipulator.ImageResult): string => {
+        if (useBase64 && r.base64) {
+          return `data:image/jpeg;base64,${r.base64}`;
+        }
+        return r.uri;
+      };
+
       let croppedUri: string | null = null;
       try {
         const result = await ImageManipulator.manipulateAsync(sourceUri, actions, {
           compress: 0.85,
           format: ImageManipulator.SaveFormat.JPEG,
+          base64: useBase64,
         });
-        croppedUri = result.uri;
-        console.log('[image-cropper] manipulate ok:', result.uri);
+        croppedUri = toFinalUri(result);
+        console.log('[image-cropper] manipulate ok, scheme:', croppedUri.slice(0, 20));
       } catch (innerErr) {
         console.warn('[image-cropper] manipulateAsync failed, attempting center-square fallback:', innerErr);
-        // フォールバック: 画像の中心を正方形 crop する (transform 情報は捨てる)
         const side = Math.min(rotatedNatW, rotatedNatH);
         const fallbackX = Math.round((rotatedNatW - side) / 2);
         const fallbackY = Math.round((rotatedNatH - side) / 2);
@@ -266,12 +284,11 @@ export default function ImageCropperScreen() {
               { crop: { originX: fallbackX, originY: fallbackY, width: side, height: side } },
               { resize: { width: 512, height: 512 } },
             ],
-            { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG },
+            { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: useBase64 },
           );
-          croppedUri = fb.uri;
+          croppedUri = toFinalUri(fb);
         } catch (fbErr) {
           console.warn('[image-cropper] fallback also failed, using source as-is:', fbErr);
-          // 最終 fallback: source をそのまま返す
           croppedUri = sourceUri;
         }
       }
