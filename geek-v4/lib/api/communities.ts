@@ -829,6 +829,110 @@ export async function leaveCommunity(id: string): Promise<{ error: string | null
 }
 
 // ============================================================
+// 所属コミュニティの最新投稿フィード (Post[] バージョン)
+// ============================================================
+// AnonPostCard と互換性のある Post[] と、各 post → community メタの map を返す。
+// コミュタブのトップで「コミュ詳細と同じ表示密度」で投稿を見るために使う。
+// 旧 fetchMyCommunityFeed (CommunityPostWithCommunity[]) は useObsidian など
+// 既存利用が残っているので保留。
+// ============================================================
+import type { Post } from '../../types/models';
+
+export type CommunityMetaLite = {
+  id: string;
+  name: string;
+  icon_emoji: string;
+  icon_color: string;
+  icon_url: string | null;
+  is_official: boolean;
+};
+
+export async function fetchMyCommunityPostsRich(
+  limit = 40,
+): Promise<{ posts: Post[]; communityByPost: Record<string, CommunityMetaLite> }> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { posts: [], communityByPost: {} };
+
+  // 1) 所属 community_id 一覧
+  const { data: memberRows, error: memErr } = await supabase
+    .from('community_members')
+    .select('community_id')
+    .eq('user_id', user.id);
+  if (memErr || !memberRows || memberRows.length === 0) {
+    return { posts: [], communityByPost: {} };
+  }
+  const myCommunityIds = memberRows.map((r) => r.community_id);
+
+  // 2) post_communities 中間テーブルから post_id を新しい attach 順で取得
+  const overfetch = Math.max(limit * 2, 60);
+  const { data: pcRows, error: pcErr } = await supabase
+    .from('post_communities')
+    .select('post_id, community_id, created_at')
+    .in('community_id', myCommunityIds)
+    .order('created_at', { ascending: false })
+    .limit(overfetch);
+  if (pcErr) {
+    console.warn('[communities] fetchMyCommunityPostsRich (pc) failed:', pcErr.message);
+    return { posts: [], communityByPost: {} };
+  }
+  const pc = pcRows ?? [];
+  if (pc.length === 0) return { posts: [], communityByPost: {} };
+
+  // 重複削除 (同一 post が複数コミュに attach されている場合は最新の attach を採用)
+  const postToCommunity = new Map<string, string>();
+  const order: string[] = [];
+  for (const row of pc) {
+    if (!postToCommunity.has(row.post_id)) {
+      postToCommunity.set(row.post_id, row.community_id);
+      order.push(row.post_id);
+    }
+  }
+  const postIds = order.slice(0, limit);
+
+  // 3) posts を AnonPostCard 互換の完全な列セットで取得
+  // POSTS_SELECT_COLS (lib/api/posts.ts) と同じセット
+  const POSTS_SELECT_COLS =
+    'id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, created_at, author_id';
+  const { data: postRows, error: postErr } = await supabase
+    .from('posts')
+    .select(POSTS_SELECT_COLS)
+    .in('id', postIds);
+  if (postErr) {
+    console.warn('[communities] fetchMyCommunityPostsRich (posts) failed:', postErr.message);
+    return { posts: [], communityByPost: {} };
+  }
+  // attach 時刻順に並べる (Map で O(N) lookup)
+  const byId = new Map((postRows ?? []).map((p) => [p.id, p as Post]));
+  const ordered: Post[] = [];
+  for (const id of postIds) {
+    const p = byId.get(id);
+    if (p) ordered.push(p);
+  }
+
+  // 4) コミュニティメタ (icon / name / 公式判定) を一括取得
+  const usedCommunityIds = Array.from(
+    new Set(ordered.map((p) => postToCommunity.get(p.id)).filter(Boolean) as string[]),
+  );
+  let communityByPost: Record<string, CommunityMetaLite> = {};
+  if (usedCommunityIds.length > 0) {
+    const { data: commRows } = await supabase
+      .from('communities')
+      .select('id, name, icon_emoji, icon_color, icon_url, is_official')
+      .in('id', usedCommunityIds);
+    const commMap = new Map(
+      ((commRows ?? []) as CommunityMetaLite[]).map((c) => [c.id, c]),
+    );
+    for (const p of ordered) {
+      const cid = postToCommunity.get(p.id);
+      const c = cid ? commMap.get(cid) : undefined;
+      if (c) communityByPost[p.id] = c;
+    }
+  }
+
+  return { posts: ordered, communityByPost };
+}
+
+// ============================================================
 // 旧 API: createCommunityPost / fetchCommunityPosts (廃止)
 // ============================================================
 // 旧スキーマで使われていた `community_posts` テーブルは migration 0023 以降
@@ -853,18 +957,35 @@ export async function leaveCommunity(id: string): Promise<{ error: string | null
 // updateCommunity({ icon_url }) を呼ぶ必要がある — そのため tmp uploads は
 // 自前の bucket folder 'pending/<user_id>/...' を使うパターンも検討余地あり。
 // ============================================================
+// body は Blob (Web) または Uint8Array / ArrayBuffer (Native) を受け付ける。
+// 監査指摘: 旧版は Blob 専用シグネチャで native の Uint8Array body を渡すと
+// 型エラーになっていた (prepareImageUpload 修正と整合)。
 export async function uploadCommunityIcon(
   community_id: string,
-  blob: Blob,
+  body: Blob | Uint8Array | ArrayBuffer,
   contentType = 'image/jpeg',
 ): Promise<{ url: string | null; error: string | null }> {
-  const ext = contentType.split('/')[1] ?? 'jpg';
+  // 防御: community_id を UUID 検証 (Storage RLS の foldername と整合)
+  if (!UUID_RE.test(community_id)) {
+    return { url: null, error: '不正なコミュニティ ID です' };
+  }
+  // 防御: contentType を allowed mime に絞る (path traversal / 不正拡張子防止)
+  const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+  const safeContentType = ALLOWED.has(contentType) ? contentType : 'image/jpeg';
+  const ext = safeContentType.split('/')[1] ?? 'jpg';
   const path = `${community_id}/${Date.now()}.${ext}`;
-  const { error: upErr } = await supabase.storage.from('community-icons').upload(path, blob, {
-    contentType,
-    upsert: true,
-    cacheControl: '3600',
-  });
+  // Supabase Storage upload は Blob / File / ArrayBuffer / ArrayBufferView /
+  // FormData / NodeJS.ReadableStream / ReadableStream / URLSearchParams / string
+  // を受け付ける。Uint8Array は ArrayBufferView なので OK。
+  const { error: upErr } = await supabase.storage.from('community-icons').upload(
+    path,
+    body as Blob, // 型は Blob にキャスト (Supabase SDK の型が Blob | ArrayBuffer | ... の union)
+    {
+      contentType: safeContentType,
+      upsert: true,
+      cacheControl: '3600',
+    },
+  );
   if (upErr) return { url: null, error: upErr.message };
   const { data: pub } = supabase.storage.from('community-icons').getPublicUrl(path);
   return { url: pub.publicUrl, error: null };

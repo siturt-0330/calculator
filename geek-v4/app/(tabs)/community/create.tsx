@@ -44,7 +44,9 @@ export default function CreateCommunityScreen() {
   const [description, setDescription] = useState('');
   // ローカルでアップロード待ちの画像 (URI + blob)
   const [localIconUri, setLocalIconUri] = useState<string | null>(null);
-  const [localIconBlob, setLocalIconBlob] = useState<Blob | null>(null);
+  // Web では Blob、Native では Uint8Array が来る。両方を Supabase Storage に
+  // そのまま渡せる (lib/image.ts の prepareImageUpload 戻り値型を参照)。
+  const [localIconBlob, setLocalIconBlob] = useState<Blob | Uint8Array | null>(null);
   const [localIconMime, setLocalIconMime] = useState<string>('image/jpeg');
   const [iconLoading, setIconLoading] = useState(false);
   const [visibility, setVisibility] = useState<Visibility>('open');
