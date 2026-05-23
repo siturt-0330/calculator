@@ -28,6 +28,7 @@ export function MemeReactionPicker({
   const insets = useSafeAreaInsets();
   const [customText, setCustomText] = useState('');
   const [showCustomInput, setShowCustomInput] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const { stamps: userStamps } = useUserStamps();
   const { mutateAsync: createStamp, isPending: creating } = useCreateUserStamp();
   // toast actions のみ subscribe — picker は post カードから render される多発路
@@ -36,14 +37,31 @@ export function MemeReactionPicker({
   // isPending 反映遅延 / state 反映前の二重押下を防ぐ defense-in-depth)
   const [submitting, setSubmitting] = useState(false);
 
-  // ★ ローカル「直近で押したスタンプ」を保持。サーバー反映が遅くても
-  // すぐにチップが選択状態に見えるようにする (Realtime invalidate 中に
-  // 選択状態が一瞬消える "勝手に消える" 現象の対策)。
-  const [recentLocalPicks, setRecentLocalPicks] = useState<Set<string>>(new Set());
+  // ★ XOR ベースの楽観 selection:
+  //   - baselinePicked: モーダル open 時点での「サーバー側で確定済みのスタンプ」
+  //     スナップショット。session 中は不変。
+  //   - localFlips: ユーザーがこの session でタップして「flip」したスタンプ集合
+  //     (奇数回タップ = メンバー)。
+  //   - visiblyPicked = baselinePicked XOR localFlips
+  //
+  // 旧版は「picked ∪ recentLocalPicks」だったため、既に押されてるスタンプを
+  // タップしても visiblyPicked から削除されず「解除されたように見えない」バグ。
+  // また、サーバーが settle して `picked` が変動すると XOR の対象が揺れて oscillation
+  // が発生していたので、baseline は固定スナップショットで安定化させる。
+  const [baselinePicked, setBaselinePicked] = useState<Set<string>>(new Set());
+  const [localFlips, setLocalFlips] = useState<Set<string>>(new Set());
 
-  // モーダルを開き直すたびに local state をリセット
+  // モーダルを開く/閉じる両タイミングで local state をリセット。
+  // close → open の short cycle で前回 picks が残らないように close 側でも reset。
   useEffect(() => {
-    if (visible) setRecentLocalPicks(new Set());
+    setLocalFlips(new Set());
+    if (visible) {
+      setBaselinePicked(new Set(picked));
+      setSearchQuery('');
+      setShowCustomInput(false);
+    }
+    // baselinePicked は visible 遷移時のみ更新したいので picked を deps に入れない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   // memes 辞書 (~3KB) は visible になったタイミングで遅延ロード — 初回 bundle
@@ -65,15 +83,37 @@ export function MemeReactionPicker({
     [userStamps],
   );
 
-  // 表示用の選択状態 = サーバー確定済み ∪ 直近ローカルタップ
-  const visiblyPicked = useMemo(
-    () => new Set<string>([...picked, ...recentLocalPicks]),
-    [picked, recentLocalPicks],
+  // 検索フィルター適用
+  const q = searchQuery.trim().toLowerCase();
+  const filteredUserStamps = useMemo(
+    () => (q ? popularUserStamps.filter((t) => t.toLowerCase().includes(q)) : popularUserStamps),
+    [popularUserStamps, q],
+  );
+  const filteredMemes = useMemo(
+    () =>
+      q
+        ? memes
+            .map((cat) => ({ ...cat, items: cat.items.filter((m) => m.toLowerCase().includes(q)) }))
+            .filter((cat) => cat.items.length > 0)
+        : memes,
+    [memes, q],
   );
 
+  // 表示用の選択状態 = baselinePicked XOR localFlips。
+  // 同じスタンプを再タップすると localFlips から外れて baseline に戻り、
+  // つまり UI 上もちゃんと「解除された」ように見える。
+  const visiblyPicked = useMemo(() => {
+    const out = new Set<string>(baselinePicked);
+    for (const m of localFlips) {
+      if (out.has(m)) out.delete(m);
+      else out.add(m);
+    }
+    return out;
+  }, [baselinePicked, localFlips]);
+
   const handlePick = (meme: string) => {
-    // ローカル選択をすぐ反映 (toggle 動作)
-    setRecentLocalPicks((prev) => {
+    // ローカル flip をすぐ反映 (toggle 動作 — 奇数回タップ = メンバー)
+    setLocalFlips((prev) => {
       const next = new Set(prev);
       if (next.has(meme)) next.delete(meme);
       else next.add(meme);
@@ -93,9 +133,9 @@ export function MemeReactionPicker({
       show(`「${t}」を作成しました`, 'success');
       setCustomText('');
       setShowCustomInput(false);
-      // 作成と同時に送信もする
+      // 作成と同時に送信もする (baseline には含まれないので flip = ON 表示)
       if (stamp) {
-        setRecentLocalPicks((prev) => new Set(prev).add(stamp.text));
+        setLocalFlips((prev) => new Set(prev).add(stamp.text));
         onPick(stamp.text);
       }
     } catch (e: unknown) {
@@ -150,6 +190,31 @@ export function MemeReactionPicker({
               <Text style={[T.bodyM, { color: C.accent, fontWeight: '700' }]}>完了</Text>
             </PressableScale>
           </View>
+          {/* 検索バー */}
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: SP['2'],
+            backgroundColor: C.bg3,
+            borderRadius: R.lg,
+            borderWidth: 1,
+            borderColor: searchQuery ? C.accent : C.border,
+            paddingHorizontal: SP['3'],
+            paddingVertical: 8,
+          }}>
+            <Icon.search size={15} color={C.text3} strokeWidth={2.2} />
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="スタンプを検索..."
+              placeholderTextColor={C.text3}
+              style={{ flex: 1, color: C.text, fontSize: 14, fontFamily: 'NotoSansJP_400Regular' }}
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+              keyboardAppearance="dark"
+            />
+          </View>
+
           <Text style={[T.caption, { color: C.text3 }]}>
             タップして送信。何個でも押せます。完了で閉じる。
           </Text>
@@ -243,17 +308,24 @@ export function MemeReactionPicker({
           )}
 
           <ScrollView contentContainerStyle={{ gap: SP['4'], paddingBottom: SP['4'] }}>
+            {/* 検索ゼロ件 */}
+            {q.length > 0 && filteredUserStamps.length === 0 && filteredMemes.length === 0 && (
+              <View style={{ alignItems: 'center', paddingVertical: SP['6'], gap: SP['2'] }}>
+                <Text style={{ fontSize: 28 }}>🔍</Text>
+                <Text style={[T.smallM, { color: C.text3 }]}>「{searchQuery}」に一致するスタンプがありません</Text>
+              </View>
+            )}
             {/* みんなが作ったスタンプ (上位) */}
-            {popularUserStamps.length > 0 && (
+            {filteredUserStamps.length > 0 && (
               <CategoryRow
                 title="✨ みんなが作った人気のスタンプ"
-                items={popularUserStamps}
+                items={filteredUserStamps}
                 picked={visiblyPicked}
                 onPick={handlePick}
               />
             )}
-            {/* 定型スタンプ — dynamic import 中は何も描画しない */}
-            {memes.map((cat) => (
+            {/* 定型スタンプ */}
+            {filteredMemes.map((cat) => (
               <CategoryRow
                 key={cat.category}
                 title={cat.category}

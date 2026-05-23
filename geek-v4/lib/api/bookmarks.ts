@@ -37,7 +37,8 @@ export async function createCollection(name: string, emoji = '📂', isPublic = 
 }
 
 export async function deleteCollection(id: string): Promise<void> {
-  await supabase.from('bookmark_collections').delete().eq('id', id);
+  const { error } = await supabase.from('bookmark_collections').delete().eq('id', id);
+  if (error) throw error;
 }
 
 export async function saveToCollection(postId: string, collectionId: string | null): Promise<void> {

@@ -342,7 +342,15 @@ export default function CommunityDetailScreen() {
   }
 
   const handle = deriveHandle(community);
-  const safeDesc = community.description.length > 0 ? sanitizeContent(community.description, { maxLength: 500 }) : '';
+  // ユーザー報告: 「打ち込んだ文章と異なる」
+  // 原因: 保存時 (createCommunity / updateCommunity) で既に sanitizeContent 済みの
+  // description を、表示時にも再度 sanitize していた。これにより:
+  //   - trim() で 前後の改行 / 空白 が再度落とされる
+  //   - <文字列> のような HTML 風表記が二度目で別の判定になる可能性
+  //   - 連続改行が再度圧縮される
+  // 保存時に正規化したものをそのまま表示するのが正しい。Web 版では
+  // <Text> がエスケープするので追加 sanitize なしでも XSS 安全。
+  const safeDesc = community.description ?? '';
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -834,9 +842,14 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
   const { data: communityStamps = [] } = useCommunityStamps(communityId);
   const { data: stampReactionsByPost = {} } = useCommunityStampReactions(postIds);
   const stampToggle = useCommunityStampReactionToggle();
+  // ★ mutate() ではなく toggle() を使う:
+  // toggle() は hook 内部で (postId+stampId) ごとの in-flight Set を握り、
+  // server roundtrip 中の連打を無視する。pending state が parent に伝わる前に
+  // 再 tap されると DELETE×2 が並走して use_count が二重消費される critical bug
+  // を防ぐための最後の defense。
   const handleStampReact = useCallback(
     (postId: string, stampId: string) => {
-      stampToggle.mutate({ postId, stampId });
+      stampToggle.toggle({ postId, stampId });
     },
     [stampToggle],
   );
@@ -937,12 +950,18 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
                 router={router}
                 handleAddTag={handleAddTag}
               />
-              {/* コミュ専用スタンプ行 (投稿カードの直下に出す) */}
+              {/* コミュ専用スタンプ行 (投稿カードの直下に出す)
+                  バグ修正: 旧版は `onReact={(stampId) => handleStampReact(p.id, ...)}`
+                  と毎回新規 arrow を渡しており、CommunityStampRow の memo / React
+                  reconciliation 経由で post.id の closure が別 post の id に
+                  入れ替わるバグが発生。postId を props で渡して handler は
+                  useCallback で安定化したものを直接渡す形に変更。 */}
               <CommunityStampRow
+                postId={p.id}
                 communityId={communityId}
                 stamps={communityStamps}
                 reactions={stampReactionsByPost[p.id] ?? []}
-                onReact={(stampId) => handleStampReact(p.id, stampId)}
+                onReact={handleStampReact}
               />
             </View>
           ))}

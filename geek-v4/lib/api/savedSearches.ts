@@ -40,9 +40,11 @@ export async function createSavedSearch(query: string, label?: string, notify = 
 }
 
 export async function updateSavedSearch(id: string, updates: Partial<SavedSearch>): Promise<void> {
-  await supabase.from('saved_searches').update(updates).eq('id', id);
+  const { error } = await supabase.from('saved_searches').update(updates).eq('id', id);
+  if (error) throw error;
 }
 
 export async function deleteSavedSearch(id: string): Promise<void> {
-  await supabase.from('saved_searches').delete().eq('id', id);
+  const { error } = await supabase.from('saved_searches').delete().eq('id', id);
+  if (error) throw error;
 }

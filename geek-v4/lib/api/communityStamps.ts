@@ -15,6 +15,11 @@ import { sanitizeContent } from '../sanitize';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// PostgreSQL の error code を明示判定するための定数。
+// 文字列 message へのキーワード matching は locale / pg バージョン依存で fragile。
+const PG_UNIQUE_VIOLATION = '23505';
+const PG_RLS_VIOLATION = '42501';
+
 export type CommunityStamp = {
   id: string;
   community_id: string;
@@ -96,14 +101,13 @@ export async function createCommunityStamp(input: {
     .select()
     .single();
   if (error || !data) {
-    const msg = error?.message ?? '';
-    if (msg.includes('duplicate') || msg.includes('unique')) {
+    if (error?.code === PG_UNIQUE_VIOLATION) {
       return { data: null, error: 'そのスタンプは既にこのコミュニティに存在します' };
     }
-    if (msg.includes('row-level security') || msg.includes('42501')) {
+    if (error?.code === PG_RLS_VIOLATION) {
       return { data: null, error: 'コミュニティのメンバーのみ作成できます' };
     }
-    return { data: null, error: msg || 'スタンプの作成に失敗しました' };
+    return { data: null, error: error?.message || 'スタンプの作成に失敗しました' };
   }
   return { data: data as CommunityStamp, error: null };
 }
@@ -115,7 +119,7 @@ export async function deleteCommunityStamp(stamp_id: string): Promise<{ error: s
   if (!UUID_RE.test(stamp_id)) return { error: '不正なスタンプ ID です' };
   const { error } = await supabase.from('community_stamps').delete().eq('id', stamp_id);
   if (error) {
-    if (error.message.includes('42501') || error.message.includes('row-level security')) {
+    if (error.code === PG_RLS_VIOLATION) {
       return { error: '作成者またはコミュニティオーナーのみ削除できます' };
     }
     return { error: error.message };
@@ -177,11 +181,12 @@ export async function fetchCommunityStampReactionsForPosts(
 // ============================================================
 // toggleCommunityStampReaction — 1 RTT トグル (DELETE → INSERT)
 // ============================================================
-// post_reactions の toggleReaction と同じパターン。
-// community_id は post_communities 経由で fetch する。
+// communityId を呼び出し側から受け取ることで INSERT 前の追加 fetch を排除。
+// 未指定の場合のみ DB から取得 (後方互換フォールバック)。
 export async function toggleCommunityStampReaction(
   postId: string,
   stampId: string,
+  communityId?: string,
 ): Promise<{ on: boolean; error: string | null }> {
   if (!UUID_RE.test(postId) || !UUID_RE.test(stampId)) {
     return { on: false, error: '不正な ID です' };
@@ -204,30 +209,31 @@ export async function toggleCommunityStampReaction(
 
   if (deleted && deleted.length > 0) return { on: false, error: null };
 
-  // INSERT — stamp の community_id が要るので 1 RTT 追加
-  const { data: stampRow, error: sErr } = await supabase
-    .from('community_stamps')
-    .select('community_id')
-    .eq('id', stampId)
-    .maybeSingle();
-  if (sErr || !stampRow) {
-    return { on: false, error: 'スタンプが見つかりません' };
+  // communityId 未提供の場合のみ DB fetch (追加 RTT)
+  let resolvedCommunityId = communityId;
+  if (!resolvedCommunityId) {
+    const { data: stampRow, error: sErr } = await supabase
+      .from('community_stamps')
+      .select('community_id')
+      .eq('id', stampId)
+      .maybeSingle();
+    if (sErr || !stampRow) {
+      return { on: false, error: 'スタンプが見つかりません' };
+    }
+    resolvedCommunityId = (stampRow as { community_id: string }).community_id;
   }
-  const community_id = (stampRow as { community_id: string }).community_id;
 
   const { error } = await supabase
     .from('community_stamp_reactions')
     .upsert(
-      { post_id: postId, user_id: userId, stamp_id: stampId, community_id },
+      { post_id: postId, user_id: userId, stamp_id: stampId, community_id: resolvedCommunityId },
       { onConflict: 'post_id,user_id,stamp_id', ignoreDuplicates: true },
     );
   if (error) {
-    const msg = error.message;
-    if (msg.includes('row-level security') || msg.includes('42501')) {
-      // RLS で弾かれる典型ケースを和訳
+    if (error.code === PG_RLS_VIOLATION) {
       return { on: false, error: 'このスタンプはこの投稿には使用できません (コミュ非メンバー、または投稿が別コミュ)' };
     }
-    return { on: false, error: msg };
+    return { on: false, error: error.message };
   }
   return { on: true, error: null };
 }

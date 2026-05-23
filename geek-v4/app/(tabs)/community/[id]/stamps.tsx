@@ -10,7 +10,7 @@
 //   - 同コミュ内で label の重複は禁止 (DB unique)
 // ============================================================
 
-import { View, Text, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, ScrollView, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { useState, useMemo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -85,6 +85,21 @@ export default function CommunityStampsScreen() {
 
   const canDelete = (stamp: CommunityStamp) =>
     isOwner || stamp.creator_id === user?.id;
+
+  const handleDelete = (s: CommunityStamp) => {
+    Alert.alert(
+      'スタンプを削除',
+      `「${s.label}」を削除しますか？\nこの操作は取り消せません。`,
+      [
+        { text: 'キャンセル', style: 'cancel' },
+        {
+          text: '削除する',
+          style: 'destructive',
+          onPress: () => deleteMut.mutate(s.id),
+        },
+      ],
+    );
+  };
 
   // 自分が作成したスタンプの数 (UI ヒント)
   const myStampCount = useMemo(
@@ -278,11 +293,9 @@ export default function CommunityStampsScreen() {
                     </View>
                     {canDelete(s) && (
                       <PressableScale
-                        onPress={() =>
-                          deleteMut.mutate(s.id)
-                        }
+                        onPress={() => handleDelete(s)}
                         haptic="warn"
-                        hitSlop={6}
+                        hitSlop={8}
                         accessibilityLabel={`スタンプ ${s.label} を削除`}
                         disabled={deleteMut.isPending}
                         style={{

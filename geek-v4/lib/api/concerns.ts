@@ -26,15 +26,16 @@ export async function addConcern(
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) throw new Error('Not authenticated');
-  await supabase
+  const { error } = await supabase
     .from('concerns')
-    .insert({ user_id: userId, post_id: postId, reason, is_private: isPrivate })
-    .select();
+    .insert({ user_id: userId, post_id: postId, reason, is_private: isPrivate });
+  if (error) throw error;
 }
 
 export async function removeConcern(postId: string): Promise<void> {
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) throw new Error('Not authenticated');
-  await supabase.from('concerns').delete().eq('user_id', userId).eq('post_id', postId);
+  const { error } = await supabase.from('concerns').delete().eq('user_id', userId).eq('post_id', postId);
+  if (error) throw error;
 }

@@ -119,8 +119,27 @@ export default function RootLayout() {
   }, [playIntro]);
 
   const hydrateLang = useLanguageStore((s) => s.hydrate);
+  const lang = useLanguageStore((s) => s.lang);
   const hydrateTagFilter = useTagFilterStore((s) => s.hydrate);
   const hydrateAdPrefs = useAdPreferencesStore((s) => s.hydrate);
+
+  // ★ 言語切替反映 (Web):
+  // `document.documentElement.lang` を更新することで:
+  //   1. Chrome / Edge / Safari の "このページを翻訳" 機能が自動発火
+  //   2. ARIA / screen reader が正しい言語で読み上げ
+  //   3. CSS の `:lang()` セレクタが効く
+  //
+  // 旧実装は useT() フックを定義していたが、UI 内に実際の使用箇所が 0 だった
+  // ため、languageStore を変えても文字列が一切翻訳されないバグだった。
+  // ブラウザ翻訳機能を活用することで、全画面の日本語が一気に多言語化される。
+  // Native (iOS / Android) では useT() 経由の翻訳 + 動的翻訳 (translateDynamic)
+  // を順次拡充していく予定。
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    try {
+      document.documentElement.lang = lang;
+    } catch { /* ignore */ }
+  }, [lang]);
   useEffect(() => {
     // hydrate 改修 (MMKV 化):
     //   - settings / tagFilter は MMKV 同期化されて 1ms 以下に

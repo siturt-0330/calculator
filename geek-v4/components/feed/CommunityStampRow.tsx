@@ -20,13 +20,21 @@ import { Icon } from '../../constants/icons';
 import type { CommunityStamp, CommunityStampAgg } from '../../hooks/useCommunityStamps';
 
 type Props = {
+  // ★ 重要 (バグ修正): postId を props で受け取る。
+  // 旧版は親で `onReact={(stampId) => handleStampReact(p.id, stampId)}` の
+  // ように毎回新規 arrow を生成して closure で post.id を閉じ込めていたが、
+  // memo の `prev.onReact !== next.onReact` ガード抜けや React の reconciliation
+  // タイミングで「最初に紐付いた arrow function (= 別 post の id 入り)」が
+  // chip の onPress closure に残るバグが発生していた。
+  // 親には post.id 非依存の安定 handler (postId, stampId) を渡してもらう。
+  postId: string;
   communityId: string;
   // 利用可能なスタンプ全件 (use_count desc)
   stamps: CommunityStamp[];
   // この投稿に対する集計
   reactions: CommunityStampAgg[];
-  // 押下時 (stampId)
-  onReact: (stampId: string) => void;
+  // 押下時 (postId, stampId)
+  onReact: (postId: string, stampId: string) => void;
   // 現在 in-flight の stampId 群 (UI 上 disable する)
   pendingStampIds?: Set<string>;
 };
@@ -34,6 +42,7 @@ type Props = {
 // パフォーマンス監査: コミュ詳細 FeedTab で 1 post 状態変更 → 全 post の
 // CommunityStampRow が再構成される問題。memo + shallow compare で post 単位 isolate。
 function CommunityStampRowInner({
+  postId,
   communityId,
   stamps,
   reactions,
@@ -42,17 +51,10 @@ function CommunityStampRowInner({
 }: Props) {
   const router = useRouter();
 
-  // 集計済みの map
-  const reactionByStampId = new Map<string, CommunityStampAgg>();
-  for (const r of reactions) reactionByStampId.set(r.stamp.id, r);
-
   // 表示順:
   //   1. 既に反応がついているスタンプ (count desc)
-  //   2. 残りのスタンプから use_count 降順で 6 個まで
-  //   3. 末尾に「+ スタンプ管理」リンク
-  const reactedSet = new Set(reactions.map((r) => r.stamp.id));
+  //   2. 末尾に「スタンプ管理」リンク (未使用スタンプは管理画面からのみ選択可)
   const reactedFirst = reactions; // 既に count desc ソート済
-  const remaining = stamps.filter((s) => !reactedSet.has(s.id)).slice(0, 6);
 
   if (stamps.length === 0) {
     // スタンプがまだ無い時はコンパクトに「作ろう」CTA だけ
@@ -61,15 +63,15 @@ function CommunityStampRowInner({
         <PressableScale
           onPress={() => router.push(`/community/${communityId}/stamps` as never)}
           haptic="tap"
-          hitSlop={6}
+          hitSlop={10}
           accessibilityLabel="コミュニティスタンプを作る"
           style={{
             flexDirection: 'row',
             alignItems: 'center',
-            gap: 4,
+            gap: 5,
             alignSelf: 'flex-start',
-            paddingHorizontal: SP['2'],
-            paddingVertical: 3,
+            paddingHorizontal: SP['3'],
+            paddingVertical: 6,
             backgroundColor: C.bg3,
             borderRadius: R.full,
             borderWidth: 1,
@@ -77,8 +79,8 @@ function CommunityStampRowInner({
             borderStyle: 'dashed',
           }}
         >
-          <Icon.sparkles size={11} color={C.text3} strokeWidth={2.2} />
-          <Text style={[T.caption, { color: C.text3, fontWeight: '600', fontSize: 10 }]}>
+          <Icon.sparkles size={13} color={C.text3} strokeWidth={2.2} />
+          <Text style={[T.caption, { color: C.text3, fontWeight: '600', fontSize: 12 }]}>
             コミュスタンプを作る
           </Text>
         </PressableScale>
@@ -95,24 +97,27 @@ function CommunityStampRowInner({
         gap: 6,
       }}
     >
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-        {/* 反応済みを最初に */}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        {/* 反応済みを最初に
+            UX 修正: chip の touch target が小さすぎる (旧版 h=23px) と
+            ユーザーが「押しても反応しない」と感じる。padding を vertical:6 horizontal:10
+            に拡大 + hitSlop:10 で実効タップ領域を ~44px に押し上げる。 */}
         {reactedFirst.map((r) => {
           const pending = pendingStampIds?.has(r.stamp.id);
           return (
             <PressableScale
               key={`r-${r.stamp.id}`}
-              onPress={() => onReact(r.stamp.id)}
+              onPress={() => onReact(postId, r.stamp.id)}
               haptic="tap"
-              hitSlop={4}
+              hitSlop={10}
               disabled={pending}
               accessibilityLabel={`${r.stamp.label} ${r.count} 件`}
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
-                gap: 4,
-                paddingHorizontal: SP['2'],
-                paddingVertical: 3,
+                gap: 5,
+                paddingHorizontal: SP['3'],
+                paddingVertical: 6,
                 backgroundColor: r.mine ? C.accent : C.bg3,
                 borderRadius: R.full,
                 borderWidth: 1,
@@ -123,7 +128,7 @@ function CommunityStampRowInner({
               <Text
                 style={[
                   T.caption,
-                  { color: r.mine ? '#fff' : C.text, fontWeight: '700', fontSize: 11 },
+                  { color: r.mine ? '#fff' : C.text, fontWeight: '700', fontSize: 12 },
                 ]}
               >
                 {r.stamp.label}
@@ -134,7 +139,7 @@ function CommunityStampRowInner({
                   {
                     color: r.mine ? '#fff' : C.text3,
                     fontWeight: '700',
-                    fontSize: 10,
+                    fontSize: 11,
                   },
                 ]}
               >
@@ -144,57 +149,23 @@ function CommunityStampRowInner({
           );
         })}
 
-        {/* まだ反応していないスタンプを 6 個まで提示 */}
-        {remaining.map((s) => {
-          const pending = pendingStampIds?.has(s.id);
-          return (
-            <PressableScale
-              key={`s-${s.id}`}
-              onPress={() => onReact(s.id)}
-              haptic="tap"
-              hitSlop={4}
-              disabled={pending}
-              accessibilityLabel={`${s.label} を押す`}
-              style={{
-                paddingHorizontal: SP['2'],
-                paddingVertical: 3,
-                backgroundColor: C.bg2,
-                borderRadius: R.full,
-                borderWidth: 1,
-                borderColor: C.border,
-                borderStyle: 'dashed',
-                opacity: pending ? 0.6 : 1,
-              }}
-            >
-              <Text
-                style={[
-                  T.caption,
-                  { color: C.text2, fontWeight: '600', fontSize: 11 },
-                ]}
-              >
-                {s.label}
-              </Text>
-            </PressableScale>
-          );
-        })}
-
-        {/* 管理画面リンク */}
+        {/* 管理画面リンク — スタンプ選択はここから */}
         <PressableScale
           onPress={() => router.push(`/community/${communityId}/stamps` as never)}
           haptic="tap"
-          hitSlop={4}
+          hitSlop={10}
           accessibilityLabel="スタンプを管理"
           style={{
             flexDirection: 'row',
             alignItems: 'center',
-            gap: 3,
-            paddingHorizontal: 6,
-            paddingVertical: 3,
+            gap: 4,
+            paddingHorizontal: SP['2'],
+            paddingVertical: 6,
             borderRadius: R.full,
           }}
         >
-          <Icon.plus size={11} color={C.text3} strokeWidth={2.4} />
-          <Text style={[T.caption, { color: C.text3, fontWeight: '600', fontSize: 10 }]}>
+          <Icon.plus size={13} color={C.text3} strokeWidth={2.4} />
+          <Text style={[T.caption, { color: C.text3, fontWeight: '600', fontSize: 11 }]}>
             管理
           </Text>
         </PressableScale>
@@ -205,7 +176,10 @@ function CommunityStampRowInner({
 
 // memo: stamps 配列は community 全体で共有なので長さ比較で OK。
 // reactions は post-specific なので長さ + 各 stamp の count/mine 簡易比較。
+// onReact は親で useCallback 化された安定参照を渡してもらう前提。
+// postId は post 毎に違うので必ず比較する (これが旧版の closure バグの根本対策)。
 export const CommunityStampRow = memo(CommunityStampRowInner, (prev, next) => {
+  if (prev.postId !== next.postId) return false;
   if (prev.communityId !== next.communityId) return false;
   if (prev.onReact !== next.onReact) return false;
   if (prev.pendingStampIds !== next.pendingStampIds) return false;

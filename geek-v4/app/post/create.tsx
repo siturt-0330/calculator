@@ -362,16 +362,26 @@ export default function CreatePost() {
       router.back();
     } catch (e: unknown) {
       hap.error();
-      const msg = e instanceof Error ? e.message : String(e);
+      // Supabase の PostgrestError は Error サブクラスではなく plain object なので
+      // instanceof Error だけでは message を取り出せない
+      const msg = e instanceof Error
+        ? e.message
+        : (e !== null && typeof e === 'object' && 'message' in e)
+          ? String((e as { message: unknown }).message)
+          : String(e);
       console.warn('post create failed:', msg);
       // よくあるエラーを日本語化
       let userMsg = '投稿に失敗しました。再度お試しください。';
       if (msg.includes('row-level security') || msg.includes('RLS')) {
         userMsg = '権限エラー。ログインし直してください。';
-      } else if (msg.includes('Network') || msg.includes('Failed to fetch')) {
+      } else if (msg.includes('Not authenticated') || msg.includes('未ログイン')) {
+        userMsg = 'ログインし直してください。';
+      } else if (msg.includes('Network') || msg.includes('Failed to fetch') || msg.includes('ネットワーク')) {
         userMsg = '通信エラー。電波を確認してください。';
       } else if (msg.includes('check') || msg.includes('constraint')) {
         userMsg = '入力内容を確認してください。';
+      } else if (msg.includes('速すぎ') || msg.includes('時間を置いて') || msg.includes('ペースが')) {
+        userMsg = msg;
       }
       show(userMsg, 'error');
     } finally {
