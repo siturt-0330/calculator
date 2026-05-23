@@ -23,7 +23,8 @@ import { useTagCooccurStore } from '../stores/tagCooccurStore';
 import { findRelatedTags } from '../lib/search/tagVector';
 import { parseQuery, type ParsedQuery } from '../lib/search/queryParser';
 import { normalize } from '../lib/search/tokenize';
-import { scorePost, scoreTagItem, type PostDoc, type TagDoc } from '../lib/search/scoring';
+import { scorePost, scoreTagItem, type TagDoc } from '../lib/search/scoring';
+import { fetchTags, fetchAllTags, fetchPosts, fetchBBS } from '../lib/search/searchQueries';
 import { findClosest, findClosestK } from '../lib/search/typoCorrect';
 import { generateVariants, previewVariants } from '../lib/search/variants';
 import { useLanguageStore } from '../stores/languageStore';
@@ -37,94 +38,12 @@ import { generateRelatedQueries } from '../lib/search/relatedSearches';
 import { expandWithTagGraph } from '../lib/utils/searchAlgo';
 import { ReasonBadges } from '../components/search/ReasonBadge';
 
-type BBSResult = { id: string; title: string; category: string; replies_count: number; created_at: string };
-type Category = 'all' | 'posts' | 'tags' | 'bbs';
-type SortMode = 'relevance' | 'newest' | 'popular';
-
-// ============= サーバー検索 =============
-async function fetchTags(queries: string[]): Promise<TagDoc[]> {
-  if (queries.length === 0) return [];
-  const filters = queries.slice(0, 16).map((q) => `name.ilike.%${q}%`).join(',');
-  const { data } = await supabase
-    .from('tags')
-    .select('name, post_count, member_count')
-    .or(filters)
-    .order('member_count', { ascending: false })
-    .limit(60);
-  return (data ?? []) as TagDoc[];
-}
-
-async function fetchAllTags(): Promise<string[]> {
-  const { data } = await supabase
-    .from('tags')
-    .select('name')
-    .order('member_count', { ascending: false })
-    .limit(200);
-  return (data ?? []).map((t: { name: string }) => t.name);
-}
-
-async function fetchPosts(queries: string[], tagFilters: string[]): Promise<PostDoc[]> {
-  const map = new Map<string, PostDoc>();
-  const SELECT = 'id, content, tag_names, likes_count, comments_count, concern_count, created_at, trust_score_at_post, media_urls, source_url, kind';
-
-  // 本文検索
-  if (queries.length > 0) {
-    const filters = queries.slice(0, 16).map((q) => `content.ilike.%${q}%`).join(',');
-    const { data } = await supabase
-      .from('posts').select(SELECT).or(filters)
-      .eq('is_anonymous', true).eq('is_public', true)
-      .order('created_at', { ascending: false }).limit(80);
-    for (const p of (data ?? []) as PostDoc[]) map.set(p.id, p);
-  }
-  // タグ overlap 検索
-  const tagQueries = [...queries, ...tagFilters].filter(Boolean).slice(0, 12);
-  if (tagQueries.length > 0) {
-    const { data } = await supabase
-      .from('posts').select(SELECT).overlaps('tag_names', tagQueries)
-      .eq('is_anonymous', true).eq('is_public', true)
-      .order('created_at', { ascending: false }).limit(80);
-    for (const p of (data ?? []) as PostDoc[]) map.set(p.id, p);
-  }
-  return [...map.values()];
-}
-
-async function fetchBBS(q: string): Promise<BBSResult[]> {
-  if (!q) return [];
-  const { data } = await supabase
-    .from('bbs_threads')
-    .select('id, title, category, replies_count, created_at')
-    .ilike('title', `%${q}%`)
-    .order('last_reply_at', { ascending: false, nullsFirst: false })
-    .limit(30);
-  const rows = (data ?? []) as BBSResult[];
-  // 同タイトル + 同カテゴリの重複を dedupe — seed data や bot クローンのスレッドが
-  // 何個も並ぶのを防ぐ
-  const seen = new Map<string, BBSResult>();
-  for (const r of rows) {
-    const key = `${(r.title || '').trim().toLowerCase()}|${r.category}`;
-    const existing = seen.get(key);
-    if (!existing) {
-      seen.set(key, r);
-    } else {
-      // 返信数が多い方を残す (より「活発な方」)
-      if ((r.replies_count ?? 0) > (existing.replies_count ?? 0)) seen.set(key, r);
-    }
-  }
-  return [...seen.values()];
-}
-
-const CATEGORY_LABELS: Record<Category, { label: string; emoji: string }> = {
-  all: { label: 'すべて', emoji: '✨' },
-  posts: { label: '投稿', emoji: '📝' },
-  tags: { label: 'タグ', emoji: '#' },
-  bbs: { label: '掲示板', emoji: '💬' },
-};
-
-const SORT_LABELS: Record<SortMode, { label: string; emoji: string }> = {
-  relevance: { label: '関連度', emoji: '🎯' },
-  newest: { label: '新着順', emoji: '🕐' },
-  popular: { label: '人気順', emoji: '🔥' },
-};
+// BBSResult / fetchTags / fetchAllTags / fetchPosts / fetchBBS は
+// lib/search/searchQueries.ts に移動 (Phase 8 split)。
+// Category / SortMode / CATEGORY_LABELS / SORT_LABELS は
+// components/search/CategorySortBar.tsx に移動 (Phase 8 split)。
+import { CategorySortBar, type Category, type SortMode } from '../components/search/CategorySortBar';
+import { SavedSearchesRow } from '../components/search/SavedSearchesRow';
 
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
@@ -603,27 +522,12 @@ export default function SearchScreen() {
         )}
 
         {/* 保存検索一覧 (検索無し時のみ) */}
-        {!debounced.trim() && savedSearches.length > 0 && (
-          <View style={{ gap: SP['1'] }}>
-            <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>保存した検索</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-              {savedSearches.map((s) => (
-                <View key={s.id} style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 4,
-                  paddingHorizontal: SP['2'], paddingVertical: 4,
-                  backgroundColor: C.accentBg, borderRadius: R.full,
-                  borderWidth: 1, borderColor: C.accentSoft,
-                }}>
-                  <PressableScale onPress={() => { setQ(s.query); setDebounced(s.query); }} haptic="tap">
-                    <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>★ {s.query}</Text>
-                  </PressableScale>
-                  <PressableScale onPress={() => removeSavedSearchFn(s.id)} haptic="warn">
-                    <Text style={{ fontSize: 10, color: C.text3 }}>✕</Text>
-                  </PressableScale>
-                </View>
-              ))}
-            </View>
-          </View>
+        {!debounced.trim() && (
+          <SavedSearchesRow
+            items={savedSearches}
+            onSelect={(query) => { setQ(query); setDebounced(query); }}
+            onRemove={removeSavedSearchFn}
+          />
         )}
 
         {/* バリアントプレビュー: アルファベット入力時に日本語変換を表示 */}
@@ -717,75 +621,18 @@ export default function SearchScreen() {
 
         {/* カテゴリタブ + ソート (検索中のみ) */}
         {showResults && (
-          <View style={{ gap: SP['2'] }}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={{ flexDirection: 'row', gap: 6 }}>
-                {(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => {
-                  const active = category === c;
-                  const meta = CATEGORY_LABELS[c];
-                  const cnt = c === 'posts' ? rankedPosts.length
-                    : c === 'tags' ? rankedTags.length
-                    : c === 'bbs' ? (bbsQ.data?.length ?? 0)
-                    : totalResults;
-                  return (
-                    <PressableScale
-                      key={c}
-                      onPress={() => setCategory(c)}
-                      haptic="select"
-                      style={{
-                        flexDirection: 'row', alignItems: 'center', gap: 4,
-                        paddingHorizontal: SP['3'], paddingVertical: 6,
-                        backgroundColor: active ? C.accent : C.bg3,
-                        borderRadius: R.full,
-                        borderWidth: 1, borderColor: active ? C.accent : C.border,
-                      }}
-                    >
-                      <Text style={{ fontSize: 11 }}>{meta.emoji}</Text>
-                      <Text style={[T.caption, { color: active ? '#fff' : C.text, fontWeight: '700' }]}>
-                        {meta.label}
-                      </Text>
-                      <View style={{
-                        paddingHorizontal: 4, paddingVertical: 1,
-                        backgroundColor: active ? 'rgba(255,255,255,0.2)' : C.bg4,
-                        borderRadius: R.sm,
-                      }}>
-                        <Text style={{ fontSize: 9, color: active ? '#fff' : C.text3, fontWeight: '700' }}>
-                          {cnt}
-                        </Text>
-                      </View>
-                    </PressableScale>
-                  );
-                })}
-              </View>
-            </ScrollView>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={{ flexDirection: 'row', gap: 6 }}>
-                {(Object.keys(SORT_LABELS) as SortMode[]).map((s) => {
-                  const active = sortMode === s;
-                  const meta = SORT_LABELS[s];
-                  return (
-                    <PressableScale
-                      key={s}
-                      onPress={() => setSortMode(s)}
-                      haptic="tap"
-                      style={{
-                        flexDirection: 'row', alignItems: 'center', gap: 3,
-                        paddingHorizontal: 8, paddingVertical: 4,
-                        backgroundColor: active ? C.accentBg : 'transparent',
-                        borderRadius: R.full,
-                        borderWidth: 1, borderColor: active ? C.accent : C.border,
-                      }}
-                    >
-                      <Text style={{ fontSize: 10 }}>{meta.emoji}</Text>
-                      <Text style={[T.caption, { color: active ? C.accentLight : C.text2, fontWeight: '600' }]}>
-                        {meta.label}
-                      </Text>
-                    </PressableScale>
-                  );
-                })}
-              </View>
-            </ScrollView>
-          </View>
+          <CategorySortBar
+            category={category}
+            onCategoryChange={setCategory}
+            sortMode={sortMode}
+            onSortChange={setSortMode}
+            counts={{
+              all: totalResults,
+              posts: rankedPosts.length,
+              tags: rankedTags.length,
+              bbs: bbsQ.data?.length ?? 0,
+            }}
+          />
         )}
       </View>
 
@@ -886,7 +733,7 @@ export default function SearchScreen() {
                   >
                     <Text style={[T.smallM, { color: C.text }]}>
                       #{tg.name}
-                      <Text style={[T.caption, { color: C.text3 }]}> · {tg.member_count.toLocaleString('ja-JP')}</Text>
+                      <Text style={[T.caption, { color: C.text3 }]}> · {(tg.member_count ?? 0).toLocaleString('ja-JP')}</Text>
                     </Text>
                   </PressableScale>
                 ))}
@@ -988,7 +835,7 @@ export default function SearchScreen() {
                     <View style={{ flex: 1 }}>
                       <HighlightedText text={`#${tg.name}`} terms={highlightTerms} style={T.bodyMd} />
                       <Text style={[T.caption, { color: C.text3 }]}>
-                        {tg.member_count.toLocaleString('ja-JP')} メンバー · {tg.post_count.toLocaleString('ja-JP')} 投稿
+                        {(tg.member_count ?? 0).toLocaleString('ja-JP')} メンバー · {(tg.post_count ?? 0).toLocaleString('ja-JP')} 投稿
                       </Text>
                     </View>
                     <ReasonBadges reasons={reasons} />
@@ -1025,7 +872,7 @@ export default function SearchScreen() {
                       </View>
                     </View>
                     <Text style={[T.caption, { color: C.text3 }]}>
-                      {t.category} · {t.replies_count.toLocaleString('ja-JP')} 返信 · {formatRelative(t.created_at)}
+                      {t.category} · {(t.replies_count ?? 0).toLocaleString('ja-JP')} 返信 · {formatRelative(t.created_at)}
                     </Text>
                   </PressableScale>
                 ))}
