@@ -48,43 +48,67 @@ export default function NicknameScreen() {
       }
       return;
     }
-    if (user) {
-      setSaving(true);
-      try {
-        // upsert 結果を確認 — RLS / trigger / 接続エラー全てに対応
-        const { error } = await supabase
-          .from('profiles')
-          .upsert({ id: user.id, nickname: trimmed })
-          .select();
-        if (error) {
-          console.warn('[nickname] profile upsert failed:', error.message);
-          // 重複ニックネーム or CHECK 違反 → 明確にエラー表示してブロック
-          // 一方、ネットワーク系エラーは続行 (notifications.tsx で fallback insert)
-          const msg = error.message.toLowerCase();
-          if (msg.includes('duplicate') || msg.includes('unique')) {
-            show('このニックネームは既に使用されています。別の名前を入力してください。', 'error');
-            setSaving(false);
-            return;
-          }
-          if (msg.includes('check') || msg.includes('violates')) {
-            show('使用できない文字が含まれています。', 'error');
-            setSaving(false);
-            return;
-          }
-          // それ以外 (ネットワーク等) は警告して進める
-          show('ニックネームの保存に失敗しましたが、続行します。', 'warn');
-        } else {
-          // ローカルストアも即時更新 — マイページ等で古いニックネームが見えるのを防ぐ
-          setUser({ ...user, nickname: trimmed });
-        }
-      } catch (e) {
-        console.warn('[nickname] upsert exception:', e);
-        show('ネットワークエラー。続行します。', 'warn');
-      } finally {
-        setSaving(false);
-      }
+    if (!user) {
+      // ユーザー未取得でもオンボーディングは進める (notifications.tsx で fallback)
+      router.replace('/onboarding/liked-tags');
+      return;
     }
-    router.push('/onboarding/liked-tags');
+
+    setSaving(true);
+    // 即時にローカルストアを楽観的更新 — DB 応答を待たずに UX を進めるため
+    // (この段階で nickname を反映しておくと、次画面以降で古い値が見えない)
+    setUser({ ...user, nickname: trimmed });
+
+    // 3 秒タイムアウト付きで upsert — 何があっても 3 秒で UI を解放
+    // 失敗・タイムアウト時も notifications.tsx の最終 upsert で fallback されるので
+    // ここで止める必要は無い (進めるのが最優先)
+    type UpsertResult = { kind: 'ok' } | { kind: 'error'; message: string } | { kind: 'timeout' };
+    const upsertWithTimeout = (): Promise<UpsertResult> =>
+      Promise.race<UpsertResult>([
+        (async () => {
+          try {
+            const { error } = await supabase
+              .from('profiles')
+              .upsert({ id: user.id, nickname: trimmed })
+              .select();
+            if (error) return { kind: 'error', message: error.message };
+            return { kind: 'ok' };
+          } catch (e) {
+            return { kind: 'error', message: e instanceof Error ? e.message : String(e) };
+          }
+        })(),
+        new Promise<UpsertResult>((resolve) =>
+          setTimeout(() => resolve({ kind: 'timeout' }), 3000),
+        ),
+      ]);
+
+    const result = await upsertWithTimeout();
+    // どんな結果でも saving は必ず解除する (詰まり防止)
+    setSaving(false);
+
+    if (result.kind === 'error') {
+      console.warn('[nickname] profile upsert failed:', result.message);
+      const msg = result.message.toLowerCase();
+      if (msg.includes('duplicate') || msg.includes('unique')) {
+        // 重複は確実なクライアントエラー → 進めずに修正させる
+        show('このニックネームは既に使用されています。別の名前を入力してください。', 'error');
+        return;
+      }
+      if (msg.includes('check') || msg.includes('violates')) {
+        // CHECK 違反も確実なクライアントエラー → 進めず修正させる
+        show('使用できない文字が含まれています。', 'error');
+        return;
+      }
+      // ネットワーク / 一時障害 → 進める (最終 upsert で再試行される)
+      show('保存に失敗しましたが続行します。あとから設定で変更できます。', 'warn');
+    } else if (result.kind === 'timeout') {
+      // 3 秒以内に返らなかった → 進める方を優先 (UI を絶対詰まらせない)
+      // 保存自体は内部で続行されている可能性があるので、エラー扱いにはしない
+      console.warn('[nickname] upsert timeout (>3s) — proceeding anyway');
+      show('通信が遅いため後で保存します。続行します。', 'warn');
+    }
+
+    router.replace('/onboarding/liked-tags');
   };
 
   return (

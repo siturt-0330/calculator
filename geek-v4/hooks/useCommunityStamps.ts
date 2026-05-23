@@ -2,9 +2,9 @@
 // useCommunityStamps / useCommunityStampReactions
 // ============================================================
 // コミュスタンプ一覧 + リアクション集計を React Query で管理。
-// 既存 useReactions.ts と同じパターン (realtime + optimistic)。
+// 既存 useReactions.ts と同じパターン (realtime + optimistic + 連打ガード)。
 // ============================================================
-import { useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import {
   listCommunityStamps,
@@ -18,6 +18,7 @@ import {
 } from '../lib/api/communityStamps';
 import { attachChannel } from '../lib/realtime';
 import { useToastStore } from '../stores/toastStore';
+import { stableKeyFor } from '../lib/utils/queryKey';
 
 // ============================================================
 // 1) コミュスタンプ一覧
@@ -87,21 +88,70 @@ export function useCreateCommunityStamp(communityId: string | undefined) {
   });
 }
 
+// 削除 — 楽観削除 + 失敗時 revert。
+// 一覧 (community-stamps) と 各 post の reactions (community-stamp-reactions) の
+// 両キャッシュから即座に消すことで「タップ → 確認 → 確定」の待ち時間を体感ゼロに。
 export function useDeleteCommunityStamp(communityId: string | undefined) {
   const qc = useQueryClient();
   const { show } = useToastStore();
-  return useMutation({
+
+  type Ctx = {
+    listSnap: CommunityStamp[] | undefined;
+    reactionsSnap: Array<[readonly unknown[], CommunityStampReactionsByPost | undefined]>;
+  };
+
+  return useMutation<void, Error, string, Ctx>({
     mutationFn: async (stampId: string) => {
       const { error } = await deleteCommunityStamp(stampId);
       if (error) throw new Error(error);
     },
+    onMutate: async (stampId) => {
+      await qc.cancelQueries({ queryKey: ['community-stamps'] });
+      await qc.cancelQueries({ queryKey: ['community-stamp-reactions'] });
+
+      const listKey = ['community-stamps', communityId];
+      const listSnap = qc.getQueryData<CommunityStamp[]>(listKey);
+      const reactionsSnap = qc.getQueriesData<CommunityStampReactionsByPost | undefined>({
+        queryKey: ['community-stamp-reactions'],
+      }) as Ctx['reactionsSnap'];
+
+      // 1) 一覧から削除
+      if (communityId) {
+        qc.setQueryData<CommunityStamp[]>(listKey, (old) =>
+          (old ?? []).filter((s) => s.id !== stampId),
+        );
+      }
+      // 2) 各 post の reactions からも除外 (孤児表示を防ぐ)
+      qc.setQueriesData<CommunityStampReactionsByPost | undefined>(
+        { queryKey: ['community-stamp-reactions'] },
+        (old) => {
+          if (!old) return old;
+          const next: CommunityStampReactionsByPost = {};
+          for (const [pid, list] of Object.entries(old)) {
+            next[pid] = list.filter((r) => r.stamp.id !== stampId);
+          }
+          return next;
+        },
+      );
+
+      return { listSnap, reactionsSnap };
+    },
     onSuccess: () => {
-      if (communityId) qc.invalidateQueries({ queryKey: ['community-stamps', communityId] });
       show('スタンプを削除しました', 'success');
     },
-    onError: (e: unknown) => {
+    onError: (e, _id, ctx) => {
+      if (ctx) {
+        if (communityId && ctx.listSnap) {
+          qc.setQueryData(['community-stamps', communityId], ctx.listSnap);
+        }
+        for (const [key, data] of ctx.reactionsSnap) qc.setQueryData(key, data);
+      }
       const msg = e instanceof Error ? e.message : '削除に失敗しました';
       show(msg, 'error');
+    },
+    onSettled: () => {
+      if (communityId) qc.invalidateQueries({ queryKey: ['community-stamps', communityId] });
+      qc.invalidateQueries({ queryKey: ['community-stamp-reactions'] });
     },
   });
 }
@@ -114,7 +164,7 @@ export function useCommunityStampReactions(postIds: string[]) {
   // sorted key で安定化 (useReactions と同じ手法)
   const sortedIds = useMemo(() => [...postIds].sort(), [postIds]);
   const idSet = useMemo(() => new Set(sortedIds), [sortedIds]);
-  const sortedKey = useMemo(() => sortedIds.join(','), [sortedIds]);
+  const sortedKey = useMemo(() => stableKeyFor(sortedIds), [sortedIds]);
 
   const q = useQuery({
     queryKey: ['community-stamp-reactions', sortedKey],
@@ -155,26 +205,131 @@ export function useCommunityStampReactions(postIds: string[]) {
 }
 
 // ============================================================
-// 4) リアクションのトグル
+// 4) リアクションのトグル (楽観更新 + snapshot revert + 連打ガード)
+// ============================================================
+// 改訂理由:
+//   1. 連打 (同一 postId+stampId への連続 tap) で server-side toggle が
+//      DELETE×2 と並走し use_count が二重消費される critical bug を防ぐ
+//      → in-flight (postId+stampId) を Set で握って 2 回目以降は無視。
+//      `toggle()` を返すので呼び出し側は mutate() ではなく toggle() を使う。
+//   2. snapshot は setQueriesData の前 (= mutation 適用前の真の値) で取って
+//      onError で確実に revert。
+//   3. communityId を caches から解決して INSERT 前の追加 fetch を排除。
 // ============================================================
 export function useCommunityStampReactionToggle() {
   const qc = useQueryClient();
   const { show } = useToastStore();
-  return useMutation({
-    mutationFn: async (vars: { postId: string; stampId: string }) => {
-      const { on, error } = await toggleCommunityStampReaction(vars.postId, vars.stampId);
+  const inFlight = useRef<Set<string>>(new Set());
+
+  type ToggleVars = { postId: string; stampId: string };
+  type Snapshot = Array<[readonly unknown[], CommunityStampReactionsByPost | undefined]>;
+
+  const mutation = useMutation<boolean, Error, ToggleVars, { snapshot: Snapshot }>({
+    mutationFn: async ({ postId, stampId }) => {
+      // communityId をキャッシュから解決して余分な RTT を排除。
+      // reactions キャッシュ → stamps キャッシュの順で探索。
+      let cachedCommunityId: string | undefined;
+      const allReactionsCaches = qc.getQueriesData<CommunityStampReactionsByPost>({
+        queryKey: ['community-stamp-reactions'],
+      });
+      outer: for (const [, byPost] of allReactionsCaches) {
+        if (!byPost) continue;
+        for (const reactions of Object.values(byPost)) {
+          const hit = reactions.find((r) => r.stamp.id === stampId);
+          if (hit) { cachedCommunityId = hit.stamp.community_id; break outer; }
+        }
+      }
+      if (!cachedCommunityId) {
+        const allStampsCaches = qc.getQueriesData<CommunityStamp[]>({ queryKey: ['community-stamps'] });
+        for (const [, stamps] of allStampsCaches) {
+          const hit = stamps?.find((s) => s.id === stampId);
+          if (hit) { cachedCommunityId = hit.community_id; break; }
+        }
+      }
+      const { on, error } = await toggleCommunityStampReaction(postId, stampId, cachedCommunityId);
       if (error) throw new Error(error);
       return on;
     },
-    onSuccess: () => {
-      // 集計を最新化 (全 page invalidate でも軽量、対象は post_id ベース)
-      qc.invalidateQueries({ queryKey: ['community-stamp-reactions'] });
+    onMutate: async ({ postId, stampId }) => {
+      // 進行中の reactions fetch を一旦停止 (楽観更新を上書きされないように)
+      await qc.cancelQueries({ queryKey: ['community-stamp-reactions'] });
+
+      // ★ mutation 前にスナップショットを取る (mutation 後に取ると更新済みの値が入り revert できない)
+      const snapshot: Snapshot = qc.getQueriesData<CommunityStampReactionsByPost | undefined>({
+        queryKey: ['community-stamp-reactions'],
+      }) as Snapshot;
+
+      // 該当スタンプの実体を community-stamps キャッシュから取得 (全 community を総当たり)。
+      let stampEntry: CommunityStamp | undefined;
+      const allStampsCaches = qc.getQueriesData<CommunityStamp[]>({ queryKey: ['community-stamps'] });
+      for (const [, stamps] of allStampsCaches) {
+        if (!stamps) continue;
+        const hit = stamps.find((s) => s.id === stampId);
+        if (hit) { stampEntry = hit; break; }
+      }
+
+      // 全 community-stamp-reactions キャッシュを総当たりして楽観更新
+      qc.setQueriesData<CommunityStampReactionsByPost | undefined>(
+        { queryKey: ['community-stamp-reactions'] },
+        (old) => {
+          if (!old) return old;
+          if (!(postId in old)) return old;
+          const next: CommunityStampReactionsByPost = { ...old };
+          const list = (next[postId] ?? []).slice();
+          const idx = list.findIndex((r) => r.stamp.id === stampId);
+          if (idx >= 0) {
+            const cur = list[idx];
+            if (!cur) return old;
+            if (cur.mine) {
+              const newCount = cur.count - 1;
+              if (newCount <= 0) list.splice(idx, 1);
+              else list[idx] = { stamp: cur.stamp, count: newCount, mine: false };
+            } else {
+              list[idx] = { stamp: cur.stamp, count: cur.count + 1, mine: true };
+            }
+          } else if (stampEntry) {
+            list.push({ stamp: stampEntry, count: 1, mine: true });
+          }
+          list.sort((a, b) => b.count - a.count);
+          next[postId] = list;
+          return next;
+        },
+      );
+
+      return { snapshot };
     },
-    onError: (e: unknown) => {
+    onError: (e, _vars, ctx) => {
+      // revert: snapshot をそのまま戻す
+      if (ctx?.snapshot) {
+        for (const [key, data] of ctx.snapshot) {
+          qc.setQueryData(key, data);
+        }
+      }
+      qc.invalidateQueries({ queryKey: ['community-stamp-reactions'] });
       const msg = e instanceof Error ? e.message : 'リアクションに失敗しました';
       show(msg, 'error');
     },
+    onSettled: () => {
+      // realtime と楽観の二重反映を server truth で整合
+      qc.invalidateQueries({ queryKey: ['community-stamp-reactions'] });
+      // use_count も変わるので community-stamps も更新
+      qc.invalidateQueries({ queryKey: ['community-stamps'] });
+    },
   });
+
+  // 連打 (同一 postId+stampId が in-flight 中の追加 tap) を吸収。
+  // 親 (CommunityStampRow) には pendingStampIds を渡して chip を disabled 化するが、
+  // pending state が parent に伝わる前に再 tap される race を hook 層で確実に潰す。
+  const toggle = useCallback((vars: ToggleVars) => {
+    const k = `${vars.postId}:${vars.stampId}`;
+    if (inFlight.current.has(k)) return;
+    inFlight.current.add(k);
+    mutation.mutate(vars, {
+      onSettled: () => { inFlight.current.delete(k); },
+    });
+  }, [mutation]);
+
+  return Object.assign(mutation, { toggle });
 }
 
 // 型 re-export

@@ -12,6 +12,7 @@ import { PressableScale } from '../../components/ui/PressableScale';
 import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
 import { supabase } from '../../lib/supabase';
+import { prepareImageUpload } from '../../lib/image';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { Icon } from '../../constants/icons';
@@ -22,11 +23,6 @@ const AVATAR_EMOJIS = [
   '🐶', '🐻', '🦊', '🐼', '🐯', '🦁', '🐸', '🦉',
   '🌸', '🌟', '⚡', '🔥', '💎', '🎨', '🎮', '🎵',
 ];
-
-async function uriToBlob(uri: string): Promise<Blob> {
-  const res = await fetch(uri);
-  return res.blob();
-}
 
 export default function ProfileEditScreen() {
   const insets = useSafeAreaInsets();
@@ -74,11 +70,10 @@ export default function ProfileEditScreen() {
     const asset = r.assets[0];
     setUploading(true);
     try {
-      const blob = await uriToBlob(asset.uri);
-      const ext = asset.mimeType?.split('/')[1] ?? 'jpg';
-      const path = `${user.id}/${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from('avatars').upload(path, blob, {
-        contentType: asset.mimeType ?? 'image/jpeg',
+      const prepared = await prepareImageUpload(asset.uri, { maxSizeBytes: 5 * 1024 * 1024 });
+      const path = `${user.id}/${Date.now()}.${prepared.ext}`;
+      const { error: upErr } = await supabase.storage.from('avatars').upload(path, prepared.blob, {
+        contentType: prepared.mime,
         upsert: true,
       });
       if (upErr) throw upErr;
@@ -88,7 +83,8 @@ export default function ProfileEditScreen() {
       show('画像をアップロードしました', 'success');
     } catch (e) {
       console.warn('upload error:', e);
-      show('アップロードに失敗しました', 'error');
+      const detail = e instanceof Error ? e.message : (e !== null && typeof e === 'object' && 'message' in e) ? String((e as {message: unknown}).message) : '';
+      show(detail.includes('大きすぎ') ? detail : 'アップロードに失敗しました', 'error');
     } finally {
       setUploading(false);
     }

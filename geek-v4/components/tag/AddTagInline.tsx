@@ -20,8 +20,12 @@ export function AddTagInline({ onSubmit }: { onSubmit: (tag: string) => Promise<
     setBusy(true);
     try {
       await onSubmit(t);
+      // 成功した時だけ form を閉じる + value clear。
       setValue('');
       setOpen(false);
+    } catch {
+      // 失敗時は form を開いたまま保持。親 (handleAddTag) 側で toast 済み。
+      // ここで握り潰さないと unhandled rejection 警告になる。
     } finally {
       setBusy(false);
     }
@@ -80,12 +84,26 @@ export function AddTagInline({ onSubmit }: { onSubmit: (tag: string) => Promise<
         editable={!busy}
         onSubmitEditing={submit}
       />
-      <PressableScale onPress={submit} haptic="confirm" disabled={busy || !value.trim()}>
+      <PressableScale
+        onPress={submit}
+        haptic="confirm"
+        disabled={busy || !value.trim()}
+        hitSlop={10}
+        accessibilityLabel="タグを送信"
+        style={{ opacity: busy || !value.trim() ? 0.5 : 1 }}
+      >
         {busy
           ? <ActivityIndicator size="small" color={C.accent} />
           : <Send size={14} color={value.trim() ? C.accent : C.text4} strokeWidth={2.4} />}
       </PressableScale>
-      <PressableScale onPress={() => { setOpen(false); setValue(''); }} haptic="tap" disabled={busy}>
+      <PressableScale
+        onPress={() => { setOpen(false); setValue(''); }}
+        haptic="tap"
+        disabled={busy}
+        hitSlop={10}
+        accessibilityLabel="入力をキャンセル"
+        style={{ opacity: busy ? 0.5 : 1 }}
+      >
         <Close size={14} color={C.text3} strokeWidth={2.4} />
       </PressableScale>
     </Animated.View>

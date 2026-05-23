@@ -78,6 +78,20 @@ export function TagRelations({
     onError: () => show('投票に失敗しました', 'error'),
   });
 
+  // AI 推薦タグに対するクイック「関連あり」アクション。
+  // tag_relations テーブルに related レコードを INSERT (suggest API)。
+  const { mutate: voteRelated } = useMutation({
+    mutationFn: (other: string) => suggestTagRelation(tagName, other, 'related'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tag-relations', tagName] });
+      show('「関連あり」を登録しました', 'success');
+    },
+    onError: (e: unknown) => {
+      const msg = e instanceof Error ? e.message : '';
+      show(msg ? `登録に失敗しました: ${msg}` : '登録に失敗しました', 'error');
+    },
+  });
+
   return (
     <View style={{ gap: SP['4'] }}>
       {aliases.length > 0 && (
@@ -166,6 +180,8 @@ export function TagRelations({
                 <PressableScale
                   onPress={() => voteSynonym(r.tag)}
                   haptic="select"
+                  hitSlop={6}
+                  accessibilityLabel={`#${r.tag} を同じ意味として登録`}
                   style={{
                     paddingHorizontal: SP['2'], paddingVertical: SP['1'],
                     borderRadius: R.full,
@@ -175,6 +191,22 @@ export function TagRelations({
                 >
                   <Text style={{ fontSize: 10, color: C.text2, fontWeight: '700' }}>
                     + 同じ意味
+                  </Text>
+                </PressableScale>
+                <PressableScale
+                  onPress={() => voteRelated(r.tag)}
+                  haptic="select"
+                  hitSlop={6}
+                  accessibilityLabel={`#${r.tag} を関連ありとして登録`}
+                  style={{
+                    paddingHorizontal: SP['2'], paddingVertical: SP['1'],
+                    borderRadius: R.full,
+                    backgroundColor: C.bg3,
+                    borderWidth: 1, borderColor: C.border,
+                  }}
+                >
+                  <Text style={{ fontSize: 10, color: C.text2, fontWeight: '700' }}>
+                    + 関連あり
                   </Text>
                 </PressableScale>
               </View>

@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState } from 'react';
-import { View, Text, Linking, Platform, ActivityIndicator, Image as RNImage, StyleSheet } from 'react-native';
+import { View, Text, Linking, Platform, Image as RNImage, StyleSheet } from 'react-native';
 import { Icon } from '../../constants/icons';
 import type { Post } from '../../types/models';
 import { useLanguageStore } from '../../stores/languageStore';
@@ -206,34 +206,6 @@ const STYLES = StyleSheet.create({
   // 本文
   bodyInner: { paddingTop: SP['2'], paddingBottom: SP['1'] },
   bodyText: { color: C.text, lineHeight: 22 },
-  translatedBadge: {
-    marginTop: SP['1'],
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    backgroundColor: 'rgba(124,177,255,0.13)',
-    borderRadius: 4,
-    alignSelf: 'flex-start',
-    borderWidth: 1,
-    borderColor: 'rgba(124,177,255,0.4)',
-  },
-  translatedBadgeText: { fontSize: 9, color: '#7CB1FF', fontWeight: '700' },
-
-  // 翻訳ボタン
-  translateRow: { flexDirection: 'row', gap: SP['2'], paddingBottom: SP['1'] },
-  translateBtn: {
-    paddingHorizontal: SP['2'],
-    paddingVertical: 4,
-    backgroundColor: 'rgba(124,177,255,0.13)',
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(124,177,255,0.4)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  translateBtnEmoji: { fontSize: 10 },
-  translateBtnLabel: { fontSize: 10, color: '#7CB1FF', fontWeight: '700' },
-
   // 出典
   sourceBtn: {
     marginTop: SP['2'],
@@ -284,20 +256,23 @@ const STYLES = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: SP['2'],
-    paddingVertical: 4,
+    paddingHorizontal: SP['3'],
+    // iOS の最小タップ領域 (44pt) に届くよう padding を確保。
+    // 旧版 (vertical:4) は実効高さ ~24px → hitSlop:8 を足しても 40px で不足し、
+    // スマホで「押しても反応しない」と感じるバグの主因だった。
+    paddingVertical: 6,
     borderRadius: R.full,
     borderWidth: 1,
   },
   reactionOverflowPill: {
-    paddingHorizontal: SP['2'],
-    paddingVertical: 4,
+    paddingHorizontal: SP['3'],
+    paddingVertical: 6,
     backgroundColor: C.bg3,
     borderRadius: R.full,
     borderWidth: 1,
     borderColor: C.border,
   },
-  reactionOverflowText: { fontSize: 11, color: C.text3, fontWeight: '700' },
+  reactionOverflowText: { fontSize: 12, color: C.text3, fontWeight: '700' },
 });
 
 // ────────────────────────────────────────────────────────────────────
@@ -396,11 +371,10 @@ function AnonPostCardInner({
   const useOgPreview = useFeatureFlag('og_preview');
   const useQuickReaction = useFeatureFlag('quick_reaction');
 
-  // 翻訳
+  // 翻訳 (自動翻訳のみ — UI ボタン/バッジは表示しない)
   const { lang, autoTranslate } = useLanguageStore();
   const [translated, setTranslated] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
-  const [showOriginal, setShowOriginal] = useState(false);
   const canTranslate = lang !== 'ja' && post.content;
 
   const doTranslate = async () => {
@@ -411,18 +385,13 @@ function AnonPostCardInner({
     setTranslating(false);
   };
 
-  // 自動翻訳 (auto-translate ON 時) — render 中に setState を起こさないよう
-  // useEffect 内で発火させる。以前はトップレベルで doTranslate() を呼んでいて
-  // setTranslating(true) が render 中に走り、毎回フィードスクロール時に多重 render を誘発していた。
   useEffect(() => {
     if (autoTranslate && canTranslate && !translated && !translating) {
       void doTranslate();
     }
-    // doTranslate は新規 closure なので意図的に省く。translated/translating の遷移だけで再評価する。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoTranslate, canTranslate, translated, translating]);
-  const displayContent = (autoTranslate && translated && !showOriginal) ? translated : post.content;
-  const isShowingTranslation = autoTranslate && translated && !showOriginal;
+  const displayContent = (autoTranslate && translated) ? translated : post.content;
   // データ欠落でクラッシュしないよう全フィールドを安全化
   const mediaUrls = post.media_urls ?? [];
   const mediaBlurhashes = post.media_blurhashes ?? [];
@@ -673,48 +642,8 @@ function AnonPostCardInner({
                   {displayContent}
                 </Text>
               )}
-              {isShowingTranslation && (
-                <View style={STYLES.translatedBadge}>
-                  <Text style={STYLES.translatedBadgeText}>
-                    🌏 AI translated · tap to see original
-                  </Text>
-                </View>
-              )}
             </View>
           </PressableScale>
-          {/* 翻訳ボタン (lang ≠ ja) */}
-          {canTranslate && (
-            <View style={STYLES.translateRow}>
-              {translated ? (
-                <PressableScale
-                  onPress={() => setShowOriginal((v) => !v)}
-                  haptic="tap"
-                  style={STYLES.translateBtn}
-                >
-                  <Text style={STYLES.translateBtnEmoji}>🌏</Text>
-                  <Text style={STYLES.translateBtnLabel}>
-                    {showOriginal ? 'Show translation' : 'Show original'}
-                  </Text>
-                </PressableScale>
-              ) : (
-                <PressableScale
-                  onPress={doTranslate}
-                  haptic="tap"
-                  disabled={translating}
-                  style={STYLES.translateBtn}
-                >
-                  {translating ? (
-                    <ActivityIndicator size="small" color="#7CB1FF" />
-                  ) : (
-                    <Text style={STYLES.translateBtnEmoji}>🌏</Text>
-                  )}
-                  <Text style={STYLES.translateBtnLabel}>
-                    {translating ? 'Translating...' : `Translate to ${lang.toUpperCase()}`}
-                  </Text>
-                </PressableScale>
-              )}
-            </View>
-          )}
         </View>
       ) : null}
 
@@ -831,6 +760,8 @@ function AnonPostCardInner({
               key={r.meme}
               onPress={() => onReact(r.meme)}
               haptic="tap"
+              hitSlop={10}
+              accessibilityLabel={`${r.meme} ${r.count} 件 ${r.mine ? '(押下済み)' : ''}`}
               style={[STYLES.reactionPillBase, reactionPillColors(r.mine)]}
             >
               <Text style={reactionPillLabel(r.mine)}>
@@ -845,6 +776,8 @@ function AnonPostCardInner({
             <PressableScale
               onPress={() => setMemePickerOpen(true)}
               haptic="tap"
+              hitSlop={10}
+              accessibilityLabel="他のリアクションを見る"
               style={STYLES.reactionOverflowPill}
             >
               <Text style={STYLES.reactionOverflowText}>

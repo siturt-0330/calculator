@@ -140,8 +140,12 @@ export default function CommunityScreen() {
         showToast(`#${tag} を追加しました`, 'success');
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : '';
-        if (msg.includes('duplicate')) showToast('そのタグは既に追加されています', 'warn');
-        else showToast('追加に失敗しました', 'error');
+        if (msg.includes('duplicate')) {
+          showToast('そのタグは既に追加されています', 'warn');
+        } else {
+          showToast(msg ? `追加に失敗しました: ${msg}` : '追加に失敗しました', 'error');
+        }
+        throw e;
       }
     },
     [addTag, showToast],

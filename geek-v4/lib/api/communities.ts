@@ -1,7 +1,7 @@
 import { supabase } from '../supabase';
 import { generateVariants } from '../search/variants';
 import { findSimilar } from '../search/similarity';
-import { sanitizeContent } from '../sanitize';
+import { sanitizeContent, sanitizeText } from '../sanitize';
 
 export type Visibility = 'open' | 'request' | 'invite';
 export type MemberRole = 'owner' | 'admin' | 'member';
@@ -276,8 +276,11 @@ export async function createCommunity(input: {
   await supabase.auth.refreshSession().catch(() => {});
 
   // 名前 / 説明を sanitize (HTML / script / onerror= / javascript: / 制御文字を除去)
-  const safeName = sanitizeContent(input.name, { maxLength: 40 });
-  const safeDesc = sanitizeContent(input.description, { maxLength: 500 });
+  // 監査修正: コミュ name/description は <Text> でしか表示しないため、
+  // sanitizeContent (= trim / on..=削除 / 連続改行圧縮) は副作用が大きすぎる。
+  // sanitizeText の "ゆるい" sanitizer で書式を保ったまま危険タグだけ除去。
+  const safeName = sanitizeText(input.name, { maxLength: 40 });
+  const safeDesc = sanitizeText(input.description, { maxLength: 500 });
   if (safeName.length < 2) {
     return { data: null, error: 'コミュニティ名は 2 文字以上にしてください' };
   }
@@ -348,13 +351,13 @@ export async function updateCommunity(
 
   // name / description は sanitize
   if (typeof safePatch.name === 'string') {
-    safePatch.name = sanitizeContent(safePatch.name, { maxLength: 40 });
+    safePatch.name = sanitizeText(safePatch.name, { maxLength: 40 });
     if ((safePatch.name as string).length < 2) {
       return { error: 'コミュニティ名は 2 文字以上にしてください' };
     }
   }
   if (typeof safePatch.description === 'string') {
-    safePatch.description = sanitizeContent(safePatch.description, { maxLength: 500 });
+    safePatch.description = sanitizeText(safePatch.description, { maxLength: 500 });
   }
   // visibility は ENUM 値のみ
   if (typeof safePatch.visibility === 'string'
@@ -1121,9 +1124,9 @@ export async function createSpot(input: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'ログインしてください' };
 
-  // 名前 / 説明 sanitize
-  const safeName = sanitizeContent(input.name, { maxLength: 80 });
-  const safeDesc = sanitizeContent(input.description ?? '', { maxLength: 500 });
+  // 名前 / 説明 sanitize (sanitizeText = trim/on..=削除しない緩い版)
+  const safeName = sanitizeText(input.name, { maxLength: 80 }).trim();
+  const safeDesc = sanitizeText(input.description ?? '', { maxLength: 500 });
   if (safeName.length < 1) return { data: null, error: '名前を入力してください' };
 
   // lat/lon の範囲チェック (DB の CHECK 制約も二重に守る)
@@ -1220,10 +1223,11 @@ export async function createEvent(input: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: 'ログインしてください' };
 
-  const safeTitle = sanitizeContent(input.title, { maxLength: 100 });
-  const safeDesc = sanitizeContent(input.description ?? '', { maxLength: 1000 });
+  // sanitizeText = trim/on..=削除しない緩い版 (title だけ trim() で minLen 判定)
+  const safeTitle = sanitizeText(input.title, { maxLength: 100 }).trim();
+  const safeDesc = sanitizeText(input.description ?? '', { maxLength: 1000 });
   const safeLocation = input.location_text
-    ? sanitizeContent(input.location_text, { maxLength: 200 })
+    ? sanitizeText(input.location_text, { maxLength: 200 })
     : null;
   if (safeTitle.length < 1) return { data: null, error: 'タイトルを入力してください' };
 

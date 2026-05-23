@@ -113,7 +113,8 @@ export async function vote(pollId: string, optionId: string, multiSelect: boolea
 
   // 単一選択の場合: 既存投票を削除してから新規投票
   if (!multiSelect) {
-    await supabase.from('poll_votes').delete().eq('poll_id', pollId).eq('user_id', userId);
+    const { error: delErr } = await supabase.from('poll_votes').delete().eq('poll_id', pollId).eq('user_id', userId);
+    if (delErr) throw delErr;
   } else {
     // 複数選択: 同じ option があれば DELETE で取り消し、無ければ INSERT。
     // 旧版は SELECT → DELETE/INSERT の 2-3 RTT だったが、DELETE の returning で

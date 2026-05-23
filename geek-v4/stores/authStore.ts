@@ -6,6 +6,7 @@ import type { User } from '@supabase/supabase-js';
 import { detachAllChannels } from '../lib/realtime';
 import { setUnauthorizedHandler } from '../lib/resilient';
 import { getBool, setBool, remove as storageRemove, contains as storageContains } from '../lib/storage';
+import { useOfflineQueueStore } from './offlineQueueStore';
 
 // onboarded 状態のローカルキャッシュ — プロフィール取得失敗時のフォールバック
 //
@@ -385,6 +386,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       try { await supabase.auth.signOut(); } catch (e) { console.warn('signOut error:', e); }
       // 全 realtime channel を強制 detach
       try { detachAllChannels(); } catch (e) { console.warn('detachAllChannels error:', e); }
+      // オフラインキューをクリア — 別ユーザーでログイン時に前ユーザーのキューが実行されないように
+      try { useOfflineQueueStore.getState().clear(); } catch (e) { console.warn('offlineQueue clear error:', e); }
       // onboarded キャッシュ + supabase auth キーを掃除
       // - onboarded は MMKV / localStorage 経由 (同期)
       // - supabase auth は AsyncStorage に session を持つので AsyncStorage 直叩き
