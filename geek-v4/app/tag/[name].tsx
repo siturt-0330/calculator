@@ -112,8 +112,12 @@ export default function TagDetailScreen() {
       show(`#${tag} を追加しました`, 'success');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '';
-      if (msg.includes('duplicate')) show('そのタグは既に追加されています', 'warn');
-      else show('追加に失敗しました', 'error');
+      if (msg.includes('duplicate')) {
+        show('そのタグは既に追加されています', 'warn');
+      } else {
+        show(msg ? `追加に失敗しました: ${msg}` : '追加に失敗しました', 'error');
+      }
+      throw e;
     }
   };
 

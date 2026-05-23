@@ -272,11 +272,14 @@ export function MemeReactionPicker({
                   onPress={handleCreate}
                   disabled={!customText.trim() || creating || submitting}
                   haptic="confirm"
+                  hitSlop={8}
+                  accessibilityLabel="スタンプを作成して送る"
                   style={{
                     flex: 2, paddingVertical: SP['2'],
                     backgroundColor: customText.trim() && !creating && !submitting ? C.accent : C.bg4,
                     borderRadius: R.md,
                     alignItems: 'center',
+                    opacity: !customText.trim() || creating || submitting ? 0.7 : 1,
                   }}
                 >
                   {creating || submitting ? (

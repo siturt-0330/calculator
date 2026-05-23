@@ -132,8 +132,13 @@ export default function FeedScreen() {
       showToast(`#${tag} を追加しました`, 'success');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '';
-      if (msg.includes('duplicate')) showToast('そのタグは既に追加されています', 'warn');
-      else showToast('追加に失敗しました', 'error');
+      if (msg.includes('duplicate')) {
+        showToast('そのタグは既に追加されています', 'warn');
+      } else {
+        showToast(msg ? `追加に失敗しました: ${msg}` : '追加に失敗しました', 'error');
+      }
+      // re-throw to keep AddTagInline open with the entered text.
+      throw e;
     }
   }, [addTag, showToast]);
 

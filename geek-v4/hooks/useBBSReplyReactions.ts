@@ -7,17 +7,9 @@ import {
   toggleBBSReplyReaction,
   type ReactionsByReply,
 } from '../lib/api/bbsReplyReactions';
+import { stableKeyFor } from '../lib/utils/queryKey';
 
 const KEY_PREFIX = 'bbs-reply-reactions';
-
-// replyIds が 50+ のとき queryKey 全ID連結は重い。短い hash に畳む。
-function stableKeyFor(sortedIds: string[]): string {
-  if (sortedIds.length <= 50) return sortedIds.join(',');
-  let h = 5381;
-  const s = sortedIds.join(',');
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  return `n${sortedIds.length}:${(h >>> 0).toString(36)}`;
-}
 
 function keyForIds(replyIds: string[]) {
   return [KEY_PREFIX, stableKeyFor(replyIds.slice().sort())];

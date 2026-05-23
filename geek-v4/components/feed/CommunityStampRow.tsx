@@ -153,7 +153,7 @@ function CommunityStampRowInner({
         <PressableScale
           onPress={() => router.push(`/community/${communityId}/stamps` as never)}
           haptic="tap"
-          hitSlop={10}
+          hitSlop={12}
           accessibilityLabel="スタンプを管理"
           style={{
             flexDirection: 'row',

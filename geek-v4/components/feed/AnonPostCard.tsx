@@ -256,20 +256,23 @@ const STYLES = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: SP['2'],
-    paddingVertical: 4,
+    paddingHorizontal: SP['3'],
+    // iOS の最小タップ領域 (44pt) に届くよう padding を確保。
+    // 旧版 (vertical:4) は実効高さ ~24px → hitSlop:8 を足しても 40px で不足し、
+    // スマホで「押しても反応しない」と感じるバグの主因だった。
+    paddingVertical: 6,
     borderRadius: R.full,
     borderWidth: 1,
   },
   reactionOverflowPill: {
-    paddingHorizontal: SP['2'],
-    paddingVertical: 4,
+    paddingHorizontal: SP['3'],
+    paddingVertical: 6,
     backgroundColor: C.bg3,
     borderRadius: R.full,
     borderWidth: 1,
     borderColor: C.border,
   },
-  reactionOverflowText: { fontSize: 11, color: C.text3, fontWeight: '700' },
+  reactionOverflowText: { fontSize: 12, color: C.text3, fontWeight: '700' },
 });
 
 // ────────────────────────────────────────────────────────────────────
@@ -757,6 +760,8 @@ function AnonPostCardInner({
               key={r.meme}
               onPress={() => onReact(r.meme)}
               haptic="tap"
+              hitSlop={10}
+              accessibilityLabel={`${r.meme} ${r.count} 件 ${r.mine ? '(押下済み)' : ''}`}
               style={[STYLES.reactionPillBase, reactionPillColors(r.mine)]}
             >
               <Text style={reactionPillLabel(r.mine)}>
@@ -771,6 +776,8 @@ function AnonPostCardInner({
             <PressableScale
               onPress={() => setMemePickerOpen(true)}
               haptic="tap"
+              hitSlop={10}
+              accessibilityLabel="他のリアクションを見る"
               style={STYLES.reactionOverflowPill}
             >
               <Text style={STYLES.reactionOverflowText}>

@@ -861,8 +861,14 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
         showToast(`#${tag} を追加しました`, 'success');
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : '';
-        if (msg.includes('duplicate')) showToast('そのタグは既に追加されています', 'warn');
-        else showToast('追加に失敗しました', 'error');
+        if (msg.includes('duplicate')) {
+          showToast('そのタグは既に追加されています', 'warn');
+        } else {
+          showToast(msg ? `追加に失敗しました: ${msg}` : '追加に失敗しました', 'error');
+        }
+        // re-throw to keep AddTagInline open with the entered text — silent close gave
+        // the false impression "added" when actually mutation rejected.
+        throw e;
       }
     },
     [addTag, showToast],
@@ -1034,10 +1040,10 @@ const FeedPostRow = memo(function FeedPostRow({
     (meme: string) => toggleReact(post.id, meme),
     [toggleReact, post.id],
   );
+  // promise を return することで AddTagInline.submit の await が実際の結果を待つ。
+  // 旧版は void で握り潰しており失敗時も form が即 close → 「追加された風」だけ表示。
   const onAddTag = useCallback(
-    (tag: string) => {
-      void handleAddTag(post.id, tag);
-    },
+    (tag: string) => handleAddTag(post.id, tag),
     [handleAddTag, post.id],
   );
   return (

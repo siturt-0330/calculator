@@ -40,6 +40,9 @@ export function TagPill({
       onPress={onPress}
       onLongPress={onLongPress}
       haptic="select"
+      // sm はタグ row で密に並ぶので hitSlop 過大は隣 chip と競合する → 6 程度に抑える
+      hitSlop={size === 'sm' ? 6 : 8}
+      accessibilityLabel={`タグ #${name}`}
       style={{
         flexDirection: 'row',
         alignItems: 'center',

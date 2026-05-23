@@ -18,6 +18,7 @@ import { PressableScale } from '../../components/ui/PressableScale';
 import { Avatar } from '../../components/ui/Avatar';
 import { TagPill } from '../../components/tag/TagPill';
 import { AddTagInline } from '../../components/tag/AddTagInline';
+import { ProgressiveImage } from '../../components/ui/ProgressiveImage';
 import { Spinner } from '../../components/ui/Spinner';
 import { TrustBadge } from '../../components/ui/TrustBadge';
 import { useToastStore } from '../../stores/toastStore';
@@ -73,7 +74,7 @@ export default function PostDetailScreen() {
   // 似た投稿
   const { data: similarPosts = [] } = useQuery({
     queryKey: ['similar-posts', id, post?.tag_names ?? []],
-    queryFn: () => fetchSimilarPosts(id, post?.tag_names ?? [], 6),
+    queryFn: () => fetchSimilarPosts(id, post?.tag_names ?? [], 3),
     enabled: !!id && !!post && (post?.tag_names?.length ?? 0) > 0,
     staleTime: 60_000,
   });
@@ -314,35 +315,72 @@ export default function PostDetailScreen() {
               </Text>
             </View>
             <View style={{ gap: SP['2'] }}>
-              {similarPosts.map((p) => (
-                <PressableScale
-                  key={p.id}
-                  onPress={() => router.push(`/post/${p.id}` as never)}
-                  haptic="tap"
-                  style={{
-                    padding: SP['3'],
-                    backgroundColor: C.bg3,
-                    borderRadius: R.md,
-                    borderWidth: 1, borderColor: C.border,
-                    gap: 4,
-                  }}
-                >
-                  <Text style={[T.small, { color: C.text, lineHeight: 18 }]} numberOfLines={2}>
-                    {p.content}
-                  </Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-                    <Text style={[T.caption, { color: C.accent }]}>
-                      #{p.tag_names[0] ?? '雑談'}
-                    </Text>
-                    <Text style={[T.caption, { color: C.text3 }]}>
-                      · 💛 {p.likes_count ?? 0}
-                    </Text>
-                    <Text style={[T.caption, { color: C.text3 }]}>
-                      · {formatRelative(p.created_at)}
-                    </Text>
-                  </View>
-                </PressableScale>
-              ))}
+              {similarPosts.map((p) => {
+                // 写真付きの投稿は先頭の media_urls[0] を 64px サムネで表示。
+                // (ユーザー要望: 似た投稿に写真が載っていても見れない問題の修正)
+                const thumb = p.media_urls?.[0];
+                const thumbBh = p.media_blurhashes?.[0];
+                return (
+                  <PressableScale
+                    key={p.id}
+                    onPress={() => router.push(`/post/${p.id}` as never)}
+                    haptic="tap"
+                    hitSlop={6}
+                    accessibilityLabel={`似た投稿: ${p.content?.slice(0, 30) ?? ''} を開く`}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: SP['3'],
+                      padding: SP['3'],
+                      backgroundColor: C.bg3,
+                      borderRadius: R.md,
+                      borderWidth: 1, borderColor: C.border,
+                    }}
+                  >
+                    {thumb && (
+                      <View
+                        style={{
+                          width: 64,
+                          height: 64,
+                          borderRadius: R.sm,
+                          overflow: 'hidden',
+                          backgroundColor: C.bg2,
+                          flexShrink: 0,
+                        }}
+                      >
+                        <ProgressiveImage
+                          uri={thumb}
+                          blurhash={thumbBh ?? undefined}
+                          width={64}
+                          height={64}
+                          radius={R.sm}
+                        />
+                      </View>
+                    )}
+                    <View style={{ flex: 1, gap: 4 }}>
+                      <Text style={[T.small, { color: C.text, lineHeight: 18 }]} numberOfLines={2}>
+                        {p.content}
+                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], flexWrap: 'wrap' }}>
+                        <Text style={[T.caption, { color: C.accent }]}>
+                          #{p.tag_names[0] ?? '雑談'}
+                        </Text>
+                        <Text style={[T.caption, { color: C.text3 }]}>
+                          · 💛 {p.likes_count ?? 0}
+                        </Text>
+                        <Text style={[T.caption, { color: C.text3 }]}>
+                          · {formatRelative(p.created_at)}
+                        </Text>
+                        {p.media_urls && p.media_urls.length > 1 && (
+                          <Text style={[T.caption, { color: C.text3 }]}>
+                            · 📷 {p.media_urls.length}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  </PressableScale>
+                );
+              })}
             </View>
           </View>
         )}

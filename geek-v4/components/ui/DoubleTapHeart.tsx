@@ -8,7 +8,7 @@ import Animated, {
   withSpring,
   runOnJS,
 } from 'react-native-reanimated';
-import { View } from 'react-native';
+import { View, Platform } from 'react-native';
 import { Icon } from '../../constants/icons';
 import { hap } from '../../design/haptics';
 import { TIMING_FAST, SPRING_BOUNCY } from '../../design/motion';
@@ -26,6 +26,13 @@ function DoubleTapHeartInner({
   onDoubleTap: () => void;
   enabled?: boolean;
 }) {
+  // Web (= iOS Safari / Android Chrome PWA) では GestureDetector + Tap が
+  // touch event を吸収して body の vertical scroll を妨げるバグがある。
+  // double-tap で like するのは native (iOS/Android アプリ) の操作慣習で、
+  // web 利用者は通常使わないので無効化して scroll 優先にする。
+  if (Platform.OS === 'web') {
+    return <View style={{ position: 'relative' }}>{children}</View>;
+  }
   // useSharedValue は parent re-render で値リセットされないので大丈夫だが、
   // useMemo でラップして reference 安定化 → useAnimatedStyle が無駄に再構築
   // されない保険にする。

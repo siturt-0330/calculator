@@ -3,19 +3,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { attachChannel } from '../lib/realtime';
 import { fetchReactionsForPosts, toggleReaction, type ReactionsByPost } from '../lib/api/reactions';
 import { useToastStore } from '../stores/toastStore';
+import { stableKeyFor } from '../lib/utils/queryKey';
 
 const KEY_PREFIX = 'reactions';
-
-// postIds が 200+ のとき queryKey に全 ID を連結すると重い + devtools が辛い。
-// 50 を超えたら短い決定的ハッシュで畳む。
-function stableKeyFor(sortedIds: string[]): string {
-  if (sortedIds.length <= 50) return sortedIds.join(',');
-  // djb2 hash (32bit, deterministic)
-  let h = 5381;
-  const s = sortedIds.join(',');
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  return `n${sortedIds.length}:${(h >>> 0).toString(36)}`;
-}
 
 function keyForIds(postIds: string[]) {
   return [KEY_PREFIX, stableKeyFor(postIds.slice().sort())];

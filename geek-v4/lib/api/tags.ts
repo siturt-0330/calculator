@@ -34,7 +34,10 @@ export type EventItem = {
   created_at: string;
 };
 
-function canonicalize(a: string, b: string): [string, string] {
+// alphabetical order でタグペアを正規化 (tag_relations の重複防止)。
+// 例: canonicalize("b", "a") = ["a", "b"] / canonicalize("a", "a") は呼び出し側で reject。
+// export して unit test 可能にする。
+export function canonicalize(a: string, b: string): [string, string] {
   return a < b ? [a, b] : [b, a];
 }
 

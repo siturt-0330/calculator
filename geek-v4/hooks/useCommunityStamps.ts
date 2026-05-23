@@ -18,16 +18,7 @@ import {
 } from '../lib/api/communityStamps';
 import { attachChannel } from '../lib/realtime';
 import { useToastStore } from '../stores/toastStore';
-
-// postIds が 200+ のとき queryKey に全 ID を連結すると重い + devtools が辛い。
-// 50 を超えたら短い決定的ハッシュで畳む。
-function stableKeyFor(sortedIds: string[]): string {
-  if (sortedIds.length <= 50) return sortedIds.join(',');
-  let h = 5381;
-  const s = sortedIds.join(',');
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  return `n${sortedIds.length}:${(h >>> 0).toString(36)}`;
-}
+import { stableKeyFor } from '../lib/utils/queryKey';
 
 // ============================================================
 // 1) コミュスタンプ一覧

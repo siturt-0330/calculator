@@ -21,6 +21,8 @@
     "nativewind-env.d.ts"
   ],
   "exclude": [
-    "supabase/**"
+    "supabase/**",
+    "tests/**",
+    "node_modules"
   ]
 }
