@@ -1,4 +1,5 @@
-import { View, Text, Linking, Platform } from 'react-native';
+import { View, Text, Platform } from 'react-native';
+import { safeOpenUrl } from '../../lib/openUrl';
 import { useQuery } from '@tanstack/react-query';
 import { fetchAndCachePreview } from '../../lib/api/linkPreview';
 import { PressableScale } from '../ui/PressableScale';
@@ -27,7 +28,7 @@ export function LinkPreviewCard({ url }: { url: string }) {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       window.open(url, '_blank', 'noopener,noreferrer');
     } else {
-      Linking.openURL(url).catch(() => {});
+      void safeOpenUrl(url);
     }
   };
 

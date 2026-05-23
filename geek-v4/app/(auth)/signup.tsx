@@ -30,8 +30,8 @@ export default function SignupScreen() {
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const passwordRef = useRef<TextInput>(null);
-  const { signUp } = useAuthStore();
-  const { show } = useToastStore();
+  const signUp = useAuthStore((s) => s.signUp);
+  const show = useToastStore((s) => s.show);
   const { online } = useNetworkStatus();
   const router = useRouter();
   const insets = useSafeAreaInsets();

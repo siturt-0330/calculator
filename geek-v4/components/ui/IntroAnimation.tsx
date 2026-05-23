@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { StyleSheet, Dimensions, Platform, View } from 'react-native';
+import { StyleSheet, Dimensions, Platform, View, type TextStyle } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -7,7 +7,19 @@ import Animated, {
   withDelay,
   runOnJS,
   Easing,
+  type SharedValue,
 } from 'react-native-reanimated';
+
+// Web 専用 CSS プロパティを TextStyle に重ねるための拡張型
+// (React Native の StyleProp 型は WebkitFontSmoothing 等を知らないので
+//  any キャストの代わりにこのローカル型で正確に表現する)
+type WebTextExtras = {
+  textShadow?: string;
+  WebkitFontSmoothing?: string;
+  MozOsxFontSmoothing?: string;
+  textRendering?: string;
+};
+type ExtendedTextStyle = TextStyle & WebTextExtras;
 
 // ============================================================
 // Geek イントロ
@@ -237,16 +249,11 @@ function Letter({
   baseStyle,
 }: {
   ch: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  opacity: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  translateY: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  translateX: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  glow: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  baseStyle: any;
+  opacity: SharedValue<number>;
+  translateY: SharedValue<number> | null;
+  translateX: SharedValue<number> | null;
+  glow: SharedValue<number>;
+  baseStyle: ExtendedTextStyle;
 }) {
   // 文字本体
   const charStyle = useAnimatedStyle(() => ({
@@ -275,10 +282,9 @@ function Letter({
             textShadowRadius: 22,
             textShadowOffset: { width: 0, height: 0 },
             ...(Platform.OS === 'web'
-              ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                ({
+              ? ({
                   textShadow: '0 0 14px #7C6AF7, 0 0 28px #7C6AF7',
-                } as any)
+                } satisfies WebTextExtras)
               : {}),
           },
           glowStyle,
@@ -294,27 +300,25 @@ function Letter({
   );
 }
 
-function baseLogoStyle() {
-  const base = {
+function baseLogoStyle(): ExtendedTextStyle {
+  const base: ExtendedTextStyle = {
     fontFamily: 'Inter_700Bold',
     fontSize: CFG.FONT_SIZE,
-    fontWeight: '700' as const,
+    fontWeight: '700',
     letterSpacing: CFG.LETTER_SPACING,
     color: CFG.LOGO_COLOR,
-    includeFontPadding: false as const,
+    includeFontPadding: false,
   };
   if (Platform.OS === 'web') {
+    // Web: 拡張 CSS プロパティ (WebkitFontSmoothing 等) は React Native の TextStyle
+    // に存在しないが、ExtendedTextStyle で許可 — RN Web が CSS にそのまま流す
     return {
       ...base,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      fontFamily: 'Inter_700Bold, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      fontFamily: 'Inter_700Bold, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       WebkitFontSmoothing: 'antialiased',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       MozOsxFontSmoothing: 'grayscale',
       textRendering: 'optimizeLegibility',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any;
+    };
   }
   return base;
 }

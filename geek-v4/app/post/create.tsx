@@ -30,6 +30,9 @@ import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { POST_KIND_META } from '../../components/feed/PostKindBadge';
 import type { PostKind } from '../../types/models';
+import { useAuthStore } from '../../stores/authStore';
+import { uploadPostImage, uploadPostVideo, validateVideoSource } from '../../lib/media';
+import { VideoPlayer } from '../../components/ui/VideoPlayer';
 
 type VisibilityOption = {
   value: PostVisibility;
@@ -53,6 +56,12 @@ export default function CreatePost() {
   const { show } = useToastStore();
 
   const [images, setImages] = useState<string[]>([]);
+  // 動画は picker から validate 済みのメタデータ付きで保持する。
+  // 1 投稿あたり 1 本まで (UI/Storage コスト両面で安全側に倒す)。
+  type PickedVideo = { uri: string; mime: string; ext: string; size: number };
+  const [video, setVideo] = useState<PickedVideo | null>(null);
+  // uploading は post 中の進捗ラベル表示用 (大きい動画では数秒〜分単位かかる)
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [content, setContent] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
@@ -241,6 +250,36 @@ export default function CreatePost() {
     }
   };
 
+  const pickVideo = async () => {
+    try {
+      const r = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: 'videos',
+        allowsMultipleSelection: false,
+        quality: 1,
+        // iOS は撮影アプリで作った video の場合 mimeType が抜けることがあるが
+        // validateVideoSource 側で URI 拡張子からも fallback で推定する。
+      });
+      if (r.canceled || r.assets.length === 0) return;
+      const asset = r.assets[0];
+      if (!asset) return;
+      const v = await validateVideoSource({
+        uri: asset.uri,
+        fileSize: asset.fileSize,
+        mimeType: asset.mimeType,
+      });
+      if (!v.ok) {
+        hap.warn();
+        show(v.reason, 'warn');
+        return;
+      }
+      setVideo({ uri: asset.uri, mime: v.mime, ext: v.ext, size: v.size });
+      hap.confirm();
+    } catch (e) {
+      console.warn('[post/create] pick video failed:', e);
+      show('動画の取得に失敗しました', 'error');
+    }
+  };
+
   const addTag = () => {
     const t = tagInput.trim().replace(/^#/, '');
     if (!t) return;
@@ -283,8 +322,8 @@ export default function CreatePost() {
   };
 
   const onPost = async () => {
-    if (images.length === 0 && !content.trim()) {
-      show('画像かテキストを入力してください。', 'warn');
+    if (images.length === 0 && !video && !content.trim()) {
+      show('画像・動画・テキストのいずれかを入力してください。', 'warn');
       return;
     }
     if (tags.length === 0) {
@@ -315,6 +354,49 @@ export default function CreatePost() {
         Alert.alert('投稿できません', check.reason ?? 'コンテンツポリシーに反する可能性があります');
         return;
       }
+
+      // ★ 重要: 投稿 INSERT の前に画像/動画を必ず Storage に upload する。
+      // 旧コードは picker の URI (file:// / blob:) を直接 media_urls に書いていた
+      // ため、投稿者以外には画像が見えない silent bug があった。
+      // ここで HTTPS URL に変換することで「投稿できないとか、そういうたぐいの
+      // 問題は絶対になくして」を担保する。
+      const userId = useAuthStore.getState().user?.id;
+      if (!userId) {
+        show('ログインし直してください', 'error');
+        return;
+      }
+
+      // 1) 画像 upload (並列)。失敗したら投稿自体を中止して revert。
+      let uploadedImageUrls: string[] = [];
+      if (images.length > 0) {
+        setUploadStatus(`画像 ${images.length} 枚をアップロード中…`);
+        try {
+          uploadedImageUrls = await Promise.all(
+            images.map((uri) => uploadPostImage(uri, userId)),
+          );
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          show(msg, 'error');
+          return; // finally で posting / uploadStatus はクリアされる
+        }
+      }
+
+      // 2) 動画 upload (1 本)。画像と直列で安全側に (大ファイルの並列は失敗率上がる)。
+      let uploadedVideoUrls: string[] = [];
+      if (video) {
+        const sizeMb = (video.size / 1024 / 1024).toFixed(1);
+        setUploadStatus(`動画 (${sizeMb}MB) をアップロード中…`);
+        try {
+          const url = await uploadPostVideo(video.uri, userId, { mime: video.mime, ext: video.ext });
+          uploadedVideoUrls = [url];
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          show(msg, 'error');
+          return;
+        }
+      }
+
+      setUploadStatus('投稿を作成中…');
       const validOptions = pollOptions.filter((o) => o.trim());
       const pollPayload = (showPoll && pollQuestion.trim() && validOptions.length >= 2)
         ? {
@@ -330,7 +412,10 @@ export default function CreatePost() {
       const isPublic = visibility !== 'private';
       await createPost({
         content,
-        mediaUris: images,
+        mediaUris: uploadedImageUrls,
+        videoUris: uploadedVideoUrls,
+        videoDurations: [], // duration は client で取得困難 (expo-video の getStatus が必要) — 後続改善
+        videoPosters: [],   // ポスター画像 自動生成も後続改善
         tagNames: tags,
         isAnonymous: anonymous,
         kind,
@@ -386,6 +471,7 @@ export default function CreatePost() {
       show(userMsg, 'error');
     } finally {
       setPosting(false);
+      setUploadStatus(null);
     }
   };
 
@@ -396,7 +482,7 @@ export default function CreatePost() {
 
   // 投稿可否の inline 表示用: 「なぜ押せない」を 1 行で示す
   const submitBlockedReason = (() => {
-    if (!content.trim() && images.length === 0) return '本文か画像を入力してください';
+    if (!content.trim() && images.length === 0 && !video) return '本文・画像・動画 のいずれかを入力してください';
     if (tags.length === 0) return 'タグを 1 つ以上 追加してください';
     if (kind === 'fact' && !sourceUrl.trim()) return '「事実」投稿には出典URLが必要です';
     if ((visibility === 'community_only' || visibility === 'community_public')
@@ -502,6 +588,7 @@ export default function CreatePost() {
                 <PressableScale
                   onPress={pickImage}
                   haptic="tap"
+                  accessibilityLabel="画像を追加"
                   style={{
                     width: 80, height: 80, borderRadius: 12,
                     backgroundColor: C.bg3,
@@ -516,7 +603,90 @@ export default function CreatePost() {
                   </Text>
                 </PressableScale>
               )}
+
+              {/* ===== 動画 picker / preview ===== */}
+              {video ? (
+                <Animated.View
+                  entering={FadeIn.duration(180)}
+                  style={{ position: 'relative', width: 80, height: 80 }}
+                >
+                  <View
+                    style={{
+                      width: 80, height: 80, borderRadius: 12,
+                      backgroundColor: '#000',
+                      alignItems: 'center', justifyContent: 'center',
+                      borderWidth: 1, borderColor: C.border,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <Text style={{ fontSize: 28 }}>▶</Text>
+                    <View style={{
+                      position: 'absolute', bottom: 4, left: 4,
+                      paddingHorizontal: 6, paddingVertical: 1,
+                      borderRadius: R.full,
+                      backgroundColor: 'rgba(0,0,0,0.7)',
+                    }}>
+                      <Text style={{ fontSize: 9, color: '#fff', fontWeight: '700' }}>
+                        {video.size > 0 ? `${(video.size / 1024 / 1024).toFixed(1)}MB` : '動画'}
+                      </Text>
+                    </View>
+                  </View>
+                  <PressableScale
+                    onPress={() => setVideo(null)}
+                    haptic="warn"
+                    hitSlop={10}
+                    accessibilityLabel="動画を削除"
+                    style={{
+                      position: 'absolute',
+                      top: -6, right: -6,
+                      width: 24, height: 24, borderRadius: 12,
+                      backgroundColor: C.bg,
+                      alignItems: 'center', justifyContent: 'center',
+                      borderWidth: 1, borderColor: C.border,
+                    }}
+                  >
+                    <X size={14} color={C.text} strokeWidth={2.4} />
+                  </PressableScale>
+                </Animated.View>
+              ) : (
+                <PressableScale
+                  onPress={pickVideo}
+                  haptic="tap"
+                  accessibilityLabel="動画を追加 (1 本まで、最大 100MB)"
+                  style={{
+                    width: 80, height: 80, borderRadius: 12,
+                    backgroundColor: C.bg3,
+                    alignItems: 'center', justifyContent: 'center',
+                    borderWidth: 1, borderStyle: 'dashed', borderColor: C.border2,
+                    gap: 2,
+                  }}
+                >
+                  <Text style={{ fontSize: 22, color: C.text3 }}>🎬</Text>
+                  <Text style={[T.caption, { color: C.text3, fontSize: 9 }]}>
+                    動画 / 1
+                  </Text>
+                </PressableScale>
+              )}
             </View>
+
+            {/* upload 進捗 — 大きい動画は数秒〜分単位かかるのでユーザーに分かるよう表示 */}
+            {uploadStatus && (
+              <View
+                accessibilityRole="alert"
+                accessibilityLiveRegion="polite"
+                style={{
+                  marginTop: SP['2'],
+                  paddingHorizontal: SP['3'],
+                  paddingVertical: SP['2'],
+                  backgroundColor: C.accentBg,
+                  borderRadius: R.md,
+                  borderWidth: 1,
+                  borderColor: C.accentSoft,
+                }}
+              >
+                <Text style={[T.caption, { color: C.accentLight }]}>{uploadStatus}</Text>
+              </View>
+            )}
           </View>
 
           {/* ===== タグ ===== */}

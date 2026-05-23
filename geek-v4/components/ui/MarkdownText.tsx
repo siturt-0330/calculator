@@ -1,8 +1,10 @@
-import { Text, Linking, Platform } from 'react-native';
+import { Text, Platform } from 'react-native';
 import { memo, useMemo } from 'react';
 import type { TextStyle, StyleProp } from 'react-native';
 import { C } from '../../design/tokens';
 import { sanitizeUrl } from '../../lib/sanitize';
+import { safeOpenUrl } from '../../lib/openUrl';
+import { useToastStore } from '../../stores/toastStore';
 
 // 軽量 inline Markdown レンダラ
 // 対応: **bold**, *italic*, `code`, ~~strike~~, [text](url)
@@ -63,11 +65,16 @@ export const MarkdownText = memo(function MarkdownText({
   const open = (url: string) => {
     // パーサ regex は https? のみ通すが、defense-in-depth で再検証
     const safe = sanitizeUrl(url);
-    if (!safe) return;
+    if (!safe) {
+      // 不正リンクは silent fail でなくユーザーに知らせる
+      useToastStore.getState().show('不正なリンクです', 'warn');
+      return;
+    }
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       window.open(safe, '_blank', 'noopener,noreferrer');
     } else {
-      Linking.openURL(safe).catch(() => {});
+      // 旧コードは silent fail → safeOpenUrl で失敗時 toast 表示
+      void safeOpenUrl(safe);
     }
   };
 

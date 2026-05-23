@@ -47,6 +47,8 @@ import {
   useCommunityStampReactionToggle,
 } from '../../../../hooks/useCommunityStamps';
 import { OfficialBadge } from '../../../../components/community/OfficialBadge';
+import { EventRow } from '../../../../components/community/EventRow';
+import { OfficialFeatureNav } from '../../../../components/community/OfficialFeatureNav';
 import { useAuthStore } from '../../../../stores/authStore';
 import {
   fetchCommunity,
@@ -1879,118 +1881,6 @@ function QnaTabInline({
   );
 }
 
-// ============================================================
-// 公式機能ナビ (Q&A / カレンダー / 地図) — 横並びチップ
-// ============================================================
-function OfficialFeatureNav({
-  communityId,
-  features,
-}: {
-  communityId: string;
-  features: Array<'qna' | 'calendar' | 'map'>;
-}) {
-  const router = useRouter();
-  type Item = { key: 'qna' | 'calendar' | 'map'; label: string; icon: typeof Icon.community; route: string };
-  const items: Item[] = [];
-  if (features.includes('qna')) items.push({ key: 'qna',      label: 'Q&A',       icon: Icon.help,     route: `/community/${communityId}/qna` });
-  if (features.includes('calendar')) items.push({ key: 'calendar', label: 'カレンダー', icon: Icon.calendar, route: `/community/${communityId}/calendar` });
-  if (features.includes('map')) items.push({ key: 'map',      label: '地図',      icon: Icon.map,      route: `/community/${communityId}/map` });
-  if (items.length === 0) return null;
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        gap: SP['2'],
-        paddingHorizontal: SP['4'],
-        paddingVertical: SP['3'],
-        borderBottomWidth: 1,
-        borderBottomColor: C.border,
-        flexWrap: 'wrap',
-      }}
-    >
-      {items.map((it) => {
-        const IconComp = it.icon;
-        return (
-          <PressableScale
-            key={it.key}
-            onPress={() => router.push(it.route as never)}
-            haptic="tap"
-            scaleValue={0.97}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              paddingHorizontal: SP['3'],
-              paddingVertical: 8,
-              backgroundColor: C.accentBg,
-              borderRadius: R.full,
-              borderWidth: 1,
-              borderColor: C.accent + '55',
-            }}
-          >
-            <IconComp size={14} color={C.accentLight} strokeWidth={2.4} />
-            <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>{it.label}</Text>
-          </PressableScale>
-        );
-      })}
-    </View>
-  );
-}
+// OfficialFeatureNav は components/community/OfficialFeatureNav.tsx に切り出し済み (Phase 8 split)
 
-function EventRow({ event }: { event: CommunityEvent }) {
-  const d = new Date(event.starts_at);
-  const valid = !Number.isNaN(d.getTime());
-  const day = valid ? d.getDate() : '?';
-  const weekday = valid
-    ? ['日', '月', '火', '水', '木', '金', '土'][d.getDay()] ?? ''
-    : '';
-  const time = valid
-    ? `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
-    : '';
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        gap: SP['3'],
-        padding: SP['3'],
-        backgroundColor: C.bg2,
-        borderRadius: R.lg,
-        borderWidth: 1,
-        borderColor: C.border,
-      }}
-    >
-      <View
-        style={{
-          width: 56,
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: C.bg3,
-          borderRadius: R.md,
-          paddingVertical: SP['2'],
-        }}
-      >
-        <Text style={[T.numLg, { color: C.text }]}>{day}</Text>
-        <Text style={[T.caption, { color: C.text3 }]}>{weekday}</Text>
-      </View>
-      <View style={{ flex: 1, gap: 4 }}>
-        <Text style={[T.bodyB, { color: C.text }]} numberOfLines={2}>
-          {event.title}
-        </Text>
-        <Text style={[T.caption, { color: C.text3 }]}>{time}</Text>
-        {event.location_text && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <Icon.map size={12} color={C.text3} strokeWidth={2.2} />
-            <Text style={[T.small, { color: C.text2 }]} numberOfLines={1}>
-              {event.location_text}
-            </Text>
-          </View>
-        )}
-        {event.description.length > 0 && (
-          <Text style={[T.small, { color: C.text2 }]} numberOfLines={3}>
-            {event.description}
-          </Text>
-        )}
-      </View>
-    </View>
-  );
-}
+// EventRow は components/community/EventRow.tsx に切り出し済み (Phase 8 split)

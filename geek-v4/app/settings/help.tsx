@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { View, Text, ScrollView, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Constants from 'expo-constants';
+import { safeOpenUrl } from '../../lib/openUrl';
 import { TopBar } from '../../components/nav/TopBar';
 import { BackButton } from '../../components/nav/BackButton';
 import { PressableScale } from '../../components/ui/PressableScale';
@@ -51,7 +53,7 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: 'アカウントを削除したい',
-    a: '設定 → アカウント設定から削除できます（実装予定）。削除すると30日以内に個人情報がすべて消去されます。',
+    a: '設定 → アカウントから削除できます。削除すると 30 日以内に個人情報がすべて消去されます。削除前に「データをエクスポート」で自分の投稿等を JSON 保存することも可能です。',
   },
   {
     q: 'パスワードを忘れた',
@@ -59,20 +61,42 @@ const FAQ: { q: string; a: string }[] = [
   },
 ];
 
+// サポート問い合わせ時にユーザー操作が不要で済むよう、診断情報を mailto: の
+// body に pre-fill する。PII (email / nickname) は一切含めない。
+function buildDiagnosticsMailto(): string {
+  const version = Constants.expoConfig?.version ?? 'unknown';
+  const ios = Constants.expoConfig?.ios?.buildNumber ?? '-';
+  const android = Constants.expoConfig?.android?.versionCode ?? '-';
+  const lines = [
+    'お問い合わせありがとうございます。お困りの内容をできるだけ具体的にご記入ください。',
+    '',
+    '----- 以下は自動入力 (削除しないでください) -----',
+    `App version: ${version}`,
+    `iOS build: ${ios} / Android versionCode: ${android}`,
+    `Platform: ${Platform.OS} (${Platform.Version})`,
+    `Locale: ${typeof navigator !== 'undefined' ? navigator.language : '-'}`,
+  ];
+  const subject = encodeURIComponent(`[GEEK Support] ${version}`);
+  const body = encodeURIComponent(lines.join('\n'));
+  return `mailto:support@geek.app?subject=${subject}&body=${body}`;
+}
+
 export default function HelpScreen() {
   const insets = useSafeAreaInsets();
-  const [open, setOpen] = useState<number | null>(null);
+  // 旧: index を持っていたが、FAQ の追加/削除/順序入替で開閉位置がズレる。
+  // 質問文 (q) は unique なので、それを開閉キーにする。
+  const [openQ, setOpenQ] = useState<string | null>(null);
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <TopBar title="ヘルプ・お問い合わせ" left={<BackButton />} />
       <ScrollView contentContainerStyle={{ padding: SP['4'], paddingBottom: insets.bottom + SP['10'], gap: SP['3'] }}>
         <Text style={[T.h3, { color: C.text }]}>よくある質問</Text>
-        {FAQ.map((item, i) => {
-          const isOpen = open === i;
+        {FAQ.map((item) => {
+          const isOpen = openQ === item.q;
           return (
             <PressableScale
-              key={i}
-              onPress={() => setOpen(isOpen ? null : i)}
+              key={item.q}
+              onPress={() => setOpenQ(isOpen ? null : item.q)}
               haptic="tap"
               style={{
                 padding: SP['4'],
@@ -99,13 +123,42 @@ export default function HelpScreen() {
         <View style={{
           marginTop: SP['6'], padding: SP['4'],
           backgroundColor: C.accentBg, borderRadius: R.lg,
-          borderWidth: 1, borderColor: C.accentSoft, gap: SP['2'],
+          borderWidth: 1, borderColor: C.accentSoft, gap: SP['3'],
         }}>
           <Text style={[T.h4, { color: C.accentLight }]}>📧 お問い合わせ</Text>
           <Text style={[T.small, { color: C.text2 }]}>
-            上記で解決しない場合は、以下のメールアドレスまでお問い合わせください。返信まで通常1〜3営業日かかります。
+            上記で解決しない場合は、以下からお問い合わせください。返信まで通常 1〜3 営業日かかります。
           </Text>
-          <Text style={[T.bodyMd, { color: C.accent, marginTop: SP['1'] }]}>support@geek.app</Text>
+
+          {/* 診断情報付きメール起動 — 環境情報が自動で件名 / 本文に入るので
+              ユーザーは操作内容を書くだけで済む。PII は一切含めない。 */}
+          <PressableScale
+            haptic="select"
+            accessibilityLabel="診断情報付きでサポートにメールを送る"
+            hitSlop={8}
+            onPress={() => {
+              void safeOpenUrl(buildDiagnosticsMailto(), {
+                errorMessage: 'メールアプリを開けませんでした。support@geek.app へ直接ご連絡ください。',
+              });
+            }}
+            style={{
+              paddingVertical: SP['3'], paddingHorizontal: SP['4'],
+              backgroundColor: C.accent, borderRadius: R.md,
+              alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <Text style={[T.bodyMd, { color: C.bg, fontWeight: '700' }]}>
+              📩 診断情報付きでメールを送る
+            </Text>
+          </PressableScale>
+
+          <Text style={[T.small, { color: C.text3 }]}>
+            または直接: <Text style={{ color: C.accent }}>support@geek.app</Text>
+          </Text>
+          <Text style={[T.caption, { color: C.text3 }]}>
+            セキュリティ脆弱性のご報告は security@geek.app、
+            著作権侵害申立は copyright@geek.app までお願いします。
+          </Text>
         </View>
       </ScrollView>
     </View>

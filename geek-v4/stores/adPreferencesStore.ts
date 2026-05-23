@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { swallow } from '../lib/swallow';
 
 // ============================================================
 // 広告関連のユーザー設定 — プライバシー観点での opt-out 用
@@ -30,7 +31,7 @@ export const useAdPreferencesStore = create<AdPreferencesState>((set) => ({
         set({ personalizedAds: v, hydrated: true });
         return;
       }
-    } catch {}
+    } catch (e) { swallow('store.adPrefs.hydrate', e); }
     set({ hydrated: true });
   },
   setPersonalizedAds: (v) => {

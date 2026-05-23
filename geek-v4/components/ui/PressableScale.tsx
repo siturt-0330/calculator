@@ -33,6 +33,10 @@ export function PressableScale({
   style,
   hitSlop,
   disabled,
+  // a11y: 呼び出し側が明示してなければ "button" / disabled state を補う。
+  // VoiceOver / TalkBack でフォーカス時に「ボタン」「使用不可」と読まれる。
+  accessibilityRole,
+  accessibilityState,
   ...rest
 }: Props) {
   const scale = useSharedValue(1);
@@ -85,6 +89,8 @@ export function PressableScale({
       {...extra}
       hitSlop={hitSlop ?? 8}
       disabled={disabled}
+      accessibilityRole={accessibilityRole ?? 'button'}
+      accessibilityState={{ disabled: !!disabled, ...(accessibilityState ?? {}) }}
       onPressIn={(e) => {
         // disabled の時は scale animation も haptic も発火させない (誤って反応した
         // ように見える bug を防ぐ)

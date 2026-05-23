@@ -33,8 +33,12 @@ export default function TagDetailScreen() {
   const { name } = useLocalSearchParams<{ name: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { blockedTags, addBlocked, removeBlocked } = useTagFilterStore();
-  const { show } = useToastStore();
+  // selector 化: TagFilterStore は likedTags など他のフィールドも持っており
+  // 全体 destructure すると無関係更新で re-render される
+  const blockedTags = useTagFilterStore((s) => s.blockedTags);
+  const addBlocked = useTagFilterStore((s) => s.addBlocked);
+  const removeBlocked = useTagFilterStore((s) => s.removeBlocked);
+  const show = useToastStore((s) => s.show);
   const { toggle: like } = useLike();
   const { toggle: concern } = useConcern();
   const { toggle: save } = useSave();

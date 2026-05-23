@@ -11,6 +11,11 @@ export type Post = {
   content: string;
   media_urls: string[];
   media_blurhashes: string[];
+  // 動画添付 (migration 0043 で追加)。サーバー側で default '{}' を持つので
+  // 過去 post でも空配列が返る (NULL にはならない)。
+  video_urls?: string[];
+  video_durations?: number[];
+  video_posters?: string[];
   tag_names: string[];
   likes_count: number;
   comments_count: number;

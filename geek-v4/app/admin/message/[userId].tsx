@@ -92,7 +92,7 @@ export default function AdminMessageScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
 
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');

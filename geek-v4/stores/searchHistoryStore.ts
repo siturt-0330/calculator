@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { swallow } from '../lib/swallow';
 
 const KEY = 'geek:search_history';
 const KEY_V2 = 'geek:search_history_v2';  // タイムスタンプ付き
@@ -32,14 +33,15 @@ export const useSearchHistoryStore = create<SearchHistoryState>((set, get) => ({
       const history = raw ? (JSON.parse(raw) as string[]) : [];
       let entries: HistoryEntry[] = [];
       if (rawV2) {
-        try { entries = JSON.parse(rawV2) as HistoryEntry[]; } catch {}
+        try { entries = JSON.parse(rawV2) as HistoryEntry[]; } catch (e) { swallow('store.searchHistory.parseV2', e); }
       }
       // 古い history からエントリを補完 (タイムスタンプは "今" で初期化)
       if (entries.length === 0 && history.length > 0) {
         entries = history.map((q) => ({ q, ts: Date.now() - 60_000 }));
       }
       set({ history, entries, hydrated: true });
-    } catch {
+    } catch (e) {
+      swallow('store.searchHistory.hydrate', e);
       set({ hydrated: true });
     }
   },

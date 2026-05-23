@@ -75,8 +75,10 @@ export function useBBSReplyReactionToggle() {
 
   const mutation = useMutation<boolean, Error, Vars, { snapshot: Snapshot }>({
     mutationFn: ({ replyId, meme }) => toggleBBSReplyReaction(replyId, meme),
-    onMutate: async ({ replyId, meme }) => {
-      await qc.cancelQueries({ queryKey: [KEY_PREFIX] });
+    onMutate: ({ replyId, meme }) => {
+      // 体感速度優先: cancelQueries は fire-and-forget (await 撤廃)。
+      // 詳細は useReactionToggle の同位置コメント参照。
+      qc.cancelQueries({ queryKey: [KEY_PREFIX] }).catch(() => {});
       const snapshot: Snapshot = qc.getQueriesData<ReactionsByReply | undefined>({
         queryKey: [KEY_PREFIX],
       }) as Snapshot;

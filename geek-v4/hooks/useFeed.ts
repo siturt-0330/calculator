@@ -44,7 +44,10 @@ async function fetchTrendingTagList(): Promise<string[]> {
 }
 
 export function useFeed() {
-  const { likedTags, blockedTags } = useTagFilterStore();
+  // selector: tagFilter には addBlocked / removeBlocked など action もあるため、全体
+  // destructure は使わず必要な値だけ subscribe する
+  const likedTags = useTagFilterStore((s) => s.likedTags);
+  const blockedTags = useTagFilterStore((s) => s.blockedTags);
   const sort = useFeedStore((s) => s.sort);
   const scope = useFeedStore((s) => s.scope);
   const qc = useQueryClient();

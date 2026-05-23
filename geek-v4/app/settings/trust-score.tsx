@@ -34,7 +34,7 @@ const ACTIONS: { emoji: string; label: string; hint: string; route: string }[] =
 export default function TrustScoreScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user } = useAuthStore();
+  const user = useAuthStore((s) => s.user);
 
   const {
     data: profile,
@@ -165,8 +165,8 @@ function Hero({ breakdown }: { breakdown: ReturnType<typeof computeTrustBreakdow
         />
       </View>
       <View style={{ width: '100%', gap: SP['1'], marginTop: SP['2'] }}>
-        {tier.perks.map((p, i) => (
-          <View key={i} style={{ flexDirection: 'row', gap: SP['2'], alignItems: 'flex-start' }}>
+        {tier.perks.map((p) => (
+          <View key={p} style={{ flexDirection: 'row', gap: SP['2'], alignItems: 'flex-start' }}>
             <Text style={[T.small, { color: tier.color, lineHeight: 18 }]}>・</Text>
             <Text style={[T.small, { color: C.text2, flex: 1 }]}>{p}</Text>
           </View>

@@ -164,6 +164,8 @@ export function MemeReactionPicker({
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <PressableScale
               onPress={onClose}
+              hitSlop={10}
+              accessibilityLabel="閉じる"
               style={{
                 padding: SP['2'],
                 marginLeft: -SP['2'],

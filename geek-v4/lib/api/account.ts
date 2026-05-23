@@ -1,4 +1,6 @@
 import { supabase } from '../supabase';
+import { swallow } from '../swallow';
+import { withApiTimeout } from '../withApiTimeout';
 
 // ============================================================
 // Account API (GDPR / personal data control)
@@ -47,12 +49,22 @@ async function fetchUserTable(
   uid: string,
   warnings: string[],
 ): Promise<unknown[]> {
-  const { data, error } = await supabase.from(table).select('*').eq(col, uid);
-  if (error) {
-    warnings.push(`${table}: ${error.message}`);
+  try {
+    // 8 秒で諦める — export は 16 テーブル並列なので 1 つが詰まっても全体を blocking しない
+    const { data, error } = await withApiTimeout(
+      supabase.from(table).select('*').eq(col, uid),
+      `account.fetch.${table}`,
+      8000,
+    );
+    if (error) {
+      warnings.push(`${table}: ${error.message}`);
+      return [];
+    }
+    return data ?? [];
+  } catch (e) {
+    warnings.push(`${table}: ${e instanceof Error ? e.message : String(e)}`);
     return [];
   }
-  return data ?? [];
 }
 
 export async function exportUserData(): Promise<UserExportData & { _warnings?: string[] }> {
@@ -61,8 +73,19 @@ export async function exportUserData(): Promise<UserExportData & { _warnings?: s
   const uid = user.id;
 
   const warnings: string[] = [];
-  const profileRes = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle();
-  if (profileRes.error) warnings.push(`profiles: ${profileRes.error.message}`);
+  type ProfileRes = { data: Record<string, unknown> | null; error: { message: string } | null };
+  let profileRes: ProfileRes = { data: null, error: null };
+  try {
+    const r = await withApiTimeout(
+      supabase.from('profiles').select('*').eq('id', uid).maybeSingle(),
+      'account.profile.fetch',
+      8000,
+    );
+    profileRes = r as ProfileRes;
+    if (profileRes.error) warnings.push(`profiles: ${profileRes.error.message}`);
+  } catch (e) {
+    warnings.push(`profiles: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   // 並列で全テーブル取得 (各々で error を捕捉してサイレント失敗を防ぐ)
   const [
@@ -161,7 +184,7 @@ export async function deleteAccount(): Promise<{ ok: boolean; error?: string }> 
   try {
     const { error } = await supabase.rpc('delete_account');
     if (!error) {
-      try { await supabase.auth.signOut(); } catch {}
+      try { await supabase.auth.signOut(); } catch (e) { swallow('auth.signOut.afterDelete', e); }
       return { ok: true };
     }
     // RPC が無い (PGRST202) / 権限なし → フォールバックへ
@@ -196,7 +219,7 @@ export async function deleteAccount(): Promise<{ ok: boolean; error?: string }> 
     const { error } = await supabase.from(table).delete().eq(col, uid);
     if (error) errors.push(`${table}: ${error.message}`);
   }
-  try { await supabase.auth.signOut(); } catch {}
+  try { await supabase.auth.signOut(); } catch (e) { swallow('auth.signOut.afterDelete', e); }
   if (errors.length > 0) {
     return { ok: false, error: `一部のデータが残っています: ${errors.slice(0, 2).join('; ')}` };
   }

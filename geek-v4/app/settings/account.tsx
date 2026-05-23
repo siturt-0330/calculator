@@ -130,6 +130,8 @@ export default function AccountScreen() {
             onPress={onExport}
             haptic="tap"
             disabled={exporting}
+            accessibilityLabel="自分のデータを JSON でエクスポート"
+            accessibilityState={{ disabled: exporting, busy: exporting }}
             style={{
               marginTop: SP['2'],
               flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SP['2'],
@@ -145,7 +147,8 @@ export default function AccountScreen() {
               <Icon.save size={18} color="#fff" strokeWidth={2.4} />
             )}
             <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>
-              {exporting ? '準備中…' : 'JSON でダウンロード'}
+              {/* "準備中…" は意味曖昧 (未実装と誤読される) → ダウンロード中であると明示 */}
+              {exporting ? 'エクスポート中…' : 'JSON でダウンロード'}
             </Text>
           </PressableScale>
         </View>
@@ -173,6 +176,8 @@ export default function AccountScreen() {
             onPress={() => setConfirmDelete(true)}
             haptic="warn"
             disabled={deleting}
+            accessibilityLabel="アカウントを削除する。確認画面が次に表示されます。"
+            accessibilityState={{ disabled: deleting, busy: deleting }}
             style={{
               marginTop: SP['3'],
               flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SP['2'],

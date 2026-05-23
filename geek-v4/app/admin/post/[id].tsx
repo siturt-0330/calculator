@@ -70,7 +70,7 @@ export default function AdminPostDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
 

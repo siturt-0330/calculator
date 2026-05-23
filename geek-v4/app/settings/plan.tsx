@@ -32,8 +32,8 @@ const PRO = [
 
 export default function PlanScreen() {
   const insets = useSafeAreaInsets();
-  const { user } = useAuthStore();
-  const { show } = useToastStore();
+  const user = useAuthStore((s) => s.user);
+  const show = useToastStore((s) => s.show);
   const qc = useQueryClient();
   const Check = Icon.check;
   const Award = Icon.award;
@@ -112,8 +112,8 @@ export default function PlanScreen() {
           </View>
           <Text style={[T.h1, { color: C.text }]}>¥0<Text style={[T.body, { color: C.text3 }]}> / 月</Text></Text>
           <View style={{ gap: SP['2'], marginTop: SP['2'] }}>
-            {FREE.map((f, i) => (
-              <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+            {FREE.map((f) => (
+              <View key={f} style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
                 <Check size={16} color={C.green} strokeWidth={2.4} />
                 <Text style={[T.body, { color: C.text2 }]}>{f}</Text>
               </View>
@@ -154,8 +154,8 @@ export default function PlanScreen() {
             </View>
             <Text style={[T.h1, { color: C.text }]}>¥480<Text style={[T.body, { color: C.text3 }]}> / 月</Text></Text>
             <View style={{ gap: SP['2'], marginTop: SP['2'] }}>
-              {PRO.map((f, i) => (
-                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+              {PRO.map((f) => (
+                <View key={f} style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
                   <Check size={16} color={C.accentLight} strokeWidth={2.4} />
                   <Text style={[T.body, { color: C.text }]}>{f}</Text>
                 </View>

@@ -24,7 +24,7 @@ import { OfflineBanner } from '../components/ui/OfflineBanner';
 import { FeedbackFAB } from '../components/feedback/FeedbackFAB';
 import { useOfflineQueueProcessor } from '../hooks/useOfflineQueueProcessor';
 import { initAnalytics } from '../lib/analytics';
-import { initSentry } from '../lib/sentry';
+import { initSentry, setSentryUser, clearSentryUser } from '../lib/sentry';
 import { initWebVitals } from '../lib/webVitals';
 import { C } from '../design/tokens';
 import { AppState } from 'react-native';
@@ -214,6 +214,16 @@ export default function RootLayout() {
       for (const el of els) { try { document.head.removeChild(el); } catch {} }
     };
   }, []);
+
+  // Sentry の user context を auth state に追従させる。
+  // - 認証成立 → setSentryUser(id) で error / breadcrumb に user.id をタグ付け
+  // - logout → clearSentryUser() で旧 id が次セッションに leak しないように clear
+  // ! email / nickname など PII は絶対に渡さない (lib/sentry.ts の setUser は id 限定)
+  useEffect(() => {
+    if (!authHydrated) return;
+    if (user?.id) setSentryUser(user.id);
+    else clearSentryUser();
+  }, [authHydrated, user?.id]);
 
   // Sentry / Analytics は first paint のクリティカルパスから外す。
   // requestIdleCallback (Web) / setTimeout (RN) で 1tick 後ろに倒す。

@@ -344,7 +344,7 @@ export default function DiscoverCommunitiesScreen() {
         {loading && results.length === 0 ? (
           Array.from({ length: 4 }).map((_, i) => (
             <View
-              key={i}
+              key={`skel-community-${i}`}
               style={{
                 flexDirection: 'row',
                 gap: SP['3'],

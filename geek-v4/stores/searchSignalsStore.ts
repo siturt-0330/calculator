@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { swallow } from '../lib/swallow';
 
 // 検索のクリック / 閲覧シグナルを記録してパーソナライズに使う
 const KEY = 'geek:search_signals';
@@ -35,7 +36,7 @@ export const useSearchSignalsStore = create<SearchSignalsState>((set, get) => ({
         set({ signals: JSON.parse(raw) as Signal[], hydrated: true });
         return;
       }
-    } catch {}
+    } catch (e) { swallow('store.searchSignals.hydrate', e); }
     set({ hydrated: true });
   },
   record: (s) => {

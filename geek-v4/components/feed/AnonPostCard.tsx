@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react';
-import { View, Text, Linking, Platform, Image as RNImage, StyleSheet } from 'react-native';
+import { View, Text, Platform, Image as RNImage, StyleSheet } from 'react-native';
+import { safeOpenUrl } from '../../lib/openUrl';
 import { Icon } from '../../constants/icons';
 import type { Post } from '../../types/models';
 import { useLanguageStore } from '../../stores/languageStore';
@@ -10,6 +11,7 @@ import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { PressableScale } from '../ui/PressableScale';
 import { ProgressiveImage } from '../ui/ProgressiveImage';
+import { VideoPlayer } from '../ui/VideoPlayer';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { DoubleTapHeart } from '../ui/DoubleTapHeart';
 import { TagPill } from '../tag/TagPill';
@@ -372,7 +374,10 @@ function AnonPostCardInner({
   const useQuickReaction = useFeatureFlag('quick_reaction');
 
   // 翻訳 (自動翻訳のみ — UI ボタン/バッジは表示しない)
-  const { lang, autoTranslate } = useLanguageStore();
+  // selector: AnonPostCard は feed の全 post で大量にマウントされるので
+  // languageStore の他フィールド変更で全 card が再 render されないように selector 化
+  const lang = useLanguageStore((s) => s.lang);
+  const autoTranslate = useLanguageStore((s) => s.autoTranslate);
   const [translated, setTranslated] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
   const canTranslate = lang !== 'ja' && post.content;
@@ -395,6 +400,9 @@ function AnonPostCardInner({
   // データ欠落でクラッシュしないよう全フィールドを安全化
   const mediaUrls = post.media_urls ?? [];
   const mediaBlurhashes = post.media_blurhashes ?? [];
+  // 動画 (migration 0043 後の投稿のみ存在)。古い投稿は undefined → 空配列で安全
+  const videoUrls = post.video_urls ?? [];
+  const videoPosters = post.video_posters ?? [];
   const tagNames = Array.from(new Set(post.tag_names ?? []));
 
   // 画像の自然なアスペクト比を解決 — Image.getSize は web/native 両対応
@@ -441,7 +449,7 @@ function AnonPostCardInner({
   const likesCount = post.likes_count ?? 0;
   const commentsCount = post.comments_count ?? 0;
   const concernCount = post.concern_count ?? 0;
-  const hasMedia = mediaUrls.length > 0;
+  const hasMedia = mediaUrls.length > 0 || videoUrls.length > 0;
   const lowTrust = likesCount > 0 && concernCount > likesCount;
 
   const openSource = () => {
@@ -452,7 +460,8 @@ function AnonPostCardInner({
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       window.open(safe, '_blank', 'noopener,noreferrer');
     } else {
-      Linking.openURL(safe).catch(() => {});
+      // 旧: silent fail。新: safeOpenUrl で失敗時 toast を表示
+      void safeOpenUrl(safe);
     }
   };
 
@@ -618,6 +627,15 @@ function AnonPostCardInner({
                 </View>
               );
             })}
+            {/* 動画 (1 件まで前提だが、配列をループして将来複数対応) */}
+            {videoUrls.map((vurl, i) => (
+              <View
+                key={`v-${vurl}`}
+                style={[STYLES.mediaItemBase, mediaItemAspect(16 / 9)]}
+              >
+                <VideoPlayer uri={vurl} poster={videoPosters[i]} />
+              </View>
+            ))}
           </View>
         </DoubleTapHeart>
       )}

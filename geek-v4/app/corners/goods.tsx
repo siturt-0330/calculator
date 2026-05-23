@@ -89,9 +89,10 @@ export default function GoodsScreen() {
             <Text style={[T.body, { color: C.text2 }]}>該当するグッズがありません</Text>
           </View>
         )}
-        {items.map((g, i) => (
+        {items.map((g) => (
           <View
-            key={i}
+            // demo データだが title はユニークなので key にする (index より stable)
+            key={g.title}
             style={{
               flexDirection: 'row',
               gap: SP['3'],

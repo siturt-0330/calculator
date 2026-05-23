@@ -140,6 +140,9 @@ import { checkRate, rateLimitMessage } from '../rateLimit';
 export async function createPost({
   content,
   mediaUris,
+  videoUris = [],
+  videoDurations = [],
+  videoPosters = [],
   tagNames,
   isAnonymous,
   kind = 'opinion',
@@ -152,7 +155,18 @@ export async function createPost({
   community_ids = [],
 }: {
   content: string;
+  /**
+   * 画像の公開 URL 配列。**必ず** lib/media.ts の uploadPostImage で Storage に
+   * upload した後の URL を渡すこと。ローカル URI (file:// / blob:) を直接渡すと
+   * 他デバイスから見られない silent bug になる。
+   */
   mediaUris: string[];
+  /** 動画の公開 URL 配列。uploadPostVideo の戻り値を渡す。 */
+  videoUris?: string[];
+  /** videoUris と同じ index で対応する秒数。取得できなければ 0。 */
+  videoDurations?: number[];
+  /** videoUris と同じ index で対応するポスター画像 URL (任意)。 */
+  videoPosters?: string[];
   tagNames: string[];
   isAnonymous: boolean;
   kind?: 'fact' | 'opinion' | 'joke' | 'wip';
@@ -179,10 +193,28 @@ export async function createPost({
   const safeSourceUrl = sourceUrl ? sanitizeUrl(sourceUrl) : null;
   const safeContentWarning = contentWarning ? sanitizeContent(contentWarning, { maxLength: 200 }) : null;
 
+  // ★ 重要 sanity check: ローカル URI が混ざっていたら投稿前に弾く。
+  // これがないと「投稿者本人だけ画像が見える」silent bug が再発する。
+  // 呼出側 (app/post/create.tsx) で uploadPostImage / uploadPostVideo を必ず
+  // 通してから createPost を叩く契約。
+  for (const u of mediaUris) {
+    if (u && !/^https?:\/\//i.test(u)) {
+      throw new Error('画像が Storage にアップロードされていません。再度お試しください。');
+    }
+  }
+  for (const u of videoUris) {
+    if (u && !/^https?:\/\//i.test(u)) {
+      throw new Error('動画が Storage にアップロードされていません。再度お試しください。');
+    }
+  }
+
   const { data: post, error } = await supabase.from('posts').insert({
     content: safeContent,
     media_urls: mediaUris,
     media_blurhashes: [],
+    video_urls: videoUris,
+    video_durations: videoDurations,
+    video_posters: videoPosters,
     tag_names: safeTags,
     is_anonymous: isAnonymous,
     author_id: user.id,

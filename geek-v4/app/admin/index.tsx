@@ -8,6 +8,7 @@ import { useRouter } from 'expo-router';
 import { TopBar } from '../../components/nav/TopBar';
 import { BackButton } from '../../components/nav/BackButton';
 import { PressableScale } from '../../components/ui/PressableScale';
+import { Stat, EmptyBlock, ErrorBlock } from '../../components/admin/AdminBlocks';
 import { Spinner } from '../../components/ui/Spinner';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Icon } from '../../constants/icons';
@@ -736,7 +737,7 @@ function ReportsTab() {
   const [minReports, setMinReports] = useState<1 | 3 | 5>(1);
   const [pendingDelete, setPendingDelete] = useState<AdminReportedPost | null>(null);
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['admin-reported', { minReports, search }],
@@ -925,7 +926,7 @@ function UsersTab() {
   const [sortBy, setSortBy] = useState<'recent' | 'concern' | 'trust' | 'problem'>('recent');
   const [pendingSuspend, setPendingSuspend] = useState<AdminUser | null>(null);
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
 
   const isProblemMode = sortBy === 'problem';
 
@@ -1156,7 +1157,7 @@ function PostsTab() {
   const [sortBy, setSortBy] = useState<'recent' | 'popular' | 'reports'>('recent');
   const [pendingDelete, setPendingDelete] = useState<AdminPost | null>(null);
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['admin-posts', search],
@@ -1334,47 +1335,7 @@ function SortChip({ label, active, onPress }: { label: string; active: boolean; 
   );
 }
 
-function Stat({ label, value, accent }: { label: string; value: string; accent?: string }) {
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
-      <Text style={[T.caption, { color: C.text3 }]}>{label}</Text>
-      <Text style={[T.smallB, { color: accent ?? C.text, fontWeight: '700' }]}>{value}</Text>
-    </View>
-  );
-}
-
-function EmptyBlock({ label, emoji = '📭' }: { label: string; emoji?: string }) {
-  return (
-    <View style={{
-      padding: SP['8'], alignItems: 'center', gap: SP['2'],
-      backgroundColor: C.bg2, borderRadius: R.lg,
-      borderWidth: 1, borderColor: C.border,
-    }}>
-      <Text style={{ fontSize: 36 }}>{emoji}</Text>
-      <Text style={[T.body, { color: C.text2 }]}>{label}</Text>
-    </View>
-  );
-}
-
-function ErrorBlock({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <View style={{ padding: SP['8'], alignItems: 'center', gap: SP['3'] }}>
-      <Text style={{ fontSize: 36 }}>⚠️</Text>
-      <Text style={[T.body, { color: C.text2, textAlign: 'center' }]}>{message}</Text>
-      <PressableScale
-        onPress={onRetry}
-        haptic="tap"
-        style={{
-          paddingHorizontal: SP['4'], paddingVertical: SP['2'],
-          backgroundColor: C.bg3, borderRadius: R.full,
-          borderWidth: 1, borderColor: C.border,
-        }}
-      >
-        <Text style={[T.smallM, { color: C.text }]}>再読み込み</Text>
-      </PressableScale>
-    </View>
-  );
-}
+// Stat / EmptyBlock / ErrorBlock は components/admin/AdminBlocks.tsx へ切り出し (Phase 8 split)
 
 function previewText(s: string): string {
   if (!s) return '(本文なし)';

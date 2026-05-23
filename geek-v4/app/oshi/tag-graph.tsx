@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TopBar } from '../../components/nav/TopBar';
 import { BackButton } from '../../components/nav/BackButton';
 import { PressableScale } from '../../components/ui/PressableScale';
+import { StatBadge } from '../../components/ui/StatBadge';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useTagGraphStore, type TagNode, TEMPLATES } from '../../stores/tagGraphStore';
@@ -745,20 +746,7 @@ export default function TagGraphScreen() {
   );
 }
 
-function StatBadge({ icon, label, color }: { icon: string; label: string; color: string }) {
-  return (
-    <View style={{
-      flexDirection: 'row', alignItems: 'center', gap: 4,
-      paddingHorizontal: SP['2'], paddingVertical: 3,
-      backgroundColor: color + '22',
-      borderWidth: 1, borderColor: color + '44',
-      borderRadius: R.full,
-    }}>
-      <Text style={{ fontSize: 12 }}>{icon}</Text>
-      <Text style={[T.caption, { color, fontWeight: '700' }]}>{label}</Text>
-    </View>
-  );
-}
+// StatBadge は components/ui/StatBadge.tsx へ切り出し (Phase 8 split)
 
 function NodeView({
   id, nodes, depth, expanded, likedSet, isRoot, canMoveUp, canMoveDown,

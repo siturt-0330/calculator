@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { swallow } from '../lib/swallow';
 
 // ============================================================
 // Click-Through Learning
@@ -39,8 +40,8 @@ function normalizeQuery(q: string): string {
 
 function save(s: ClickStats) {
   try {
-    AsyncStorage.setItem(KEY, JSON.stringify(s)).catch(() => {});
-  } catch {}
+    AsyncStorage.setItem(KEY, JSON.stringify(s)).catch((e) => swallow('store.searchClick.save', e));
+  } catch (e) { swallow('store.searchClick.save.sync', e); }
 }
 
 export const useSearchClickStore = create<State>((set, get) => ({
@@ -60,7 +61,7 @@ export const useSearchClickStore = create<State>((set, get) => ({
         });
         return;
       }
-    } catch {}
+    } catch (e) { swallow('store.searchClick.hydrate', e); }
     set({ hydrated: true });
   },
 

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+import { swallow } from '../lib/swallow';
 
 // タグの共起マトリクス: tag → { otherTag → 共出現回数 }
 // 一定数の最近の投稿から計算してキャッシュする (1時間有効)
@@ -24,7 +25,7 @@ type TagCooccurState = {
 async function persist(snapshot: { cooccur: CooccurMap; tagPopularity: Record<string, number>; fetchedAt: number }) {
   try {
     await AsyncStorage.setItem(KEY, JSON.stringify(snapshot));
-  } catch {}
+  } catch (e) { swallow('store.tagCooccur.persist', e); }
 }
 
 async function fetchAndCompute(): Promise<{ cooccur: CooccurMap; tagPopularity: Record<string, number> }> {
@@ -78,7 +79,7 @@ export const useTagCooccurStore = create<TagCooccurState>((set, get) => ({
         });
         return;
       }
-    } catch {}
+    } catch (e) { swallow('store.tagCooccur.hydrate', e); }
     set({ hydrated: true });
   },
   refresh: async () => {

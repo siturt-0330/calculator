@@ -53,7 +53,7 @@ const STATUS_META: Record<AdStatus, { label: string; fg: string; bg: string; bor
 
 export default function AdminAdsScreen() {
   const insets = useSafeAreaInsets();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const qc = useQueryClient();
 
   const [filter, setFilter] = useState<AdStatus | 'all'>('all');
@@ -367,7 +367,7 @@ function AdFormModal({
   onSaved: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [tagInput, setTagInput] = useState('');
   const [excludeTagInput, setExcludeTagInput] = useState('');

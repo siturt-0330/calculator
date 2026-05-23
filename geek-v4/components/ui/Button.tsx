@@ -88,9 +88,17 @@ export function Button({
 
   const hapticType = haptic ?? (variant === 'primary' ? 'confirm' : 'tap');
 
+  // a11y: label をそのまま screen reader に渡す + loading 中は busy 状態を伝える。
+  // PressableScale の default で role=button / disabled state は付くが、label と busy は
+  // Button 側で明示するのが正確。
+  const a11yProps = {
+    accessibilityLabel: label,
+    accessibilityState: { disabled: !!isDisabled, busy: !!loading },
+  } as const;
+
   if (variant === 'primary') {
     return (
-      <PressableScale onPress={onPress} disabled={isDisabled} haptic={hapticType} style={containerStyle}>
+      <PressableScale onPress={onPress} disabled={isDisabled} haptic={hapticType} style={containerStyle} {...a11yProps}>
         <LinearGradient
           colors={[...([C.accent, C.accentDeep] as const)]}
           start={{ x: 0, y: 0 }}
@@ -111,7 +119,7 @@ export function Button({
   }
 
   return (
-    <PressableScale onPress={onPress} disabled={isDisabled} haptic={hapticType} style={containerStyle}>
+    <PressableScale onPress={onPress} disabled={isDisabled} haptic={hapticType} style={containerStyle} {...a11yProps}>
       {IconComp && <IconComp size={18} color={textColor} strokeWidth={2.2} />}
       {inner}
     </PressableScale>

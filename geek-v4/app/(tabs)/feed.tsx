@@ -493,7 +493,7 @@ function FeedSkeleton() {
   return (
     <View>
       {Array.from({ length: 3 }).map((_, i) => (
-        <PostCardSkeleton key={i} />
+        <PostCardSkeleton key={`skel-post-${i}`} />
       ))}
     </View>
   );

@@ -150,7 +150,7 @@ export function MypageSkeleton() {
         borderWidth: 1, borderColor: C.border,
       }}>
         {[0, 1, 2].map((i) => (
-          <View key={i} style={{ alignItems: 'center', gap: 4 }}>
+          <View key={`skel-stat-${i}`} style={{ alignItems: 'center', gap: 4 }}>
             <Skeleton width={40} height={24} />
             <Skeleton width={36} height={10} />
           </View>

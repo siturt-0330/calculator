@@ -21,6 +21,7 @@ import { deepNormalize } from '../../lib/search/tokenize';
 import { findClosestK } from '../../lib/search/typoCorrect';
 import { textRelevance } from '../../lib/utils/searchAlgo';
 import { useSearchClickStore } from '../../stores/searchClickStore';
+import { useT } from '../../hooks/useT';
 import { logEvent } from '../../lib/personalize';
 import { supabase } from '../../lib/supabase';
 
@@ -40,6 +41,8 @@ export default function BBSScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const { threads, loading, refreshing, refresh } = useBBS();
+  // 既存 file 内に local 変数 `t` (setTimeout / loop param) があるので tr に rename
+  const tr = useT();
 
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -196,11 +199,12 @@ export default function BBSScreen() {
         <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'] }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: SP['3'], paddingBottom: SP['2'] }}>
             <Text style={{ fontFamily: FONT.display, fontSize: 28, color: C.text, letterSpacing: -0.5, flex: 1 }}>
-              掲示板
+              {tr('bbs.title')}
             </Text>
             <PressableScale
               onPress={() => router.push('/bbs/create' as never)}
               haptic="confirm"
+              accessibilityLabel="新しいスレッドを作成"
               style={{
                 flexDirection: 'row', alignItems: 'center', gap: 4,
                 paddingHorizontal: SP['3'], paddingVertical: SP['2'],
@@ -210,7 +214,7 @@ export default function BBSScreen() {
               }}
             >
               <Icon.plus size={16} color="#fff" strokeWidth={2.6} />
-              <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>スレ立て</Text>
+              <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>{tr('bbs.create_thread')}</Text>
             </PressableScale>
           </View>
 
@@ -227,7 +231,7 @@ export default function BBSScreen() {
             <TextInput
               value={search}
               onChangeText={setSearch}
-              placeholder="スレッドを検索"
+              placeholder={tr('bbs.search_placeholder')}
               placeholderTextColor={C.text3}
               keyboardAppearance="dark"
               selectionColor={C.accent}
@@ -476,7 +480,7 @@ export default function BBSScreen() {
         ListEmptyComponent={
           loading ? (
             <View>
-              {Array.from({ length: 5 }).map((_, i) => <ThreadCardSkeleton key={i} />)}
+              {Array.from({ length: 5 }).map((_, i) => <ThreadCardSkeleton key={`skel-thread-${i}`} />)}
             </View>
           ) : (
             <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'], paddingTop: SP['4'] }}>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, Platform, ActivityIndicator, Linking, TextInput } from 'react-native';
+import { View, Text, ScrollView, Platform, ActivityIndicator, TextInput } from 'react-native';
+import { safeOpenUrl } from '../../lib/openUrl';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -282,7 +283,7 @@ export default function MapScreen() {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       window.open(url, '_blank', 'noopener,noreferrer');
     } else {
-      Linking.openURL(url).catch(() => {});
+      void safeOpenUrl(url, { errorMessage: 'マップを開けませんでした' });
     }
   };
 

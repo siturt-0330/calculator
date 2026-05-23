@@ -3,6 +3,7 @@ import { View, Text, Platform, Switch } from 'react-native';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { Icon } from '../../constants/icons';
+import { swallow } from '../../lib/swallow';
 import {
   pushSubscribe,
   pushUnsubscribe,
@@ -109,7 +110,7 @@ export function PushNotificationToggle() {
       if (res.error) {
         setError(res.error);
         // 保存に失敗したら端末側もロールバック
-        try { await sub.unsubscribe(); } catch {}
+        try { await sub.unsubscribe(); } catch (e) { swallow('push.unsubscribe.rollback', e); }
         setStatus('disabled');
         return;
       }
@@ -131,7 +132,7 @@ export function PushNotificationToggle() {
       const sub = await getCurrentSubscription();
       if (sub) {
         const endpoint = sub.endpoint;
-        try { await sub.unsubscribe(); } catch {}
+        try { await sub.unsubscribe(); } catch (e) { swallow('push.unsubscribe.device', e); }
         await pushUnsubscribe(endpoint);
       }
       setStatus('disabled');

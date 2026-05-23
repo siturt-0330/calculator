@@ -60,9 +60,10 @@ export default function FriendsScreen() {
       </View>
 
       <View style={{ gap: SP['3'] }}>
-        {PROFILES.map((p, i) => (
+        {PROFILES.map((p) => (
           <View
-            key={i}
+            // 静的 array だが index ではなく name を key にして識別性を上げる
+            key={p.name}
             style={{
               padding: SP['4'],
               backgroundColor: C.bg2,
