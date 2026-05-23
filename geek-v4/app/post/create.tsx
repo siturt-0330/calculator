@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, ScrollView, Alert, Image } from 'react-native';
+import { View, Text, ScrollView, Alert } from 'react-native';
 import Animated, { FadeIn, FadeInDown, Layout } from 'react-native-reanimated';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQueryClient } from '@tanstack/react-query';
@@ -32,21 +32,11 @@ import { POST_KIND_META } from '../../components/feed/PostKindBadge';
 import type { PostKind } from '../../types/models';
 import { useAuthStore } from '../../stores/authStore';
 import { uploadPostImage, uploadPostVideo, validateVideoSource } from '../../lib/media';
-import { VideoPlayer } from '../../components/ui/VideoPlayer';
+import { VisibilityPicker } from '../../components/post/VisibilityPicker';
+import { PollEditor } from '../../components/post/PollEditor';
+import { CommunityPicker } from '../../components/post/CommunityPicker';
 
-type VisibilityOption = {
-  value: PostVisibility;
-  emoji: string;
-  label: string;
-  desc: string;
-};
-
-const VISIBILITY_OPTIONS: VisibilityOption[] = [
-  { value: 'private',          emoji: '🔒', label: '自分だけ',                              desc: '下書きとしてあなただけ見える' },
-  { value: 'public',           emoji: '🌐', label: '一般公開',                              desc: 'コミュニティには載せず、ホームに公開' },
-  { value: 'community_only',   emoji: '👥', label: '指定コミュニティのメンバーだけ',        desc: '選んだコミュニティ内の人だけ閲覧可' },
-  { value: 'community_public', emoji: '📣', label: '全員に公開 (コミュニティにも掲載)',     desc: 'ホームにも、コミュニティにも掲載' },
-];
+// VISIBILITY_OPTIONS + VisibilityOption type は components/post/VisibilityPicker.tsx に移動 (Phase 8 split)
 
 export default function CreatePost() {
   const router = useRouter();
@@ -478,7 +468,7 @@ export default function CreatePost() {
   const X = Icon.close;
   const Cam = Icon.image;
   const Hash = Icon.hash;
-  const CommunityIcon = Icon.community;
+  // CommunityIcon は CommunityPicker.tsx 内に移動 (Phase 8 split)
 
   // 投稿可否の inline 表示用: 「なぜ押せない」を 1 行で示す
   const submitBlockedReason = (() => {
@@ -813,344 +803,34 @@ export default function CreatePost() {
           </View>
 
           {/* ===== 公開範囲 (2x2 grid) — 視覚的に大きく印象づける ===== */}
-          <View style={{ gap: SP['2'] }}>
-            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
-              <Text style={[T.smallB, { color: C.text2 }]}>公開範囲</Text>
-              <Text style={[T.caption, { color: C.red }]}>*</Text>
-            </View>
-            <Text style={[T.caption, { color: C.text3 }]}>
-              だれに見せる投稿か。後から変更できません
-            </Text>
-            {/* 2 列グリッド: 縦の長さを 1/2 に圧縮 */}
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -SP['1'], marginTop: SP['1'] }}>
-              {VISIBILITY_OPTIONS.map((opt) => {
-                const active = visibility === opt.value;
-                return (
-                  <View key={opt.value} style={{ width: '50%', padding: SP['1'] }}>
-                    <PressableScale
-                      onPress={() => setVisibility(opt.value)}
-                      haptic="select"
-                      scaleValue={0.97}
-                      style={{
-                        minHeight: 96,
-                        gap: 6,
-                        paddingHorizontal: SP['3'],
-                        paddingVertical: SP['3'],
-                        borderRadius: R.lg,
-                        backgroundColor: active ? C.accent + '18' : C.bg2,
-                        borderWidth: 1.5,
-                        borderColor: active ? C.accent : C.border,
-                      }}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Text style={{ fontSize: 20 }}>{opt.emoji}</Text>
-                        {active && (
-                          <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                            <View style={{
-                              width: 18, height: 18, borderRadius: 9,
-                              backgroundColor: C.accent,
-                              alignItems: 'center', justifyContent: 'center',
-                            }}>
-                              <Icon.ok size={11} color="#fff" strokeWidth={3} />
-                            </View>
-                          </View>
-                        )}
-                      </View>
-                      <Text style={[T.smallB, { color: active ? C.accentLight : C.text }]} numberOfLines={2}>
-                        {opt.label}
-                      </Text>
-                      <Text style={[T.caption, { color: C.text3, fontSize: 10, lineHeight: 14 }]} numberOfLines={2}>
-                        {opt.desc}
-                      </Text>
-                    </PressableScale>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
+          <VisibilityPicker value={visibility} onChange={setVisibility} />
 
           {/* ===== 投票 (collapsible) ===== */}
-          <View style={{ gap: SP['2'] }}>
-            <PressableScale
-              onPress={() => setShowPoll((v) => !v)}
-              haptic="tap"
-              scaleValue={0.99}
-              style={{
-                flexDirection: 'row', alignItems: 'center', gap: SP['2'],
-                paddingHorizontal: SP['3'], paddingVertical: SP['3'],
-                borderRadius: R.md,
-                backgroundColor: showPoll ? C.accent + '15' : C.bg2,
-                borderWidth: 1,
-                borderColor: showPoll ? C.accent : C.border,
-              }}
-            >
-              <Text style={{ fontSize: 16 }}>📊</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={[T.smallB, { color: showPoll ? C.accentLight : C.text }]}>
-                  投票を追加
-                </Text>
-                <Text style={[T.caption, { color: C.text3 }]}>
-                  {showPoll ? '質問と選択肢を入力 (下) ・最大 6 個' : 'みんなに聞いてみたいことがあれば'}
-                </Text>
-              </View>
-              <Text style={[T.caption, { color: showPoll ? C.accent : C.text3, fontWeight: '700' }]}>
-                {showPoll ? '閉じる' : '＋ 追加'}
-              </Text>
-            </PressableScale>
-            {showPoll && (
-              <Animated.View
-                entering={FadeInDown.duration(180)}
-                layout={Layout.springify().damping(20)}
-                style={{
-                  padding: SP['3'],
-                  backgroundColor: C.bg3,
-                  borderRadius: R.md,
-                  borderWidth: 1, borderColor: C.border,
-                  gap: SP['2'],
-                }}>
-                <Input
-                  placeholder="質問 (例: 鬼滅で一番強い柱は？)"
-                  value={pollQuestion}
-                  onChangeText={setPollQuestion}
-                  maxLength={200}
-                />
-                {pollOptions.map((opt, i) => (
-                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-                    <Text style={[T.caption, { color: C.text3, width: 18 }]}>{i + 1}.</Text>
-                    <View style={{ flex: 1 }}>
-                      <Input
-                        placeholder={`選択肢 ${i + 1}`}
-                        value={opt}
-                        onChangeText={(v) => setPollOptions(pollOptions.map((o, j) => j === i ? v : o))}
-                        maxLength={80}
-                      />
-                    </View>
-                    {pollOptions.length > 2 && (
-                      <PressableScale
-                        onPress={() => setPollOptions(pollOptions.filter((_, j) => j !== i))}
-                        haptic="warn"
-                        style={{ padding: 4 }}
-                      >
-                        <X size={14} color={C.text3} strokeWidth={2.4} />
-                      </PressableScale>
-                    )}
-                  </View>
-                ))}
-                {pollOptions.length < 6 && (
-                  <PressableScale
-                    onPress={() => setPollOptions([...pollOptions, ''])}
-                    haptic="tap"
-                    style={{
-                      alignSelf: 'flex-start',
-                      paddingHorizontal: SP['3'], paddingVertical: 4,
-                      borderRadius: R.full,
-                      backgroundColor: C.bg2, borderWidth: 1, borderColor: C.border,
-                    }}
-                  >
-                    <Text style={[T.caption, { color: C.text2 }]}>+ 選択肢を追加</Text>
-                  </PressableScale>
-                )}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], marginTop: SP['1'] }}>
-                  <PressableScale
-                    onPress={() => setPollMulti((v) => !v)}
-                    haptic="select"
-                    style={{
-                      paddingHorizontal: SP['2'], paddingVertical: 4,
-                      borderRadius: R.full,
-                      backgroundColor: pollMulti ? C.accent : C.bg2,
-                      borderWidth: 1,
-                      borderColor: pollMulti ? C.accent : C.border,
-                    }}
-                  >
-                    <Text style={[T.caption, { color: pollMulti ? '#fff' : C.text2 }]}>
-                      {pollMulti ? '✓ 複数選択可' : '単一選択'}
-                    </Text>
-                  </PressableScale>
-                  <View style={{ flex: 1 }} />
-                  <Text style={[T.caption, { color: C.text3 }]}>期間:</Text>
-                  {[6, 24, 72, 168].map((h) => (
-                    <PressableScale
-                      key={h}
-                      onPress={() => setPollHours(h)}
-                      haptic="select"
-                      style={{
-                        paddingHorizontal: SP['2'], paddingVertical: 4,
-                        borderRadius: R.full,
-                        backgroundColor: pollHours === h ? C.accent : C.bg2,
-                        borderWidth: 1,
-                        borderColor: pollHours === h ? C.accent : C.border,
-                      }}
-                    >
-                      <Text style={[T.caption, { color: pollHours === h ? '#fff' : C.text2 }]}>
-                        {h < 24 ? `${h}h` : `${h / 24}d`}
-                      </Text>
-                    </PressableScale>
-                  ))}
-                </View>
-              </Animated.View>
-            )}
-          </View>
+          <PollEditor
+            open={showPoll}
+            onToggle={() => setShowPoll((v) => !v)}
+            question={pollQuestion}
+            onQuestionChange={setPollQuestion}
+            options={pollOptions}
+            onOptionsChange={setPollOptions}
+            multi={pollMulti}
+            onMultiChange={setPollMulti}
+            hours={pollHours}
+            onHoursChange={setPollHours}
+          />
 
           {/* ===== コミュニティ (visibility が community 系のときだけ) ===== */}
           {showCommunityPicker && (
-            <Animated.View
-              entering={FadeInDown.duration(200)}
-              layout={Layout.springify().damping(20)}
-              style={{ gap: SP['2'] }}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-                <CommunityIcon size={14} color={C.text2} strokeWidth={2.2} />
-                <Text style={[T.smallM, { color: C.text2, flex: 1 }]}>
-                  コミュニティを選ぶ (複数選択可)
-                </Text>
-                {selectedCommunityIds.length > 0 && (
-                  <Text style={[T.caption, { color: C.accent, fontWeight: '700' }]}>
-                    {selectedCommunityIds.length} 件選択中
-                  </Text>
-                )}
-              </View>
-
-              {/* 選択済みコミュニティ pills */}
-              {selectedCommunities.length > 0 && (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-                  {selectedCommunities.map((c) => (
-                    <PressableScale
-                      key={c.id}
-                      onPress={() => removeSelectedCommunity(c.id)}
-                      haptic="warn"
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 6,
-                        paddingHorizontal: SP['3'],
-                        paddingVertical: 6,
-                        borderRadius: R.full,
-                        backgroundColor: C.accent + '20',
-                        borderWidth: 1,
-                        borderColor: C.accent,
-                      }}
-                    >
-                      <View
-                        style={{
-                          width: 18, height: 18, borderRadius: 9,
-                          backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
-                          alignItems: 'center', justifyContent: 'center',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        {c.icon_url ? (
-                          <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                        ) : (
-                          <Text style={{ fontSize: 11 }}>{c.icon_emoji}</Text>
-                        )}
-                      </View>
-                      <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]} numberOfLines={1}>
-                        {c.name}
-                      </Text>
-                      <X size={12} color={C.accentLight} strokeWidth={2.6} />
-                    </PressableScale>
-                  ))}
-                </View>
-              )}
-
-              {/* 検索 input */}
-              <Input
-                placeholder="参加中のコミュニティを検索"
-                value={communityQuery}
-                onChangeText={setCommunityQuery}
-                icon={Icon.search}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-
-              {/* 検索結果 */}
-              <View style={{
-                backgroundColor: C.bg2,
-                borderRadius: R.lg,
-                borderWidth: 1,
-                borderColor: C.border,
-                overflow: 'hidden',
-              }}>
-                {communityLoading && communityResults.length === 0 ? (
-                  <View style={{ padding: SP['4'], alignItems: 'center' }}>
-                    <Text style={[T.caption, { color: C.text3 }]}>検索中…</Text>
-                  </View>
-                ) : communityResults.length === 0 ? (
-                  <View style={{ padding: SP['4'], alignItems: 'center', gap: 6 }}>
-                    {myCommunities.length === 0 ? (
-                      <>
-                        <Text style={[T.body, { color: C.text2, textAlign: 'center' }]}>
-                          まだコミュニティに参加していません
-                        </Text>
-                        <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
-                          参加してから、そのコミュニティに投稿できます
-                        </Text>
-                      </>
-                    ) : (
-                      <Text style={[T.caption, { color: C.text3 }]}>
-                        「{communityQuery.trim()}」 と一致する参加中コミュニティがありません
-                      </Text>
-                    )}
-                  </View>
-                ) : (
-                  communityResults.map((c, idx) => {
-                    const isSelected = selectedCommunityIds.includes(c.id);
-                    return (
-                      <PressableScale
-                        key={c.id}
-                        onPress={() => toggleCommunity(c)}
-                        haptic="tap"
-                        scaleValue={0.99}
-                        style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          gap: SP['3'],
-                          paddingHorizontal: SP['3'],
-                          paddingVertical: SP['3'],
-                          backgroundColor: isSelected ? C.accent + '15' : 'transparent',
-                          borderTopWidth: idx === 0 ? 0 : 1,
-                          borderTopColor: C.divider,
-                        }}
-                      >
-                        <View
-                          style={{
-                            width: 36, height: 36, borderRadius: 18,
-                            backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
-                            alignItems: 'center', justifyContent: 'center',
-                            overflow: 'hidden',
-                          }}
-                        >
-                          {c.icon_url ? (
-                            <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                          ) : (
-                            <Text style={{ fontSize: 18 }}>{c.icon_emoji}</Text>
-                          )}
-                        </View>
-                        <View style={{ flex: 1, gap: 1 }}>
-                          <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
-                            {c.name}
-                          </Text>
-                          <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
-                            メンバー {c.member_count.toLocaleString('ja-JP')} 人
-                          </Text>
-                        </View>
-                        <View
-                          style={{
-                            width: 22, height: 22, borderRadius: 11,
-                            borderWidth: isSelected ? 0 : 1.5,
-                            borderColor: C.border2,
-                            backgroundColor: isSelected ? C.accent : 'transparent',
-                            alignItems: 'center', justifyContent: 'center',
-                          }}
-                        >
-                          {isSelected && <Icon.ok size={14} color="#fff" strokeWidth={2.8} />}
-                        </View>
-                      </PressableScale>
-                    );
-                  })
-                )}
-              </View>
-            </Animated.View>
+            <CommunityPicker
+              query={communityQuery}
+              onQueryChange={setCommunityQuery}
+              results={communityResults}
+              selected={selectedCommunities}
+              loading={communityLoading}
+              myCommunitiesEmpty={myCommunities.length === 0}
+              onToggle={toggleCommunity}
+              onRemove={removeSelectedCommunity}
+            />
           )}
 
           {/* ===== コンテンツ警告 (CW) — collapsible ===== */}
