@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchThreads, createThread } from '../lib/api/bbs';
+import { fetchThreads, createThread, fetchMyJoinedCommunityThreads } from '../lib/api/bbs';
 import { attachChannel } from '../lib/realtime';
+import { useAuthStore } from '../stores/authStore';
 
 export function useBBS() {
   const qc = useQueryClient();
@@ -55,5 +56,62 @@ export function useBBS() {
     refreshing: isRefetching,
     refresh: refetch,
     create,
+  };
+}
+
+// ============================================================
+// useMyCommunityBBS — 「コミュニティ」スコープ用
+// ============================================================
+// useBBS と同じ shape を返すが、自分が参加しているコミュニティの
+// bbs_threads だけを取得する。realtime も community_id IN フィルタが
+// PostgreSQL で書きづらい (in 句は postgres_changes filter で未サポート) ので
+// 全 bbs 変更を購読しつつ debounce で invalidate (= useBBS と同じ debounce)。
+//
+// hasJoinedCommunities フラグも追加返却 — empty state の出し分けに使う:
+//   - false → 「コミュニティに参加しよう」CTA を出す
+//   - true & threads=[] → 「まだスレがありません」案内
+// ============================================================
+export function useMyCommunityBBS() {
+  const qc = useQueryClient();
+  // user.id が変わったら自動で query key が変わって stale 化される
+  const userId = useAuthStore((s) => s.user?.id);
+
+  const { data, isLoading, isRefetching, refetch } = useQuery({
+    queryKey: ['bbs-threads', 'my-communities', userId ?? 'anon'],
+    queryFn: () => fetchMyJoinedCommunityThreads(80),
+    staleTime: 30_000,
+    enabled: !!userId,
+  });
+
+  // useBBS と同じ realtime: bbs_threads / bbs_replies 変更で debounce invalidate
+  // ('my-communities' クエリだけ無効化 — useBBS の 'bbs-threads' base key も
+  //  下位 key として hit するので両方再 fetch される)
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!userId) return;
+    const invalidate = (delay = 1500) => {
+      if (debounce.current) clearTimeout(debounce.current);
+      debounce.current = setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ['bbs-threads', 'my-communities', userId] });
+      }, delay);
+    };
+    const detach = attachChannel('bbs-threads-my-communities', (ch) =>
+      ch.on('postgres_changes', { event: '*', schema: 'public', table: 'bbs_threads' },
+        () => invalidate(1500))
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bbs_replies' },
+          () => invalidate(3000)),
+    );
+    return () => {
+      detach();
+      if (debounce.current) clearTimeout(debounce.current);
+    };
+  }, [qc, userId]);
+
+  return {
+    threads: data?.threads ?? [],
+    hasJoinedCommunities: data?.hasJoinedCommunities ?? false,
+    loading: isLoading,
+    refreshing: isRefetching,
+    refresh: refetch,
   };
 }

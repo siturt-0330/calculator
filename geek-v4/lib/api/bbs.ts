@@ -51,6 +51,54 @@ export async function fetchThreads(): Promise<BBSThread[]> {
   return (data ?? []).map((t: { title: string }) => ({ ...t, title: cleanTitle(t.title) })) as BBSThread[];
 }
 
+// 自分が参加している全コミュニティの BBS スレッドを横断取得
+// ============================================================
+// 用途: 掲示板タブの「コミュニティ」スコープ。
+// 流れ:
+//   1. community_members から自分の community_id 一覧を取得
+//   2. bbs_threads.community_id IN (myIds) で一括 fetch
+//   3. last_reply_at desc でソート (返信ゼロは created_at fallback)
+// 戻り値の hasJoinedCommunities は empty state の出し分けに使う:
+//   - false: 「コミュニティに参加しよう」CTA を出す
+//   - true (& threads.length === 0): 「まだスレッドがありません」案内
+export async function fetchMyJoinedCommunityThreads(
+  limit = 80,
+): Promise<{ threads: BBSThread[]; hasJoinedCommunities: boolean }> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { threads: [], hasJoinedCommunities: false };
+
+  // 1) 自分の所属 community_id
+  const { data: memberRows, error: memErr } = await supabase
+    .from('community_members')
+    .select('community_id')
+    .eq('user_id', user.id);
+  if (memErr) {
+    console.warn('[bbs] fetchMyJoinedCommunityThreads (members) failed:', memErr.message);
+    return { threads: [], hasJoinedCommunities: false };
+  }
+  const myCommunityIds = (memberRows ?? []).map((r) => r.community_id);
+  if (myCommunityIds.length === 0) {
+    return { threads: [], hasJoinedCommunities: false };
+  }
+
+  // 2) その community_id に属するスレッド (visibility 制御は RLS)
+  const { data: threadRows, error: threadErr } = await supabase
+    .from('bbs_threads')
+    .select(BBS_THREAD_SELECT_COLS)
+    .in('community_id', myCommunityIds)
+    .order('last_reply_at', { ascending: false, nullsFirst: false })
+    .limit(limit);
+  if (threadErr) {
+    console.warn('[bbs] fetchMyJoinedCommunityThreads (threads) failed:', threadErr.message);
+    return { threads: [], hasJoinedCommunities: true };
+  }
+  const threads = (threadRows ?? []).map((t: { title: string }) => ({
+    ...t,
+    title: cleanTitle(t.title),
+  })) as BBSThread[];
+  return { threads, hasJoinedCommunities: true };
+}
+
 // 特定コミュニティの BBS スレッド一覧 (community 詳細の BBS タブ用)
 // visibility 問わず全件返す — RLS 側で member/非 member 制御
 export async function fetchCommunityThreads(
