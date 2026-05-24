@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { fetchTrendingTags } from '../../lib/api/trending';
 import { attachChannel } from '../../lib/realtime';
+import { useTagCooccurStore } from '../../stores/tagCooccurStore';
 import { PressableScale } from '../ui/PressableScale';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -13,9 +14,20 @@ function TrendingRowInner() {
   const router = useRouter();
   const qc = useQueryClient();
 
+  // Phase 3: cluster diversity を有効にするため cooccur を取得 (hydrate 済みなら)
+  // cooccur が無くても fetch 自体は動く (diversify はスキップ)
+  const cooccur = useTagCooccurStore((s) => s.cooccur);
+  const cooccurHydrated = useTagCooccurStore((s) => s.hydrated);
+  const cooccurHasData = cooccurHydrated && Object.keys(cooccur).length > 0;
+  const cooccurKey = cooccurHasData ? 'div' : 'plain';
+
   const { data: trending = [] } = useQuery({
-    queryKey: ['trending-tags'],
-    queryFn: () => fetchTrendingTags(10),
+    queryKey: ['trending-tags', cooccurKey],
+    queryFn: () => fetchTrendingTags({
+      limit: 10,
+      // diversify は cooccur が hydrate されている場合のみ — 1 cluster 1 代表
+      ...(cooccurHasData ? { diversify: true, cooccur } : {}),
+    }),
     staleTime: 5 * 60 * 1000,  // 5分
     refetchOnMount: false,
   });
