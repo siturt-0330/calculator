@@ -26,6 +26,7 @@ import { useOfflineQueueProcessor } from '../hooks/useOfflineQueueProcessor';
 import { initAnalytics } from '../lib/analytics';
 import { initSentry, setSentryUser, clearSentryUser } from '../lib/sentry';
 import { initWebVitals } from '../lib/webVitals';
+import { useAdminShortcut } from '../hooks/useAdminShortcut';
 import { C } from '../design/tokens';
 import { AppState } from 'react-native';
 import { supabase } from '../lib/supabase';
@@ -103,6 +104,10 @@ export default function RootLayout() {
   const introReplaying = useIntroStore((s) => s.playing);
   const finishIntroReplay = useIntroStore((s) => s.finish);
   const playIntro = useIntroStore((s) => s.play);
+
+  // Web のみ: Cmd/Ctrl + Shift + A で /admin へ飛ぶ (admin user 限定の隠し dev shortcut)
+  // 一般ユーザーには 100% 無関係 (key combo が条件を満たさない / email チェックで弾く)
+  useAdminShortcut();
 
   // Web のみ: "I" キー押下でイントロ再生 (ログイン前でも何度でも見られるショートカット)
   useEffect(() => {
