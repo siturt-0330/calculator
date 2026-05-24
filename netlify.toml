@@ -31,6 +31,23 @@
   EXPO_NO_TELEMETRY    = "1"
   CI                   = "1"
 
+  # ============================================================
+  # EXPO_PUBLIC_* — クライアント bundle に inline される public 値。
+  # ------------------------------------------------------------
+  # 設計意図: dashboard 設定の drift / 削除 / context scope ミスで
+  # 「build は通るが env が無くて画面が真っ白」事故 (2026-05-24) を防ぐため、
+  # 本物の public-safe な値は repo に直接固定する。
+  # ------------------------------------------------------------
+  # - SUPABASE_URL / ANON_KEY: 設計上クライアントから晒される前提。
+  #   RLS で保護されているので leak しても DB は守られる。
+  # - VAPID_PUBLIC_KEY: WebPush の公開鍵 (private key は Edge Function 側に分離)。
+  # - SENTRY_DSN / POSTHOG_KEY: 必要になったらここに追加。
+  # ============================================================
+  EXPO_PUBLIC_SUPABASE_URL      = "https://migpiwdlpwpvehzvdjyh.supabase.co"
+  EXPO_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_qUe9WLya6BdSnBWjHQGMWw_hgp7FP67"
+  EXPO_PUBLIC_VAPID_PUBLIC_KEY  = "BI5KOhcP8w0KPoaRf0DBskimUBLdJoQwBkOiDEV3_Szlh-VvdOGLLWgyTR2VQBedF5LpzunyaYakHdrmwftN4n8"
+  EXPO_PUBLIC_POSTHOG_HOST      = "https://app.posthog.com"
+
 # ============================================================
 # SPA fallback — every unknown URL serves index.html
 # Expo Router handles client-side routing from there.
