@@ -129,30 +129,35 @@ export function useReactionToggle() {
       };
 
       // 1) legacy reactions cache (旧 useReactions 経路)
-      qc.setQueriesData<ReactionsByPost | undefined>(
-        { queryKey: [KEY_PREFIX] },
-        (old) => {
-          if (!old) return old;
-          if (!(postId in old)) return old;
-          return { ...old, [postId]: applyToggle(old[postId] ?? [], meme) };
-        },
-      );
+      //    react-query v5 の partial-match setQueriesData が散発的に伝播しない
+      //    事故を回避するため、明示的に exact key で書き戻す。
+      const legacyEntries = qc.getQueriesData<ReactionsByPost | undefined>({
+        queryKey: [KEY_PREFIX],
+      });
+      for (const [exactKey, old] of legacyEntries) {
+        if (!old || !(postId in old)) continue;
+        const next: ReactionsByPost = { ...old, [postId]: applyToggle(old[postId] ?? [], meme) };
+        qc.setQueryData(exactKey, next);
+      }
+
       // 2) ★ 重要: feed-page RPC cache (本番 feed の主要表示元)
-      //    旧版はここを更新してなかったため、chip 押下 → 数百 ms server 完了まで
-      //    count / mine flag が変わらず「反応してない」体感バグの主因だった。
-      qc.setQueriesData<WithReactions[] | undefined>(
-        { queryKey: [FEED_PAGE_KEY] },
-        (rows) => {
-          if (!rows) return rows;
-          let touched = false;
-          const next = rows.map((p) => {
-            if (p.id !== postId) return p;
-            touched = true;
-            return { ...p, reactions: applyToggle(p.reactions ?? [], meme) };
-          });
-          return touched ? next : rows;
-        },
-      );
+      //    旧版は setQueriesData(prefix) で更新していたが、v5 で partial-match が
+      //    伝播せずスタンプ count が UI に反映されない bug が頻発したため、
+      //    getQueriesData で exact key を列挙 → setQueryData で 1 つずつ書き戻す
+      //    方式に切替。確実に該当 cache が更新される。
+      const feedPageEntries = qc.getQueriesData<WithReactions[] | undefined>({
+        queryKey: [FEED_PAGE_KEY],
+      });
+      for (const [exactKey, rows] of feedPageEntries) {
+        if (!Array.isArray(rows)) continue;
+        let touched = false;
+        const next = rows.map((p) => {
+          if (p.id !== postId) return p;
+          touched = true;
+          return { ...p, reactions: applyToggle(p.reactions ?? [], meme) };
+        });
+        if (touched) qc.setQueryData(exactKey, next);
+      }
 
       return { snapshot };
     },
@@ -172,8 +177,9 @@ export function useReactionToggle() {
     },
     onSettled: () => {
       // realtime invalidate との二重反映を server-truth で整合 (両 cache とも)
-      qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
-      qc.invalidateQueries({ queryKey: [FEED_PAGE_KEY] });
+      // refetchType: 'active' を明示 — staleTime>0 の query でも mount 中なら確実 refetch
+      qc.invalidateQueries({ queryKey: [KEY_PREFIX], refetchType: 'active' });
+      qc.invalidateQueries({ queryKey: [FEED_PAGE_KEY], refetchType: 'active' });
     },
   });
 
