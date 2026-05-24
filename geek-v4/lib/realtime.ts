@@ -13,6 +13,10 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 // ============================================================
 
 type ChannelBuilder = (channel: RealtimeChannel) => RealtimeChannel;
+// subscribe status の通知コールバック (SUBSCRIBED / CHANNEL_ERROR / TIMED_OUT / CLOSED)
+// 失敗した channel を観測できると "realtime 来てない" の debug が桁違いに楽になる。
+export type RealtimeStatus = 'SUBSCRIBED' | 'CHANNEL_ERROR' | 'TIMED_OUT' | 'CLOSED';
+export type StatusCallback = (status: RealtimeStatus, err?: Error) => void;
 
 type Entry = {
   channel: RealtimeChannel;
@@ -27,7 +31,14 @@ const MAX_CONCURRENT_CHANNELS = 20;
 
 // 指定 name の channel に対し subscribe (初回のみ) + refCount を増やす。
 // 戻り値の関数を呼ぶと refCount を減らし、ゼロになったら channel を破棄する。
-export function attachChannel(name: string, build: ChannelBuilder): () => void {
+//
+// onStatus を渡すと subscribe ライフサイクル (成功/失敗/timeout/close) を観測できる。
+// 同 name の 2 回目以降の attach では onStatus は呼ばれない (既存 channel を共有)。
+export function attachChannel(
+  name: string,
+  build: ChannelBuilder,
+  onStatus?: StatusCallback,
+): () => void {
   const existing = channels.get(name);
   if (existing) {
     existing.refCount++;
@@ -40,7 +51,13 @@ export function attachChannel(name: string, build: ChannelBuilder): () => void {
   }
   // 新規 channel を作成 → builder で .on(...) を全部チェーン → subscribe
   const ch = build(supabase.channel(name));
-  ch.subscribe();
+  if (onStatus) {
+    ch.subscribe((status, err) => {
+      onStatus(status as RealtimeStatus, err);
+    });
+  } else {
+    ch.subscribe();
+  }
   channels.set(name, { channel: ch, refCount: 1 });
   return () => detachChannel(name);
 }
