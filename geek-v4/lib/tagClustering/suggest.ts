@@ -164,9 +164,12 @@ export function suggestClusters(input: SuggestInput): SuggestedCluster[] {
       if (members.length >= maxClusterSize) break;
       if (used.has(n)) continue;
       const edgeScore = adj.get(h.tag)?.get(n) ?? 0;
-      sumCooccur += Math.max(0, edgeScore - 3); // variant bonus を抜いた素 cooccur
+      const isVariant = variantsFor(h.tag).has(n) || variantsFor(n).has(h.tag);
+      // variant 関係なら +3 のボーナスが含まれているので差し引いて素の cooccur を得る
+      const rawCooccur = isVariant ? edgeScore - 3 : edgeScore;
+      sumCooccur += Math.max(0, rawCooccur);
       cooccurPairs++;
-      if (variantsFor(h.tag).has(n) || variantsFor(n).has(h.tag)) variantPairs++;
+      if (isVariant) variantPairs++;
       members.push(n);
       used.add(n);
     }

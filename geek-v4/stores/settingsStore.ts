@@ -45,6 +45,7 @@ type Settings = {
   reduceMotion: boolean;
   dataSaver: boolean;
   concernsPrivate: boolean;
+  autoApplyTagClusters: boolean;  // 高信頼タグクラスタを自動グループ化
 };
 
 const DEFAULTS: Settings = {
@@ -63,6 +64,7 @@ const DEFAULTS: Settings = {
   reduceMotion: false,
   dataSaver: false,
   concernsPrivate: true,
+  autoApplyTagClusters: false,  // opt-in (ユーザーが明示 ON にしないと自動 accept しない)
 };
 
 // 旧 AsyncStorage キー (JSON BLOB) — migrate 時に読む
@@ -120,6 +122,7 @@ function sanitizeSettings(raw: unknown): Settings {
     reduceMotion: pickBool('reduceMotion'),
     dataSaver: pickBool('dataSaver'),
     concernsPrivate: pickBool('concernsPrivate'),
+    autoApplyTagClusters: pickBool('autoApplyTagClusters'),
   };
 }
 
@@ -166,6 +169,7 @@ function loadSettingsSync(): Settings {
     reduceMotion: pickBool('reduceMotion'),
     dataSaver: pickBool('dataSaver'),
     concernsPrivate: pickBool('concernsPrivate'),
+    autoApplyTagClusters: pickBool('autoApplyTagClusters'),
   };
 }
 
