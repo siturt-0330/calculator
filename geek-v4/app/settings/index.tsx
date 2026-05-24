@@ -39,6 +39,8 @@ export default function SettingsScreen() {
         <ListItem icon={Icon.award} label="プラン" onPress={() => router.push('/settings/plan' as never)} />
 
         <SectionHeader title="カスタマイズ" />
+        <ListItem icon={Icon.globe} label="言語" onPress={() => router.push('/settings/language' as never)} />
+        <Divider />
         <ListItem icon={Icon.bell} label="通知設定" onPress={() => router.push('/settings/notifications' as never)} />
         <Divider />
         <ListItem icon={Icon.sparkles} label="おすすめ・自動化" onPress={() => router.push('/settings/recommendations' as never)} />
