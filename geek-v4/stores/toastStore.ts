@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { translateStatic } from '../lib/i18n';
 
 export type ToastVariant = 'info' | 'success' | 'error' | 'warn';
 
@@ -40,9 +41,13 @@ export function computeDuration(message: string, variant: ToastVariant, override
 export const useToastStore = create<ToastState>((set) => ({
   toasts: [],
   show: (message, variant = 'info', opts) => {
+    // ★ 言語連動: ja 以外を選んでいる場合、message を辞書翻訳。
+    //   辞書に無い文字列はそのまま (Japanese ベタ書きが残るが致命的でない)。
+    //   非 ja ユーザーが Auth flow 等で日本語エラーを見る現象を低減。
+    const localized = translateStatic(message);
     const id = Math.random().toString(36).slice(2);
-    set((s) => ({ toasts: [...s.toasts, { id, message, variant, undoLabel: opts?.undoLabel, onUndo: opts?.onUndo }] }));
-    const ms = computeDuration(message, variant, opts?.duration);
+    set((s) => ({ toasts: [...s.toasts, { id, message: localized, variant, undoLabel: opts?.undoLabel, onUndo: opts?.onUndo }] }));
+    const ms = computeDuration(localized, variant, opts?.duration);
     setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), ms);
   },
   dismiss: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
