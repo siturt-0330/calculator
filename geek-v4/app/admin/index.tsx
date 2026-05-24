@@ -435,7 +435,7 @@ function computeHealth(stats: { totalUsers: number; suspendedUsers: number; open
   level: HealthLevel; emoji: string; label: string; color: string; bg: string; border: string; description: string;
 } {
   if (!stats) {
-    return { level: 'healthy', emoji: '🟢', label: 'Loading', color: C.text3, bg: C.bg2, border: C.border, description: 'データ取得中…' };
+    return { level: 'healthy', emoji: '🟢', label: '読み込み中', color: C.text3, bg: C.bg2, border: C.border, description: 'データ取得中…' };
   }
   const ratio = stats.totalUsers > 0 ? stats.suspendedUsers / stats.totalUsers : 0;
   if (stats.openReports >= 10 || ratio >= 0.1) {
@@ -453,7 +453,7 @@ function computeHealth(stats: { totalUsers: number; suspendedUsers: number; open
     };
   }
   return {
-    level: 'healthy', emoji: '🟢', label: 'Healthy', color: C.green, bg: C.greenBg, border: C.green + '66',
+    level: 'healthy', emoji: '🟢', label: '正常', color: C.green, bg: C.greenBg, border: C.green + '66',
     description: '通報・凍結ともに落ち着いています',
   };
 }
