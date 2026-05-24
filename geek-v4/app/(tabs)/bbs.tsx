@@ -4,7 +4,7 @@ import { FlashList, type ListRenderItem } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
-import { useBBS } from '../../hooks/useBBS';
+import { useBBS, useMyCommunityBBS } from '../../hooks/useBBS';
 import type { BBSThread } from '../../types/models';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -26,6 +26,8 @@ import { logEvent } from '../../lib/personalize';
 import { supabase } from '../../lib/supabase';
 
 type SortMode = 'recent' | 'popular' | 'relevance';
+// 掲示板タブのスコープ — LINE のトーク/友だち と同じ感覚で 2 択切替
+type Scope = 'community' | 'all';
 
 const CATEGORIES = ['すべて', '雑談', 'アニメ', 'ゲーム', 'マンガ', '音楽', 'アイドル', 'Vtuber', '推し活', 'グルメ', 'コスプレ', 'ニュース'];
 
@@ -40,7 +42,26 @@ export default function BBSScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const { threads, loading, refreshing, refresh } = useBBS();
+  // 「すべて」スコープ用 — 全 public スレッド
+  const allBbs = useBBS();
+  // 「コミュニティ」スコープ用 — 自分の参加コミュ横断
+  const myBbs = useMyCommunityBBS();
+
+  // scope: ユーザーが明示的に切り替えるまでは「動的 default」=
+  //   参加コミュあり → 'community' / なし → 'all'
+  // 切替後は scopeRaw に固定される (ユーザーの意思を尊重)
+  const [scopeRaw, setScopeRaw] = useState<Scope | null>(null);
+  // myBbs の loading が終わるまでは表示しない (initial flash 防止)
+  const effectiveScope: Scope =
+    scopeRaw ?? (myBbs.loading ? 'community' : myBbs.hasJoinedCommunities ? 'community' : 'all');
+
+  const setScope = (s: Scope) => setScopeRaw(s);
+  const scopedSource = effectiveScope === 'community' ? myBbs : allBbs;
+  const threads = scopedSource.threads;
+  const loading = scopedSource.loading;
+  const refreshing = scopedSource.refreshing;
+  const refresh = scopedSource.refresh;
+
   // 既存 file 内に local 変数 `t` (setTimeout / loop param) があるので tr に rename
   const tr = useT();
 
@@ -197,10 +218,40 @@ export default function BBSScreen() {
       {/* ヘッダー (中央寄せ) */}
       <View style={{ alignItems: 'center', backgroundColor: C.bg, paddingTop: insets.top }}>
         <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'] }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: SP['3'], paddingBottom: SP['2'] }}>
-            <Text style={{ fontFamily: FONT.display, fontSize: 28, color: C.text, letterSpacing: -0.5, flex: 1 }}>
-              {tr('bbs.title')}
-            </Text>
+          {/* LINE のトーク/友だち と同じ感覚の scope トグル
+              アクティブ側だけ filled pill (C.text 背景に C.bg テキスト)、
+              非アクティブは plain text。タップで切替。アイコン無し、シンプル。 */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: SP['3'], paddingBottom: SP['2'], gap: SP['1'] }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'], flex: 1 }}>
+              {([
+                { v: 'community' as const, label: 'コミュニティ' },
+                { v: 'all'       as const, label: 'すべて' },
+              ]).map((m) => {
+                const active = effectiveScope === m.v;
+                return (
+                  <PressableScale
+                    key={m.v}
+                    onPress={() => setScope(m.v)}
+                    haptic="select"
+                    hitSlop={6}
+                    accessibilityLabel={`${m.label}${active ? ' (選択中)' : ''}`}
+                    style={{
+                      paddingHorizontal: SP['3'], paddingVertical: 7,
+                      backgroundColor: active ? C.text : 'transparent',
+                      borderRadius: R.full,
+                    }}
+                  >
+                    <Text style={{
+                      fontFamily: FONT.display, fontSize: 18, letterSpacing: -0.3,
+                      color: active ? C.bg : C.text2,
+                      fontWeight: active ? '800' : '600',
+                    }}>
+                      {m.label}
+                    </Text>
+                  </PressableScale>
+                );
+              })}
+            </View>
             <PressableScale
               onPress={() => router.push('/bbs/create' as never)}
               haptic="confirm"
@@ -532,6 +583,29 @@ export default function BBSScreen() {
                     </Text>
                   </PressableScale>
                 </View>
+              ) : effectiveScope === 'community' && !myBbs.hasJoinedCommunities ? (
+                // コミュニティスコープで参加コミュ 0 件 → コミュニティ参加への導線
+                <>
+                  <View style={{
+                    marginBottom: SP['4'],
+                    padding: SP['4'], backgroundColor: C.accentBg,
+                    borderRadius: R.lg, borderWidth: 1, borderColor: C.accentSoft,
+                    gap: SP['1'],
+                  }}>
+                    <Text style={[T.smallM, { color: C.accentLight }]}>💬 コミュニティ掲示板</Text>
+                    <Text style={[T.small, { color: C.text2 }]}>
+                      コミュニティに参加すると、そのコミュニティの掲示板がここに集まります。
+                    </Text>
+                  </View>
+                  <EmptyState
+                    icon={Icon.community}
+                    title="まずコミュニティに参加しよう"
+                    message="興味のあるコミュニティを探して、議論に参加してみよう"
+                    actionLabel="コミュニティを探す"
+                    onAction={() => router.push('/(tabs)/community/discover' as never)}
+                    tone="accent"
+                  />
+                </>
               ) : (
                 <>
                   <View style={{
@@ -547,8 +621,8 @@ export default function BBSScreen() {
                   </View>
                   <EmptyState
                     icon={Icon.bbs}
-                    title="まだスレッドがありません"
-                    message="最初のスレッドを立ててみよう"
+                    title={effectiveScope === 'community' ? '参加コミュにまだスレッドがありません' : 'まだスレッドがありません'}
+                    message={effectiveScope === 'community' ? '最初の 1 本を立てて議論を始めよう' : '最初のスレッドを立ててみよう'}
                     actionLabel="スレ立てする"
                     onAction={() => router.push('/bbs/create' as never)}
                     tone="accent"
