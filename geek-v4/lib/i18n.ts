@@ -73,20 +73,53 @@ export function translate(jaText: string, lang: Lang): string {
 
 const cache = new Map<string, string>();
 
+// ============================================================
+// 固有名詞 (ブランド) の保護
+// ------------------------------------------------------------
+// MyMemory に "Geek" を渡すと "オタク" / "긱" / "极客" 等の一般名詞に
+// 翻訳されてしまう。Geek はアプリのブランド名なので必ず "Geek" のまま残したい。
+//
+// 戦略: 翻訳 API に渡す前に Geek → 翻訳されにくい placeholder に置換し、
+// 戻り値で復元する。placeholder は:
+//   - underscore で囲んだ uppercase token (MyMemory はトークン化 + 個別翻訳しないことが多い)
+//   - 日本語/英語/中韓辞書に存在しない文字列
+//   - 必ず ASCII でエンコード安全
+//
+// マッチは `\bGeek\b` (大文字始まりの正確な単語) のみ:
+//   - "geek" 小文字 → 一般名詞として翻訳して OK
+//   - "GEEK" 全大文字 → 別物として一旦保留 (将来必要なら追加)
+//   - 全角 "Ｇｅｅｋ" → 一旦保留 (テキスト入力で正規化されている前提)
+// JS の \b は Japanese char (\W) と Latin char (\w) の境目でもマッチするので
+// 「これはGeekだ」「Geekアプリ」のような日本語混在文も正しく拾える。
+// ============================================================
+const BRAND_PLACEHOLDER = '__GEEKBRAND__';
+
+export function protectBrandNames(text: string): string {
+  return text.replace(/\bGeek\b/g, BRAND_PLACEHOLDER);
+}
+
+export function restoreBrandNames(text: string): string {
+  // case-insensitive で復元 — API が token を lowercase 化する事故にも耐性
+  return text.replace(/__GEEKBRAND__/gi, 'Geek');
+}
+
 export async function translateDynamic(text: string, targetLang: Lang): Promise<string> {
   if (!text || targetLang === 'ja') return text;
   const cacheKey = `${targetLang}:${text}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
+  const protectedSrc = protectBrandNames(text);
+
   try {
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=ja|${targetLang}`;
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(protectedSrc)}&langpair=ja|${targetLang}`;
     const res = await fetch(url);
     if (!res.ok) return text;
     const data = await res.json() as { responseData?: { translatedText?: string } };
-    const translated = data?.responseData?.translatedText ?? text;
-    cache.set(cacheKey, translated);
-    return translated;
+    const translated = data?.responseData?.translatedText ?? protectedSrc;
+    const final = restoreBrandNames(translated);
+    cache.set(cacheKey, final);
+    return final;
   } catch {
     return text;
   }
