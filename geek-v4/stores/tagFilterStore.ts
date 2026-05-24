@@ -8,6 +8,12 @@ import {
   remove as storageRemove,
   contains as storageContains,
 } from '../lib/storage';
+// gossip blocklist は lib/gossipBlocklist.ts に切り出し済み (pure data, no deps)
+// store 経由で参照しているコードのために re-export を維持
+import {
+  GOSSIP_TRENDING_BLOCKLIST as _GOSSIP_TRENDING_BLOCKLIST,
+  GOSSIP_TRENDING_BLOCKLIST_SET as _GOSSIP_TRENDING_BLOCKLIST_SET,
+} from '../lib/gossipBlocklist';
 
 const KEY_LIKED = 'geek:liked_tags';
 const KEY_BLOCKED = 'geek:blocked_tags';
@@ -19,26 +25,9 @@ const KEY_BLOCKED_INIT_V3 = 'geek:blocked_tags_init_v3';
 // 旧 AsyncStorage キーから MMKV へ migrate 済みかの sentinel (native のみ)
 const KEY_LEGACY_MIGRATED = 'geek:tag_filter:_migrated_v1';
 
-// 「人が不幸になる」「トラブル」「スキャンダル」系のタグ — トレンド/フィードから
-// 強制除外する用途で使う。DEFAULT_BLOCKED_TAGS とマージしてユーザーの初回 hydrate
-// 時にもブロックリストへ入る。
-// このカテゴリは trending では**ユーザー設定に関わらず**絶対に出さない (= 検閲ではなく
-// 「健全な趣味 SNS」というプロダクト価値の表明)。
-export const GOSSIP_TRENDING_BLOCKLIST = [
-  // 不倫・スキャンダル系
-  '浮気', '不倫', '熱愛', '熱愛報道', 'スクープ', '報道', 'ゴシップ', 'ゴシップ記事',
-  '暴露', '暴露話', '流出', 'リーク', 'リーク情報', '文春', '文春砲', '週刊文春',
-  '週刊誌', 'フライデー', '新潮', '芸能ニュース', 'スキャンダル',
-  '略奪愛', '二股', '三股', '不貞', '離婚', '別居', '修羅場', '不仲', '破局',
-  // 事件・事故・犯罪報道
-  '事件', '事故', '訴訟', '裁判', '逮捕', '書類送検', '容疑', '容疑者',
-  '殺人', '殺害', '殺人事件', '強盗事件', '暴行', '暴行事件', '誘拐',
-  '不祥事', '謝罪会見', '辞任', '解雇', '解任', '降格',
-  // 死亡・訃報
-  '死亡', '訃報', '死去', '急逝', '逝去', '自殺報道', '事故死', '突然死',
-  // 炎上・批判
-  '炎上', '炎上中', '大炎上', '叩き', '炎上商法', '物議', '批判殺到',
-];
+// 後方互換のための re-export — 実体は lib/gossipBlocklist.ts
+// (trending logic から RN 依存無しで参照できるよう、データは別 file に切り出し済み)
+export const GOSSIP_TRENDING_BLOCKLIST = _GOSSIP_TRENDING_BLOCKLIST;
 
 // 初回のみ自動で適用されるデフォルトのブロックタグ
 // 削除可能 (ユーザーは自由に解除できる)
@@ -78,7 +67,7 @@ export const DEFAULT_BLOCKED_TAGS = [
 ];
 
 // Set 化したもの — fetchTrending 等でホットパスで毎回構築しなくて済むようエクスポート
-export const GOSSIP_TRENDING_BLOCKLIST_SET = new Set(GOSSIP_TRENDING_BLOCKLIST);
+export const GOSSIP_TRENDING_BLOCKLIST_SET = _GOSSIP_TRENDING_BLOCKLIST_SET;
 
 type TagFilterState = {
   likedTags: string[];
