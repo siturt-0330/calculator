@@ -25,7 +25,7 @@ import { useT } from '../../hooks/useT';
 import { logEvent } from '../../lib/personalize';
 import { supabase } from '../../lib/supabase';
 
-type SortMode = 'recent' | 'popular' | 'relevance';
+type SortMode = 'recent' | 'popular';
 // 掲示板タブのスコープ — LINE のトーク/友だち と同じ感覚で 2 択切替
 type Scope = 'community' | 'all';
 
@@ -183,15 +183,17 @@ export default function BBSScreen() {
       if (ctrBoost > 0) score += Math.min(100, ctrBoost * 15);
       return { item: t, score };
     });
-    if (sort === 'recent') {
+    // sort は recent / popular の 2 択
+    // (旧「関連度」はユーザーフィードバックで撤去 — score 計算は検索ヒット
+    //  時の絞り込みに使われているので score 自体は残してある)
+    if (sort === 'popular') {
+      scored.sort((a, b) => b.item.replies_count - a.item.replies_count);
+    } else {
+      // default: recent — 最終返信時刻が新しい順 (返信ゼロは作成時刻に fallback)
       scored.sort((a, b) =>
         new Date(b.item.last_reply_at ?? b.item.created_at).getTime() -
         new Date(a.item.last_reply_at ?? a.item.created_at).getTime(),
       );
-    } else if (sort === 'popular') {
-      scored.sort((a, b) => b.item.replies_count - a.item.replies_count);
-    } else {
-      scored.sort((a, b) => b.score - a.score);
     }
     return scored;
   }, [threadDocs, debounced, variants, normalizedVariants, normalizedExcludes, category, sort, ctrBoosts]);
@@ -355,9 +357,8 @@ export default function BBSScreen() {
               flexDirection: 'row', gap: 6, alignItems: 'center',
             }}>
               {([
-                { v: 'recent',    label: '新着',    emoji: '🕐' },
-                { v: 'popular',   label: '人気',    emoji: '🔥' },
-                { v: 'relevance', label: '関連度', emoji: '🎯' },
+                { v: 'recent',  label: '新着', emoji: '🕐' },
+                { v: 'popular', label: '人気', emoji: '🔥' },
               ] as const).map((s) => {
                 const active = sort === s.v;
                 return (
