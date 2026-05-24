@@ -307,79 +307,86 @@ export default function BBSScreen() {
           </View>
         </View>
 
-        {/* カテゴリ (横スクロール) */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          // keyboard が出てる時にカテゴリをタップしてもまず select し、必要なら閉じる。
-          // ('handled': 子の onPress が処理した時のみ keyboard を閉じる)
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{
-            gap: 6, paddingHorizontal: SP['4'], paddingBottom: SP['2'],
-          }}
-          style={{ width: '100%' }}>
-          {CATEGORIES.map((cat) => {
-            const active = category === cat;
-            const color = cat === 'すべて' ? C.accent : (CATEGORY_COLORS[cat] ?? C.accent);
-            return (
-              <PressableScale
-                key={cat}
-                onPress={() => setCategory(cat)}
-                haptic="select"
-                hitSlop={6}
-                accessibilityLabel={`カテゴリ ${cat}${active ? ' (選択中)' : ''}`}
-                style={{
-                  paddingHorizontal: SP['3'], paddingVertical: 6,
-                  backgroundColor: active ? color : C.bg2,
-                  borderRadius: R.full,
-                  borderWidth: 1, borderColor: active ? color : C.border,
-                }}
-              >
-                <Text style={[T.caption, { color: active ? '#fff' : C.text2, fontWeight: '700' }]}>
-                  {cat}
-                </Text>
-              </PressableScale>
-            );
-          })}
-        </ScrollView>
+        {/* カテゴリチップ + ソート行はコミュニティタブでは出さない
+            ユーザーリクエスト: 「コミュニティの方ではなくしてほしい」
+            状態 (category / sort) は保持するので、すべてに戻ったら復活する。 */}
+        {effectiveScope === 'all' && (
+          <>
+            {/* カテゴリ (横スクロール) */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              // keyboard が出てる時にカテゴリをタップしてもまず select し、必要なら閉じる。
+              // ('handled': 子の onPress が処理した時のみ keyboard を閉じる)
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{
+                gap: 6, paddingHorizontal: SP['4'], paddingBottom: SP['2'],
+              }}
+              style={{ width: '100%' }}>
+              {CATEGORIES.map((cat) => {
+                const active = category === cat;
+                const color = cat === 'すべて' ? C.accent : (CATEGORY_COLORS[cat] ?? C.accent);
+                return (
+                  <PressableScale
+                    key={cat}
+                    onPress={() => setCategory(cat)}
+                    haptic="select"
+                    hitSlop={6}
+                    accessibilityLabel={`カテゴリ ${cat}${active ? ' (選択中)' : ''}`}
+                    style={{
+                      paddingHorizontal: SP['3'], paddingVertical: 6,
+                      backgroundColor: active ? color : C.bg2,
+                      borderRadius: R.full,
+                      borderWidth: 1, borderColor: active ? color : C.border,
+                    }}
+                  >
+                    <Text style={[T.caption, { color: active ? '#fff' : C.text2, fontWeight: '700' }]}>
+                      {cat}
+                    </Text>
+                  </PressableScale>
+                );
+              })}
+            </ScrollView>
 
-        {/* ソート + 件数 */}
-        <View style={{
-          width: '100%', maxWidth: containerMaxWidth,
-          paddingHorizontal: SP['4'], paddingBottom: SP['3'],
-          flexDirection: 'row', gap: 6, alignItems: 'center',
-        }}>
-          {([
-            { v: 'recent',    label: '新着',    emoji: '🕐' },
-            { v: 'popular',   label: '人気',    emoji: '🔥' },
-            { v: 'relevance', label: '関連度', emoji: '🎯' },
-          ] as const).map((s) => {
-            const active = sort === s.v;
-            return (
-              <PressableScale
-                key={s.v}
-                onPress={() => setSort(s.v)}
-                haptic="tap"
-                hitSlop={10}
-                accessibilityLabel={`並び替え ${s.label}${active ? ' (選択中)' : ''}`}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 3,
-                  paddingHorizontal: 8, paddingVertical: 4,
-                  backgroundColor: active ? C.accentBg : 'transparent',
-                  borderRadius: R.full,
-                  borderWidth: 1, borderColor: active ? C.accent : C.border,
-                }}
-              >
-                <Text style={{ fontSize: 10 }}>{s.emoji}</Text>
-                <Text style={[T.caption, { color: active ? C.accentLight : C.text2, fontWeight: '600' }]}>
-                  {s.label}
-                </Text>
-              </PressableScale>
-            );
-          })}
-          <View style={{ flex: 1 }} />
-          <Text style={[T.caption, { color: C.text3 }]}>{filtered.length.toLocaleString('ja-JP')}件</Text>
-        </View>
+            {/* ソート + 件数 */}
+            <View style={{
+              width: '100%', maxWidth: containerMaxWidth,
+              paddingHorizontal: SP['4'], paddingBottom: SP['3'],
+              flexDirection: 'row', gap: 6, alignItems: 'center',
+            }}>
+              {([
+                { v: 'recent',    label: '新着',    emoji: '🕐' },
+                { v: 'popular',   label: '人気',    emoji: '🔥' },
+                { v: 'relevance', label: '関連度', emoji: '🎯' },
+              ] as const).map((s) => {
+                const active = sort === s.v;
+                return (
+                  <PressableScale
+                    key={s.v}
+                    onPress={() => setSort(s.v)}
+                    haptic="tap"
+                    hitSlop={10}
+                    accessibilityLabel={`並び替え ${s.label}${active ? ' (選択中)' : ''}`}
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 3,
+                      paddingHorizontal: 8, paddingVertical: 4,
+                      backgroundColor: active ? C.accentBg : 'transparent',
+                      borderRadius: R.full,
+                      borderWidth: 1, borderColor: active ? C.accent : C.border,
+                    }}
+                  >
+                    <Text style={{ fontSize: 10 }}>{s.emoji}</Text>
+                    <Text style={[T.caption, { color: active ? C.accentLight : C.text2, fontWeight: '600' }]}>
+                      {s.label}
+                    </Text>
+                  </PressableScale>
+                );
+              })}
+              <View style={{ flex: 1 }} />
+              <Text style={[T.caption, { color: C.text3 }]}>{filtered.length.toLocaleString('ja-JP')}件</Text>
+            </View>
+          </>
+        )}
       </View>
 
       {/* ヘッダー / リスト境界の hairline — 他タブ画面 (community, mypage) と統一 */}
