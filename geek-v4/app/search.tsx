@@ -35,6 +35,7 @@ import { useTagSearchV3 } from '../hooks/useTagSearchV3';
 import { useSearchClickStore } from '../stores/searchClickStore';
 import { generateRelatedQueries } from '../lib/search/relatedSearches';
 import { expandWithTagGraph } from '../lib/utils/searchAlgo';
+import { expandWithCooccur } from '../lib/tagClustering/relations';
 import { ReasonBadges } from '../components/search/ReasonBadge';
 
 type BBSResult = { id: string; title: string; category: string; replies_count: number; created_at: string };
@@ -263,11 +264,20 @@ export default function SearchScreen() {
     return [...set].filter((x) => x.length >= 2);
   }, [variantsPerKeyword, parsedQuery, expansion, vectorRelated]);
 
+  // Phase 2: cluster cooccur primitive — vectorRelated/expansion で取りこぼした
+  // 純粋な共起ペアも拡張集合に追加 (e.g. graph に無いがよく一緒に投稿される)。
+  const cooccurExpanded = useMemo(() => {
+    const inputs = [...parsedQuery.keywords, ...parsedQuery.tags];
+    if (inputs.length === 0) return [] as { tag: string; score: number }[];
+    return expandWithCooccur(inputs, cooccur, { topK: 12, minCount: 3 });
+  }, [parsedQuery, cooccur]);
+
   const expandedTagSet = useMemo(() => {
     const s = new Set(expansion.map((e) => e.tag));
     for (const r of vectorRelated) s.add(r.tag);
+    for (const r of cooccurExpanded) s.add(r.tag);
     return s;
-  }, [expansion, vectorRelated]);
+  }, [expansion, vectorRelated, cooccurExpanded]);
 
   // クエリ全 variants をマージ (スコアリング & ハイライト用)
   const allVariantQueries: ParsedQuery = useMemo(() => {

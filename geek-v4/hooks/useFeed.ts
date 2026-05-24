@@ -7,8 +7,10 @@ import { useTagFilterStore } from '../stores/tagFilterStore';
 import { useFeedStore } from '../stores/feedStore';
 import { useSearchSignalsStore } from '../stores/searchSignalsStore';
 import { useSearchClickStore } from '../stores/searchClickStore';
+import { useTagCooccurStore } from '../stores/tagCooccurStore';
 import { smartSort } from '../lib/feed/smartRank';
 import { GOSSIP_TRENDING_BLOCKLIST_SET } from '../stores/tagFilterStore';
+import { deepNormalize } from '../lib/search/tokenize';
 import type { Post } from '../types/models';
 import { useQuery as useReactQuery } from '@tanstack/react-query';
 import { getEvents, computeProfile, rankFeed } from '../lib/personalize';
@@ -119,6 +121,32 @@ export function useFeed() {
   const events = useMemo(() => eventsQ.data ?? [], [eventsQ.data]);
   const profile = useMemo(() => computeProfile(events), [events]);
 
+  // Phase 2: cluster signal (cooccur) を Feed の scoring に渡す
+  // - cooccur store の hydrate は他箇所 (tag-graph 画面) で kick されるが、
+  //   for-you ソート時にも欲しいので念のため hydrate を試行
+  // - interest 集合: likedTags + 高 affinity (>1.0) tag を normalize して 1 set
+  const cooccur = useTagCooccurStore((s) => s.cooccur);
+  const cooccurHydrate = useTagCooccurStore((s) => s.hydrate);
+  const cooccurEnsureFresh = useTagCooccurStore((s) => s.ensureFresh);
+  const cooccurHydrated = useTagCooccurStore((s) => s.hydrated);
+  useEffect(() => { void cooccurHydrate(); }, [cooccurHydrate]);
+  useEffect(() => {
+    if (cooccurHydrated && sort === 'for-you') void cooccurEnsureFresh();
+  }, [cooccurHydrated, cooccurEnsureFresh, sort]);
+
+  const interestTagsNorm = useMemo(() => {
+    const s = new Set<string>();
+    for (const t of likedTags) {
+      const n = deepNormalize(t);
+      if (n) s.add(n);
+    }
+    // profile.tagAffinity のキーは既に normalized
+    for (const [tag, value] of Object.entries(profile.tagAffinity)) {
+      if (value > 1) s.add(tag);
+    }
+    return s;
+  }, [likedTags, profile.tagAffinity]);
+
   const { posts, reasonsMap }: { posts: Post[]; reasonsMap: Record<string, RankReason> } = useMemo(() => {
     if (sort === 'for-you') {
       // For-You は personalize 基盤で再ランク。blocked タグはクライアント側で先に除去。
@@ -141,6 +169,9 @@ export function useFeed() {
         now: Date.now(),
         trendingTags,
         targetCount: visiblePosts.length,
+        // Phase 2: cluster cooccur signal
+        cooccur,
+        interestTagsNorm,
       });
       const byId: Record<string, Post> = {};
       for (const p of visiblePosts) byId[p.id] = p;
@@ -175,7 +206,7 @@ export function useFeed() {
     }, sort);
     return { posts: sorted, reasonsMap: {} };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawPosts, sort, likedTags, blockedTags, signals.tagFreq, signals.recentTags, trendingTags, ctrBoosts, profile]);
+  }, [rawPosts, sort, likedTags, blockedTags, signals.tagFreq, signals.recentTags, trendingTags, ctrBoosts, profile, cooccur, interestTagsNorm]);
 
   // ----------------------------------------------------------------
   // タグターゲティング広告 — プライバシー保護 (個人 id は送らず、タグだけで配信)
