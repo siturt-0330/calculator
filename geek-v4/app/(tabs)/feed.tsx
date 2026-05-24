@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, RefreshControl, Platform } from 'react-native';
+import { View, Text, RefreshControl, Platform, Pressable } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Image as ExpoImage } from 'expo-image';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
@@ -50,6 +50,8 @@ import { logEvent } from '../../lib/personalize';
 import { PostCardSkeleton } from '../../components/feed/PostCardSkeleton';
 import { TrendingRow } from '../../components/feed/TrendingRow';
 import { PressableScale } from '../../components/ui/PressableScale';
+import { useAuthStore } from '../../stores/authStore';
+import { isAdminUser } from '../../lib/admin';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Icon } from '../../constants/icons';
@@ -64,6 +66,8 @@ export default function FeedScreen() {
   const { posts, reasonsMap, communitiesByPost, ads, interestTags, loading, refreshing, refresh, loadMore } = useFeed();
   const { blockedCount } = useTagFilter();
   const likedTags = useTagFilterStore((s) => s.likedTags);
+  // dev shortcut: Geek ロゴ長押しで admin user だけ /admin へ
+  const currentUser = useAuthStore((s) => s.user);
   const scope = useFeedStore((s) => s.scope);
   const setScope = useFeedStore((s) => s.setScope);
   // 並び替えは廃止 — 常に for-you (パーソナライズ) で配信。
@@ -357,42 +361,59 @@ export default function FeedScreen() {
           >
             <Plus size={20} color="#fff" strokeWidth={2.6} />
           </PressableScale>
-          {/* Geek brand wordmark — Orbitron Black + accent gradient (web) + glow */}
-          <Text
-            allowFontScaling={false}
-            style={[
-              {
-                flex: 1,
-                fontFamily: 'Orbitron_900Black',
-                fontSize: 30,
-                lineHeight: 34,
-                letterSpacing: 2,
-                color: C.text,
-              },
-              Platform.OS === 'web'
-                ? // RN-web 経由で CSS gradient text を効かせる (as object キャストで十分通る)
-                  ({
-                    backgroundImage:
-                      'linear-gradient(110deg, #b794f4 0%, #7c6af7 35%, #67c1ff 75%, #6ee7b7 100%)',
-                    backgroundClip: 'text',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                    color: 'transparent',
-                    textShadow:
-                      '0 0 14px rgba(124,106,247,0.55), 0 0 28px rgba(103,193,255,0.25)',
-                    transform: 'skewX(-4deg)',
-                  } as object)
-                : {
-                    color: C.accent,
-                    textShadowColor: C.accent + '88',
-                    textShadowOffset: { width: 0, height: 0 },
-                    textShadowRadius: 10,
-                    transform: [{ skewX: '-4deg' }],
+          {/* Geek brand wordmark — Orbitron Black + accent gradient (web) + glow
+              admin user 限定: 1.2 秒長押しで /admin へ飛ぶ隠し dev shortcut。
+              一般ユーザーには Pressable ラッパーすら付かない (cursor: pointer も出ない)。 */}
+          {(() => {
+            const wordmark = (
+              <Text
+                allowFontScaling={false}
+                style={[
+                  {
+                    flex: 1,
+                    fontFamily: 'Orbitron_900Black',
+                    fontSize: 30,
+                    lineHeight: 34,
+                    letterSpacing: 2,
+                    color: C.text,
                   },
-            ]}
-          >
-            Geek
-          </Text>
+                  Platform.OS === 'web'
+                    ? // RN-web 経由で CSS gradient text を効かせる (as object キャストで十分通る)
+                      ({
+                        backgroundImage:
+                          'linear-gradient(110deg, #b794f4 0%, #7c6af7 35%, #67c1ff 75%, #6ee7b7 100%)',
+                        backgroundClip: 'text',
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                        color: 'transparent',
+                        textShadow:
+                          '0 0 14px rgba(124,106,247,0.55), 0 0 28px rgba(103,193,255,0.25)',
+                        transform: 'skewX(-4deg)',
+                      } as object)
+                    : {
+                        color: C.accent,
+                        textShadowColor: C.accent + '88',
+                        textShadowOffset: { width: 0, height: 0 },
+                        textShadowRadius: 10,
+                        transform: [{ skewX: '-4deg' }],
+                      },
+                ]}
+              >
+                Geek
+              </Text>
+            );
+            if (!isAdminUser(currentUser)) return wordmark;
+            return (
+              <Pressable
+                onLongPress={() => router.push('/admin' as never)}
+                delayLongPress={1200}
+                accessibilityLabel="Geek (長押しで管理パネル)"
+                style={{ flex: 1 }}
+              >
+                {wordmark}
+              </Pressable>
+            );
+          })()}
           <PressableScale
             onPress={() => router.push('/search' as never)}
             hitSlop={10}
