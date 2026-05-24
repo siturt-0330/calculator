@@ -17,6 +17,7 @@ import { useReactions, useReactionToggle } from '../../hooks/useReactions';
 import { useAddedTags, useAddTag } from '../../hooks/useAddedTags';
 import { usePolls } from '../../hooks/usePolls';
 import { useFeedPage } from '../../hooks/useFeedPage';
+import { useFeedRealtime } from '../../hooks/useFeedRealtime';
 import { useNotifications } from '../../hooks/useNotifications';
 import { NotificationBadge } from '../../components/ui/NotificationBadge';
 import { useToastStore } from '../../stores/toastStore';
@@ -107,6 +108,11 @@ export default function FeedScreen() {
   // を 1 RPC に統合。失敗 / ENV flag 無効時は legacy hook 群へフォールバック。
   const { fullPosts, isLoading: rpcLoading, isDisabled: rpcDisabled, isEmpty: rpcEmpty } =
     useFeedPage(postIds);
+
+  // ★ Realtime 反映 — RPC 経路でも post_reactions / likes / concerns / saves の
+  //   変更を購読する。useReactions(legacyIds) の中の subscription は legacyIds=[]
+  //   で disabled になっていたので、ここで常時起動する。
+  useFeedRealtime(postIds);
 
   // fallback 判定:
   //   - ENV flag で RPC が無効 (= isDisabled)
