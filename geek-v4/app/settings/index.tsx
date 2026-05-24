@@ -41,6 +41,8 @@ export default function SettingsScreen() {
         <SectionHeader title="カスタマイズ" />
         <ListItem icon={Icon.bell} label="通知設定" onPress={() => router.push('/settings/notifications' as never)} />
         <Divider />
+        <ListItem icon={Icon.sparkles} label="おすすめ・自動化" onPress={() => router.push('/settings/recommendations' as never)} />
+        <Divider />
         <ListItem icon={Icon.hash} label="ブロックするタグ" onPress={() => router.push('/settings/blocked-tags' as never)} />
         <Divider />
         <ListItem icon={Icon.block} label="ブロックしたユーザー" onPress={() => router.push('/settings/blocked-users' as never)} />

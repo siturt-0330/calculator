@@ -147,4 +147,48 @@ describe('suggestClusters', () => {
     });
     expect(r.length).toBe(1);
   });
+
+  // ============================================================
+  // Phase 1.5 — AUTO_APPLY_THRESHOLD (0.75) の sanity check
+  // ============================================================
+  // 信頼度の formula: tanh(avgCooccur/12) * 0.7 + min(variantPairs, 3) * 0.1
+  // cooccur のみでは上限 0.7 (tanh の上限) — 0.75 に届かない。
+  // つまり 0.75 を超えるには「強い共起 + 1 つ以上の variant ペア」が必須。
+  // → false positive (偶然の共起) に対する防壁として 0.75 は意図的に高めに置いてある。
+  it('AUTO_APPLY_THRESHOLD = 0.75 は weak signal を確実に拒否する', () => {
+    // 弱いケース: cooccur 3 だけ、variant なし → confidence < 0.5
+    const weak: CooccurMap = {
+      A: { B: 3, C: 3, D: 3 },
+      B: { A: 3, C: 3, D: 3 },
+      C: { A: 3, B: 3, D: 3 },
+      D: { A: 3, B: 3, C: 3 },
+    };
+    const weak_r = suggestClusters({
+      interestTags: ['A', 'B', 'C', 'D'],
+      cooccur: weak,
+      inGraphTags: new Set(),
+    });
+    expect(weak_r.length).toBe(1);
+    // 弱いシグナルは AUTO_APPLY_THRESHOLD (0.75) を大きく下回る
+    expect(weak_r[0]!.confidence).toBeLessThan(0.5);
+  });
+
+  it('AUTO_APPLY_THRESHOLD = 0.75 は cooccur のみで簡単に超えない (false positive 防止)', () => {
+    // 共起のみ非常に高い (variant なし) → tanh の上限 0.7 で頭打ち、0.75 未満
+    const cooccurOnly: CooccurMap = {
+      A: { B: 100, C: 100, D: 100 },
+      B: { A: 100, C: 100, D: 100 },
+      C: { A: 100, B: 100, D: 100 },
+      D: { A: 100, B: 100, C: 100 },
+    };
+    const r = suggestClusters({
+      interestTags: ['A', 'B', 'C', 'D'],
+      cooccur: cooccurOnly,
+      inGraphTags: new Set(),
+    });
+    expect(r.length).toBe(1);
+    // cooccur 寄与の上限は 0.7 — variant が無ければ threshold (0.75) に届かない
+    expect(r[0]!.confidence).toBeLessThan(0.75);
+    expect(r[0]!.confidence).toBeGreaterThan(0.6);
+  });
 });

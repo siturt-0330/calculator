@@ -10,6 +10,7 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { SuggestedClusters } from '../../components/tag-graph/SuggestedClusters';
 import { useTagClusterSuggestions } from '../../hooks/useTagClusterSuggestions';
+import { useAutoApplyTagClusters } from '../../hooks/useAutoApplyTagClusters';
 import { useTagGraphStore, type TagNode, TEMPLATES } from '../../stores/tagGraphStore';
 import { useTagFilterStore } from '../../stores/tagFilterStore';
 import { useTagCooccurStore } from '../../stores/tagCooccurStore';
@@ -60,6 +61,11 @@ export default function TagGraphScreen() {
   // タグ自動グルーピング候補 (共起 + 同義 で抽出)
   // ユーザーが「これらをまとめてグループ化」 ボタンで 1 タップ accept できる
   const clusterSuggestions = useTagClusterSuggestions({ maxClusters: 4 });
+  // settings → "autoApplyTagClusters" が ON のとき、高信頼クラスタを自動 accept
+  useAutoApplyTagClusters({
+    clusters: clusterSuggestions.clusters,
+    hydrated: clusterSuggestions.hydrated,
+  });
 
   useEffect(() => { void hydrateCooccur(); void ensureCooccur(); }, [hydrateCooccur, ensureCooccur]);
 
