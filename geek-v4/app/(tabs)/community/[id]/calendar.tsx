@@ -235,7 +235,13 @@ export default function CalendarScreen() {
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
               <Text style={[T.h3, { color: C.text, flex: 1 }]}>イベントを追加</Text>
-              <PressableScale onPress={() => setModalOpen(false)} haptic="tap" style={{ padding: 6 }}>
+              <PressableScale
+                onPress={() => setModalOpen(false)}
+                haptic="tap"
+                hitSlop={12}
+                accessibilityLabel="閉じる"
+                style={{ padding: 6 }}
+              >
                 <Icon.close size={20} color={C.text2} strokeWidth={2.4} />
               </PressableScale>
             </View>

@@ -1,6 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useToastStore } from '../stores/toastStore';
+import {
+  patchFeedPagePost,
+  snapshotFeedPage,
+  revertFeedPageSnapshot,
+  invalidateFeedPage,
+} from '../lib/cacheUpdates/feedPagePatcher';
+import type { FeedPagePost } from '../lib/api/feedPage';
 
 async function getMyLikes(postIds: string[]): Promise<Record<string, boolean>> {
   if (postIds.length === 0) return {};
@@ -49,20 +56,28 @@ export function useLikes(postIds: string[]) {
 export function useLike() {
   const qc = useQueryClient();
 
-  const { mutateAsync } = useMutation({
-    mutationFn: toggle,
-    onMutate: async ({ postId }: { postId: string; wasLiked: boolean }) => {
-      await qc.cancelQueries({ queryKey: ['my-likes'] });
-      const prevLikes = qc.getQueriesData({ queryKey: ['my-likes'] });
-      // 任意の my-likes キャッシュから当該 postId の状態を確認
-      let wasLiked = false;
-      for (const [, d] of prevLikes) {
-        if ((d as Record<string, boolean> | undefined)?.[postId]) {
-          wasLiked = true;
-          break;
-        }
-      }
+  type Vars = { postId: string; wasLiked: boolean };
+  type Ctx = {
+    prevLikes: Array<[readonly unknown[], unknown]>;
+    prevFeed: Array<[readonly unknown[], unknown]>;
+    prevFeedPage: Array<[readonly unknown[], FeedPagePost[] | undefined]>;
+  };
 
+  const { mutateAsync } = useMutation<void, Error, Vars, Ctx>({
+    mutationFn: toggle,
+    onMutate: async ({ postId, wasLiked }) => {
+      // ★ await でレース防止 (in-flight refetch が optimistic を上書きする現象の修正)
+      await Promise.all([
+        qc.cancelQueries({ queryKey: ['my-likes'] }).catch(() => {}),
+        qc.cancelQueries({ queryKey: ['feed'] }).catch(() => {}),
+        qc.cancelQueries({ queryKey: ['feed-page'] }).catch(() => {}),
+      ]);
+
+      const prevLikes = qc.getQueriesData({ queryKey: ['my-likes'] });
+      const prevFeed = qc.getQueriesData({ queryKey: ['feed'] });
+      const prevFeedPage = snapshotFeedPage(qc);
+
+      // 1) legacy my-likes cache (fallback 経路)
       qc.setQueriesData({ queryKey: ['my-likes'] }, (old: Record<string, boolean> | undefined) => {
         const next = { ...(old ?? {}) };
         if (next[postId]) delete next[postId];
@@ -70,7 +85,7 @@ export function useLike() {
         return next;
       });
 
-      await qc.cancelQueries({ queryKey: ['feed'] });
+      // 2) useFeed の infinite query cache — likes_count を ±1
       qc.setQueriesData({ queryKey: ['feed'] }, (data: unknown) => {
         if (!data || typeof data !== 'object') return data;
         const old = data as { pages?: Array<{ posts: Array<{ id: string; likes_count: number }> }> };
@@ -88,24 +103,49 @@ export function useLike() {
         };
       });
 
-      return { prevLikes };
+      // 3) ★ RPC cache (feed-page) — my_like + likes_count を更新
+      //    feed.tsx は full.my_like / post.likes_count を参照するので、ここを更新しないと UI 反映 0。
+      patchFeedPagePost(qc, postId, (p) => ({
+        ...p,
+        my_like: !wasLiked,
+        likes_count: Math.max(0, (p.likes_count ?? 0) + (wasLiked ? -1 : 1)),
+      }));
+
+      return { prevLikes, prevFeed, prevFeedPage };
     },
     onError: (_e, _v, ctx) => {
-      if (ctx?.prevLikes) ctx.prevLikes.forEach(([k, d]) => qc.setQueryData(k, d));
+      if (!ctx) return;
+      for (const [k, d] of ctx.prevLikes) qc.setQueryData(k, d);
+      for (const [k, d] of ctx.prevFeed) qc.setQueryData(k, d);
+      revertFeedPageSnapshot(qc, ctx.prevFeedPage);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['my-likes'] });
+      invalidateFeedPage(qc);
     },
   });
 
   // toggle() のシグネチャは旧来通り postId のみ — wasLiked はキャッシュから自動判定
   return {
     toggle: (postId: string) => {
-      // キャッシュから wasLiked を判定 (mutation 内で再判定するが、SQL 側にも渡す)
+      // キャッシュから wasLiked を判定: my-likes と feed-page の両方を見る
       let wasLiked = false;
-      const cached = qc.getQueriesData<Record<string, boolean> | undefined>({ queryKey: ['my-likes'] });
-      for (const [, d] of cached) {
+      const cachedLikes = qc.getQueriesData<Record<string, boolean> | undefined>({ queryKey: ['my-likes'] });
+      for (const [, d] of cachedLikes) {
         if (d?.[postId]) { wasLiked = true; break; }
+      }
+      if (!wasLiked) {
+        // RPC cache を fallback で見る (my-likes が空でも feed-page にはあるかも)
+        const cachedFeedPage = qc.getQueriesData<FeedPagePost[] | undefined>({ queryKey: ['feed-page'] });
+        outer: for (const [, rows] of cachedFeedPage) {
+          if (!Array.isArray(rows)) continue;
+          for (const r of rows) {
+            if (r.id === postId && r.my_like) {
+              wasLiked = true;
+              break outer;
+            }
+          }
+        }
       }
       return mutateAsync({ postId, wasLiked }).catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : '';

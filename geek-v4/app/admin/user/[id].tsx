@@ -16,6 +16,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { TopBar } from '../../../components/nav/TopBar';
 import { BackButton } from '../../../components/nav/BackButton';
 import { PressableScale } from '../../../components/ui/PressableScale';
+import { MiniMetric } from '../../../components/admin/MiniMetric';
 import { Spinner } from '../../../components/ui/Spinner';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { Avatar } from '../../../components/ui/Avatar';
@@ -429,7 +430,7 @@ function StatPill({ value, label, tone }: { value: number; label: string; tone?:
 function ActionGrid({ user }: { user: AdminUser }) {
   const router = useRouter();
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
 
   const [pendingSuspend, setPendingSuspend] = useState(false);
   const [pendingUnsuspend, setPendingUnsuspend] = useState(false);
@@ -730,7 +731,7 @@ function PostsTab({ posts, userId }: { posts: AdminPost[]; userId: string }) {
   const router = useRouter();
   const [pending, setPending] = useState<AdminPost | null>(null);
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
 
   const remove = useMutation({
     mutationFn: deletePost,
@@ -952,7 +953,7 @@ function ModerationTab({ logs, userId }: { logs: ModerationLog[]; userId: string
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
 
   // メモを moderation_log に 'note' action として書き込む。
   // sendAdminMessage 系は本人に通知が飛ぶので使えない — 直接 insert。
@@ -1134,14 +1135,7 @@ function ModerationTab({ logs, userId }: { logs: ModerationLog[]; userId: string
 // ============================================================
 // shared helpers
 // ============================================================
-function MiniMetric({ icon, value, accent }: { icon: string; value: number; accent?: string }) {
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-      <Text style={{ fontSize: 11, color: accent ?? C.text3 }}>{icon}</Text>
-      <Text style={[T.smallB, { color: accent ?? C.text, fontWeight: '700' }]}>{value}</Text>
-    </View>
-  );
-}
+// MiniMetric は components/admin/MiniMetric.tsx へ切り出し (Phase 8 split)
 
 function EmptyState({ icon, title, hint }: { icon: string; title: string; hint?: string }) {
   return (

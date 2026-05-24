@@ -14,6 +14,7 @@
 
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { swallow } from '../lib/swallow';
 
 const KEY = 'geek:offline_queue_v1';
 
@@ -38,8 +39,8 @@ export type OfflineQueueState = {
 
 function save(q: QueuedAction[]) {
   try {
-    AsyncStorage.setItem(KEY, JSON.stringify(q)).catch(() => {});
-  } catch {}
+    AsyncStorage.setItem(KEY, JSON.stringify(q)).catch((e) => swallow('store.offlineQueue.save', e));
+  } catch (e) { swallow('store.offlineQueue.save.sync', e); }
 }
 
 export const useOfflineQueueStore = create<OfflineQueueState>((set, get) => ({
@@ -54,7 +55,7 @@ export const useOfflineQueueStore = create<OfflineQueueState>((set, get) => ({
         set({ queue: q, hydrated: true });
         return;
       }
-    } catch {}
+    } catch (e) { swallow('store.offlineQueue.hydrate', e); }
     set({ hydrated: true });
   },
 

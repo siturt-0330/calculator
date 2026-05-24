@@ -22,7 +22,7 @@ import { useTagFilterStore } from '../stores/tagFilterStore';
 import { useTagCooccurStore } from '../stores/tagCooccurStore';
 import { findRelatedTags } from '../lib/search/tagVector';
 import { parseQuery, type ParsedQuery } from '../lib/search/queryParser';
-import { normalize } from '../lib/search/tokenize';
+import { normalize, deepNormalize } from '../lib/search/tokenize';
 import { scorePost, scoreTagItem, type PostDoc, type TagDoc } from '../lib/search/scoring';
 import { findClosest, findClosestK } from '../lib/search/typoCorrect';
 import { generateVariants, previewVariants } from '../lib/search/variants';
@@ -35,6 +35,8 @@ import { useTagSearchV3 } from '../hooks/useTagSearchV3';
 import { useSearchClickStore } from '../stores/searchClickStore';
 import { generateRelatedQueries } from '../lib/search/relatedSearches';
 import { expandWithTagGraph } from '../lib/utils/searchAlgo';
+import { expandWithCooccur } from '../lib/tagClustering/relations';
+import { classifyEntity } from '../lib/search/queryEntity';
 import { ReasonBadges } from '../components/search/ReasonBadge';
 
 type BBSResult = { id: string; title: string; category: string; replies_count: number; created_at: string };
@@ -263,11 +265,50 @@ export default function SearchScreen() {
     return [...set].filter((x) => x.length >= 2);
   }, [variantsPerKeyword, parsedQuery, expansion, vectorRelated]);
 
+  // Phase 2: cluster cooccur primitive — vectorRelated/expansion で取りこぼした
+  // 純粋な共起ペアも拡張集合に追加 (e.g. graph に無いがよく一緒に投稿される)。
+  const cooccurExpanded = useMemo(() => {
+    const inputs = [...parsedQuery.keywords, ...parsedQuery.tags];
+    if (inputs.length === 0) return [] as { tag: string; score: number }[];
+    return expandWithCooccur(inputs, cooccur, { topK: 12, minCount: 3 });
+  }, [parsedQuery, cooccur]);
+
   const expandedTagSet = useMemo(() => {
     const s = new Set(expansion.map((e) => e.tag));
     for (const r of vectorRelated) s.add(r.tag);
+    for (const r of cooccurExpanded) s.add(r.tag);
     return s;
-  }, [expansion, vectorRelated]);
+  }, [expansion, vectorRelated, cooccurExpanded]);
+
+  // Phase 4: クエリ意味解釈 (entity / modifiers / relatedEntities)
+  // knownTagSet は「我々がタグとして認識しているもの全部」 — cooccur + popularity + graph
+  // ノードの label / alias を deepNormalize で正規化した集合。
+  // ここに query の keyword が当たれば「これは entity (対象タグ) だ」 と判断する。
+  const knownTagSet = useMemo(() => {
+    const s = new Set<string>();
+    for (const k of Object.keys(tagPopularity)) {
+      const n = deepNormalize(k);
+      if (n) s.add(n);
+    }
+    for (const k of Object.keys(cooccur)) {
+      const n = deepNormalize(k);
+      if (n) s.add(n);
+    }
+    for (const node of Object.values(nodes)) {
+      const ln = deepNormalize(node.label);
+      if (ln) s.add(ln);
+      for (const a of node.aliases) {
+        const an = deepNormalize(a);
+        if (an) s.add(an);
+      }
+    }
+    return s;
+  }, [tagPopularity, cooccur, nodes]);
+
+  const queryEntity = useMemo(
+    () => classifyEntity(parsedQuery, knownTagSet, { cooccur, relatedTopK: 6 }),
+    [parsedQuery, knownTagSet, cooccur],
+  );
 
   // クエリ全 variants をマージ (スコアリング & ハイライト用)
   const allVariantQueries: ParsedQuery = useMemo(() => {
@@ -334,7 +375,9 @@ export default function SearchScreen() {
     recentTags: signals.recentTags,
     trendingTags: trendingTagSet,
     coldStartMode,
-  }), [likedSet, blockedSet, history, signals, trendingTagSet, coldStartMode]);
+    // Phase 4: scoring に entity / relatedEntities boost を渡す
+    queryEntity,
+  }), [likedSet, blockedSet, history, signals, trendingTagSet, coldStartMode, queryEntity]);
 
   const rankedPosts = useMemo(() => {
     const scored = (postsQ.data ?? [])

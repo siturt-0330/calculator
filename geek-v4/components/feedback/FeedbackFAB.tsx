@@ -57,6 +57,7 @@ export function FeedbackFAB() {
       <PressableScale
         onPress={() => setOpen(true)}
         haptic="tap"
+        accessibilityLabel="この画面についてのフィードバックを送る"
         style={{
           position: 'absolute',
           right: SP['4'],
@@ -95,7 +96,13 @@ export function FeedbackFAB() {
               <Text style={[T.h3, { color: C.text, flex: 1 }]}>
                 ここを修正したい
               </Text>
-              <PressableScale onPress={() => setOpen(false)} haptic="tap" style={{ padding: SP['2'] }}>
+              <PressableScale
+                onPress={() => setOpen(false)}
+                haptic="tap"
+                hitSlop={12}
+                accessibilityLabel="閉じる"
+                style={{ padding: SP['2'] }}
+              >
                 <Text style={{ fontSize: 18, color: C.text3 }}>✕</Text>
               </PressableScale>
             </View>

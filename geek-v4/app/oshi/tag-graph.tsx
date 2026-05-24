@@ -5,8 +5,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TopBar } from '../../components/nav/TopBar';
 import { BackButton } from '../../components/nav/BackButton';
 import { PressableScale } from '../../components/ui/PressableScale';
+import { StatBadge } from '../../components/ui/StatBadge';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { SuggestedClusters } from '../../components/tag-graph/SuggestedClusters';
+import { useTagClusterSuggestions } from '../../hooks/useTagClusterSuggestions';
+import { useAutoApplyTagClusters } from '../../hooks/useAutoApplyTagClusters';
 import { useTagGraphStore, type TagNode, TEMPLATES } from '../../stores/tagGraphStore';
 import { useTagFilterStore } from '../../stores/tagFilterStore';
 import { useTagCooccurStore } from '../../stores/tagCooccurStore';
@@ -53,6 +57,15 @@ export default function TagGraphScreen() {
   const { cooccur, tagPopularity, ensureFresh: ensureCooccur, loading: cooccurLoading, hydrate: hydrateCooccur } = useTagCooccurStore();
   const { show } = useToastStore();
   const likedSet = useMemo(() => new Set(likedTags), [likedTags]);
+
+  // タグ自動グルーピング候補 (共起 + 同義 で抽出)
+  // ユーザーが「これらをまとめてグループ化」 ボタンで 1 タップ accept できる
+  const clusterSuggestions = useTagClusterSuggestions({ maxClusters: 4 });
+  // settings → "autoApplyTagClusters" が ON のとき、高信頼クラスタを自動 accept
+  useAutoApplyTagClusters({
+    clusters: clusterSuggestions.clusters,
+    hydrated: clusterSuggestions.hydrated,
+  });
 
   useEffect(() => { void hydrateCooccur(); void ensureCooccur(); }, [hydrateCooccur, ensureCooccur]);
 
@@ -391,6 +404,12 @@ export default function TagGraphScreen() {
               </PressableScale>
             )}
           </View>
+
+          {/* タグ自動グルーピング候補 — AI 提案より前 (1 タップ accept で複数まとめて追加できる) */}
+          <SuggestedClusters
+            clusters={clusterSuggestions.clusters}
+            hydrated={clusterSuggestions.hydrated}
+          />
 
           {/* AI 連携提案 (ベクトル類似度) */}
           {aiSuggestions.length > 0 && (
@@ -745,20 +764,7 @@ export default function TagGraphScreen() {
   );
 }
 
-function StatBadge({ icon, label, color }: { icon: string; label: string; color: string }) {
-  return (
-    <View style={{
-      flexDirection: 'row', alignItems: 'center', gap: 4,
-      paddingHorizontal: SP['2'], paddingVertical: 3,
-      backgroundColor: color + '22',
-      borderWidth: 1, borderColor: color + '44',
-      borderRadius: R.full,
-    }}>
-      <Text style={{ fontSize: 12 }}>{icon}</Text>
-      <Text style={[T.caption, { color, fontWeight: '700' }]}>{label}</Text>
-    </View>
-  );
-}
+// StatBadge は components/ui/StatBadge.tsx へ切り出し (Phase 8 split)
 
 function NodeView({
   id, nodes, depth, expanded, likedSet, isRoot, canMoveUp, canMoveDown,

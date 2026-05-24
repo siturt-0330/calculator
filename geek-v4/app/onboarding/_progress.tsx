@@ -36,7 +36,7 @@ export function StepProgress({ step }: { step: number }) {
           const current = idx === step;
           return (
             <View
-              key={idx}
+              key={`step-${idx}`}
               style={{
                 width: current ? 18 : 6,
                 height: 6,

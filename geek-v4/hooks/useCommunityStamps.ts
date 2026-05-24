@@ -250,11 +250,13 @@ export function useCommunityStampReactionToggle() {
       if (error) throw new Error(error);
       return on;
     },
-    onMutate: async ({ postId, stampId }) => {
-      // 進行中の reactions fetch を一旦停止 (楽観更新を上書きされないように)
-      await qc.cancelQueries({ queryKey: ['community-stamp-reactions'] });
+    onMutate: ({ postId, stampId }) => {
+      // 体感速度優先: cancelQueries の await を撤廃して同期パス。
+      // chip 押下から visual 反映までの microtask hop を排除。
+      // (詳細は useReactionToggle の同位置コメント参照)
+      qc.cancelQueries({ queryKey: ['community-stamp-reactions'] }).catch(() => {});
 
-      // ★ mutation 前にスナップショットを取る (mutation 後に取ると更新済みの値が入り revert できない)
+      // ★ setQueriesData の前にスナップショットを取る (mutation 後に取ると更新済みの値が入り revert できない)
       const snapshot: Snapshot = qc.getQueriesData<CommunityStampReactionsByPost | undefined>({
         queryKey: ['community-stamp-reactions'],
       }) as Snapshot;

@@ -33,7 +33,7 @@ const FEATURE_LABEL: Record<string, string> = {
 
 export default function AdminOfficialAppsScreen() {
   const insets = useSafeAreaInsets();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const qc = useQueryClient();
 
   const [openApp, setOpenApp] = useState<AdminPendingApp | null>(null);
@@ -206,7 +206,13 @@ export default function AdminOfficialAppsScreen() {
               <Text style={[T.h3, { color: C.text, flex: 1 }]} numberOfLines={1}>
                 {openApp?.community_name ?? '申請詳細'}
               </Text>
-              <PressableScale onPress={() => setOpenApp(null)} haptic="tap" style={{ padding: 6 }}>
+              <PressableScale
+                onPress={() => setOpenApp(null)}
+                haptic="tap"
+                hitSlop={12}
+                accessibilityLabel="閉じる"
+                style={{ padding: 6 }}
+              >
                 <Icon.close size={20} color={C.text2} strokeWidth={2.4} />
               </PressableScale>
             </View>

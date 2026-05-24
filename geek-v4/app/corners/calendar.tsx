@@ -411,7 +411,13 @@ function AddEventModal({
         }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <Text style={[T.h3, { color: C.text }]}>予定を追加</Text>
-            <PressableScale onPress={onClose} haptic="tap" style={{ padding: SP['2'] }}>
+            <PressableScale
+              onPress={onClose}
+              haptic="tap"
+              hitSlop={12}
+              accessibilityLabel="閉じる"
+              style={{ padding: SP['2'] }}
+            >
               <Icon.close size={22} color={C.text2} strokeWidth={2.2} />
             </PressableScale>
           </View>

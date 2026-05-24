@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <!-- 認証不要で公開して良いページのみ列挙。投稿などのユーザー生成コンテンツは
+       認証必須なので含めない。geek-intro 側にランディングを置いた段階で
+       そちらの sitemap と統合する。 -->
+  <url>
+    <loc>https://geek.app/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://geek.app/(auth)/login</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://geek.app/(auth)/signup</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+</urlset>

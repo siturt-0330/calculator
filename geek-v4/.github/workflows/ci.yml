@@ -1,0 +1,71 @@
+name: CI
+
+# PR / push to master で typecheck + unit test を実行。
+# eslint は eslint-config-expo の依存欠落のため一旦コメントアウト
+# (https://github.com/siturt-0330/geek-v4/issues — 別 PR で resolve 予定)
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+# 同一 PR で push を連打した時は古い run をキャンセル
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: TypeScript + Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          # Netlify と同じく NODE_ENV=production だと devDeps を skip するので
+          # CI では明示的に development にして type-check / test に必要な devDeps を入れる
+          NODE_ENV: development
+
+      - name: TypeScript type check
+        run: npm run type-check
+
+      - name: Unit tests
+        run: npm test -- --ci --reporters=default --runInBand
+
+      # - name: Lint
+      #   run: npm run lint
+      #   # TODO: eslint-config-expo を install して有効化
+
+  build-web:
+    name: Web build smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: check
+    # PR は skip (デプロイ前確認用)、master push と手動 dispatch で動かす
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+        env:
+          NODE_ENV: development
+      - name: Build web bundle (smoke)
+        run: npm run build:web
+        env:
+          # ビルドが env 不在で死なないように dummy 値を渡す。
+          # 実 deploy は Netlify 側の env が使われる。
+          EXPO_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key-for-build

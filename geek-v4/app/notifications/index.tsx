@@ -70,7 +70,7 @@ export default function NotificationsScreen() {
         <TopBar title="通知" left={<BackButton />} />
         <View>
           {Array.from({ length: 6 }).map((_, i) => (
-            <NotificationSkeleton key={i} />
+            <NotificationSkeleton key={`skel-notif-${i}`} />
           ))}
         </View>
       </View>

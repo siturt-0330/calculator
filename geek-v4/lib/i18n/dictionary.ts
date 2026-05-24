@@ -76,6 +76,46 @@ export const STRINGS: Record<string, Partial<Record<Lang, string>>> = {
   'auth.signup':              { ja: '新規登録', en: 'Sign up', ko: '회원가입', zh: '注册', th: 'สมัครสมาชิก', fr: 'Inscription', es: 'Registrarse' },
   'auth.email':               { ja: 'メールアドレス', en: 'Email', ko: '이메일', zh: '邮箱', th: 'อีเมล', fr: 'Email', es: 'Correo electrónico' },
   'auth.password':            { ja: 'パスワード', en: 'Password', ko: '비밀번호', zh: '密码', th: 'รหัสผ่าน', fr: 'Mot de passe', es: 'Contraseña' },
+  'auth.forgot':              { ja: 'パスワードを忘れた方', en: 'Forgot password?', ko: '비밀번호를 잊으셨나요?', zh: '忘记密码？', th: 'ลืมรหัสผ่าน?', fr: 'Mot de passe oublié ?', es: '¿Olvidaste tu contraseña?' },
+  'auth.reset_password':      { ja: 'パスワード再設定', en: 'Reset password', ko: '비밀번호 재설정', zh: '重置密码', th: 'ตั้งรหัสผ่านใหม่', fr: 'Réinitialiser le mot de passe', es: 'Restablecer contraseña' },
+  'auth.new_password':        { ja: '新しいパスワード', en: 'New password', ko: '새 비밀번호', zh: '新密码', th: 'รหัสผ่านใหม่', fr: 'Nouveau mot de passe', es: 'Nueva contraseña' },
+  'auth.back_to_login':       { ja: 'ログイン画面に戻る', en: 'Back to login', ko: '로그인 화면으로 돌아가기', zh: '返回登录页', th: 'กลับไปยังหน้าเข้าสู่ระบบ', fr: 'Retour à la connexion', es: 'Volver al inicio de sesión' },
+  'auth.have_account':        { ja: '既にアカウントをお持ちですか？', en: 'Already have an account?', ko: '이미 계정이 있으신가요?', zh: '已有账号？', th: 'มีบัญชีอยู่แล้ว?', fr: 'Vous avez déjà un compte ?', es: '¿Ya tienes una cuenta?' },
+  'auth.phone_optional':      { ja: '電話番号 (任意)', en: 'Phone (optional)', ko: '전화번호 (선택)', zh: '电话号码（可选）', th: 'หมายเลขโทรศัพท์ (ไม่บังคับ)', fr: 'Téléphone (facultatif)', es: 'Teléfono (opcional)' },
+  'auth.create_account':      { ja: 'アカウントを作成', en: 'Create account', ko: '계정 만들기', zh: '创建账号', th: 'สร้างบัญชี', fr: 'Créer un compte', es: 'Crear cuenta' },
+  'auth.tagline':             { ja: '好きを、匿名で、安心して続ける', en: 'Love what you love — anonymously, safely.', ko: '좋아하는 것을, 익명으로, 안심하고.', zh: '匿名安心地坚持热爱', th: 'รักในสิ่งที่ชอบ ด้วยตัวตนนิรนาม', fr: 'Aimer ce que vous aimez, anonymement, sereinement', es: 'Ama lo que amas, anónima y seguramente' },
+
+  // bbs
+  'bbs.title':                { ja: '掲示板', en: 'Boards', ko: '게시판', zh: '论坛', th: 'กระดาน', fr: 'Forums', es: 'Foros' },
+  'bbs.create_thread':        { ja: 'スレ立て', en: 'New thread', ko: '새 스레드', zh: '发新帖', th: 'สร้างกระทู้', fr: 'Nouveau fil', es: 'Nuevo hilo' },
+  'bbs.search_placeholder':   { ja: 'スレッドを検索', en: 'Search threads', ko: '스레드 검색', zh: '搜索帖子', th: 'ค้นหากระทู้', fr: 'Rechercher des fils', es: 'Buscar hilos' },
+  'bbs.suggest':              { ja: 'もしかして:', en: 'Did you mean:', ko: '혹시:', zh: '您是不是要找:', th: 'หมายถึง:', fr: 'Vouliez-vous dire :', es: '¿Quizás quisiste decir:' },
+  'bbs.lively':               { ja: '賑わい中', en: 'Busy now', ko: '활발함', zh: '热闹中', th: 'คึกคัก', fr: 'Animé', es: 'Animado' },
+
+  // community
+  'community.find':           { ja: 'コミュニティを探す', en: 'Find a community', ko: '커뮤니티 찾기', zh: '查找社区', th: 'ค้นหาคอมมูนิตี้', fr: 'Trouver une communauté', es: 'Buscar una comunidad' },
+  'community.create':         { ja: '作成', en: 'Create', ko: '만들기', zh: '创建', th: 'สร้าง', fr: 'Créer', es: 'Crear' },
+  'community.also_search':    { ja: 'これも検索:', en: 'Also search:', ko: '함께 검색:', zh: '同时搜索:', th: 'ค้นหาด้วย:', fr: 'Recherchez aussi :', es: 'También buscar:' },
+  'community.searching':      { ja: '検索中…', en: 'Searching…', ko: '검색 중…', zh: '搜索中…', th: 'กำลังค้นหา…', fr: 'Recherche en cours…', es: 'Buscando…' },
+  'community.official':       { ja: '公式コミュニティ', en: 'Official communities', ko: '공식 커뮤니티', zh: '官方社区', th: 'คอมมูนิตี้ทางการ', fr: 'Communautés officielles', es: 'Comunidades oficiales' },
+  'community.clear_filter':   { ja: 'フィルタを解除', en: 'Clear filter', ko: '필터 해제', zh: '清除筛选', th: 'ล้างตัวกรอง', fr: 'Effacer le filtre', es: 'Borrar filtro' },
+  'community.name':           { ja: '名前', en: 'Name', ko: '이름', zh: '名称', th: 'ชื่อ', fr: 'Nom', es: 'Nombre' },
+  'community.description_optional': { ja: '説明（任意）', en: 'Description (optional)', ko: '설명 (선택)', zh: '描述（可选）', th: 'คำอธิบาย (ไม่บังคับ)', fr: 'Description (facultatif)', es: 'Descripción (opcional)' },
+  'community.tags_optional':  { ja: 'タグ（任意）', en: 'Tags (optional)', ko: '태그 (선택)', zh: '标签（可选）', th: 'แท็ก (ไม่บังคับ)', fr: 'Tags (facultatif)', es: 'Etiquetas (opcional)' },
+
+  // generic chrome
+  'chrome.close':             { ja: '閉じる', en: 'Close', ko: '닫기', zh: '关闭', th: 'ปิด', fr: 'Fermer', es: 'Cerrar' },
+  'chrome.confirm':           { ja: '確認', en: 'Confirm', ko: '확인', zh: '确认', th: 'ยืนยัน', fr: 'Confirmer', es: 'Confirmar' },
+  'chrome.next':              { ja: '次へ', en: 'Next', ko: '다음', zh: '下一步', th: 'ถัดไป', fr: 'Suivant', es: 'Siguiente' },
+  'chrome.skip':              { ja: 'あとで', en: 'Later', ko: '나중에', zh: '稍后', th: 'ภายหลัง', fr: 'Plus tard', es: 'Más tarde' },
+  'chrome.done':              { ja: '完了', en: 'Done', ko: '완료', zh: '完成', th: 'เสร็จ', fr: 'Terminé', es: 'Hecho' },
+
+  // common (additions)
+  'common.copy':              { ja: 'コピー', en: 'Copy', ko: '복사', zh: '复制', th: 'คัดลอก', fr: 'Copier', es: 'Copiar' },
+  'common.copied':            { ja: 'コピーしました', en: 'Copied', ko: '복사됨', zh: '已复制', th: 'คัดลอกแล้ว', fr: 'Copié', es: 'Copiado' },
+  'common.more':              { ja: 'もっと見る', en: 'See more', ko: '더 보기', zh: '查看更多', th: 'ดูเพิ่ม', fr: 'Voir plus', es: 'Ver más' },
+  'common.error':             { ja: 'エラーが発生しました', en: 'An error occurred', ko: '오류가 발생했습니다', zh: '发生错误', th: 'เกิดข้อผิดพลาด', fr: 'Une erreur s\'est produite', es: 'Ocurrió un error' },
+  'common.try_again':         { ja: 'もう一度お試しください', en: 'Please try again', ko: '다시 시도해주세요', zh: '请重试', th: 'กรุณาลองอีกครั้ง', fr: 'Veuillez réessayer', es: 'Por favor intenta de nuevo' },
 };
 
 export function t(key: keyof typeof STRINGS | string, lang: Lang, vars: Record<string, string | number> = {}): string {

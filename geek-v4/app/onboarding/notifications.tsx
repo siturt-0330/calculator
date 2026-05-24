@@ -9,6 +9,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useToastStore } from '../../stores/toastStore';
 import { supabase } from '../../lib/supabase';
+import { registerNativePushToken } from '../../lib/api/push';
 import { StepProgress } from './_progress';
 
 export default function NotificationsOnboarding() {
@@ -32,8 +33,18 @@ export default function NotificationsOnboarding() {
         try {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const Notifications = require('expo-notifications') as typeof import('expo-notifications');
-          await Notifications.requestPermissionsAsync();
-        } catch {}
+          const perm = await Notifications.requestPermissionsAsync();
+          // ★ Critical: permission granted な時だけ Expo Push Token を取得して
+          //   push_subscriptions に登録する。これがないと send-push Edge Function
+          //   は宛先を持てず、native ユーザーに通知が永遠に届かない。
+          //   失敗しても onboarding 自体は進める (token は後から取り直せる)。
+          if (perm.granted) {
+            const r = await registerNativePushToken();
+            if (!r.ok) console.warn('[onboarding] push token register failed:', r.error);
+          }
+        } catch (e) {
+          console.warn('[onboarding] notification setup error:', e);
+        }
       }
       updateSetting('notifyLike', allow);
       updateSetting('notifyComment', allow);

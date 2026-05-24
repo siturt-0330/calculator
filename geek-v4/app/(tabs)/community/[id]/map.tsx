@@ -6,7 +6,8 @@
 //   描けないため、リストの下に最初の地点だけ iframe で簡易表示)
 // - native: react-native-maps で markers を一括描画
 // ============================================================
-import { View, Text, ScrollView, Modal, TextInput, ActivityIndicator, Platform, Linking } from 'react-native';
+import { View, Text, ScrollView, Modal, TextInput, ActivityIndicator, Platform } from 'react-native';
+import { safeOpenUrl } from '../../../../lib/openUrl';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
@@ -57,7 +58,7 @@ function openInMaps(lat: number, lng: number, label: string) {
     ios: `https://maps.apple.com/?q=${q}&ll=${lat},${lng}`,
     default: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
   });
-  if (url) void Linking.openURL(url).catch(() => {});
+  if (url) void safeOpenUrl(url, { errorMessage: 'マップを開けませんでした' });
 }
 
 export default function MapScreen() {
@@ -238,7 +239,13 @@ export default function MapScreen() {
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
               <Text style={[T.h3, { color: C.text, flex: 1 }]}>スポットを追加</Text>
-              <PressableScale onPress={() => setModalOpen(false)} haptic="tap" style={{ padding: 6 }}>
+              <PressableScale
+                onPress={() => setModalOpen(false)}
+                haptic="tap"
+                hitSlop={12}
+                accessibilityLabel="閉じる"
+                style={{ padding: 6 }}
+              >
                 <Icon.close size={20} color={C.text2} strokeWidth={2.4} />
               </PressableScale>
             </View>

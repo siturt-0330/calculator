@@ -55,8 +55,8 @@ export default function PrivacyPolicyScreen() {
           Geek（以下「本サービス」）は、ユーザーのプライバシーを最優先に設計されています。
           匿名性の確保、最小限のデータ収集、ユーザー自身による管理を基本方針としています。
         </Text>
-        {SECTIONS.map((s, i) => (
-          <View key={i} style={{ gap: SP['2'] }}>
+        {SECTIONS.map((s) => (
+          <View key={s.title} style={{ gap: SP['2'] }}>
             <Text style={[T.h4, { color: C.text }]}>{s.title}</Text>
             <Text style={[T.body, { color: C.text2 }]}>{s.body}</Text>
           </View>

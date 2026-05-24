@@ -74,7 +74,7 @@ function parseQuery(search: string): Record<string, string> {
 export default function ResetPasswordScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const setUser = useAuthStore((s) => s.setUser);
 
   const [phase, setPhase] = useState<Phase>('loading');

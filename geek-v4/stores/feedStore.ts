@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { SortMode } from '../lib/api/posts';
+import { swallow } from '../lib/swallow';
 
 export type FeedScope = 'open' | 'closed'; // open=全部+ブロックで除外, closed=好きタグのみ
 
@@ -32,6 +33,6 @@ export const useFeedStore = create<FeedState>((set, get) => ({
         const parsed = JSON.parse(raw) as { sort?: SortMode; scope?: FeedScope };
         set({ sort: parsed.sort ?? 'for-you', scope: parsed.scope ?? 'open' });
       }
-    } catch {}
+    } catch (e) { swallow('store.feed.hydrate', e); }
   },
 }));

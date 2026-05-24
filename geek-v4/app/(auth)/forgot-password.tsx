@@ -39,7 +39,7 @@ export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const insets = useSafeAreaInsets();
   const MailIcon = Icon.at;
 

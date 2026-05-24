@@ -1,0 +1,73 @@
+# ============================================================
+# GEEK v4 — Netlify (Web) configuration
+# ============================================================
+# Expo Web (Metro export) を Netlify に配信する設定。
+# build env と環境変数 (EXPO_PUBLIC_*) は Site settings → Environment variables
+# に設定すること。.env はリポジトリに含まれない。
+# ============================================================
+
+[build]
+  publish = "dist"
+  command = "npm ci && npm run build:web"
+
+[build.environment]
+  NODE_VERSION = "20"
+  NPM_FLAGS = "--prefer-offline --no-audit"
+  # babel-plugin-transform-remove-console は dependencies 側に置いてあるので
+  # NODE_ENV=production でも install される。
+
+# ============================================================
+# SPA fallback: Expo Router の client-side routing に全 path を渡す
+# ============================================================
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# ============================================================
+# Cache strategy
+# ============================================================
+# ハッシュ付きの bundle / asset は immutable (1y)
+[[headers]]
+  for = "/_expo/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# HTML / Service Worker は常に re-validate して古い shell をユーザーに残さない
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+# ============================================================
+# Security headers — RN Web は inline style を多用するので CSP は外す。
+# 代わりに最低限のクラシックヘッダ + HSTS で対応。
+# ============================================================
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(self), microphone=(), geolocation=(self), interest-cohort=()"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"

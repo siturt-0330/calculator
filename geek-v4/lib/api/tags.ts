@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { withApiTimeout } from '../withApiTimeout';
 
 export type PostAddedTag = {
   id: string;
@@ -56,18 +57,28 @@ export async function fetchPostAddedTags(postId: string): Promise<PostAddedTag[]
 // 複数 post の added tags を一括取得 (フィード用)
 export async function fetchAddedTagsForPosts(postIds: string[]): Promise<Record<string, string[]>> {
   if (postIds.length === 0) return {};
-  const { data, error } = await supabase
-    .from('post_added_tags')
-    .select('post_id, tag_name, created_at')
-    .in('post_id', postIds)
-    .order('created_at', { ascending: true });
-  if (error) return {};
-  const map: Record<string, string[]> = {};
-  for (const r of (data ?? []) as Array<{ post_id: string; tag_name: string }>) {
-    const arr = map[r.post_id] ?? (map[r.post_id] = []);
-    if (!arr.includes(r.tag_name)) arr.push(r.tag_name);
+  // フィードの一部なので、network が詰まっても feed 全体を blocking しない
+  // 6 秒で諦めて空 map を返す (UI 側でタグ無しで表示 → 次回 refetch で復帰)
+  try {
+    const { data, error } = await withApiTimeout(
+      supabase
+        .from('post_added_tags')
+        .select('post_id, tag_name, created_at')
+        .in('post_id', postIds)
+        .order('created_at', { ascending: true }),
+      'tags.addedForPosts',
+      6000,
+    );
+    if (error) return {};
+    const map: Record<string, string[]> = {};
+    for (const r of (data ?? []) as Array<{ post_id: string; tag_name: string }>) {
+      const arr = map[r.post_id] ?? (map[r.post_id] = []);
+      if (!arr.includes(r.tag_name)) arr.push(r.tag_name);
+    }
+    return map;
+  } catch {
+    return {};
   }
-  return map;
 }
 
 export async function addPostTag(postId: string, tagName: string): Promise<void> {

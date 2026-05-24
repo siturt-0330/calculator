@@ -39,7 +39,7 @@ import { openCropper } from '../../../lib/imageCropper';
 export default function CreateCommunityScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   // ローカルでアップロード待ちの画像 (URI + blob)

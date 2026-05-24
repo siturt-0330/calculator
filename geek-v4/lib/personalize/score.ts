@@ -8,6 +8,7 @@
 
 import type { UserInterestProfile } from './profile';
 import { deepNormalize } from '../search/tokenize';
+import type { CooccurMap } from '../tagClustering/suggest';
 
 // 候補のタグを profile キーと突き合わせる前に deepNormalize する。
 // (events.logEvent でも同じ正規化を通しているので、両側が hiragana lowercase で揃う)
@@ -97,6 +98,54 @@ function trendingBonus(c: RankableCandidate, trending: Set<string>): number {
   return 0;
 }
 
+// ============================================================
+// relatedTagBonus — Phase 2 cross-algo signal
+// ============================================================
+//
+// 投稿の tag のうち、ユーザーの興味タグと「共起 (cooccur) 関係にある」 ものを
+// 検出し、小さな boost を与える。
+//
+// 目的: 「ユーザーが乃木坂46 を好きなら、欅坂46/日向坂46 が tag に付いてる
+// 投稿も少しだけ上に来る」 — 完全には合致してないが、cluster 的に近い投稿
+// を発見しやすくする。
+//
+// 設計:
+//   - interestNorm: 既に正規化済みのユーザー興味タグ集合 (likedTags ∪ 高 affinity)
+//   - cooccur: 全タグ間の共起マトリクス
+//   - 投稿の各 tag に対し:
+//       - cooccur[tag] の neighbors のうち、interest 集合に含まれるものを集計
+//       - そのときの cooccur count に応じて bonus
+//   - 直接マッチ (interestScore で既にカバー) のタグは除外して二重計上を防ぐ
+//   - cap = 4 (interest/quality 等より小さく抑える — 過剰な誘導を防ぐ)
+// ============================================================
+function relatedTagBonus(
+  c: RankableCandidate,
+  cooccur: CooccurMap | undefined,
+  interestNorm: ReadonlySet<string> | undefined,
+): number {
+  if (!cooccur || !interestNorm || interestNorm.size === 0) return 0;
+  if (c.tags.length === 0) return 0;
+  const postNorm = new Set(normTags(c.tags));
+  let bonus = 0;
+  for (const postTagRaw of c.tags) {
+    const neighbors = cooccur[postTagRaw];
+    if (!neighbors) continue;
+    for (const [neighborRaw, count] of Object.entries(neighbors)) {
+      if (count < 3) continue;
+      const nNorm = deepNormalize(neighborRaw);
+      if (!nNorm) continue;
+      // 投稿自身に同じタグが付いていれば直接 interest match で既にカウント済み
+      if (postNorm.has(nNorm)) continue;
+      if (interestNorm.has(nNorm)) {
+        // count 5 → 0.5, count 10 → 1.0 (cap)
+        bonus += Math.min(count / 10, 1);
+      }
+    }
+  }
+  // 最大 4 で cap — interest/quality 等よりは控えめに
+  return Math.min(bonus * 0.6, 4);
+}
+
 function topAffinityTag(
   c: RankableCandidate,
   profile: UserInterestProfile,
@@ -149,6 +198,9 @@ type ScoreCtx = {
   now: number;
   trendingTags: Set<string>;
   explorationBudget: number;
+  // Phase 2: cross-algo cluster signal (optional; rankFeed が無くても動く)
+  cooccur?: CooccurMap | undefined;
+  interestTagsNorm?: ReadonlySet<string> | undefined;
 };
 
 // ----------------------------------------------------------------
@@ -175,8 +227,10 @@ export function scoreCandidate(
   const q = quality(c);
   const novelty = c.is_seen ? -25 : 0;
   const trBonus = trendingBonus(c, ctx.trendingTags);
+  // Phase 2: cluster cooccur boost — interest と「近い」タグに小さく加点
+  const relatedBonus = relatedTagBonus(c, ctx.cooccur, ctx.interestTagsNorm);
 
-  const score = interest + session + fresh + q + novelty + trBonus;
+  const score = interest + session + fresh + q + novelty + trBonus + relatedBonus;
 
   // ----------------------------------------------------------------
   // Reason selection (priority order)
@@ -249,7 +303,14 @@ function dominantTag(c: RankableCandidate, profile: UserInterestProfile): string
 export function rankFeed(
   candidates: RankableCandidate[],
   profile: UserInterestProfile,
-  ctx: { now: number; trendingTags: Set<string>; targetCount: number },
+  ctx: {
+    now: number;
+    trendingTags: Set<string>;
+    targetCount: number;
+    // Phase 2: optional cooccur + interest set for cluster-aware boost
+    cooccur?: CooccurMap | undefined;
+    interestTagsNorm?: ReadonlySet<string> | undefined;
+  },
 ): ScoredCandidate[] {
   const targetCount = Math.max(0, Math.floor(ctx.targetCount));
   if (targetCount === 0 || candidates.length === 0) return [];
@@ -261,6 +322,8 @@ export function rankFeed(
     now: ctx.now,
     trendingTags: ctx.trendingTags,
     explorationBudget,
+    cooccur: ctx.cooccur,
+    interestTagsNorm: ctx.interestTagsNorm,
   };
 
   // Score all

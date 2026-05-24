@@ -45,8 +45,11 @@ export function checkRate(action: keyof typeof limits): RateLimitResult {
   if (!cfg) return { ok: true, remaining: Infinity, retryAfterMs: 0 };
   const now = Date.now();
   const cur = state.get(action) ?? { count: 0, windowStart: now };
-  if (now - cur.windowStart > cfg.windowMs) {
-    // 新しい window
+  // 端末時計が逆行 (NTP sync / 手動変更) しても rate limit が bypass されないよう
+  // elapsed の絶対値で判定。負値なら新 window としてリセット。
+  const elapsed = now - cur.windowStart;
+  if (elapsed < 0 || elapsed > cfg.windowMs) {
+    // clock skew or window expiry: 新 window 開始
     state.set(action, { count: 1, windowStart: now });
     return { ok: true, remaining: cfg.max - 1, retryAfterMs: 0 };
   }

@@ -12,6 +12,7 @@ import { PressableScale } from '../../components/ui/PressableScale';
 import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
+import { useT } from '../../hooks/useT';
 import { Icon } from '../../constants/icons';
 
 export default function LoginScreen() {
@@ -25,8 +26,10 @@ export default function LoginScreen() {
   const [needsConfirmBanner, setNeedsConfirmBanner] = useState(false);
   const [resending, setResending] = useState(false);
   const passwordRef = useRef<TextInput>(null);
-  const { signIn } = useAuthStore();
-  const { show } = useToastStore();
+  // selector 化: store 全体 subscribe → 必要な action のみ → 不要 re-render 削減
+  const signIn = useAuthStore((s) => s.signIn);
+  const show = useToastStore((s) => s.show);
+  const t = useT();
   const { online } = useNetworkStatus();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -88,7 +91,12 @@ export default function LoginScreen() {
       } else if (result.error.includes('network') || result.error.includes('Network') || result.error.includes('ネットワーク')) {
         show('ネットワークエラー。接続を確認してください。', 'error');
       } else {
-        show('ログインに失敗しました: ' + result.error, 'error');
+        // ★ 旧コードは raw `result.error` を UI に表示 → Supabase が返す未来の
+        // メッセージ次第で PII (email 等) が画面に出るリスクがあった。
+        // ユーザー向けは一般メッセージに固定し、詳細は console.warn でのみ残す
+        // (Sentry breadcrumb に乗る — beforeSend で redact 済み)。
+        console.warn('[login] unhandled signIn error:', result.error);
+        show('ログインに失敗しました。しばらくしてからもう一度お試しください。', 'error');
       }
       return;
     }
@@ -111,7 +119,9 @@ export default function LoginScreen() {
     try {
       const { error } = await supabase.auth.resend({ type: 'signup', email: e });
       if (error) {
-        show('再送信に失敗しました: ' + error.message, 'error');
+        // 旧: raw error.message を表示 → PII risk。ユーザー向け一般化、詳細は console。
+        console.warn('[login] resend confirmation failed:', error.message);
+        show('再送信に失敗しました。少し待ってからもう一度お試しください。', 'error');
       } else {
         show('確認メールを再送しました。受信箱を確認してください。', 'success');
       }
@@ -154,7 +164,7 @@ export default function LoginScreen() {
       >
         <View style={{ marginBottom: SP['6'] }}>
           <Text style={[T.display, { color: C.text, marginBottom: SP['2'], letterSpacing: -0.6 }]}>Geek</Text>
-          <Text style={[T.body, { color: C.text2 }]}>好きを、匿名で、安心して続ける。</Text>
+          <Text style={[T.body, { color: C.text2 }]}>{t('auth.tagline')}。</Text>
         </View>
 
         {/* ログイン失敗バナー */}
@@ -180,14 +190,14 @@ export default function LoginScreen() {
                 haptic="tap"
                 style={{ flex: 1, padding: SP['2'], borderRadius: R.md, borderWidth: 1, borderColor: C.border, alignItems: 'center' }}
               >
-                <Text style={[T.smallM, { color: C.text }]}>パスワード再設定</Text>
+                <Text style={[T.smallM, { color: C.text }]}>{t('auth.reset_password')}</Text>
               </PressableScale>
               <PressableScale
                 onPress={goToSignup}
                 haptic="confirm"
                 style={{ flex: 1, padding: SP['2'], borderRadius: R.md, backgroundColor: C.accent, alignItems: 'center' }}
               >
-                <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>新規登録</Text>
+                <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>{t('auth.signup')}</Text>
               </PressableScale>
             </View>
           </View>

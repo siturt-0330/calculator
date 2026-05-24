@@ -133,6 +133,78 @@ export async function getMyPushSubscriptions(): Promise<StoredPushSubscription[]
 export const VAPID_PUBLIC_KEY: string = process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY ?? '';
 export const isVapidConfigured = (): boolean => VAPID_PUBLIC_KEY.length > 0;
 
+// ============================================================
+// Native (iOS / Android) push token registration
+// ============================================================
+// 旧版は app/onboarding/notifications.tsx で `requestPermissionsAsync()` を
+// 呼ぶだけで token を取得・保存していなかった。結果として:
+//   - permission は granted されるが
+//   - push_subscriptions テーブルに native row が一切作られず
+//   - send-push Edge Function (Expo Push API 経由) が宛先を持てない
+// → native ユーザーには通知が永遠に届かないバグ。
+//
+// この関数を onboarding と settings/notifications から呼ぶことで:
+//   1. Notifications.getExpoPushTokenAsync() で ExponentPushToken[...] 取得
+//   2. push_subscriptions に platform='ios'/'android', endpoint=token として upsert
+//      (p256dh / auth_key は Web Push 用の NOT NULL カラムなので空文字を入れる)
+//
+// 将来的に migration で p256dh / auth_key を NULL 可にして、あるいは
+// expo_push_token カラムを別に切ると schema が綺麗になる。今は schema 互換のみ
+// 守って quick fix。
+// ============================================================
+export async function registerNativePushToken(): Promise<{ ok: boolean; error?: string }> {
+  // Platform は呼び出し側 (RN only) で限定する想定だが安全のためここでもガード。
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Platform } = require('react-native') as typeof import('react-native');
+  if (Platform.OS === 'web') return { ok: false, error: 'web は別経路 (pushSubscribe) を使う' };
+
+  // expo-notifications を lazy require: web bundle に native 専用モジュール
+  // を含めないため (lib/api/account.ts と同じパターン)。
+  let Notifications: typeof import('expo-notifications');
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    Notifications = require('expo-notifications') as typeof import('expo-notifications');
+  } catch (e) {
+    return { ok: false, error: `expo-notifications load failed: ${String(e)}` };
+  }
+
+  // EAS Build / production では projectId が必要。getExpoPushTokenAsync 内部で
+  // Constants.expoConfig.extra.eas.projectId が読まれる。
+  let tokenResp: { data: string } | null = null;
+  try {
+    tokenResp = await Notifications.getExpoPushTokenAsync();
+  } catch (e) {
+    return { ok: false, error: `getExpoPushTokenAsync failed: ${String(e)}` };
+  }
+  const token = tokenResp?.data;
+  if (!token) return { ok: false, error: 'push token が空でした' };
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: 'ログインが必要です' };
+
+  const platform: 'ios' | 'android' = Platform.OS === 'ios' ? 'ios' : 'android';
+  const { error } = await supabase
+    .from('push_subscriptions')
+    .upsert(
+      {
+        user_id: user.id,
+        endpoint: token,
+        // Web Push 用 NOT NULL カラム互換 — native では使用しないので空文字を埋める
+        p256dh: '',
+        auth_key: '',
+        user_agent: `expo-${platform}`,
+        platform,
+      },
+      { onConflict: 'user_id,endpoint' },
+    );
+
+  if (error) {
+    console.warn('[push] native register failed:', error.message);
+    return { ok: false, error: error.message };
+  }
+  return { ok: true };
+}
+
 // base64url → Uint8Array (PushManager.subscribe の applicationServerKey に必要)
 export function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);

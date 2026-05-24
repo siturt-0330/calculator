@@ -1,4 +1,5 @@
 import { ENV } from './env';
+import Constants from 'expo-constants';
 
 // Sensitive substrings — error message に出てきたら redact する
 const SENSITIVE_PATTERNS: RegExp[] = [
@@ -41,9 +42,19 @@ export function initSentry() {
     // ErrorBoundary / resilient breadcrumb は globalThis.Sentry を遅延参照する
     // ので init 完了後に晒しておく (lib/resilient.ts, components/ui/ErrorBoundary.tsx)
     (globalThis as { Sentry?: typeof Sentry }).Sentry = Sentry;
+    // release / dist タグを付けると Sentry の Releases / Source Maps が
+    // version 別に分類される。EAS Build / Web build どちらでも
+    // app.json の version + buildNumber を読む。
+    const appVersion = (Constants.expoConfig?.version ?? '0.0.0') as string;
+    const buildNumber =
+      (Constants.expoConfig?.ios?.buildNumber as string | undefined) ??
+      (Constants.expoConfig?.android?.versionCode as number | undefined)?.toString() ??
+      '0';
     Sentry.init({
       dsn: ENV.SENTRY_DSN,
       environment: ENV.IS_DEV ? 'development' : 'production',
+      release: `geek-v4@${appVersion}`,
+      dist: buildNumber,
       // PII / token を Sentry に流出させないよう sample rate を絞る + scrub
       tracesSampleRate: 0.05,
       sendDefaultPii: false,
@@ -103,5 +114,35 @@ export function initSentry() {
     });
   } catch {
     // Sentry 未インストールでも本体が止まらないように
+  }
+}
+
+// ============================================================
+// User context helpers
+// ============================================================
+// auth state が変化したとき呼び出して Sentry の error / breadcrumb に user.id を
+// 紐付ける。**email / nickname など PII は絶対に渡さない**。
+// Sentry が初期化されていない場合 (DSN 未設定 / __DEV__) は noop。
+// ============================================================
+type SentryLike = {
+  setUser?: (u: { id: string } | null) => void;
+};
+function getSentry(): SentryLike | undefined {
+  return (globalThis as { Sentry?: SentryLike }).Sentry;
+}
+
+export function setSentryUser(userId: string): void {
+  try {
+    getSentry()?.setUser?.({ id: userId });
+  } catch {
+    /* swallow */
+  }
+}
+
+export function clearSentryUser(): void {
+  try {
+    getSentry()?.setUser?.(null);
+  } catch {
+    /* swallow */
   }
 }

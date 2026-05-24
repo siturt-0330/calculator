@@ -1,0 +1,48 @@
+{
+  "name": "GEEK — 推し活の匿名 SNS",
+  "short_name": "GEEK",
+  "description": "推し活・オタク文化のための完全匿名型 SNS。タグでつながる、構造的に安全なコミュニティ。",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "lang": "ja",
+  "dir": "ltr",
+  "categories": ["social", "lifestyle", "entertainment"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "投稿する",
+      "short_name": "投稿",
+      "url": "/post/create",
+      "description": "新しい投稿を作成"
+    },
+    {
+      "name": "通知",
+      "short_name": "通知",
+      "url": "/notifications",
+      "description": "通知一覧を開く"
+    }
+  ]
+}

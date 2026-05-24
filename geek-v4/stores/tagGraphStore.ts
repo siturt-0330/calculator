@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { swallow } from '../lib/swallow';
 
 // タグツリー(ロジックツリー / マインドマップ風)
 // - 各ノードは「タグ or グループ」両方を表す（区別なし）
@@ -132,7 +133,7 @@ function uid() {
 async function save(snapshot: { nodes: Record<string, TagNode>; rootIds: string[] }) {
   try {
     await AsyncStorage.setItem(KEY, JSON.stringify(snapshot));
-  } catch {}
+  } catch (e) { swallow('store.tagGraph.save', e); }
 }
 
 // パフォーマンス監査: 旧版は 3+ 画面 (onboarding/liked-tags, blocked-tags, settings)
@@ -157,7 +158,7 @@ async function _loadOnce() {
         }
         return { nodes, rootIds: data.rootIds ?? [] };
       }
-    } catch {}
+    } catch (e) { swallow('store.tagGraph.load', e); }
     return { nodes: {}, rootIds: [] };
   })();
   return _hydratePromise;

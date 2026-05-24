@@ -1,17 +1,49 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { attachChannel } from '../lib/realtime';
-import { fetchReactionsForPosts, toggleReaction, type ReactionsByPost } from '../lib/api/reactions';
+import { fetchReactionsForPosts, toggleReaction, type ReactionAgg, type ReactionsByPost } from '../lib/api/reactions';
 import { useToastStore } from '../stores/toastStore';
 import { stableKeyFor } from '../lib/utils/queryKey';
+import {
+  FEED_PAGE_KEY,
+  patchFeedPagePost,
+  snapshotFeedPage,
+  revertFeedPageSnapshot,
+  invalidateFeedPage,
+} from '../lib/cacheUpdates/feedPagePatcher';
+import type { FeedPagePost } from '../lib/api/feedPage';
 
 const KEY_PREFIX = 'reactions';
+
+// 1 つの reactions リストに対して 1 toggle を適用する純関数。
+// chip の visual と server 双方が同じ deterministic な遷移をする。
+function applyToggle(list: ReactionAgg[], meme: string): ReactionAgg[] {
+  const next = list.slice();
+  const idx = next.findIndex((r) => r.meme === meme);
+  const cur = idx >= 0 ? next[idx] : undefined;
+  if (cur) {
+    if (cur.mine) {
+      const newCount = cur.count - 1;
+      if (newCount <= 0) next.splice(idx, 1);
+      else next[idx] = { meme: cur.meme, count: newCount, mine: false };
+    } else {
+      next[idx] = { meme: cur.meme, count: cur.count + 1, mine: true };
+    }
+  } else {
+    next.push({ meme, count: 1, mine: true });
+  }
+  next.sort((a, b) => b.count - a.count);
+  return next;
+}
 
 function keyForIds(postIds: string[]) {
   return [KEY_PREFIX, stableKeyFor(postIds.slice().sort())];
 }
 
-// 投稿IDの集合に対するリアクション一括取得 + Realtime 反映
+// 投稿IDの集合に対するリアクション一括取得 + Realtime 反映 (legacy 経路)
+// ※ 本番では useFeedPage (RPC) が reactions を担う。
+//   useReactions は RPC fallback 時のみ使われる。realtime subscription は
+//   useFeedRealtime.ts (常時起動) が主担当。
 export function useReactions(postIds: string[]) {
   const qc = useQueryClient();
   const sortedIds = postIds.slice().sort();
@@ -60,17 +92,23 @@ export function useReactions(postIds: string[]) {
 // ============================================================
 // useReactionToggle — 楽観 toggle + snapshot/revert + smart-queue
 // ============================================================
-// 改訂理由:
-//   1. 連打 (同一 postId+meme への連続 tap) で server-side toggle が
+// 改訂理由 (リアルタイム反映バグ対応):
+//   1. 旧版は legacy reactions cache (['reactions']) と feed-page cache
+//      (['feed-page', userId, sortedKey]) の両方を inline で更新していた。
+//      共通 helper (patchFeedPagePost) に集約することで保守と動作の一貫性を確保。
+//   2. **await cancelQueries を復活**。
+//      旧版は fire-and-forget で「体感速度優先」だったが、in-flight refetch
+//      (フォーカス時 / mount 時) が optimistic 適用直後に v0 で cache を
+//      上書きするレース条件で「クリックしても反映されない」現象を発生させていた。
+//      ms オーダーの遅延で UX への影響は軽微、対して正しさへの寄与は決定的。
+//   3. onError 時に両 cache を snapshot で revert。
+//   4. 連打 (同一 postId+meme への連続 tap) で server-side toggle が
 //      DELETE×2 と並走し use_count が二重消費される critical bug を防ぐ
 //      → pending counter で in-flight 中の追加 tap をカウントだけして、settle 時に
 //        余剰タップ数の parity を見て net toggle を再 dispatch する smart-queue 方式。
 //        単純 drop だと MemeReactionPicker の XOR 楽観表示 (localFlips) と
 //        server-side state が乖離するので、最終的に server が user の visual 意図に
 //        追いつくようにする (N 連打 → ceil(N/2) 回 dispatch で最終状態が parity に整う)。
-//   2. onError 時に snapshot を戻す revert を入れることで「失敗したのに
-//      画面では押されたまま残る」現象を排除。
-//   3. useCommunityStampReactionToggle と同じ snapshot/revert パターンに統一。
 // ============================================================
 export function useReactionToggle() {
   const qc = useQueryClient();
@@ -79,49 +117,57 @@ export function useReactionToggle() {
   const pending = useRef<Map<string, number>>(new Map());
 
   type Vars = { postId: string; meme: string };
-  type Snapshot = Array<[readonly unknown[], ReactionsByPost | undefined]>;
+  type Snapshot = {
+    reactions: Array<[readonly unknown[], ReactionsByPost | undefined]>;
+    feedPage: Array<[readonly unknown[], FeedPagePost[] | undefined]>;
+  };
 
   const mutation = useMutation<boolean, Error, Vars, { snapshot: Snapshot }>({
     mutationFn: ({ postId, meme }) => toggleReaction(postId, meme),
     onMutate: async ({ postId, meme }) => {
-      await qc.cancelQueries({ queryKey: [KEY_PREFIX] });
-      // snapshot は setQueriesData の前 (= mutation 適用前の真の値) で取る
-      const snapshot: Snapshot = qc.getQueriesData<ReactionsByPost | undefined>({
+      // ★ await を復活: in-flight refetch のキャンセル完了を待ってから
+      //   optimistic を書き込む。これをしないと refetch のレスポンスが
+      //   optimistic 値を上書きして「クリックしても反映されない」現象になる。
+      await Promise.all([
+        qc.cancelQueries({ queryKey: [KEY_PREFIX] }).catch(() => {}),
+        qc.cancelQueries({ queryKey: [FEED_PAGE_KEY] }).catch(() => {}),
+      ]);
+
+      // snapshot は patch 前 (= mutation 適用前の真の値) で取る
+      const snapshot: Snapshot = {
+        reactions: qc.getQueriesData<ReactionsByPost | undefined>({
+          queryKey: [KEY_PREFIX],
+        }) as Snapshot['reactions'],
+        feedPage: snapshotFeedPage(qc),
+      };
+
+      // 1) legacy reactions cache (旧 useReactions 経路の fallback 用)
+      const legacyEntries = qc.getQueriesData<ReactionsByPost | undefined>({
         queryKey: [KEY_PREFIX],
-      }) as Snapshot;
-      qc.setQueriesData<ReactionsByPost | undefined>(
-        { queryKey: [KEY_PREFIX] },
-        (old) => {
-          if (!old) return old;
-          if (!(postId in old)) return old;
-          const next = { ...old };
-          const list = (next[postId] ?? []).slice();
-          const idx = list.findIndex((r) => r.meme === meme);
-          const cur = idx >= 0 ? list[idx] : undefined;
-          if (cur) {
-            if (cur.mine) {
-              const newCount = cur.count - 1;
-              if (newCount <= 0) list.splice(idx, 1);
-              else list[idx] = { meme: cur.meme, count: newCount, mine: false };
-            } else {
-              list[idx] = { meme: cur.meme, count: cur.count + 1, mine: true };
-            }
-          } else {
-            list.push({ meme, count: 1, mine: true });
-          }
-          list.sort((a, b) => b.count - a.count);
-          next[postId] = list;
-          return next;
-        },
-      );
+      });
+      for (const [exactKey, old] of legacyEntries) {
+        if (!old || !(postId in old)) continue;
+        const next: ReactionsByPost = { ...old, [postId]: applyToggle(old[postId] ?? [], meme) };
+        qc.setQueryData(exactKey, next);
+      }
+
+      // 2) ★ feed-page RPC cache (本番 feed の主要表示元)
+      //    helper 経由で exact-key 書き戻し。
+      patchFeedPagePost(qc, postId, (p) => ({
+        ...p,
+        reactions: applyToggle(p.reactions ?? [], meme),
+      }));
+
       return { snapshot };
     },
     onError: (e, _vars, ctx) => {
-      // 楽観更新を snapshot で revert
+      // 楽観更新を snapshot で revert (両 cache とも)
       if (ctx?.snapshot) {
-        for (const [key, data] of ctx.snapshot) qc.setQueryData(key, data);
+        for (const [key, data] of ctx.snapshot.reactions) qc.setQueryData(key, data);
+        revertFeedPageSnapshot(qc, ctx.snapshot.feedPage);
       }
       qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
+      invalidateFeedPage(qc);
       const msg = e instanceof Error ? e.message : '';
       useToastStore.getState().show(
         msg ? `リアクションに失敗しました: ${msg}` : 'リアクションに失敗しました',
@@ -129,8 +175,10 @@ export function useReactionToggle() {
       );
     },
     onSettled: () => {
-      // realtime invalidate との二重反映を server-truth で整合
-      qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
+      // realtime invalidate との二重反映を server-truth で整合 (両 cache とも)
+      // refetchType: 'active' を明示 — staleTime>0 の query でも mount 中なら確実 refetch
+      qc.invalidateQueries({ queryKey: [KEY_PREFIX], refetchType: 'active' });
+      invalidateFeedPage(qc);
     },
   });
 

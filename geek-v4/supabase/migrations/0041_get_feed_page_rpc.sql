@@ -129,6 +129,13 @@ begin
         p.content,
         p.media_urls,
         p.media_blurhashes,
+        -- 動画 (migration 0043 で追加)。
+        -- 注: plpgsql の create 時 column 存在チェックは無く、関数初回呼出時の
+        -- runtime に解決される。本 migration は 0043 より前に走るが、
+        -- アプリ起動時には全 migration が apply 済み → column が存在する想定。
+        p.video_urls,
+        p.video_durations,
+        p.video_posters,
         p.tag_names,
         p.likes_count,
         p.comments_count,
@@ -312,6 +319,9 @@ begin
                      'content',             pr.content,
                      'media_urls',          pr.media_urls,
                      'media_blurhashes',    pr.media_blurhashes,
+                     'video_urls',          pr.video_urls,
+                     'video_durations',     pr.video_durations,
+                     'video_posters',       pr.video_posters,
                      'tag_names',           pr.tag_names,
                      'likes_count',         pr.likes_count,
                      'comments_count',      pr.comments_count,

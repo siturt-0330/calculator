@@ -30,7 +30,14 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# local env files — .env はクライアント側にも EXPO_PUBLIC_* で同梱されるが
+# Sentry DSN / PostHog key / 将来のサーバー側秘密 (ANTHROPIC_API_KEY 等) を
+# git に固定するのは leak の起点になるため、.env 本体は untracked にする。
+# 値の管理は EAS Secrets (`eas secret:*`) / Netlify env (Site settings → env vars)
+# / Supabase secrets (`supabase secrets set`) で行う。docs/DEPLOY.md を参照。
+.env
+.env.local
+.env.*.local
 .env*.local
 
 # typescript

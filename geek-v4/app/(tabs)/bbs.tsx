@@ -4,7 +4,7 @@ import { FlashList, type ListRenderItem } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
-import { useBBS } from '../../hooks/useBBS';
+import { useBBS, useMyCommunityBBS } from '../../hooks/useBBS';
 import type { BBSThread } from '../../types/models';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -21,10 +21,13 @@ import { deepNormalize } from '../../lib/search/tokenize';
 import { findClosestK } from '../../lib/search/typoCorrect';
 import { textRelevance } from '../../lib/utils/searchAlgo';
 import { useSearchClickStore } from '../../stores/searchClickStore';
+import { useT } from '../../hooks/useT';
 import { logEvent } from '../../lib/personalize';
 import { supabase } from '../../lib/supabase';
 
-type SortMode = 'recent' | 'popular' | 'relevance';
+type SortMode = 'recent' | 'popular';
+// 掲示板タブのスコープ — LINE のトーク/友だち と同じ感覚で 2 択切替
+type Scope = 'community' | 'all';
 
 const CATEGORIES = ['すべて', '雑談', 'アニメ', 'ゲーム', 'マンガ', '音楽', 'アイドル', 'Vtuber', '推し活', 'グルメ', 'コスプレ', 'ニュース'];
 
@@ -39,7 +42,28 @@ export default function BBSScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const { threads, loading, refreshing, refresh } = useBBS();
+  // 「すべて」スコープ用 — 全 public スレッド
+  const allBbs = useBBS();
+  // 「コミュニティ」スコープ用 — 自分の参加コミュ横断
+  const myBbs = useMyCommunityBBS();
+
+  // scope: ユーザーが明示的に切り替えるまでは「動的 default」=
+  //   参加コミュあり → 'community' / なし → 'all'
+  // 切替後は scopeRaw に固定される (ユーザーの意思を尊重)
+  const [scopeRaw, setScopeRaw] = useState<Scope | null>(null);
+  // myBbs の loading が終わるまでは表示しない (initial flash 防止)
+  const effectiveScope: Scope =
+    scopeRaw ?? (myBbs.loading ? 'community' : myBbs.hasJoinedCommunities ? 'community' : 'all');
+
+  const setScope = (s: Scope) => setScopeRaw(s);
+  const scopedSource = effectiveScope === 'community' ? myBbs : allBbs;
+  const threads = scopedSource.threads;
+  const loading = scopedSource.loading;
+  const refreshing = scopedSource.refreshing;
+  const refresh = scopedSource.refresh;
+
+  // 既存 file 内に local 変数 `t` (setTimeout / loop param) があるので tr に rename
+  const tr = useT();
 
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -159,15 +183,17 @@ export default function BBSScreen() {
       if (ctrBoost > 0) score += Math.min(100, ctrBoost * 15);
       return { item: t, score };
     });
-    if (sort === 'recent') {
+    // sort は recent / popular の 2 択
+    // (旧「関連度」はユーザーフィードバックで撤去 — score 計算は検索ヒット
+    //  時の絞り込みに使われているので score 自体は残してある)
+    if (sort === 'popular') {
+      scored.sort((a, b) => b.item.replies_count - a.item.replies_count);
+    } else {
+      // default: recent — 最終返信時刻が新しい順 (返信ゼロは作成時刻に fallback)
       scored.sort((a, b) =>
         new Date(b.item.last_reply_at ?? b.item.created_at).getTime() -
         new Date(a.item.last_reply_at ?? a.item.created_at).getTime(),
       );
-    } else if (sort === 'popular') {
-      scored.sort((a, b) => b.item.replies_count - a.item.replies_count);
-    } else {
-      scored.sort((a, b) => b.score - a.score);
     }
     return scored;
   }, [threadDocs, debounced, variants, normalizedVariants, normalizedExcludes, category, sort, ctrBoosts]);
@@ -194,13 +220,44 @@ export default function BBSScreen() {
       {/* ヘッダー (中央寄せ) */}
       <View style={{ alignItems: 'center', backgroundColor: C.bg, paddingTop: insets.top }}>
         <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'] }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: SP['3'], paddingBottom: SP['2'] }}>
-            <Text style={{ fontFamily: FONT.display, fontSize: 28, color: C.text, letterSpacing: -0.5, flex: 1 }}>
-              掲示板
-            </Text>
+          {/* LINE のトーク/友だち と同じ感覚の scope トグル
+              アクティブ側だけ filled pill (C.text 背景に C.bg テキスト)、
+              非アクティブは plain text。タップで切替。アイコン無し、シンプル。 */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: SP['3'], paddingBottom: SP['2'], gap: SP['1'] }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'], flex: 1 }}>
+              {([
+                { v: 'community' as const, label: 'コミュニティ' },
+                { v: 'all'       as const, label: 'すべて' },
+              ]).map((m) => {
+                const active = effectiveScope === m.v;
+                return (
+                  <PressableScale
+                    key={m.v}
+                    onPress={() => setScope(m.v)}
+                    haptic="select"
+                    hitSlop={6}
+                    accessibilityLabel={`${m.label}${active ? ' (選択中)' : ''}`}
+                    style={{
+                      paddingHorizontal: SP['3'], paddingVertical: 7,
+                      backgroundColor: active ? C.text : 'transparent',
+                      borderRadius: R.full,
+                    }}
+                  >
+                    <Text style={{
+                      fontFamily: FONT.display, fontSize: 18, letterSpacing: -0.3,
+                      color: active ? C.bg : C.text2,
+                      fontWeight: active ? '800' : '600',
+                    }}>
+                      {m.label}
+                    </Text>
+                  </PressableScale>
+                );
+              })}
+            </View>
             <PressableScale
               onPress={() => router.push('/bbs/create' as never)}
               haptic="confirm"
+              accessibilityLabel="新しいスレッドを作成"
               style={{
                 flexDirection: 'row', alignItems: 'center', gap: 4,
                 paddingHorizontal: SP['3'], paddingVertical: SP['2'],
@@ -210,7 +267,7 @@ export default function BBSScreen() {
               }}
             >
               <Icon.plus size={16} color="#fff" strokeWidth={2.6} />
-              <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>スレ立て</Text>
+              <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>{tr('bbs.create_thread')}</Text>
             </PressableScale>
           </View>
 
@@ -227,7 +284,7 @@ export default function BBSScreen() {
             <TextInput
               value={search}
               onChangeText={setSearch}
-              placeholder="スレッドを検索"
+              placeholder={tr('bbs.search_placeholder')}
               placeholderTextColor={C.text3}
               keyboardAppearance="dark"
               selectionColor={C.accent}
@@ -252,79 +309,85 @@ export default function BBSScreen() {
           </View>
         </View>
 
-        {/* カテゴリ (横スクロール) */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          // keyboard が出てる時にカテゴリをタップしてもまず select し、必要なら閉じる。
-          // ('handled': 子の onPress が処理した時のみ keyboard を閉じる)
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{
-            gap: 6, paddingHorizontal: SP['4'], paddingBottom: SP['2'],
-          }}
-          style={{ width: '100%' }}>
-          {CATEGORIES.map((cat) => {
-            const active = category === cat;
-            const color = cat === 'すべて' ? C.accent : (CATEGORY_COLORS[cat] ?? C.accent);
-            return (
-              <PressableScale
-                key={cat}
-                onPress={() => setCategory(cat)}
-                haptic="select"
-                hitSlop={6}
-                accessibilityLabel={`カテゴリ ${cat}${active ? ' (選択中)' : ''}`}
-                style={{
-                  paddingHorizontal: SP['3'], paddingVertical: 6,
-                  backgroundColor: active ? color : C.bg2,
-                  borderRadius: R.full,
-                  borderWidth: 1, borderColor: active ? color : C.border,
-                }}
-              >
-                <Text style={[T.caption, { color: active ? '#fff' : C.text2, fontWeight: '700' }]}>
-                  {cat}
-                </Text>
-              </PressableScale>
-            );
-          })}
-        </ScrollView>
+        {/* カテゴリチップ + ソート行はコミュニティタブでは出さない
+            ユーザーリクエスト: 「コミュニティの方ではなくしてほしい」
+            状態 (category / sort) は保持するので、すべてに戻ったら復活する。 */}
+        {effectiveScope === 'all' && (
+          <>
+            {/* カテゴリ (横スクロール) */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              // keyboard が出てる時にカテゴリをタップしてもまず select し、必要なら閉じる。
+              // ('handled': 子の onPress が処理した時のみ keyboard を閉じる)
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{
+                gap: 6, paddingHorizontal: SP['4'], paddingBottom: SP['2'],
+              }}
+              style={{ width: '100%' }}>
+              {CATEGORIES.map((cat) => {
+                const active = category === cat;
+                const color = cat === 'すべて' ? C.accent : (CATEGORY_COLORS[cat] ?? C.accent);
+                return (
+                  <PressableScale
+                    key={cat}
+                    onPress={() => setCategory(cat)}
+                    haptic="select"
+                    hitSlop={6}
+                    accessibilityLabel={`カテゴリ ${cat}${active ? ' (選択中)' : ''}`}
+                    style={{
+                      paddingHorizontal: SP['3'], paddingVertical: 6,
+                      backgroundColor: active ? color : C.bg2,
+                      borderRadius: R.full,
+                      borderWidth: 1, borderColor: active ? color : C.border,
+                    }}
+                  >
+                    <Text style={[T.caption, { color: active ? '#fff' : C.text2, fontWeight: '700' }]}>
+                      {cat}
+                    </Text>
+                  </PressableScale>
+                );
+              })}
+            </ScrollView>
 
-        {/* ソート + 件数 */}
-        <View style={{
-          width: '100%', maxWidth: containerMaxWidth,
-          paddingHorizontal: SP['4'], paddingBottom: SP['3'],
-          flexDirection: 'row', gap: 6, alignItems: 'center',
-        }}>
-          {([
-            { v: 'recent',    label: '新着',    emoji: '🕐' },
-            { v: 'popular',   label: '人気',    emoji: '🔥' },
-            { v: 'relevance', label: '関連度', emoji: '🎯' },
-          ] as const).map((s) => {
-            const active = sort === s.v;
-            return (
-              <PressableScale
-                key={s.v}
-                onPress={() => setSort(s.v)}
-                haptic="tap"
-                hitSlop={10}
-                accessibilityLabel={`並び替え ${s.label}${active ? ' (選択中)' : ''}`}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 3,
-                  paddingHorizontal: 8, paddingVertical: 4,
-                  backgroundColor: active ? C.accentBg : 'transparent',
-                  borderRadius: R.full,
-                  borderWidth: 1, borderColor: active ? C.accent : C.border,
-                }}
-              >
-                <Text style={{ fontSize: 10 }}>{s.emoji}</Text>
-                <Text style={[T.caption, { color: active ? C.accentLight : C.text2, fontWeight: '600' }]}>
-                  {s.label}
-                </Text>
-              </PressableScale>
-            );
-          })}
-          <View style={{ flex: 1 }} />
-          <Text style={[T.caption, { color: C.text3 }]}>{filtered.length.toLocaleString('ja-JP')}件</Text>
-        </View>
+            {/* ソート + 件数 */}
+            <View style={{
+              width: '100%', maxWidth: containerMaxWidth,
+              paddingHorizontal: SP['4'], paddingBottom: SP['3'],
+              flexDirection: 'row', gap: 6, alignItems: 'center',
+            }}>
+              {([
+                { v: 'recent',  label: '新着', emoji: '🕐' },
+                { v: 'popular', label: '人気', emoji: '🔥' },
+              ] as const).map((s) => {
+                const active = sort === s.v;
+                return (
+                  <PressableScale
+                    key={s.v}
+                    onPress={() => setSort(s.v)}
+                    haptic="tap"
+                    hitSlop={10}
+                    accessibilityLabel={`並び替え ${s.label}${active ? ' (選択中)' : ''}`}
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 3,
+                      paddingHorizontal: 8, paddingVertical: 4,
+                      backgroundColor: active ? C.accentBg : 'transparent',
+                      borderRadius: R.full,
+                      borderWidth: 1, borderColor: active ? C.accent : C.border,
+                    }}
+                  >
+                    <Text style={{ fontSize: 10 }}>{s.emoji}</Text>
+                    <Text style={[T.caption, { color: active ? C.accentLight : C.text2, fontWeight: '600' }]}>
+                      {s.label}
+                    </Text>
+                  </PressableScale>
+                );
+              })}
+              <View style={{ flex: 1 }} />
+              <Text style={[T.caption, { color: C.text3 }]}>{filtered.length.toLocaleString('ja-JP')}件</Text>
+            </View>
+          </>
+        )}
       </View>
 
       {/* ヘッダー / リスト境界の hairline — 他タブ画面 (community, mypage) と統一 */}
@@ -476,7 +539,7 @@ export default function BBSScreen() {
         ListEmptyComponent={
           loading ? (
             <View>
-              {Array.from({ length: 5 }).map((_, i) => <ThreadCardSkeleton key={i} />)}
+              {Array.from({ length: 5 }).map((_, i) => <ThreadCardSkeleton key={`skel-thread-${i}`} />)}
             </View>
           ) : (
             <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'], paddingTop: SP['4'] }}>
@@ -528,6 +591,29 @@ export default function BBSScreen() {
                     </Text>
                   </PressableScale>
                 </View>
+              ) : effectiveScope === 'community' && !myBbs.hasJoinedCommunities ? (
+                // コミュニティスコープで参加コミュ 0 件 → コミュニティ参加への導線
+                <>
+                  <View style={{
+                    marginBottom: SP['4'],
+                    padding: SP['4'], backgroundColor: C.accentBg,
+                    borderRadius: R.lg, borderWidth: 1, borderColor: C.accentSoft,
+                    gap: SP['1'],
+                  }}>
+                    <Text style={[T.smallM, { color: C.accentLight }]}>💬 コミュニティ掲示板</Text>
+                    <Text style={[T.small, { color: C.text2 }]}>
+                      コミュニティに参加すると、そのコミュニティの掲示板がここに集まります。
+                    </Text>
+                  </View>
+                  <EmptyState
+                    icon={Icon.community}
+                    title="まずコミュニティに参加しよう"
+                    message="興味のあるコミュニティを探して、議論に参加してみよう"
+                    actionLabel="コミュニティを探す"
+                    onAction={() => router.push('/(tabs)/community/discover' as never)}
+                    tone="accent"
+                  />
+                </>
               ) : (
                 <>
                   <View style={{
@@ -543,8 +629,8 @@ export default function BBSScreen() {
                   </View>
                   <EmptyState
                     icon={Icon.bbs}
-                    title="まだスレッドがありません"
-                    message="最初のスレッドを立ててみよう"
+                    title={effectiveScope === 'community' ? '参加コミュにまだスレッドがありません' : 'まだスレッドがありません'}
+                    message={effectiveScope === 'community' ? '最初の 1 本を立てて議論を始めよう' : '最初のスレッドを立ててみよう'}
                     actionLabel="スレ立てする"
                     onAction={() => router.push('/bbs/create' as never)}
                     tone="accent"

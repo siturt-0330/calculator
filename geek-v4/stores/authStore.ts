@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import type { User } from '@supabase/supabase-js';
 import { detachAllChannels } from '../lib/realtime';
 import { setUnauthorizedHandler } from '../lib/resilient';
+import { swallow } from '../lib/swallow';
 import { getBool, setBool, remove as storageRemove, contains as storageContains } from '../lib/storage';
 import { useOfflineQueueStore } from './offlineQueueStore';
 
@@ -211,7 +212,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         const expiresAt = data?.session?.expires_at;
         if (expiresAt && expiresAt * 1000 < Date.now()) {
           console.warn('[authStore] hydrate: token expired, forcing signOut');
-          try { await supabase.auth.signOut(); } catch {}
+          try { await supabase.auth.signOut(); } catch (e) { swallow('auth.signOut.hydrate', e); }
         } else {
           try {
             user = await buildUser(authUser);
@@ -264,7 +265,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // 凍結 / 制限アカウントなら強制 signOut してエラー返却
       const stateError = checkAccountState(user);
       if (stateError) {
-        try { await supabase.auth.signOut(); } catch {}
+        try { await supabase.auth.signOut(); } catch (e) { swallow('auth.signOut.signIn-stateError', e); }
         set({ user: null });
         return { error: stateError };
       }
@@ -394,14 +395,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       //   (Web は localStorage)
       try {
         if (u) storageRemove(onboardedKey(u.id));
-      } catch {}
+      } catch (e) { swallow('storage.onboarded.remove', e); }
       try {
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
           window.localStorage.removeItem('geek-v4-auth');
         } else {
           await AsyncStorage.removeItem('geek-v4-auth');
         }
-      } catch {}
+      } catch (e) { swallow('storage.auth-key.remove', e); }
     } finally {
       signOutInFlight = false;
     }

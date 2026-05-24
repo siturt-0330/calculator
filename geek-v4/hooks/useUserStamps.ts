@@ -80,7 +80,7 @@ export function useUserStamps() {
 // (~数百 ms - 数秒) 体感ラグを消す。失敗時は snapshot で revert。
 export function useCreateUserStamp() {
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const userId = useAuthStore((s) => s.user?.id);
 
   type Input = { text: string; category?: string; isPublic?: boolean };
@@ -125,7 +125,7 @@ export function useCreateUserStamp() {
 
 export function useDeleteUserStamp() {
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   return useMutation({
     mutationFn: deleteUserStamp,
     onMutate: async (stampId) => {

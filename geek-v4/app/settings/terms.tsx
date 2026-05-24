@@ -46,6 +46,26 @@ const SECTIONS: { title: string; body: string }[] = [
     title: '第10条（準拠法・管轄）',
     body: '本規約は日本法に準拠します。本サービスに関する紛争は東京地方裁判所を専属的合意管轄裁判所とします。',
   },
+  {
+    title: '第11条（著作権侵害・名誉毀損の申立）',
+    body:
+      '本サービス上の投稿があなたの著作権・肖像権・プライバシー・名誉等を侵害している場合、以下の窓口より申立てができます。\n\n' +
+      '・申立先メール: copyright@geek.app\n' +
+      '・件名: 「著作権侵害通知」または「DMCA Notice」\n\n' +
+      '【記載いただきたい内容】\n' +
+      '1. 申立人の氏名・連絡先\n' +
+      '2. 侵害されたと主張する権利の内容\n' +
+      '3. 侵害投稿の URL または投稿 ID\n' +
+      '4. 権利者本人 (またはその代理人) であることの宣誓\n\n' +
+      '受領後、運営は原則 7 日以内に確認のうえ、必要な措置 (非表示・削除等) を講じます。' +
+      '虚偽の申立により当社または第三者に損害を与えた場合、申立人がその責任を負うものとします。',
+  },
+  {
+    title: '第12条（お問い合わせ）',
+    body:
+      '本規約・本サービスに関するお問い合わせは「設定 → ヘルプ・お問い合わせ」のフォームよりお願いします。' +
+      '緊急性のあるセキュリティ脆弱性のご報告は security@geek.app 宛にお願いします。',
+  },
 ];
 
 export default function TermsScreen() {
@@ -55,8 +75,8 @@ export default function TermsScreen() {
       <TopBar title="利用規約" left={<BackButton />} />
       <ScrollView contentContainerStyle={{ padding: SP['4'], paddingBottom: insets.bottom + SP['10'], gap: SP['4'] }}>
         <Text style={[T.caption, { color: C.text3 }]}>最終更新日：2026年5月15日</Text>
-        {SECTIONS.map((s, i) => (
-          <View key={i} style={{ gap: SP['2'] }}>
+        {SECTIONS.map((s) => (
+          <View key={s.title} style={{ gap: SP['2'] }}>
             <Text style={[T.h4, { color: C.text }]}>{s.title}</Text>
             <Text style={[T.body, { color: C.text2 }]}>{s.body}</Text>
           </View>

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { swallow } from '../lib/swallow';
 
 export type Lang = 'ja' | 'en' | 'zh' | 'ko' | 'es' | 'fr' | 'th' | 'vi' | 'id';
 
@@ -29,7 +30,7 @@ type LangState = {
 async function save(snapshot: { lang: Lang; autoTranslate: boolean }) {
   try {
     await AsyncStorage.setItem(KEY, JSON.stringify(snapshot));
-  } catch {}
+  } catch (e) { swallow('store.language.save', e); }
 }
 
 export const useLanguageStore = create<LangState>((set, get) => ({
@@ -45,7 +46,7 @@ export const useLanguageStore = create<LangState>((set, get) => ({
         set({ lang: d.lang ?? 'ja', autoTranslate: d.autoTranslate ?? false, hydrated: true });
         return;
       }
-    } catch {}
+    } catch (e) { swallow('store.language.hydrate', e); }
     set({ hydrated: true });
   },
   setLang: (lang) => {

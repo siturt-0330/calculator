@@ -27,8 +27,9 @@ const AVATAR_EMOJIS = [
 export default function ProfileEditScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, refreshProfile } = useAuthStore();
-  const { show } = useToastStore();
+  const user = useAuthStore((s) => s.user);
+  const refreshProfile = useAuthStore((s) => s.refreshProfile);
+  const show = useToastStore((s) => s.show);
   const [nickname, setNickname] = useState(user?.nickname ?? '');
   const [emoji, setEmoji] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);

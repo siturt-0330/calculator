@@ -1,6 +1,7 @@
 // 検索結果のランキングスコア (BM25 + シグナル + パーソナライゼーション)
-import { normalize, tokenize, katakanaToHiragana, hiraganaToKatakana } from './tokenize';
+import { normalize, tokenize, katakanaToHiragana, hiraganaToKatakana, deepNormalize } from './tokenize';
 import type { ParsedQuery } from './queryParser';
+import type { QueryEntity } from './queryEntity';
 
 const BM25_K1 = 1.5;
 const BM25_B = 0.75;
@@ -44,6 +45,10 @@ export type PersonalizationCtx = {
   termDocFreq?: Record<string, number>;
   /** Cold start mode — 新規ユーザー向け diversity 補正 */
   coldStartMode?: boolean;
+  /** Phase 4: 検索クエリの意味解釈 (entity / modifiers / relatedEntities)
+   *  これが与えられると、entity 完全一致と relatedEntities マッチで追加 boost
+   *  が掛かる。未指定なら既存挙動 (BM25 + 既存シグナル) のまま。 */
+  queryEntity?: QueryEntity;
 };
 
 // BM25 component: a single term within a single document field
@@ -267,6 +272,40 @@ export function scorePost(
   }
   if (recentHit > 0) {
     total += recentHit * 0.5;
+  }
+
+  // ============================================================
+  // Phase 4: queryEntity boost
+  // ============================================================
+  // entity が分かれば「対象の post」を強くブースト、relatedEntities マッチ
+  // (cooccur 拡張) は中程度ブースト。
+  //
+  // 既存のキーワード一致 (entity も keywords[] に含まれる) と二重にブースト
+  // するように見えるが、entity が「ただの単語」 ではなく「タグとして認識された」
+  // ことに価値を加点するので問題ない (BM25 一致だけだと弱い)。
+  if (ctx.queryEntity) {
+    const qe = ctx.queryEntity;
+    if (qe.entityNorm) {
+      for (const tag of post.tag_names) {
+        if (deepNormalize(tag) === qe.entityNorm) {
+          total += 6;
+          reasons.push(`✓${qe.entity}`);
+          break;
+        }
+      }
+    }
+    if (qe.relatedEntities.length > 0) {
+      const relatedSet = new Set(qe.relatedEntities);
+      let relHits = 0;
+      for (const tag of post.tag_names) {
+        const n = deepNormalize(tag);
+        if (n && relatedSet.has(n)) relHits++;
+      }
+      if (relHits > 0) {
+        total += Math.min(relHits * 1.5, 3);
+        reasons.push('🔗関連クラスタ');
+      }
+    }
   }
 
   return {

@@ -36,7 +36,10 @@ type MypageStats = {
 export default function MypageScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, signOut } = useAuthStore();
+  // selector: 全 destructure → 必要フィールドのみ subscribe (account_state 等の他フィールド更新で
+  // re-render するのを防ぐ)
+  const user = useAuthStore((s) => s.user);
+  const signOut = useAuthStore((s) => s.signOut);
   const { unreadCount } = useNotifications();
   const [logoutOpen, setLogoutOpen] = useState(false);
 
