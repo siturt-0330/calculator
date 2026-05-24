@@ -26,7 +26,7 @@ export function ScopeToggle({
     }}>
       {(
         [
-          { v: 'open', label: 'All', sub: '全部' },
+          { v: 'open', label: 'すべて', sub: '全部' },
           { v: 'closed', label: '選択した # のみ', sub: '好きだけ' },
         ] as const
       ).map((m) => {

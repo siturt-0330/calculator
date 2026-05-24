@@ -754,7 +754,7 @@ export default function TagGraphScreen() {
                   opacity: input.trim() ? 1 : 0.5,
                 }}
               >
-                <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>OK</Text>
+                <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>確認</Text>
               </PressableScale>
             </View>
           </View>
