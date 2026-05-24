@@ -2,6 +2,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { addConcern, getMyConcerns, removeConcern } from '../lib/api/concerns';
 import { useToastStore } from '../stores/toastStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import {
+  patchFeedPagePost,
+  snapshotFeedPage,
+  revertFeedPageSnapshot,
+  invalidateFeedPage,
+} from '../lib/cacheUpdates/feedPagePatcher';
+import type { FeedPagePost } from '../lib/api/feedPage';
 
 export function useConcerns(postIds: string[]) {
   return useQuery({
@@ -18,16 +25,31 @@ export function useConcern() {
   const show = useToastStore((s) => s.show);
   const concernsPrivate = useSettingsStore((s) => s.concernsPrivate);
 
-  const { mutateAsync } = useMutation({
-    mutationFn: async ({ postId, current }: { postId: string; current: boolean }) => {
+  type Vars = { postId: string; current: boolean };
+  type Ctx = {
+    prevConcerns: Array<[readonly unknown[], unknown]>;
+    prevFeed: Array<[readonly unknown[], unknown]>;
+    prevFeedPage: Array<[readonly unknown[], FeedPagePost[] | undefined]>;
+  };
+
+  const { mutateAsync } = useMutation<void, Error, Vars, Ctx>({
+    mutationFn: async ({ postId, current }) => {
       if (current) await removeConcern(postId);
       else await addConcern(postId, 'other', concernsPrivate);
     },
     onMutate: async ({ postId, current }) => {
-      await qc.cancelQueries({ queryKey: ['my-concerns'] });
-      // 失敗時 rollback のため snapshot を取る
+      // ★ await でレース防止
+      await Promise.all([
+        qc.cancelQueries({ queryKey: ['my-concerns'] }).catch(() => {}),
+        qc.cancelQueries({ queryKey: ['feed'] }).catch(() => {}),
+        qc.cancelQueries({ queryKey: ['feed-page'] }).catch(() => {}),
+      ]);
+
       const prevConcerns = qc.getQueriesData({ queryKey: ['my-concerns'] });
       const prevFeed = qc.getQueriesData({ queryKey: ['feed'] });
+      const prevFeedPage = snapshotFeedPage(qc);
+
+      // 1) legacy my-concerns cache
       qc.setQueriesData({ queryKey: ['my-concerns'] }, (old: Record<string, boolean> | undefined) => {
         const next = { ...(old ?? {}) };
         if (current) delete next[postId];
@@ -35,6 +57,7 @@ export function useConcern() {
         return next;
       });
 
+      // 2) useFeed infinite query — concern_count ±1
       qc.setQueriesData({ queryKey: ['feed'] }, (data: unknown) => {
         if (!data || typeof data !== 'object') return data;
         const old = data as { pages?: Array<{ posts: Array<{ id: string; concern_count: number }> }> };
@@ -51,12 +74,22 @@ export function useConcern() {
           })),
         };
       });
-      return { prevConcerns, prevFeed };
+
+      // 3) ★ RPC cache (feed-page) — my_concern + concern_count
+      patchFeedPagePost(qc, postId, (p) => ({
+        ...p,
+        my_concern: !current,
+        concern_count: Math.max(0, (p.concern_count ?? 0) + (current ? -1 : 1)),
+      }));
+
+      return { prevConcerns, prevFeed, prevFeedPage };
     },
     onError: (_e, _v, ctx) => {
       // 楽観更新を巻き戻す — server 真値に戻す
-      if (ctx?.prevConcerns) ctx.prevConcerns.forEach(([k, d]) => qc.setQueryData(k, d));
-      if (ctx?.prevFeed) ctx.prevFeed.forEach(([k, d]) => qc.setQueryData(k, d));
+      if (!ctx) return;
+      for (const [k, d] of ctx.prevConcerns) qc.setQueryData(k, d);
+      for (const [k, d] of ctx.prevFeed) qc.setQueryData(k, d);
+      revertFeedPageSnapshot(qc, ctx.prevFeedPage);
     },
     onSuccess: (_d, { current }) => {
       if (current) {
@@ -72,6 +105,7 @@ export function useConcern() {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['my-concerns'] });
+      invalidateFeedPage(qc);
     },
   });
 
