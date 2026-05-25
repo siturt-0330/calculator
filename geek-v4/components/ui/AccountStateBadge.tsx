@@ -1,6 +1,7 @@
 import { View, Text } from 'react-native';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
+import { useT } from '../../lib/i18n';
 import type { AccountState } from '../../types/models';
 
 const META: Record<AccountState, { emoji: string; label: string; desc: string; bg: string; fg: string }> = {
@@ -13,6 +14,7 @@ const META: Record<AccountState, { emoji: string; label: string; desc: string; b
 
 export function AccountStateBadge({ state }: { state: AccountState }) {
   const m = META[state];
+  const t = useT();
   return (
     <View style={{
       padding: SP['4'],
@@ -26,8 +28,8 @@ export function AccountStateBadge({ state }: { state: AccountState }) {
     }}>
       <Text style={{ fontSize: 28 }}>{m.emoji}</Text>
       <View style={{ flex: 1 }}>
-        <Text style={[T.h4, { color: m.fg }]}>アカウント状態：{m.label}</Text>
-        <Text style={[T.small, { color: C.text2, marginTop: 2 }]}>{m.desc}</Text>
+        <Text style={[T.h4, { color: m.fg }]}>{t('アカウント状態')}：{t(m.label)}</Text>
+        <Text style={[T.small, { color: C.text2, marginTop: 2 }]}>{t(m.desc)}</Text>
       </View>
     </View>
   );

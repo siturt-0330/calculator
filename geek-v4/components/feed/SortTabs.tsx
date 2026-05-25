@@ -2,8 +2,10 @@ import { View, Text } from 'react-native';
 import { PressableScale } from '../ui/PressableScale';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
+import { useT } from '../../lib/i18n';
 import type { SortMode } from '../../lib/api/posts';
 
+// label は ja 文字列を直接書いて、表示時に useT で翻訳。DICT 側で en/zh/ko/es/fr 対応済。
 const ORDER: ReadonlyArray<{ v: SortMode; label: string }> = [
   { v: 'for-you', label: 'あなた向け' },
   { v: 'new', label: '新着' },
@@ -18,6 +20,7 @@ export function SortTabs({
   value: SortMode;
   onChange: (v: SortMode) => void;
 }) {
+  const t = useT();
   return (
     <View style={{
       flexDirection: 'row',
@@ -52,7 +55,7 @@ export function SortTabs({
                 },
               ]}
             >
-              {m.label}
+              {t(m.label)}
             </Text>
           </PressableScale>
         );

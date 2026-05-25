@@ -9,6 +9,7 @@ import { useFeatureFlag } from '../../hooks/useFeatureFlag';
 import { useAuthStore } from '../../stores/authStore';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
+import { useT } from '../../lib/i18n';
 
 const KIND_OPTIONS: { kind: FeedbackKind; label: string; emoji: string }[] = [
   { kind: 'ui',         label: 'UIが変',          emoji: '🎨' },
@@ -20,6 +21,7 @@ const KIND_OPTIONS: { kind: FeedbackKind; label: string; emoji: string }[] = [
 ];
 
 export function FeedbackFAB() {
+  const t = useT();
   const enabled = useFeatureFlag('feedback_fab');
   const user = useAuthStore((s) => s.user);
   const segments = useSegments();
@@ -94,7 +96,7 @@ export function FeedbackFAB() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
               <Text style={{ fontSize: 20 }}>🔧</Text>
               <Text style={[T.h3, { color: C.text, flex: 1 }]}>
-                ここを修正したい
+                {t('ここを修正したい')}
               </Text>
               <PressableScale
                 onPress={() => setOpen(false)}
@@ -134,7 +136,7 @@ export function FeedbackFAB() {
                   >
                     <Text style={{ fontSize: 13 }}>{opt.emoji}</Text>
                     <Text style={[T.smallM, { color: active ? '#fff' : C.text, fontWeight: '700' }]}>
-                      {opt.label}
+                      {t(opt.label)}
                     </Text>
                   </PressableScale>
                 );
@@ -180,7 +182,7 @@ export function FeedbackFAB() {
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <Text style={[T.bodyB, { color: '#fff' }]}>
-                  フィードバックを送信
+                  {t('フィードバックを送信')}
                 </Text>
               )}
             </PressableScale>
