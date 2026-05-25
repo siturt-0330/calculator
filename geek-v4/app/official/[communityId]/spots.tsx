@@ -73,6 +73,9 @@ export default function OfficialSpotsScreen() {
         description: description.trim() || undefined,
         lat,
         lon,
+        // migration 0045 で category 必須化。official 管理画面の旧 UI は
+        // 一旦 'other' default で送る (UI 更新は別 PR で検討可)。
+        category: 'other',
         photo_url: photoUrl.trim() || undefined,
       });
       if (error || !data) throw new Error(error ?? '聖地の登録に失敗しました');
