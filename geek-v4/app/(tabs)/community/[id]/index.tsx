@@ -58,10 +58,12 @@ import {
   fetchCommunitySpots,
   fetchCommunityEvents,
   toggleSpotCertified,
+  SPOT_CATEGORY_META,
   type CommunityWithMembership,
   type CommunitySpot,
   type CommunityEvent,
   type CommunityGenre,
+  type SpotCategory,
 } from '../../../../lib/api/communities';
 import {
   getTabsFor,
@@ -1477,6 +1479,7 @@ const SpotsTab = memo(function SpotsTab({
 
   const renderItem: ListRenderItem<CommunitySpot> = ({ item }) => {
     const safePhoto = item.photo_url ? sanitizeUrl(item.photo_url) : null;
+    const meta = SPOT_CATEGORY_META[(item.category as SpotCategory) ?? 'other'];
     return (
       <View
         style={{
@@ -1486,7 +1489,9 @@ const SpotsTab = memo(function SpotsTab({
           backgroundColor: C.bg2,
           borderRadius: R.lg,
           borderWidth: 1,
-          borderColor: item.is_certified ? C.accent + '55' : C.border,
+          borderColor: item.is_certified ? C.accent + '55' : meta.color + '33',
+          borderLeftWidth: 4,
+          borderLeftColor: meta.color,
         }}
       >
         <View
@@ -1503,7 +1508,7 @@ const SpotsTab = memo(function SpotsTab({
           {safePhoto ? (
             <Image source={{ uri: safePhoto }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
           ) : (
-            <Text style={{ fontSize: 28 }}>📍</Text>
+            <Text style={{ fontSize: 28 }}>{meta.emoji}</Text>
           )}
         </View>
         <View style={{ flex: 1, gap: 4 }}>
@@ -1544,22 +1549,54 @@ const SpotsTab = memo(function SpotsTab({
                   borderColor: item.is_certified ? C.accent + '55' : C.border,
                 }}
               >
-                <Icon.edit
+                <Icon.shield
                   size={12}
                   color={item.is_certified ? C.accent : C.text3}
                   strokeWidth={2.4}
                 />
               </PressableScale>
             )}
+            <PressableScale
+              onPress={() => router.push(`/community/${communityId}/spot/${item.id}/edit` as never)}
+              haptic="tap"
+              hitSlop={6}
+              accessibilityLabel={`${item.name} を編集`}
+              style={{
+                padding: 6,
+                borderRadius: R.full,
+                backgroundColor: C.bg3,
+                borderWidth: 1,
+                borderColor: C.border,
+              }}
+            >
+              <Icon.edit size={12} color={C.text2} strokeWidth={2.4} />
+            </PressableScale>
+          </View>
+          {/* カテゴリ chip */}
+          <View
+            style={{
+              alignSelf: 'flex-start',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 3,
+              paddingHorizontal: 6,
+              paddingVertical: 1,
+              backgroundColor: meta.color + '22',
+              borderRadius: R.full,
+              borderWidth: 1,
+              borderColor: meta.color + '55',
+            }}
+          >
+            <Text style={{ fontSize: 10 }}>{meta.emoji}</Text>
+            <Text style={{ fontSize: 10, color: meta.color, fontWeight: '700' }}>
+              {meta.label}
+            </Text>
           </View>
           {item.description.length > 0 && (
             <Text style={[T.small, { color: C.text2 }]} numberOfLines={2}>
               {item.description}
             </Text>
           )}
-          <Text style={[T.mono, { color: C.text3, fontSize: 10 }]} numberOfLines={1}>
-            {item.lat.toFixed(5)}, {item.lon.toFixed(5)}
-          </Text>
         </View>
       </View>
     );
@@ -1567,26 +1604,51 @@ const SpotsTab = memo(function SpotsTab({
 
   return (
     <View style={{ paddingTop: SP['3'], paddingHorizontal: SP['4'], gap: SP['3'] }}>
-      {canCreate && (
-        <PressableScale
-          onPress={() => router.push(`/community/${communityId}/spot/create` as never)}
-          haptic="confirm"
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 6,
-            paddingVertical: SP['2'],
-            backgroundColor: C.accentBg,
-            borderRadius: R.full,
-            borderWidth: 1,
-            borderColor: C.accentSoft,
-          }}
-        >
-          <Icon.plus size={16} color={C.accent} strokeWidth={2.4} />
-          <Text style={[T.smallM, { color: C.accent, fontWeight: '700' }]}>聖地を追加</Text>
-        </PressableScale>
-      )}
+      <View style={{ flexDirection: 'row', gap: SP['2'] }}>
+        {canCreate && (
+          <PressableScale
+            onPress={() => router.push(`/community/${communityId}/spot/create` as never)}
+            haptic="confirm"
+            style={{
+              flex: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              paddingVertical: SP['2'],
+              backgroundColor: C.accentBg,
+              borderRadius: R.full,
+              borderWidth: 1,
+              borderColor: C.accentSoft,
+            }}
+          >
+            <Icon.plus size={16} color={C.accent} strokeWidth={2.4} />
+            <Text style={[T.smallM, { color: C.accent, fontWeight: '700' }]}>聖地を追加</Text>
+          </PressableScale>
+        )}
+        {spots.length > 0 && (
+          <PressableScale
+            onPress={() => router.push(`/community/${communityId}/spot/map` as never)}
+            haptic="tap"
+            accessibilityLabel="聖地マップを開く"
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              paddingHorizontal: SP['4'],
+              paddingVertical: SP['2'],
+              backgroundColor: C.bg3,
+              borderRadius: R.full,
+              borderWidth: 1,
+              borderColor: C.border,
+            }}
+          >
+            <Icon.map size={16} color={C.text2} strokeWidth={2.4} />
+            <Text style={[T.smallM, { color: C.text2, fontWeight: '700' }]}>マップ</Text>
+          </PressableScale>
+        )}
+      </View>
       {isLoading ? (
         <View style={{ paddingVertical: SP['8'], alignItems: 'center' }}>
           <Spinner size="large" />
