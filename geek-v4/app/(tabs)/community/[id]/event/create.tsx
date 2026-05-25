@@ -18,6 +18,7 @@ import { Button } from '../../../../../components/ui/Button';
 import { Icon } from '../../../../../constants/icons';
 import { useToastStore } from '../../../../../stores/toastStore';
 import { createEvent } from '../../../../../lib/api/communities';
+import { EventSpotPicker } from '../../../../../components/community/EventSpotPicker';
 import { TABBAR } from '../../../../../design/tabbar';
 
 // "YYYY-MM-DDTHH:MM" な local datetime → Date
@@ -56,6 +57,7 @@ export default function CreateEventScreen() {
   const [startsAt, setStartsAt] = useState(defaultStartsAt());
   const [endsAt, setEndsAt] = useState('');
   const [locationText, setLocationText] = useState('');
+  const [spotId, setSpotId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const startsDate = useMemo(() => parseLocalDateTime(startsAt), [startsAt]);
@@ -74,6 +76,7 @@ export default function CreateEventScreen() {
       starts_at: startsDate.toISOString(),
       ends_at: endsDate ? endsDate.toISOString() : undefined,
       location_text: locationText.trim() || undefined,
+      spot_id: spotId,
     });
     setSubmitting(false);
     if (error) {
@@ -191,10 +194,17 @@ export default function CreateEventScreen() {
           )}
         </View>
 
+        {/* 会場 spot リンク (任意) — migration 0046 */}
+        <EventSpotPicker
+          communityId={id}
+          value={spotId}
+          onChange={setSpotId}
+        />
+
         <Input
-          label="場所 (任意)"
+          label="場所 (テキスト、任意)"
           icon={Icon.map}
-          placeholder="例: 渋谷ハチ公前 / Discord / オンライン"
+          placeholder="聖地と別に補足したい時 (例: A 棟 3F / オンライン)"
           value={locationText}
           onChangeText={setLocationText}
           maxLength={200}

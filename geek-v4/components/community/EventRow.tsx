@@ -1,8 +1,15 @@
 import { View, Text } from 'react-native';
+import { useRouter } from 'expo-router';
 import { Icon } from '../../constants/icons';
+import { PressableScale } from '../ui/PressableScale';
 import { C, SP, R } from '../../design/tokens';
 import { T } from '../../design/typography';
-import type { CommunityEvent } from '../../lib/api/communities';
+import {
+  type CommunityEvent,
+  type CommunitySpot,
+  type SpotCategory,
+  SPOT_CATEGORY_META,
+} from '../../lib/api/communities';
 
 // ============================================================
 // EventRow — コミュニティ詳細画面で 1 件のイベントを表示するロー
@@ -10,8 +17,12 @@ import type { CommunityEvent } from '../../lib/api/communities';
 // 元は app/(tabs)/community/[id]/index.tsx 内に定義されていたが、
 // ファイルが 2000 行近くまで肥大化していたため切り出した。
 // 表示専用 (state なし) — props で受け取った event を render するだけ。
+//
+// migration 0046 で event.spot_id が追加 → spot 情報を親から渡せる場合は
+// カテゴリ色付き badge を出し、tap で spot 詳細 (edit) に飛べる。
 // ============================================================
-export function EventRow({ event }: { event: CommunityEvent }) {
+export function EventRow({ event, spot }: { event: CommunityEvent; spot?: CommunitySpot | null }) {
+  const router = useRouter();
   const d = new Date(event.starts_at);
   const valid = !Number.isNaN(d.getTime());
   const day = valid ? d.getDate() : '?';
@@ -51,6 +62,38 @@ export function EventRow({ event }: { event: CommunityEvent }) {
           {event.title}
         </Text>
         <Text style={[T.caption, { color: C.text3 }]}>{time}</Text>
+        {/* spot リンク (migration 0046) — 会場 spot がある時は強調 */}
+        {spot && (() => {
+          const meta = SPOT_CATEGORY_META[(spot.category as SpotCategory) ?? 'other'];
+          return (
+            <PressableScale
+              onPress={() =>
+                router.push(`/community/${event.community_id}/spot/${spot.id}/edit` as never)
+              }
+              haptic="tap"
+              hitSlop={4}
+              accessibilityLabel={`会場「${spot.name}」を開く`}
+              style={{
+                alignSelf: 'flex-start',
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+                paddingHorizontal: 8,
+                paddingVertical: 4,
+                backgroundColor: meta.color + '22',
+                borderRadius: R.full,
+                borderWidth: 1,
+                borderColor: meta.color + '55',
+              }}
+            >
+              <Text style={{ fontSize: 11 }}>{meta.emoji}</Text>
+              <Text style={{ fontSize: 11, color: meta.color, fontWeight: '700' }} numberOfLines={1}>
+                {spot.name}
+              </Text>
+              <Icon.chevronR size={10} color={meta.color} strokeWidth={2.4} />
+            </PressableScale>
+          );
+        })()}
         {event.location_text && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <Icon.map size={12} color={C.text3} strokeWidth={2.2} />

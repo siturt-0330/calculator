@@ -597,7 +597,15 @@ export default function CommunityDetailScreen() {
         )}
         {visitedTabs.spots && (
           <View style={{ display: activeTab === 'spots' ? 'flex' : 'none' }}>
-            <SpotsTab communityId={id} canCreate={community.is_member} community={community} />
+            <SpotsTab
+              communityId={id}
+              canCreate={community.is_member}
+              community={community}
+              onGoToEvents={() => {
+                setVisitedTabs((prev) => ({ ...prev, events: true }));
+                setActiveTab('events');
+              }}
+            />
           </View>
         )}
         {visitedTabs.events && (
@@ -1437,10 +1445,12 @@ const SpotsTab = memo(function SpotsTab({
   communityId,
   canCreate,
   community,
+  onGoToEvents,
 }: {
   communityId: string;
   canCreate: boolean;
   community: CommunityWithMembership;
+  onGoToEvents: () => void;
 }) {
   const router = useRouter();
   const { show: showToast } = useToastStore();
@@ -1454,6 +1464,21 @@ const SpotsTab = memo(function SpotsTab({
     enabled: communityId.length > 0,
     staleTime: 30_000,
   });
+
+  // migration 0046: spot_id 付き upcoming イベントを取得 → spot 別件数で badge 表示
+  const { data: upcomingEvents = [] } = useQuery({
+    queryKey: ['community', communityId, 'events', 'upcoming'],
+    queryFn: () => fetchCommunityEvents(communityId, { upcomingOnly: true }),
+    enabled: communityId.length > 0,
+    staleTime: 60_000,
+  });
+  const eventCountBySpot = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of upcomingEvents) {
+      if (e.spot_id) m.set(e.spot_id, (m.get(e.spot_id) ?? 0) + 1);
+    }
+    return m;
+  }, [upcomingEvents]);
 
   useEffect(() => {
     if (isError) showToast('聖地の取得に失敗しました', 'error');
@@ -1476,6 +1501,7 @@ const SpotsTab = memo(function SpotsTab({
   const renderItem: ListRenderItem<CommunitySpot> = ({ item }) => {
     const safePhoto = item.photo_url ? sanitizeUrl(item.photo_url) : null;
     const meta = SPOT_CATEGORY_META[(item.category as SpotCategory) ?? 'other'];
+    const upcomingCount = eventCountBySpot.get(item.id) ?? 0;
     return (
       <View
         style={{
@@ -1593,6 +1619,31 @@ const SpotsTab = memo(function SpotsTab({
               {item.description}
             </Text>
           )}
+          {upcomingCount > 0 && (
+            <PressableScale
+              onPress={onGoToEvents}
+              haptic="tap"
+              hitSlop={4}
+              accessibilityLabel={`この聖地の直近イベント ${upcomingCount} 件を見る`}
+              style={{
+                alignSelf: 'flex-start',
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+                paddingHorizontal: 6,
+                paddingVertical: 2,
+                backgroundColor: C.accent + '22',
+                borderRadius: R.full,
+                borderWidth: 1,
+                borderColor: C.accent + '55',
+              }}
+            >
+              <Icon.calendar size={10} color={C.accent} strokeWidth={2.6} />
+              <Text style={{ fontSize: 10, color: C.accent, fontWeight: '700' }}>
+                直近イベント {upcomingCount} 件
+              </Text>
+            </PressableScale>
+          )}
         </View>
       </View>
     );
@@ -1682,6 +1733,20 @@ const EventsTab = memo(function EventsTab({ communityId, canCreate }: { communit
     staleTime: 30_000,
   });
 
+  // event.spot_id → spot 情報の lookup 用 (migration 0046)
+  // spots は SpotsTab 側のキャッシュを使い回し
+  const { data: spots = [] } = useQuery({
+    queryKey: ['community', communityId, 'spots'],
+    queryFn: () => fetchCommunitySpots(communityId),
+    enabled: communityId.length > 0,
+    staleTime: 30_000,
+  });
+  const spotById = useMemo(() => {
+    const m = new Map<string, CommunitySpot>();
+    for (const s of spots) m.set(s.id, s);
+    return m;
+  }, [spots]);
+
   useEffect(() => {
     if (isError) showToast('イベントの取得に失敗しました', 'error');
   }, [isError, showToast]);
@@ -1740,7 +1805,7 @@ const EventsTab = memo(function EventsTab({ communityId, canCreate }: { communit
           <View key={monthLabel} style={{ gap: SP['2'] }}>
             <Text style={[T.smallB, { color: C.text2, marginTop: SP['2'] }]}>{monthLabel}</Text>
             {monthEvents.map((ev) => (
-              <EventRow key={ev.id} event={ev} />
+              <EventRow key={ev.id} event={ev} spot={ev.spot_id ? spotById.get(ev.spot_id) ?? null : null} />
             ))}
           </View>
         ))
