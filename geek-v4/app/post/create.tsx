@@ -28,8 +28,6 @@ import { useDebounce } from '../../hooks/useDebounce';
 import { checkContent } from '../../lib/ai/checkContent';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
-import { POST_KIND_META } from '../../components/feed/PostKindBadge';
-import type { PostKind } from '../../types/models';
 import { useAuthStore } from '../../stores/authStore';
 import { uploadPostImage, uploadPostVideo, validateVideoSource } from '../../lib/media';
 import { VideoPlayer } from '../../components/ui/VideoPlayer';
@@ -66,7 +64,6 @@ export default function CreatePost() {
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [anonymous, setAnonymous] = useState(true);
-  const [kind, setKind] = useState<PostKind>('opinion');
   const [sourceUrl, setSourceUrl] = useState('');
   const [posting, setPosting] = useState(false);
 
@@ -193,19 +190,18 @@ export default function CreatePost() {
       try {
         const d = JSON.parse(raw) as {
           content?: string; tags?: string[]; sourceUrl?: string;
-          kind?: PostKind; anonymous?: boolean; visibility?: PostVisibility;
+          anonymous?: boolean; visibility?: PostVisibility;
         };
         const hasContent = (d.content && d.content.trim().length > 0) || (d.tags && d.tags.length > 0) || (d.sourceUrl && d.sourceUrl.length > 0);
         if (!hasContent) return;
         setContent(d.content ?? '');
         setTags(d.tags ?? []);
         setSourceUrl(d.sourceUrl ?? '');
-        setKind((d.kind ?? 'opinion') as PostKind);
         setAnonymous(d.anonymous ?? true);
         setVisibility((d.visibility ?? 'public') as PostVisibility);
         show('下書きを復元しました', 'info', { undoLabel: '破棄', onUndo: () => {
           setContent(''); setTags([]); setSourceUrl('');
-          setKind('opinion'); setAnonymous(true); setVisibility('public');
+          setAnonymous(true); setVisibility('public');
           void AsyncStorage.removeItem(DRAFT_KEY);
         }});
       } catch {
@@ -224,13 +220,13 @@ export default function CreatePost() {
     setDraftSaving(true);
     const t = setTimeout(() => {
       void AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({
-        content, tags, sourceUrl, kind, anonymous, visibility,
+        content, tags, sourceUrl, anonymous, visibility,
       })).finally(() => {
         setDraftSaving(false);
       });
     }, 500);
     return () => clearTimeout(t);
-  }, [content, tags, sourceUrl, kind, anonymous, visibility]);
+  }, [content, tags, sourceUrl, anonymous, visibility]);
 
   const pickImage = async () => {
     try {
@@ -330,10 +326,6 @@ export default function CreatePost() {
       show('タグを1つ以上追加してください。', 'warn');
       return;
     }
-    if (kind === 'fact' && !sourceUrl.trim()) {
-      show('「事実」として投稿するには出典URLが必要です。', 'warn');
-      return;
-    }
     if (sourceUrl && !/^https?:\/\//.test(sourceUrl.trim())) {
       show('出典URLは http:// または https:// で始めてください。', 'warn');
       return;
@@ -418,7 +410,7 @@ export default function CreatePost() {
         videoPosters: [],   // ポスター画像 自動生成も後続改善
         tagNames: tags,
         isAnonymous: anonymous,
-        kind,
+        // kind は廃止 (2026-05) — createPost の default 'opinion' に任せる
         sourceUrl: sourceUrl.trim() || null,
         isPublic,
         contentWarning: cwCategory !== 'none' ? (cwText.trim() || null) : null,
@@ -484,7 +476,6 @@ export default function CreatePost() {
   const submitBlockedReason = (() => {
     if (!content.trim() && images.length === 0 && !video) return '本文・画像・動画 のいずれかを入力してください';
     if (tags.length === 0) return 'タグを 1 つ以上 追加してください';
-    if (kind === 'fact' && !sourceUrl.trim()) return '「事実」投稿には出典URLが必要です';
     if ((visibility === 'community_only' || visibility === 'community_public')
         && selectedCommunityIds.length < 1) return '投稿先コミュニティを選んでください';
     return null;
@@ -1236,7 +1227,7 @@ export default function CreatePost() {
             )}
           </View>
 
-          {/* ===== 詳細を追加 (kind + sourceUrl) — 全部一度に見せない ===== */}
+          {/* ===== 出典 URL (任意) — kind バッジは 2026-05 に廃止 ===== */}
           <View style={{ gap: SP['2'] }}>
             <PressableScale
               onPress={() => setShowAdvanced((v) => !v)}
@@ -1251,13 +1242,13 @@ export default function CreatePost() {
                 borderColor: C.border,
               }}
             >
-              <Text style={{ fontSize: 16 }}>{POST_KIND_META[kind].emoji}</Text>
+              <Text style={{ fontSize: 16 }}>🔗</Text>
               <View style={{ flex: 1 }}>
                 <Text style={[T.smallB, { color: C.text }]}>
-                  詳細を追加
+                  出典 URL を追加 (任意)
                 </Text>
                 <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
-                  種別: {POST_KIND_META[kind].label}{sourceUrl ? ' · 出典あり' : ''}
+                  {sourceUrl ? sourceUrl : '記事・配信・ソースへのリンク'}
                 </Text>
               </View>
               <Text style={[T.caption, { color: C.text3, fontWeight: '700' }]}>
@@ -1268,63 +1259,19 @@ export default function CreatePost() {
               <Animated.View
                 entering={FadeInDown.duration(180)}
                 layout={Layout.springify().damping(20)}
-                style={{ gap: SP['3'] }}
+                style={{ gap: SP['2'] }}
               >
-                {/* 投稿カテゴリ chips */}
-                <View style={{ gap: SP['2'] }}>
-                  <Text style={[T.caption, { color: C.text3 }]}>この投稿は…</Text>
-                  <View style={{ flexDirection: 'row', gap: SP['2'], flexWrap: 'wrap' }}>
-                    {(Object.keys(POST_KIND_META) as PostKind[]).map((k) => {
-                      const m = POST_KIND_META[k];
-                      const active = kind === k;
-                      return (
-                        <PressableScale
-                          key={k}
-                          onPress={() => setKind(k)}
-                          haptic="select"
-                          style={{
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 4,
-                            paddingHorizontal: SP['3'],
-                            paddingVertical: SP['2'],
-                            borderRadius: R.full,
-                            backgroundColor: active ? m.bg : C.bg3,
-                            borderWidth: 1.5,
-                            borderColor: active ? m.fg : C.border,
-                          }}
-                        >
-                          <Text style={{ fontSize: 14 }}>{m.emoji}</Text>
-                          <Text style={[T.smallM, { color: active ? m.fg : C.text2 }]}>{m.label}</Text>
-                        </PressableScale>
-                      );
-                    })}
-                  </View>
-                  {kind === 'fact' && (
-                    <Text style={[T.caption, { color: C.amber }]}>
-                      ⚠ 「事実」を選んだ場合は出典URLが必須です
-                    </Text>
-                  )}
-                  {kind === 'wip' && (
-                    <Text style={[T.caption, { color: C.green }]}>
-                      💡 未完成の作品は拡散リミット推奨。安心して試せます
-                    </Text>
-                  )}
-                </View>
-                {/* 出典 URL */}
-                <View style={{ gap: SP['2'] }}>
-                  <Text style={[T.caption, { color: C.text3 }]}>
-                    出典URL {kind === 'fact' ? '（必須）' : '（任意・あると信頼度UP）'}
-                  </Text>
-                  <Input
-                    placeholder="https://..."
-                    value={sourceUrl}
-                    onChangeText={setSourceUrl}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    keyboardType="url"
-                  />
-                </View>
+                <Text style={[T.caption, { color: C.text3 }]}>
+                  出典URL (任意・あると信頼度UP)
+                </Text>
+                <Input
+                  placeholder="https://..."
+                  value={sourceUrl}
+                  onChangeText={setSourceUrl}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                />
               </Animated.View>
             )}
           </View>

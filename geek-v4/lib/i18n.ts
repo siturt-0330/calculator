@@ -51,11 +51,7 @@ const DICT: Dict = {
   // UI 高頻度ラベル (フィード周り)
   'すべて':               { en: 'All',                zh: '全部',         ko: '전체',       es: 'Todo',           fr: 'Tout' },
   'タグを追加':           { en: 'Add tag',            zh: '添加标签',     ko: '태그 추가',  es: 'Añadir tag',     fr: 'Ajouter un tag' },
-  '事実':                 { en: 'Fact',               zh: '事实',         ko: '사실',       es: 'Hecho',          fr: 'Fait' },
-  '意見':                 { en: 'Opinion',            zh: '意见',         ko: '의견',       es: 'Opinión',        fr: 'Avis' },
-  'ジョーク':             { en: 'Joke',               zh: '玩笑',         ko: '농담',       es: 'Broma',          fr: 'Blague' },
-  '制作中':               { en: 'WIP',                zh: '制作中',       ko: '제작 중',    es: 'WIP',            fr: 'En cours' },
-  '完了':                 { en: 'Done',               zh: '完成',         ko: '완료',       es: 'Hecho',          fr: 'Terminé' },
+  // 事実 / 意見 / ジョーク / 制作中 / 完了 (kind バッジ) は 2026-05 に機能廃止
   '送信':                 { en: 'Send',               zh: '发送',         ko: '전송',       es: 'Enviar',         fr: 'Envoyer' },
   '閉じる':               { en: 'Close',              zh: '关闭',         ko: '닫기',       es: 'Cerrar',         fr: 'Fermer' },
   'キャンセル':           { en: 'Cancel',             zh: '取消',         ko: '취소',       es: 'Cancelar',       fr: 'Annuler' },
@@ -97,11 +93,9 @@ const DICT: Dict = {
   '入力内容を確認してください':     { en: 'Please check your input',       zh: '请检查输入内容',  ko: '입력 내용을 확인해 주세요', es: 'Verifica tu entrada',  fr: 'Veuillez vérifier vos entrées' },
 
   // ============================================================
-  // PR #99 で漏らした kind バッジ・ソートタブ・アカウント状態など (2026-05)
+  // PR #99 で漏らした ソートタブ・アカウント状態など (2026-05)
+  // ※ kind バッジ (ネタ / 未完成) は機能廃止に伴い削除
   // ============================================================
-  // PostKindBadge (components/feed/PostKindBadge.tsx) — '制作中' とは別物の生ラベル
-  'ネタ':                           { en: 'Joke',                          zh: '梗',              ko: '농담',               es: 'Broma',                    fr: 'Blague' },
-  '未完成':                         { en: 'WIP',                           zh: '未完成',          ko: '미완성',             es: 'Incompleto',               fr: 'Incomplet' },
 
   // SortTabs (components/feed/SortTabs.tsx)
   'あなた向け':                     { en: 'For you',                       zh: '为你推荐',        ko: '추천',               es: 'Para ti',                  fr: 'Pour toi' },
