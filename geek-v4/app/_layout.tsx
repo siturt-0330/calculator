@@ -351,6 +351,7 @@ export default function RootLayout() {
                   <Stack.Screen name="settings/trust-score" />
                   <Stack.Screen name="settings/plan" />
                   <Stack.Screen name="settings/notifications" />
+                  <Stack.Screen name="settings/language" />
                   <Stack.Screen name="settings/blocked-users" />
                   <Stack.Screen name="settings/blocked-tags" />
                   <Stack.Screen name="settings/feedback-admin" />

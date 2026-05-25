@@ -49,11 +49,22 @@ export const useLanguageStore = create<LangState>((set, get) => ({
     } catch (e) { swallow('store.language.hydrate', e); }
     set({ hydrated: true });
   },
+  // ★ 2026-05-25 改修: setLang から autoTranslate の自動連動を撤廃。
+  //
+  // 旧仕様: setLang('en') すると autoTranslate=true を自動セット → ユーザーが
+  //         「言語を英語に変えたら勝手に日本語投稿が翻訳されて表示」される事故。
+  //         オンボーディングで誤タップ + 設定変更画面の不在 + DICT 不足で UI が
+  //         一見日本語のまま、という条件が重なって「気付かないまま英語化」現象が
+  //         起きていた (production 報告)。
+  //
+  // 新仕様: lang のみを更新。autoTranslate はユーザーが明示的に setAutoTranslate
+  //         で切替する。設定 → 言語画面に独立 toggle を配置。
+  //
+  // ※ 既存ユーザーで autoTranslate=true が保存されている人は引き続き翻訳が走るが、
+  //   設定画面で off にできるようになるので破壊的変更ではない。
   setLang: (lang) => {
     set({ lang });
-    const auto = lang !== 'ja';
-    set({ autoTranslate: auto });
-    void save({ lang, autoTranslate: auto });
+    void save({ lang, autoTranslate: get().autoTranslate });
   },
   setAutoTranslate: (autoTranslate) => {
     set({ autoTranslate });
