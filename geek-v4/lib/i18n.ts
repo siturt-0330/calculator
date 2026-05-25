@@ -95,6 +95,72 @@ const DICT: Dict = {
   'メールアドレスが正しくありません': { en: 'Invalid email address',       zh: '电子邮箱无效',    ko: '이메일이 올바르지 않습니다', es: 'Correo no válido',    fr: 'Adresse e-mail invalide' },
   'パスワードが正しくありません':   { en: 'Invalid password',              zh: '密码错误',        ko: '비밀번호가 올바르지 않습니다', es: 'Contraseña incorrecta', fr: 'Mot de passe incorrect' },
   '入力内容を確認してください':     { en: 'Please check your input',       zh: '请检查输入内容',  ko: '입력 내용을 확인해 주세요', es: 'Verifica tu entrada',  fr: 'Veuillez vérifier vos entrées' },
+
+  // ============================================================
+  // PR #99 で漏らした kind バッジ・ソートタブ・アカウント状態など (2026-05)
+  // ============================================================
+  // PostKindBadge (components/feed/PostKindBadge.tsx) — '制作中' とは別物の生ラベル
+  'ネタ':                           { en: 'Joke',                          zh: '梗',              ko: '농담',               es: 'Broma',                    fr: 'Blague' },
+  '未完成':                         { en: 'WIP',                           zh: '未完成',          ko: '미완성',             es: 'Incompleto',               fr: 'Incomplet' },
+
+  // SortTabs (components/feed/SortTabs.tsx)
+  'あなた向け':                     { en: 'For you',                       zh: '为你推荐',        ko: '추천',               es: 'Para ti',                  fr: 'Pour toi' },
+  '新着':                           { en: 'New',                           zh: '最新',            ko: '최신',               es: 'Nuevo',                    fr: 'Nouveau' },
+  '急上昇':                         { en: 'Trending',                      zh: '热门',            ko: '급상승',             es: 'Tendencia',                fr: 'Tendance' },
+  '人気':                           { en: 'Popular',                       zh: '人气',            ko: '인기',               es: 'Popular',                  fr: 'Populaire' },
+
+  // ScopeToggle sub (components/feed/ScopeToggle.tsx)
+  '全部':                           { en: 'All',                           zh: '全部',            ko: '전체',               es: 'Todo',                     fr: 'Tout' },
+  '好きだけ':                       { en: 'Liked only',                    zh: '只看喜欢',        ko: '좋아하는 것만',      es: 'Solo favoritos',           fr: 'Favoris uniquement' },
+
+  // AccountStateBadge (components/ui/AccountStateBadge.tsx)
+  '健康':                           { en: 'Healthy',                       zh: '健康',            ko: '정상',               es: 'Saludable',                fr: 'En bonne santé' },
+  '注意':                           { en: 'Caution',                       zh: '注意',            ko: '주의',               es: 'Precaución',               fr: 'Attention' },
+  '制限':                           { en: 'Restricted',                    zh: '受限',            ko: '제한',               es: 'Restringido',              fr: 'Restreint' },
+  '警告':                           { en: 'Warning',                       zh: '警告',            ko: '경고',               es: 'Advertencia',              fr: 'Avertissement' },
+  '停止':                           { en: 'Suspended',                     zh: '已停用',          ko: '정지',               es: 'Suspendido',               fr: 'Suspendu' },
+  '通常通り利用できます':           { en: 'You can use the app normally',  zh: '可以正常使用',    ko: '평소처럼 이용할 수 있습니다', es: 'Puedes usar la app con normalidad', fr: 'Vous pouvez utiliser l’app normalement' },
+  '気になる評価が増えています':     { en: 'Concern reactions are increasing', zh: '在意评价正在增加', ko: '우려 평가가 늘고 있습니다', es: 'Las reacciones de inquietud están aumentando', fr: 'Les réactions de préoccupation augmentent' },
+  '1日の投稿数が制限されています':  { en: 'Your daily post limit is restricted', zh: '每日发布数量已受限', ko: '하루 게시 수가 제한되었습니다', es: 'Tu límite diario de publicaciones está restringido', fr: 'Votre limite de publication quotidienne est restreinte' },
+  '一部機能が停止されています':     { en: 'Some features are suspended',    zh: '部分功能已停用',  ko: '일부 기능이 정지되었습니다', es: 'Algunas funciones están suspendidas', fr: 'Certaines fonctionnalités sont suspendues' },
+  '退会勧告中です':                 { en: 'Withdrawal recommended',        zh: '建议退出',        ko: '탈퇴 권고 중입니다', es: 'Se recomienda darse de baja', fr: 'Désinscription recommandée' },
+
+  // OfficialFeatureNav (components/community/OfficialFeatureNav.tsx)
+  'カレンダー':                     { en: 'Calendar',                      zh: '日历',            ko: '캘린더',             es: 'Calendario',               fr: 'Calendrier' },
+  '地図':                           { en: 'Map',                           zh: '地图',            ko: '지도',               es: 'Mapa',                     fr: 'Carte' },
+
+  // FeedbackFAB (components/feedback/FeedbackFAB.tsx)
+  'バグ・エラー':                   { en: 'Bug / Error',                   zh: '错误 / Bug',      ko: '버그 / 오류',        es: 'Error',                    fr: 'Bug / Erreur' },
+  '誤字・誤表記':                   { en: 'Typo',                          zh: '错别字',          ko: '오탈자',             es: 'Errata',                   fr: 'Faute de frappe' },
+  '機能の提案':                     { en: 'Feature suggestion',            zh: '功能建议',        ko: '기능 제안',          es: 'Sugerencia',               fr: 'Suggestion' },
+  'コンテンツの問題':               { en: 'Content issue',                 zh: '内容问题',        ko: '콘텐츠 문제',        es: 'Problema de contenido',    fr: 'Problème de contenu' },
+  'その他':                         { en: 'Other',                         zh: '其他',            ko: '기타',               es: 'Otro',                     fr: 'Autre' },
+
+  // Community discover badge (app/(tabs)/community/discover.tsx)
+  '完全一致':                       { en: 'Exact match',                   zh: '完全匹配',        ko: '완전 일치',          es: 'Coincidencia exacta',      fr: 'Correspondance exacte' },
+  '先頭一致':                       { en: 'Prefix match',                  zh: '前缀匹配',        ko: '앞부분 일치',        es: 'Coincide al inicio',       fr: 'Correspondance préfixe' },
+  '説明にマッチ':                   { en: 'Description match',             zh: '描述匹配',        ko: '설명 일치',          es: 'Coincide en descripción',  fr: 'Correspondance description' },
+  '別名にマッチ':                   { en: 'Synonym match',                 zh: '别名匹配',        ko: '별명 일치',          es: 'Coincide en sinónimo',     fr: 'Correspondance synonyme' },
+
+  // BBS tabs (app/(tabs)/bbs.tsx)
+  'コミュニティ':                   { en: 'Community',                     zh: '社区',            ko: '커뮤니티',           es: 'Comunidad',                fr: 'Communauté' },
+
+  // 地図 / 現在地系
+  '現在地':                         { en: 'Current location',              zh: '当前位置',        ko: '현재 위치',          es: 'Ubicación actual',         fr: 'Position actuelle' },
+
+  // 検索系
+  '検索':                           { en: 'Search',                        zh: '搜索',            ko: '검색',               es: 'Buscar',                   fr: 'Rechercher' },
+  '見つかりませんでした':           { en: 'Not found',                     zh: '未找到',          ko: '찾을 수 없습니다',   es: 'No encontrado',            fr: 'Introuvable' },
+  '結果なし':                       { en: 'No results',                    zh: '无结果',          ko: '결과 없음',          es: 'Sin resultados',           fr: 'Aucun résultat' },
+
+  // 聖地 (PR #100 spot)
+  'ライブ会場':                     { en: 'Live venue',                    zh: '演出场地',        ko: '공연장',             es: 'Recinto de conciertos',    fr: 'Salle de concert' },
+  '聖地':                           { en: 'Pilgrimage spot',               zh: '圣地',            ko: '성지',               es: 'Lugar sagrado',            fr: 'Lieu sacré' },
+  'コラボカフェ':                   { en: 'Collab café',                   zh: '联动咖啡',        ko: '콜라보 카페',        es: 'Café colaboración',        fr: 'Café collab' },
+  'グッズ販売':                     { en: 'Goods shop',                    zh: '周边商店',        ko: '굿즈샵',             es: 'Tienda de mercancía',      fr: 'Boutique goodies' },
+  '撮影スポット':                   { en: 'Photo spot',                    zh: '拍照点',          ko: '포토 스팟',          es: 'Punto fotográfico',        fr: 'Spot photo' },
+  '神社・寺':                       { en: 'Shrine / Temple',               zh: '神社・寺庙',      ko: '신사・사찰',         es: 'Templo / Santuario',       fr: 'Sanctuaire / Temple' },
+  '飲食':                           { en: 'Restaurant',                    zh: '餐饮',            ko: '식음',               es: 'Restaurante',              fr: 'Restauration' },
 };
 
 // React Hook で使用: const t = useT(); t('好きなタグ')
