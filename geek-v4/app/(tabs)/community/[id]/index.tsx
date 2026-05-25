@@ -49,6 +49,7 @@ import {
 import { OfficialBadge } from '../../../../components/community/OfficialBadge';
 import { EventRow } from '../../../../components/community/EventRow';
 import { OfficialFeatureNav } from '../../../../components/community/OfficialFeatureNav';
+import { CommunityMyProfileTab } from '../../../../components/community/CommunityMyProfileTab';
 import { useAuthStore } from '../../../../stores/authStore';
 import {
   fetchCommunity,
@@ -626,14 +627,9 @@ export default function CommunityDetailScreen() {
         )}
         {visitedTabs.profile && (
           <View style={{ display: activeTab === 'profile' ? 'flex' : 'none' }}>
-            <ComingSoonTab
-              emoji="🪪"
-              title="マイプロフィール (準備中)"
-              body={
-                '最推し / 推し歴 / ライブ参戦数 (写真付き) / マイセトリ ' +
-                'を記録できる個人ページを予定しています。匿名アイコンを ' +
-                'タップで他メンバーのプロフィールも閲覧可能になる予定。'
-              }
+            <CommunityMyProfileTab
+              communityId={id}
+              isMember={community.is_member}
             />
           </View>
         )}
