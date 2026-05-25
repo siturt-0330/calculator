@@ -4,16 +4,27 @@ import { Icon } from '../../constants/icons';
 type Size = 'sm' | 'md';
 
 // 信頼スコアを色と数値で表示する小さなバッジ
-// 80+ green, 60+ blue, 40+ amber, それ未満 red
+// しきい値は lib/trust/score.ts の TIERS と合わせる:
+//   100  → god       (神 / 紫)
+//   90+  → definitely (絶対良い人 / amber)
+//   70+  → probably   (多分良い人 / green)
+//   30+  → regular    (常連 / blue)
+//   0+   → newcomer   (新参者 / 灰)
 export function TrustBadge({ score, size = 'sm' }: { score: number | null | undefined; size?: Size }) {
   if (score === null || score === undefined) return null;
   const s = Math.max(0, Math.min(100, Math.round(score)));
-  const tier = s >= 80 ? 'high' : s >= 60 ? 'good' : s >= 40 ? 'mid' : 'low';
+  const tier: 'god' | 'definitely' | 'probably' | 'regular' | 'newcomer' =
+    s >= 100 ? 'god' :
+    s >= 90  ? 'definitely' :
+    s >= 70  ? 'probably' :
+    s >= 30  ? 'regular' :
+               'newcomer';
   const palette: Record<typeof tier, { fg: string; bg: string; border: string }> = {
-    high: { fg: '#22D3A4', bg: 'rgba(34,211,164,0.12)', border: 'rgba(34,211,164,0.45)' },
-    good: { fg: '#7CB1FF', bg: 'rgba(124,177,255,0.12)', border: 'rgba(124,177,255,0.45)' },
-    mid:  { fg: '#F5B342', bg: 'rgba(245,179,66,0.12)', border: 'rgba(245,179,66,0.45)' },
-    low:  { fg: '#FF6B7A', bg: 'rgba(255,107,122,0.12)', border: 'rgba(255,107,122,0.45)' },
+    god:        { fg: '#a855f7', bg: 'rgba(168,85,247,0.14)', border: 'rgba(168,85,247,0.55)' },
+    definitely: { fg: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.45)' },
+    probably:   { fg: '#34d399', bg: 'rgba(52,211,153,0.12)', border: 'rgba(52,211,153,0.45)' },
+    regular:    { fg: '#60a5fa', bg: 'rgba(96,165,250,0.12)', border: 'rgba(96,165,250,0.45)' },
+    newcomer:   { fg: '#94a3b8', bg: 'rgba(148,163,184,0.10)', border: 'rgba(148,163,184,0.40)' },
   };
   const c = palette[tier];
   const ShieldIcon = Icon.shield;
