@@ -104,7 +104,18 @@ export type CommunityPost = {
 
 // ============================================================
 // 聖地 (community_spots) — 地図ベース・スポット
+// ------------------------------------------------------------
+// migration 0045 で category + photo_urls を追加 (wiki 編集解放含む)
+// カテゴリ定義は lib/api/spotCategory.ts (RN チェーン非依存 pure module)
 // ============================================================
+
+export {
+  SPOT_CATEGORY_META,
+  SELECTABLE_SPOT_CATEGORIES,
+} from './spotCategory';
+export type { SpotCategory } from './spotCategory';
+import { SELECTABLE_SPOT_CATEGORIES, type SpotCategory } from './spotCategory';
+
 export type CommunitySpot = {
   id: string;
   community_id: string;
@@ -112,6 +123,10 @@ export type CommunitySpot = {
   description: string;
   lat: number;
   lon: number;
+  // migration 0045 で追加。旧 photo_url (単数) は後方互換のため残す。
+  // 表示時は photo_urls.length > 0 ? photo_urls : (photo_url ? [photo_url] : [])
+  category: SpotCategory;
+  photo_urls: string[];
   photo_url: string | null;
   created_by: string;
   created_at: string;
@@ -1181,12 +1196,16 @@ export async function fetchCommunitySpots(community_id: string): Promise<Communi
 }
 
 // 聖地作成 (メンバーのみ — RLS で担保)
+// migration 0045 で category 必須 + photo_urls (複数) 追加
 export async function createSpot(input: {
   community_id: string;
   name: string;
   description?: string;
   lat: number;
   lon: number;
+  category: SpotCategory;
+  photo_urls?: string[];
+  /** @deprecated 旧版互換。新規は photo_urls を使う */
   photo_url?: string;
 }): Promise<{ data: CommunitySpot | null; error: string | null }> {
   const { data: { user } } = await supabase.auth.getUser();
@@ -1202,6 +1221,14 @@ export async function createSpot(input: {
     return { data: null, error: '緯度・経度が範囲外です' };
   }
 
+  // category は allowlist 外なら fail-safe で 'other'
+  const safeCategory: SpotCategory = SELECTABLE_SPOT_CATEGORIES.includes(input.category)
+    ? input.category
+    : 'other';
+
+  // 写真は最大 4 枚 (DB CHECK 制約も二重に守る)
+  const safePhotos = (input.photo_urls ?? []).slice(0, 4).filter((u) => !!u);
+
   const { data, error } = await supabase
     .from('community_spots')
     .insert({
@@ -1210,6 +1237,8 @@ export async function createSpot(input: {
       description: safeDesc,
       lat: input.lat,
       lon: input.lon,
+      category: safeCategory,
+      photo_urls: safePhotos,
       photo_url: input.photo_url ?? null,
       created_by: user.id,
     })
@@ -1219,7 +1248,54 @@ export async function createSpot(input: {
   return { data: data as CommunitySpot, error: null };
 }
 
-// 聖地削除 (作成者 or community owner — RLS で担保)
+// 聖地更新 (migration 0045 で community member 全員に編集権を開放: wiki 型)
+export async function updateSpot(
+  spot_id: string,
+  patch: Partial<{
+    name: string;
+    description: string;
+    lat: number;
+    lon: number;
+    category: SpotCategory;
+    photo_urls: string[];
+  }>,
+): Promise<{ data: CommunitySpot | null; error: string | null }> {
+  // ホワイトリスト化 — 想定外の column 書き換えを防ぐ
+  const allowed: Partial<Pick<CommunitySpot, 'name' | 'description' | 'lat' | 'lon' | 'category' | 'photo_urls'>> = {};
+  if (patch.name !== undefined) {
+    const s = sanitizeText(patch.name, { maxLength: 80 }).trim();
+    if (s.length < 1) return { data: null, error: '名前は 1 文字以上必要です' };
+    allowed.name = s;
+  }
+  if (patch.description !== undefined) {
+    allowed.description = sanitizeText(patch.description, { maxLength: 500 });
+  }
+  if (patch.lat !== undefined) {
+    if (patch.lat < -90 || patch.lat > 90) return { data: null, error: '緯度が範囲外です' };
+    allowed.lat = patch.lat;
+  }
+  if (patch.lon !== undefined) {
+    if (patch.lon < -180 || patch.lon > 180) return { data: null, error: '経度が範囲外です' };
+    allowed.lon = patch.lon;
+  }
+  if (patch.category !== undefined) {
+    allowed.category = SELECTABLE_SPOT_CATEGORIES.includes(patch.category) ? patch.category : 'other';
+  }
+  if (patch.photo_urls !== undefined) {
+    allowed.photo_urls = patch.photo_urls.slice(0, 4).filter((u) => !!u);
+  }
+
+  const { data, error } = await supabase
+    .from('community_spots')
+    .update(allowed)
+    .eq('id', spot_id)
+    .select()
+    .single();
+  if (error || !data) return { data: null, error: error?.message ?? '聖地の更新に失敗しました' };
+  return { data: data as CommunitySpot, error: null };
+}
+
+// 聖地削除 (migration 0045 で community member 全員に削除権を開放: wiki 型)
 export async function deleteSpot(spot_id: string): Promise<{ error: string | null }> {
   const { error } = await supabase.from('community_spots').delete().eq('id', spot_id);
   if (error) return { error: error.message };
