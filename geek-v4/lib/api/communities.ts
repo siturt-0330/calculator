@@ -2,6 +2,7 @@ import { supabase } from '../supabase';
 import { generateVariants } from '../search/variants';
 import { findSimilar } from '../search/similarity';
 import { sanitizeContent, sanitizeText } from '../sanitize';
+import { setGenreOverride } from '../community/genreOverride';
 
 export type Visibility = 'open' | 'request' | 'invite';
 export type MemberRole = 'owner' | 'admin' | 'member';
@@ -476,6 +477,12 @@ export async function createCommunity(input: {
     }
     return { data: null, error: msg || 'コミュニティ作成に失敗しました' };
   }
+
+  // ユーザーが選んだ genre を local override にも保存。
+  // - migration 0044 未適用なら DB に genre 行が無い → effectiveGenre() で
+  //   override を引いて oshi/creative 等のタブ構成を正しく出せる
+  // - migration 適用後でも保険として残す (どちらかが効けば OK)
+  setGenreOverride(data.id, safeGenre);
 
   // タグを登録 (失敗しても community 自体は出来ているのでログだけ)
   if (input.tags.length > 0) {
