@@ -213,7 +213,7 @@ export default function MypageScreen() {
           <PrimaryAction
             icon={Icon.calendar}
             label="カレンダー"
-            onPress={() => router.push('/corners/calendar' as never)}
+            onPress={() => router.push('/mypage/calendar' as never)}
           />
         </View>
 
