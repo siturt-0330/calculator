@@ -137,6 +137,57 @@ export async function fetchPosts({
 import { sanitizeContent, sanitizeTag, sanitizeUrl } from '../sanitize';
 import { checkRate, rateLimitMessage } from '../rateLimit';
 
+// ============================================================
+// Discover — 検索タブの Instagram 風グリッド用
+// ------------------------------------------------------------
+// media_urls.length > 0 な公開投稿だけを新着順で取得。
+// 「写真ベースで偶然の出会いを増やす」UX のための最小 API。
+// (将来は trending / personalize で並び替えに切り替え予定)
+// ============================================================
+export type DiscoverMediaPost = {
+  id: string;
+  content: string;
+  media_urls: string[];
+  media_blurhashes: string[] | null;
+  likes_count: number;
+  comments_count: number;
+  created_at: string;
+};
+
+export async function fetchDiscoverMediaPosts(opts: {
+  limit?: number;
+  /** ISO 文字列。これより古い created_at で絞る (無限スクロール) */
+  beforeCreatedAt?: string;
+} = {}): Promise<DiscoverMediaPost[]> {
+  const limit = Math.max(6, Math.min(opts.limit ?? 36, 60));
+  // not-empty array filter: Supabase で `media_urls != '{}'` は使えないので
+  // PostgREST の cs (contains) を使う代替で「1 件以上」を表現できないため、
+  // overfetch + client filter で対応。
+  // 監査指摘: text[] の長さフィルタは PostgREST に無いので client 側で削るしかない。
+  let query = supabase
+    .from('posts')
+    .select('id, content, media_urls, media_blurhashes, likes_count, comments_count, created_at')
+    .eq('is_anonymous', true)
+    .eq('is_public', true)
+    .order('created_at', { ascending: false })
+    .limit(limit * 3); // overfetch して空 media を捨ててから limit 件返す
+
+  if (opts.beforeCreatedAt) {
+    query = query.lt('created_at', opts.beforeCreatedAt);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.warn('[posts] fetchDiscoverMediaPosts failed:', error.message);
+    return [];
+  }
+  const rows = (data ?? []) as DiscoverMediaPost[];
+  // 写真があるものだけ + limit
+  return rows
+    .filter((p) => Array.isArray(p.media_urls) && p.media_urls.length > 0)
+    .slice(0, limit);
+}
+
 export async function createPost({
   content,
   mediaUris,

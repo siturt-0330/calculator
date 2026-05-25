@@ -38,6 +38,7 @@ import { expandWithTagGraph } from '../lib/utils/searchAlgo';
 import { expandWithCooccur } from '../lib/tagClustering/relations';
 import { classifyEntity } from '../lib/search/queryEntity';
 import { ReasonBadges } from '../components/search/ReasonBadge';
+import { DiscoverPhotoGrid } from '../components/search/DiscoverPhotoGrid';
 
 type BBSResult = { id: string; title: string; category: string; replies_count: number; created_at: string };
 type Category = 'all' | 'posts' | 'tags' | 'bbs';
@@ -935,6 +936,9 @@ export default function SearchScreen() {
                 ))}
               </View>
             </View>
+
+            {/* 写真で発見 (Instagram 風 3 列グリッド) */}
+            <DiscoverPhotoGrid />
           </View>
         ) : loading ? (
           <View style={{ padding: SP['8'], alignItems: 'center' }}>
