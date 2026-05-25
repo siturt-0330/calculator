@@ -10,11 +10,13 @@ import { formatRelativeFor } from '../../lib/utils/date';
 import { useLanguageStore } from '../../stores/languageStore';
 
 describe('translate — D 追加分の DICT が引ける', () => {
-  it('UI ラベル: すべて / タグを追加 / 事実 / 意見', () => {
+  it('UI ラベル: すべて / タグを追加 / 送信 / 閉じる', () => {
+    // 旧 kind バッジ ラベル (事実 / 意見 等) は 2026-05 に機能廃止
+    // → DICT から削除済み。代わりに今残ってる D scope key で検証。
     expect(translate('すべて', 'en')).toBe('All');
     expect(translate('タグを追加', 'en')).toBe('Add tag');
-    expect(translate('事実', 'en')).toBe('Fact');
-    expect(translate('意見', 'en')).toBe('Opinion');
+    expect(translate('送信', 'en')).toBe('Send');
+    expect(translate('閉じる', 'en')).toBe('Close');
   });
 
   it('Toast/Error 系も翻訳される', () => {

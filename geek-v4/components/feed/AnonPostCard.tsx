@@ -22,7 +22,6 @@ import { PollCard } from './PollCard';
 import { useFeatureFlag } from '../../hooks/useFeatureFlag';
 import type { Poll } from '../../lib/api/polls';
 import { Avatar } from '../ui/Avatar';
-import { PostKindBadge } from './PostKindBadge';
 import { TrustBadge } from '../ui/TrustBadge';
 import { formatRelative } from '../../lib/utils/date';
 import { SHADOW } from '../../design/shadows';
@@ -536,7 +535,6 @@ function AnonPostCardInner({
               <Text style={[T.smallM, STYLES.officialName]} numberOfLines={1}>
                 {post.official_author.name || '公式管理者'}
               </Text>
-              <PostKindBadge kind={post.kind ?? 'opinion'} size="sm" />
             </View>
             <Text style={[T.caption, STYLES.officialSub]} numberOfLines={1}>
               {post.official_author.organization
@@ -549,7 +547,6 @@ function AnonPostCardInner({
             <Text style={[T.smallM, STYLES.anonLabel]}>匿</Text>
             <TrustBadge score={post.trust_score_at_post} />
             <Text style={[T.small, STYLES.anonRelative]}>· {formatRelative(post.created_at)}</Text>
-            <PostKindBadge kind={post.kind ?? 'opinion'} size="sm" />
           </View>
         )}
         <PressableScale onPress={onMore} hitSlop={8} style={STYLES.morePress}>
