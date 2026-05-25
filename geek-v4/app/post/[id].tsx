@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, useWindowDimensions,
 } from 'react-native';
@@ -12,6 +12,10 @@ import { fetchComments, createComment } from '../../lib/api/bbs';
 import { fetchPostAddedTags, addPostTag } from '../../lib/api/tags';
 import { supabase } from '../../lib/supabase';
 import { attachChannel } from '../../lib/realtime';
+import { useFeedPage } from '../../hooks/useFeedPage';
+import { useReactionToggle } from '../../hooks/useReactions';
+import { invalidateFeedPage } from '../../lib/cacheUpdates/feedPagePatcher';
+import { MemeReactionPicker } from '../../components/feed/MemeReactionPicker';
 import { C, SP, R } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { PressableScale } from '../../components/ui/PressableScale';
@@ -54,6 +58,22 @@ export default function PostDetailScreen() {
     // 同じ投稿を 30 秒以内に再オープン → 再 fetch しない
     staleTime: 60_000,
   });
+
+  // ★ 投稿詳細でも reactions / my_like 等を表示するため、feed と同じ RPC
+  // 経路 (useFeedPage) で 1 件分の周辺データを取得する。
+  // フィードで使ってる useFeedPage と同じ cache prefix `[FEED_PAGE_KEY]` を共有
+  // するので、useReactionToggle.onMutate の patchFeedPagePost が
+  // 詳細画面の cache も自動で更新する (= 楽観 update が UI に即時反映される)。
+  const postIdsForFeedPage = useMemo(() => (id ? [id] : []), [id]);
+  const { fullPosts } = useFeedPage(postIdsForFeedPage);
+  const fullPost = id ? fullPosts.get(id) : undefined;
+  const reactions = fullPost?.reactions ?? [];
+  const myMemes = useMemo(
+    () => reactions.filter((r) => r.mine).map((r) => r.meme),
+    [reactions],
+  );
+  const { toggle: toggleReact } = useReactionToggle();
+  const [memePickerOpen, setMemePickerOpen] = useState(false);
 
   const { data: replies = [], isLoading: repliesLoading, refetch, isRefetching } = useQuery({
     queryKey: ['post-comments', id],
@@ -108,24 +128,48 @@ export default function PostDetailScreen() {
     },
   });
 
-  // Realtime: 同じ投稿への新規コメント + 投稿カウンター更新
+  // Realtime: 同じ投稿への新規コメント + 投稿カウンター更新 + リアクション
+  //
+  // ★ 1 channel / 1 table パターン (旧版は 1 channel に 3 table を chain して
+  //   いたが、publication 未登録 table が混ざると CHANNEL_ERROR で全死する
+  //   既知不具合があるため分離する。詳細は hooks/useFeedRealtime.ts のコメント)。
+  //
+  // 注: 旧 reactions invalidate は ['reactions'] (legacy cache key) を叩いて
+  //     いたが、投稿詳細では useFeedPage 経由で [FEED_PAGE_KEY] cache を使う。
+  //     正しい target は invalidateFeedPage(qc) (= [FEED_PAGE_KEY] 全 cache)。
   useEffect(() => {
     if (!id) return;
-    return attachChannel(`post-detail:${id}`, (ch) =>
-      ch.on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'comments', filter: `post_id=eq.${id}` },
-        () => qc.invalidateQueries({ queryKey: ['post-comments', id] }),
-      ).on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'posts', filter: `id=eq.${id}` },
-        () => qc.invalidateQueries({ queryKey: ['post', id] }),
-      ).on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'post_reactions', filter: `post_id=eq.${id}` },
-        () => qc.invalidateQueries({ queryKey: ['reactions'] }),
+    const detachers: Array<() => void> = [];
+    detachers.push(
+      attachChannel(`post-detail-comments:${id}`, (ch) =>
+        ch.on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'comments', filter: `post_id=eq.${id}` },
+          () => qc.invalidateQueries({ queryKey: ['post-comments', id] }),
+        ),
       ),
     );
+    detachers.push(
+      attachChannel(`post-detail-post:${id}`, (ch) =>
+        ch.on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'posts', filter: `id=eq.${id}` },
+          () => qc.invalidateQueries({ queryKey: ['post', id] }),
+        ),
+      ),
+    );
+    detachers.push(
+      attachChannel(`post-detail-reactions:${id}`, (ch) =>
+        ch.on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'post_reactions', filter: `post_id=eq.${id}` },
+          () => invalidateFeedPage(qc),
+        ),
+      ),
+    );
+    return () => {
+      for (const d of detachers) d();
+    };
   }, [id, qc]);
 
   const handleAddTag = async (tag: string) => {
@@ -299,6 +343,89 @@ export default function PostDetailScreen() {
                 🏷️ オレンジ色のタグは他のユーザーが追加したタグです
               </Text>
             )}
+
+            {/* ============================================================
+                リアクション (テキストスタンプ)
+                ------------------------------------------------------------
+                useFeedPage([id]) で取得した reactions を表示。タップで toggle。
+                useReactionToggle が patchFeedPagePost 経由で [FEED_PAGE_KEY]
+                cache を即時更新するので、ピル数値も即時反映される。
+                ============================================================ */}
+            <View
+              style={{
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                gap: 6,
+                alignItems: 'center',
+                marginTop: 2,
+              }}
+            >
+              {reactions.slice(0, 12).map((r) => {
+                const mine = r.mine;
+                return (
+                  <PressableScale
+                    key={r.meme}
+                    onPress={() => toggleReact(id, r.meme)}
+                    haptic="tap"
+                    hitSlop={6}
+                    accessibilityLabel={`${r.meme} ${r.count} 件 ${mine ? '(押下済み)' : ''}`}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 5,
+                      paddingHorizontal: SP['3'],
+                      paddingVertical: 5,
+                      borderRadius: R.full,
+                      backgroundColor: mine ? C.accent : C.bg3,
+                      borderWidth: 1.5,
+                      borderColor: mine ? C.accent : C.border,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        color: mine ? '#fff' : C.text,
+                        fontWeight: '700',
+                      }}
+                    >
+                      {r.meme}
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        color: mine ? '#fff' : C.text2,
+                        fontWeight: '700',
+                      }}
+                    >
+                      {r.count}
+                    </Text>
+                  </PressableScale>
+                );
+              })}
+              <PressableScale
+                onPress={() => setMemePickerOpen(true)}
+                haptic="tap"
+                hitSlop={6}
+                accessibilityLabel="テキストスタンプを追加"
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingHorizontal: SP['3'],
+                  paddingVertical: 5,
+                  borderRadius: R.full,
+                  backgroundColor: C.bg3,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  borderStyle: 'dashed',
+                }}
+              >
+                <Icon.plus size={12} color={C.accent} strokeWidth={2.6} />
+                <Text style={{ fontSize: 11, color: C.accent, fontWeight: '700' }}>
+                  {reactions.length === 0 ? 'テキストスタンプを送る' : 'スタンプ'}
+                </Text>
+              </PressableScale>
+            </View>
           </View>
         </View>
 
@@ -477,6 +604,14 @@ export default function PostDetailScreen() {
           </PressableScale>
         </View>
       </View>
+
+      {/* テキストスタンプ Picker — フィードカードと同じ component を再利用 */}
+      <MemeReactionPicker
+        visible={memePickerOpen}
+        onClose={() => setMemePickerOpen(false)}
+        onPick={(meme) => toggleReact(id, meme)}
+        picked={myMemes}
+      />
     </KeyboardAvoidingView>
   );
 }
