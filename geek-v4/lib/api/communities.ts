@@ -425,20 +425,49 @@ export async function createCommunity(input: {
   const safeGenre: CommunityGenre = SELECTABLE_GENRES.includes(input.genre)
     ? input.genre
     : 'discussion';
-  const { data, error } = await supabase
+
+  // ============================================================
+  // Defensive: migration 0044 (communities.genre) が production の
+  // Supabase に未適用な環境でも壊れないように、genre column が
+  // PostgREST schema cache に無ければ genre 抜きで再試行する。
+  //
+  // エラーメッセージ例:
+  //   "Could not find the 'genre' column of 'communities' in the schema cache"
+  // ------------------------------------------------------------
+  // 根本解決は `supabase db push --linked` で migration を流すこと。
+  // 本 fallback はあくまで一時しのぎ (genre 未設定 = DB 側で NULL or
+  // default 'legacy' になる)。
+  // ============================================================
+  const basePayload = {
+    name: safeName,
+    description: safeDesc,
+    icon_emoji: input.icon_emoji,
+    icon_color: input.icon_color,
+    icon_url: input.icon_url ?? null,
+    visibility: input.visibility,
+    created_by: user.id,
+  };
+
+  // schema cache に missing column を判定する正規表現
+  const SCHEMA_CACHE_MISSING = /Could not find the .* column .* in the schema cache/i;
+
+  let { data, error } = await supabase
     .from('communities')
-    .insert({
-      name: safeName,
-      description: safeDesc,
-      icon_emoji: input.icon_emoji,
-      icon_color: input.icon_color,
-      icon_url: input.icon_url ?? null,
-      visibility: input.visibility,
-      genre: safeGenre,
-      created_by: user.id,
-    })
+    .insert({ ...basePayload, genre: safeGenre })
     .select()
     .single();
+
+  // genre が schema cache に無い → migration 0044 未適用環境 → genre 抜きで retry
+  if (error && SCHEMA_CACHE_MISSING.test(error.message) && /genre/i.test(error.message)) {
+    console.warn('[communities] genre column missing in schema cache — retrying without genre (migration 0044 未適用の可能性)');
+    const retry = await supabase
+      .from('communities')
+      .insert(basePayload)
+      .select()
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error || !data) {
     const msg = error?.message ?? '';
@@ -507,7 +536,20 @@ export async function updateCommunity(
     return { error: '不正な公開設定です' };
   }
 
-  const { error } = await supabase.from('communities').update(safePatch).eq('id', id);
+  // Defensive: migration 0044 (communities.genre) 未適用環境では genre 抜きで retry
+  // (createCommunity と同じ理由 — schema cache に column が無いと PostgREST が拒否)
+  const SCHEMA_CACHE_MISSING = /Could not find the .* column .* in the schema cache/i;
+  let { error } = await supabase.from('communities').update(safePatch).eq('id', id);
+  if (error && 'genre' in safePatch && SCHEMA_CACHE_MISSING.test(error.message) && /genre/i.test(error.message)) {
+    console.warn('[communities] update: genre column missing in schema cache — retrying without genre');
+    const { genre: _ignored, ...withoutGenre } = safePatch as { genre?: unknown; [k: string]: unknown };
+    if (Object.keys(withoutGenre).length === 0) {
+      // genre だけだった → no-op で成功扱い (warn 済)
+      return { error: null };
+    }
+    const retry = await supabase.from('communities').update(withoutGenre).eq('id', id);
+    error = retry.error;
+  }
   if (error) return { error: mapJoinError(error.message) };
   return { error: null };
 }
