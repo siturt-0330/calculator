@@ -44,6 +44,57 @@ const DICT: Dict = {
   '翻訳':                 { en: 'Translate',      zh: '翻译',     ko: '번역',       es: 'Traducir',   fr: 'Traduire' },
   '原文':                 { en: 'Original',       zh: '原文',     ko: '원문',       es: 'Original',   fr: 'Original' },
   '翻訳中...':            { en: 'Translating...', zh: '翻译中...', ko: '번역 중...', es: 'Traduciendo...', fr: 'Traduction...' },
+
+  // ============================================================
+  // D スコープ追加 (2026-05): フィード / 投稿カード / トースト / エラー
+  // ============================================================
+  // UI 高頻度ラベル (フィード周り)
+  'すべて':               { en: 'All',                zh: '全部',         ko: '전체',       es: 'Todo',           fr: 'Tout' },
+  'タグを追加':           { en: 'Add tag',            zh: '添加标签',     ko: '태그 추가',  es: 'Añadir tag',     fr: 'Ajouter un tag' },
+  '事実':                 { en: 'Fact',               zh: '事实',         ko: '사실',       es: 'Hecho',          fr: 'Fait' },
+  '意見':                 { en: 'Opinion',            zh: '意见',         ko: '의견',       es: 'Opinión',        fr: 'Avis' },
+  'ジョーク':             { en: 'Joke',               zh: '玩笑',         ko: '농담',       es: 'Broma',          fr: 'Blague' },
+  '制作中':               { en: 'WIP',                zh: '制作中',       ko: '제작 중',    es: 'WIP',            fr: 'En cours' },
+  '完了':                 { en: 'Done',               zh: '完成',         ko: '완료',       es: 'Hecho',          fr: 'Terminé' },
+  '送信':                 { en: 'Send',               zh: '发送',         ko: '전송',       es: 'Enviar',         fr: 'Envoyer' },
+  '閉じる':               { en: 'Close',              zh: '关闭',         ko: '닫기',       es: 'Cerrar',         fr: 'Fermer' },
+  'キャンセル':           { en: 'Cancel',             zh: '取消',         ko: '취소',       es: 'Cancelar',       fr: 'Annuler' },
+  '保存する':             { en: 'Save',               zh: '保存',         ko: '저장',       es: 'Guardar',        fr: 'Enregistrer' },
+  '読み込み中...':        { en: 'Loading...',         zh: '加载中...',    ko: '로딩 중...', es: 'Cargando...',    fr: 'Chargement...' },
+  'もっと見る':           { en: 'See more',           zh: '查看更多',     ko: '더 보기',    es: 'Ver más',        fr: 'Voir plus' },
+  'もっと読み込む':       { en: 'Load more',          zh: '加载更多',     ko: '더 불러오기', es: 'Cargar más',    fr: 'Charger plus' },
+  '戻る':                 { en: 'Back',               zh: '返回',         ko: '뒤로',       es: 'Atrás',          fr: 'Retour' },
+  '確認':                 { en: 'OK',                 zh: '确认',         ko: '확인',       es: 'OK',             fr: 'OK' },
+  'テキストスタンプ':     { en: 'Text stamp',         zh: '文字贴纸',     ko: '텍스트 스탬프', es: 'Sticker de texto', fr: 'Sticker texte' },
+  'スタンプを検索...':    { en: 'Search stamps...',   zh: '搜索贴纸...',  ko: '스탬프 검색...', es: 'Buscar...',    fr: 'Rechercher...' },
+  '新しいスタンプを作る': { en: 'Create new stamp',   zh: '创建新贴纸',   ko: '새 스탬프 만들기', es: 'Crear sticker', fr: 'Créer un sticker' },
+
+  // ============================================================
+  // Toast / Error 文 (translateStatic 経由で stores/toastStore.ts から呼ばれる)
+  // ============================================================
+  'ログインしてください':           { en: 'Please log in',                 zh: '请登录',          ko: '로그인해 주세요',    es: 'Por favor inicia sesión',  fr: 'Veuillez vous connecter' },
+  'ログインに失敗しました':         { en: 'Login failed',                  zh: '登录失败',        ko: '로그인 실패',        es: 'Error al iniciar sesión',  fr: 'Échec de la connexion' },
+  '通信エラーが発生しました':       { en: 'Network error',                 zh: '网络错误',        ko: '네트워크 오류',      es: 'Error de red',             fr: 'Erreur réseau' },
+  'オフラインです':                 { en: 'You are offline',               zh: '您处于离线状态',  ko: '오프라인입니다',     es: 'Sin conexión',             fr: 'Vous êtes hors-ligne' },
+  '接続が回復しました':             { en: 'Connection restored',           zh: '连接已恢复',      ko: '연결이 복구됨',      es: 'Conexión restaurada',      fr: 'Connexion rétablie' },
+  '投稿しました':                   { en: 'Posted',                        zh: '已发布',          ko: '게시 완료',          es: 'Publicado',                fr: 'Publié' },
+  '投稿に失敗しました':             { en: 'Post failed',                   zh: '发布失败',        ko: '게시 실패',          es: 'Error al publicar',        fr: 'Échec de la publication' },
+  'コメントしました':               { en: 'Commented',                     zh: '已评论',          ko: '댓글 작성',          es: 'Comentado',                fr: 'Commenté' },
+  '送信に失敗しました':             { en: 'Send failed',                   zh: '发送失败',        ko: '전송 실패',          es: 'Error al enviar',          fr: 'Échec de l’envoi' },
+  '保存しました':                   { en: 'Saved',                         zh: '已保存',          ko: '저장됨',             es: 'Guardado',                 fr: 'Enregistré' },
+  '保存を解除しました':             { en: 'Unsaved',                       zh: '已取消保存',      ko: '저장 해제',          es: 'Eliminado de guardados',   fr: 'Retiré des enregistrements' },
+  '通報しました':                   { en: 'Reported',                      zh: '已举报',          ko: '신고됨',             es: 'Reportado',                fr: 'Signalé' },
+  '通報に失敗しました':             { en: 'Report failed',                 zh: '举报失败',        ko: '신고 실패',          es: 'Error al reportar',        fr: 'Échec du signalement' },
+  'シェアできませんでした':         { en: 'Failed to share',               zh: '分享失败',        ko: '공유 실패',          es: 'No se pudo compartir',     fr: 'Échec du partage' },
+  'リンクをコピーしました':         { en: 'Link copied',                   zh: '已复制链接',      ko: '링크 복사됨',        es: 'Enlace copiado',           fr: 'Lien copié' },
+  'リアクションに失敗しました':     { en: 'Reaction failed',               zh: '反应失败',        ko: '리액션 실패',        es: 'Error en la reacción',     fr: 'Échec de la réaction' },
+  '何かエラーが発生しました':       { en: 'Something went wrong',          zh: '发生了一些错误',  ko: '오류가 발생했습니다', es: 'Algo salió mal',           fr: 'Une erreur est survenue' },
+  'もう一度お試しください':         { en: 'Please try again',              zh: '请再试一次',      ko: '다시 시도해 주세요', es: 'Inténtalo de nuevo',       fr: 'Veuillez réessayer' },
+  '権限がありません':               { en: 'Permission denied',             zh: '没有权限',        ko: '권한이 없습니다',    es: 'Permiso denegado',         fr: 'Accès refusé' },
+  '画像の読み込みに失敗しました':   { en: 'Failed to load image',          zh: '图片加载失败',    ko: '이미지 로드 실패',   es: 'Error al cargar la imagen', fr: 'Échec du chargement de l’image' },
+  'メールアドレスが正しくありません': { en: 'Invalid email address',       zh: '电子邮箱无效',    ko: '이메일이 올바르지 않습니다', es: 'Correo no válido',    fr: 'Adresse e-mail invalide' },
+  'パスワードが正しくありません':   { en: 'Invalid password',              zh: '密码错误',        ko: '비밀번호가 올바르지 않습니다', es: 'Contraseña incorrecta', fr: 'Mot de passe incorrect' },
+  '入力内容を確認してください':     { en: 'Please check your input',       zh: '请检查输入内容',  ko: '입력 내용을 확인해 주세요', es: 'Verifica tu entrada',  fr: 'Veuillez vérifier vos entrées' },
 };
 
 // React Hook で使用: const t = useT(); t('好きなタグ')
@@ -63,6 +114,28 @@ export function translate(jaText: string, lang: Lang): string {
   const entry = DICT[jaText];
   if (!entry) return jaText;
   return entry[lang] ?? jaText;
+}
+
+// ============================================================
+// translateStatic — hook が使えない場所から呼ぶための imperative 版
+// ------------------------------------------------------------
+// useT() は React component / hook 内でしか使えない。
+// store action / catch handler / lib 内部 などから呼びたい時はこっち。
+// 内部で languageStore の最新 state を読むので、user が言語を切り替えれば
+// 次回呼び出しから新言語が適用される。
+//
+// 用例 (stores/toastStore.ts):
+//   show: (message, variant) => {
+//     const localized = translateStatic(message);
+//     set((s) => ({ toasts: [...s.toasts, { ..., message: localized }] }));
+//   }
+//
+// 辞書に無い文字列はそのまま返るので、既存 caller の挙動は変わらない
+// (= 安全な fallback)。
+// ============================================================
+export function translateStatic(jaText: string): string {
+  const lang = useLanguageStore.getState().lang;
+  return translate(jaText, lang);
 }
 
 // =============================================

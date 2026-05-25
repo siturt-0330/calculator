@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { translateStatic } from '../lib/i18n';
 
 export type ToastVariant = 'info' | 'success' | 'error' | 'warn';
 
@@ -40,9 +41,13 @@ export function computeDuration(message: string, variant: ToastVariant, override
 export const useToastStore = create<ToastState>((set) => ({
   toasts: [],
   show: (message, variant = 'info', opts) => {
+    // ★ 2026-05 改修: 全 caller の文言を変更せずに、表示直前で言語切替する。
+    //   DICT に登録があれば現在 lang に翻訳、無ければそのまま (= 安全な fallback)。
+    //   既存 caller (auth flow / hooks / api) のコード変更ゼロで Toast が多言語化される。
+    const localized = translateStatic(message);
     const id = Math.random().toString(36).slice(2);
-    set((s) => ({ toasts: [...s.toasts, { id, message, variant, undoLabel: opts?.undoLabel, onUndo: opts?.onUndo }] }));
-    const ms = computeDuration(message, variant, opts?.duration);
+    set((s) => ({ toasts: [...s.toasts, { id, message: localized, variant, undoLabel: opts?.undoLabel, onUndo: opts?.onUndo }] }));
+    const ms = computeDuration(localized, variant, opts?.duration);
     setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), ms);
   },
   dismiss: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
