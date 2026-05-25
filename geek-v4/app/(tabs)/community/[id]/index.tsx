@@ -19,6 +19,7 @@ import {
   FlatList,
   ActivityIndicator,
   TextInput,
+  Modal,
   type ListRenderItem,
 } from 'react-native';
 import Animated, {
@@ -59,7 +60,10 @@ import {
   fetchCommunitySpots,
   fetchCommunityEvents,
   toggleSpotCertified,
+  updateCommunity,
   SPOT_CATEGORY_META,
+  COMMUNITY_GENRE_META,
+  SELECTABLE_GENRES,
   type CommunityWithMembership,
   type CommunitySpot,
   type CommunityEvent,
@@ -70,6 +74,7 @@ import {
   getTabsFor,
   type CommunityTabKey,
 } from '../../../../lib/community/tabSets';
+import { effectiveGenre, setGenreOverride } from '../../../../lib/community/genreOverride';
 import { fetchCommunityPosts } from '../../../../lib/api/posts';
 import { fetchCommunityThreads } from '../../../../lib/api/bbs';
 // Q&A 関連 import は廃止 (2026-05) — QnaTabInline 撤去に伴い
@@ -188,6 +193,8 @@ export default function CommunityDetailScreen() {
   const [descExpanded, setDescExpanded] = useState(false);
   const [joining, setJoining] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // ジャンル変更モーダル (migration 0044 未適用環境でも local override で変更可)
+  const [genreModalOpen, setGenreModalOpen] = useState(false);
 
   // -----------------------------------------------------------
   // Community core fetch (header)
@@ -492,6 +499,36 @@ export default function CommunityDetailScreen() {
             </View>
           )}
 
+          {/* ジャンル badge (tap で変更モーダル) — 公式コミュは固定なので隠す */}
+          {!community.is_official && (() => {
+            const currentGenre = effectiveGenre(id, community.genre);
+            const meta = COMMUNITY_GENRE_META[currentGenre];
+            return (
+              <PressableScale
+                onPress={() => setGenreModalOpen(true)}
+                haptic="tap"
+                accessibilityLabel={`ジャンル ${meta.label} — タップして変更`}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingHorizontal: SP['3'],
+                  paddingVertical: 4,
+                  backgroundColor: C.bg3,
+                  borderRadius: R.full,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                }}
+              >
+                <Text style={{ fontSize: 13 }}>{meta.emoji}</Text>
+                <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>
+                  {meta.label}
+                </Text>
+                <Icon.edit size={10} color={C.text3} strokeWidth={2.2} />
+              </PressableScale>
+            );
+          })()}
+
           {/* Compact stats */}
           <View
             style={{
@@ -574,7 +611,7 @@ export default function CommunityDetailScreen() {
           activeTab={activeTab}
           onChange={setActiveTab}
           isOfficial={!!community.is_official}
-          genre={community.genre}
+          genre={effectiveGenre(id, community.genre)}
         />
 
         {/* ============================================================
@@ -650,8 +687,7 @@ export default function CommunityDetailScreen() {
           'compose' タブを持たないので、代替として右下に FAB を出して post create を
           開く。legacy / official は従来通り tab 経由なので FAB は出さない。 */}
       {!community.is_official &&
-        community.genre &&
-        community.genre !== 'legacy' && (
+        effectiveGenre(id, community.genre) !== 'legacy' && (
           <PressableScale
             onPress={() =>
               router.push(`/post/create?community_id=${encodeURIComponent(id)}` as never)
@@ -678,7 +714,123 @@ export default function CommunityDetailScreen() {
             <Icon.plus size={26} color="#fff" strokeWidth={2.8} />
           </PressableScale>
         )}
+
+      {/* === ジャンル変更モーダル (local override + server 試行) === */}
+      <GenreChangeModal
+        visible={genreModalOpen}
+        currentGenre={effectiveGenre(id, community.genre)}
+        onClose={() => setGenreModalOpen(false)}
+        onPick={async (g) => {
+          setGenreOverride(id, g);
+          setGenreModalOpen(false);
+          // server にも書きにいく — migration 適用済なら更新、未適用なら
+          // updateCommunity 内の defensive で genre が外されるが、local override は残る
+          await updateCommunity(id, { genre: g });
+          // community キャッシュを invalidate して tab が再描画されるように
+          void qc.invalidateQueries({ queryKey: ['community', id] });
+          show(`ジャンルを「${COMMUNITY_GENRE_META[g].label}」に変更しました`, 'success');
+        }}
+      />
     </View>
+  );
+}
+
+// ============================================================
+// GenreChangeModal — community 詳細のジャンル変更モーダル
+// ------------------------------------------------------------
+// migration 0044 未適用環境でも UI 操作だけでタブ構成を切り替えられる
+// (local override に保存)。migration 適用済なら updateCommunity が server も更新。
+// ============================================================
+function GenreChangeModal({
+  visible,
+  currentGenre,
+  onClose,
+  onPick,
+}: {
+  visible: boolean;
+  currentGenre: CommunityGenre;
+  onClose: () => void;
+  onPick: (g: CommunityGenre) => void;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' }}>
+        <View
+          style={{
+            backgroundColor: C.bg2,
+            borderTopLeftRadius: R['2xl'],
+            borderTopRightRadius: R['2xl'],
+            padding: SP['4'],
+            paddingBottom: insets.bottom + SP['4'],
+            gap: SP['3'],
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+            <Text style={[T.h3, { color: C.text, flex: 1 }]}>ジャンルを変更</Text>
+            <PressableScale
+              onPress={onClose}
+              haptic="tap"
+              hitSlop={12}
+              accessibilityLabel="閉じる"
+              style={{ padding: SP['2'] }}
+            >
+              <Icon.close size={20} color={C.text2} strokeWidth={2.4} />
+            </PressableScale>
+          </View>
+          <Text style={[T.caption, { color: C.text3 }]}>
+            タブ構成がジャンルに合わせて変わります
+          </Text>
+          <View style={{ gap: SP['2'] }}>
+            {SELECTABLE_GENRES.map((g) => {
+              const meta = COMMUNITY_GENRE_META[g];
+              const isActive = g === currentGenre;
+              return (
+                <PressableScale
+                  key={g}
+                  onPress={() => onPick(g)}
+                  haptic="select"
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: SP['3'],
+                    padding: SP['3'],
+                    backgroundColor: isActive ? C.accent + '22' : C.bg3,
+                    borderRadius: R.md,
+                    borderWidth: 1.5,
+                    borderColor: isActive ? C.accent : 'transparent',
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 20,
+                      backgroundColor: C.bg2,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text style={{ fontSize: 22 }}>{meta.emoji}</Text>
+                  </View>
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={[T.bodyB, { color: C.text, fontWeight: '700' }]}>
+                      {meta.label}
+                    </Text>
+                    <Text style={[T.caption, { color: C.text3 }]} numberOfLines={2}>
+                      {meta.description}
+                    </Text>
+                  </View>
+                  {isActive && (
+                    <Icon.check size={18} color={C.accent} strokeWidth={2.6} />
+                  )}
+                </PressableScale>
+              );
+            })}
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
