@@ -499,35 +499,63 @@ export default function CommunityDetailScreen() {
             </View>
           )}
 
-          {/* ジャンル badge (tap で変更モーダル) — 公式コミュは固定なので隠す */}
-          {!community.is_official && (() => {
-            const currentGenre = effectiveGenre(id, community.genre);
-            const meta = COMMUNITY_GENRE_META[currentGenre];
-            return (
-              <PressableScale
-                onPress={() => setGenreModalOpen(true)}
-                haptic="tap"
-                accessibilityLabel={`ジャンル ${meta.label} — タップして変更`}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 4,
-                  paddingHorizontal: SP['3'],
-                  paddingVertical: 4,
-                  backgroundColor: C.bg3,
-                  borderRadius: R.full,
-                  borderWidth: 1,
-                  borderColor: C.border,
-                }}
-              >
-                <Text style={{ fontSize: 13 }}>{meta.emoji}</Text>
-                <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>
-                  {meta.label}
-                </Text>
-                <Icon.edit size={10} color={C.text3} strokeWidth={2.2} />
-              </PressableScale>
-            );
-          })()}
+          {/* ジャンル badge (tap で変更モーダル) と「コミュニティを編集」ボタンを横並び */}
+          {!community.is_official && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6 }}>
+              {(() => {
+                const currentGenre = effectiveGenre(id, community.genre);
+                const meta = COMMUNITY_GENRE_META[currentGenre];
+                return (
+                  <PressableScale
+                    onPress={() => setGenreModalOpen(true)}
+                    haptic="tap"
+                    accessibilityLabel={`ジャンル ${meta.label} — タップして変更`}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      paddingHorizontal: SP['3'],
+                      paddingVertical: 4,
+                      backgroundColor: C.bg3,
+                      borderRadius: R.full,
+                      borderWidth: 1,
+                      borderColor: C.border,
+                    }}
+                  >
+                    <Text style={{ fontSize: 13 }}>{meta.emoji}</Text>
+                    <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>
+                      {meta.label}
+                    </Text>
+                    <Icon.edit size={10} color={C.text3} strokeWidth={2.2} />
+                  </PressableScale>
+                );
+              })()}
+              {/* 編集 (wiki edit, migration 0048) — member 全員可 */}
+              {community.is_member && (
+                <PressableScale
+                  onPress={() => router.push(`/community/${id}/edit` as never)}
+                  haptic="tap"
+                  accessibilityLabel="コミュニティを編集"
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    paddingHorizontal: SP['3'],
+                    paddingVertical: 4,
+                    backgroundColor: C.bg3,
+                    borderRadius: R.full,
+                    borderWidth: 1,
+                    borderColor: C.border,
+                  }}
+                >
+                  <Icon.edit size={11} color={C.text2} strokeWidth={2.4} />
+                  <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>
+                    編集
+                  </Text>
+                </PressableScale>
+              )}
+            </View>
+          )}
 
           {/* Compact stats */}
           <View

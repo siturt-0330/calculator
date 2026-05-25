@@ -561,6 +561,46 @@ export async function updateCommunity(
   return { error: null };
 }
 
+// ============================================================
+// コミュニティタグの一括更新 (wiki edit 用)
+// ------------------------------------------------------------
+// 既存タグを全削除 → 新タグを insert する単純実装。
+// migration 0048 で member 全員が community_tags の INSERT/DELETE 可 (元から)。
+//
+// 同時編集時の race:
+//   - 2 人が同時に変更 → 後勝ち (最後の insert が残る)
+//   - Wiki 思想なので許容。将来 audit log + revert で対応。
+// ============================================================
+export async function replaceCommunityTags(
+  community_id: string,
+  tags: string[],
+): Promise<{ error: string | null }> {
+  if (!UUID_RE.test(community_id)) return { error: '不正なコミュニティ ID です' };
+
+  // sanitize (createCommunity と同じルール)
+  const cleanTags = tags
+    .map((t) => t.trim().replace(/^#/, ''))
+    .filter((t) => t.length > 0 && t.length <= 40)
+    .slice(0, 10);
+  // 重複除外 (PK は (community_id, tag) なので insert で conflict する前に dedupe)
+  const uniqueTags = Array.from(new Set(cleanTags));
+
+  // 既存を全削除
+  const { error: delErr } = await supabase
+    .from('community_tags')
+    .delete()
+    .eq('community_id', community_id);
+  if (delErr) return { error: delErr.message };
+
+  if (uniqueTags.length === 0) return { error: null };
+
+  // 新規 insert
+  const rows = uniqueTags.map((tag) => ({ community_id, tag }));
+  const { error: insErr } = await supabase.from('community_tags').insert(rows);
+  if (insErr) return { error: insErr.message };
+  return { error: null };
+}
+
 // 共通 UUID 形式チェック (community_id 入力検証)
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
