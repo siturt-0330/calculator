@@ -69,12 +69,7 @@ import {
 } from '../../../../lib/community/tabSets';
 import { fetchCommunityPosts } from '../../../../lib/api/posts';
 import { fetchCommunityThreads } from '../../../../lib/api/bbs';
-import {
-  askQna,
-  fetchQnaHistory,
-  fetchQnaDocuments,
-  type QnaQuestion,
-} from '../../../../lib/api/officialCommunities';
+// Q&A 関連 import は廃止 (2026-05) — QnaTabInline 撤去に伴い
 import { useToastStore } from '../../../../stores/toastStore';
 import { useLike, useLikes } from '../../../../hooks/useLike';
 import { useConcern, useConcerns } from '../../../../hooks/useConcern';
@@ -560,8 +555,9 @@ export default function CommunityDetailScreen() {
             />
           </View>
 
-          {/* オーナーのみ: 公式登録を申請する CTA */}
-          <OwnerApplyOfficialCta community={community} />
+          {/* 公式登録の申請機能は廃止 (2026-05)。
+              Geek 公式アカウント (migration 0033 で seed 済) 以外には公式バッジを
+              付与しない方針へ転換。詳細は HYPOTHESIS_LOG.md 参照。 */}
         </View>
 
         {/* 公式機能ピル (Q&A / カレンダー / 地図) は廃止 —
@@ -589,11 +585,11 @@ export default function CommunityDetailScreen() {
         </View>
         {visitedTabs.threads && (
           <View style={{ display: activeTab === 'threads' ? 'flex' : 'none' }}>
-            {community.is_official ? (
-              <QnaTabInline communityId={id} community={community} />
-            ) : (
-              <ThreadsTab communityId={id} />
-            )}
+            {/* 公式コミュも一般と同じ ThreadsTab を使用。
+                Q&A (AI 自動回答) 機能は廃止 (コスト × ハルシネーション問題)。
+                公式 = 「Q&A タブ」だった旧 UX は、CommunityTabBar 側で
+                ラベルを "Q&A" のまま残すか "掲示板" に揃えるかを別途決める。 */}
+            <ThreadsTab communityId={id} />
           </View>
         )}
         {visitedTabs.spots && (
@@ -1695,273 +1691,12 @@ const EventsTab = memo(function EventsTab({ communityId, canCreate }: { communit
   );
 });
 
-// ============================================================
-// Owner only: 公式登録を申請する CTA
-// ============================================================
-function OwnerApplyOfficialCta({ community }: { community: CommunityWithMembership }) {
-  const router = useRouter();
-  const userId = useAuthStore((s) => s.user?.id);
-  const isOwner = community.role === 'owner' || (userId && community.created_by === userId);
-  if (community.is_official) return null;
-  if (!isOwner) return null;
-  return (
-    <PressableScale
-      onPress={() => router.push(`/community/${community.id}/apply-official` as never)}
-      haptic="tap"
-      style={{
-        alignSelf: 'stretch',
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
-        marginTop: SP['1'],
-        paddingVertical: SP['2'] + 2,
-        backgroundColor: C.accentBg,
-        borderRadius: R.full,
-        borderWidth: 1,
-        borderColor: C.accent + '55',
-      }}
-    >
-      <Icon.shield size={14} color={C.accentLight} strokeWidth={2.4} />
-      <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>
-        公式コミュニティとして申請する
-      </Text>
-    </PressableScale>
-  );
-}
+// OwnerApplyOfficialCta は廃止 (2026-05): 公式登録の申請機能をなくし、
+// Geek 公式 (migration 0033 seed) のみが is_official=true を持つ方針へ転換。
 
-// ============================================================
-// Q&A タブ (公式コミュニティのみ) — NotebookLM 風
-// 管理者が登録したナレッジから検索して回答する
-// ============================================================
-function QnaTabInline({
-  communityId,
-  community,
-}: {
-  communityId: string;
-  community: CommunityWithMembership;
-}) {
-  const userId = useAuthStore((s) => s.user?.id);
-  const { show } = useToastStore();
-  const qc = useQueryClient();
-  const router = useRouter();
-  const [question, setQuestion] = useState('');
-  const [latest, setLatest] = useState<QnaQuestion | null>(null);
-
-  const isAdmin = !!userId && community.official_admin_user_id === userId;
-
-  const { data: history = [] } = useQuery({
-    queryKey: ['community', communityId, 'qna-history'],
-    queryFn: () => fetchQnaHistory(communityId, 30),
-    enabled: communityId.length > 0,
-    staleTime: 15_000,
-  });
-
-  const { data: docs = [] } = useQuery({
-    queryKey: ['community', communityId, 'qna-docs'],
-    queryFn: () => fetchQnaDocuments(communityId),
-    enabled: communityId.length > 0,
-    staleTime: 30_000,
-  });
-  const docTitleById = new Map<string, string>(docs.map((d) => [d.id, d.title]));
-
-  const ask = useMutation({
-    mutationFn: () => askQna({ communityId, question: question.trim() }),
-    onSuccess: (q) => {
-      setLatest(q);
-      setQuestion('');
-      void qc.invalidateQueries({ queryKey: ['community', communityId, 'qna-history'] });
-    },
-    onError: (e: unknown) => {
-      show(e instanceof Error ? e.message : '質問の送信に失敗しました', 'error');
-    },
-  });
-
-  const canAsk = question.trim().length >= 3 && !ask.isPending;
-
-  return (
-    <View style={{ padding: SP['4'], gap: SP['4'] }}>
-      {/* 入力 */}
-      <View style={{ gap: SP['2'] }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Icon.help size={16} color={C.accent} strokeWidth={2.4} />
-          <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>
-            このコミュニティに質問する
-          </Text>
-        </View>
-        <View
-          style={{
-            flexDirection: 'row',
-            gap: SP['2'],
-            backgroundColor: C.bg2,
-            borderRadius: R.lg,
-            borderWidth: 1,
-            borderColor: C.border,
-            paddingHorizontal: SP['3'],
-            paddingVertical: SP['2'],
-            alignItems: 'flex-end',
-          }}
-        >
-          <TextInput
-            value={question}
-            onChangeText={setQuestion}
-            placeholder="例: 使い方を教えて"
-            placeholderTextColor={C.text3}
-            multiline
-            style={{
-              flex: 1,
-              color: C.text,
-              fontSize: 14,
-              maxHeight: 100,
-              paddingVertical: 4,
-            }}
-          />
-          <PressableScale
-            onPress={() => canAsk && ask.mutate()}
-            disabled={!canAsk}
-            haptic="confirm"
-            style={{
-              paddingHorizontal: SP['3'],
-              paddingVertical: SP['2'],
-              backgroundColor: canAsk ? C.accent : C.bg3,
-              borderRadius: R.full,
-              opacity: canAsk ? 1 : 0.5,
-              minWidth: 60,
-              alignItems: 'center',
-            }}
-          >
-            {ask.isPending ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>送信</Text>
-            )}
-          </PressableScale>
-        </View>
-        {isAdmin && (
-          <PressableScale
-            onPress={() => router.push(`/community/${communityId}/qna-admin` as never)}
-            haptic="tap"
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              alignSelf: 'flex-start',
-              paddingHorizontal: SP['3'],
-              paddingVertical: 6,
-              backgroundColor: C.bg2,
-              borderRadius: R.full,
-              borderWidth: 1,
-              borderColor: C.border,
-            }}
-          >
-            <Icon.plus size={12} color={C.text2} strokeWidth={2.4} />
-            <Text style={[T.caption, { color: C.text2, fontWeight: '600' }]}>
-              ナレッジを管理 ({docs.length})
-            </Text>
-          </PressableScale>
-        )}
-      </View>
-
-      {/* 最新の回答 */}
-      {latest && (
-        <View
-          style={{
-            padding: SP['3'],
-            backgroundColor: C.accentBg,
-            borderRadius: R.lg,
-            borderWidth: 1,
-            borderColor: C.accent + '40',
-            gap: SP['2'],
-          }}
-        >
-          <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>
-            Q. {latest.question}
-          </Text>
-          <Text style={[T.body, { color: C.text }]}>
-            {latest.answer || '...'}
-          </Text>
-          {latest.source_doc_ids.length > 0 && (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-              {latest.source_doc_ids.map((sid) => (
-                <View
-                  key={sid}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 4,
-                    paddingHorizontal: 8,
-                    paddingVertical: 3,
-                    backgroundColor: C.bg2,
-                    borderRadius: R.full,
-                    borderWidth: 1,
-                    borderColor: C.border,
-                  }}
-                >
-                  <Icon.info size={10} color={C.text3} strokeWidth={2.4} />
-                  <Text style={[T.caption, { color: C.text2, fontWeight: '600' }]} numberOfLines={1}>
-                    {docTitleById.get(sid) ?? 'ナレッジ'}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          )}
-        </View>
-      )}
-
-      {/* 履歴 */}
-      <View style={{ gap: SP['2'] }}>
-        <Text style={[T.smallM, { color: C.text3, fontWeight: '700' }]}>
-          みんなの質問
-        </Text>
-        {history.length === 0 ? (
-          <View
-            style={{
-              padding: SP['4'],
-              backgroundColor: C.bg2,
-              borderRadius: R.lg,
-              borderWidth: 1,
-              borderColor: C.border,
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            <Icon.help size={28} color={C.text3} strokeWidth={1.8} />
-            <Text style={[T.small, { color: C.text3, textAlign: 'center' }]}>
-              まだ質問がありません。{'\n'}最初の質問をしてみましょう。
-            </Text>
-          </View>
-        ) : (
-          history.map((h) => (
-            <View
-              key={h.id}
-              style={{
-                padding: SP['3'],
-                backgroundColor: C.bg2,
-                borderRadius: R.lg,
-                borderWidth: 1,
-                borderColor: C.border,
-                gap: 6,
-              }}
-            >
-              <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>
-                Q. {h.question}
-              </Text>
-              {h.answer && (
-                <Text style={[T.small, { color: C.text2 }]} numberOfLines={3}>
-                  {h.answer}
-                </Text>
-              )}
-              <Text style={[T.caption, { color: C.text3 }]}>
-                {formatRelative(h.asked_at)}
-                {h.status === 'no_source' && ' · 該当ナレッジなし'}
-              </Text>
-            </View>
-          ))
-        )}
-      </View>
-    </View>
-  );
-}
+// QnaTabInline は廃止 (2026-05): AI 自動回答の事業構造的トレードオフ
+// (コスト × ハルシネーション) により Q&A 機能ごと撤去。
+// 公式コミュも一般コミュと同じ ThreadsTab を使う。
 
 // OfficialFeatureNav は components/community/OfficialFeatureNav.tsx に切り出し済み (Phase 8 split)
 

@@ -193,19 +193,13 @@ export default function OfficialDashboardScreen() {
               tone="accent"
               delay={0}
             />
-            <ActionTile
-              icon={Icon.info}
-              label="ナレッジ管理"
-              onPress={() => router.push(`/official/${communityId}/knowledge` as never)}
-              tone="amber"
-              delay={40}
-            />
+            {/* ナレッジ管理は廃止 (2026-05) — Q&A 機能ごと撤去 */}
             <ActionTile
               icon={Icon.calendar}
               label="イベント管理"
               onPress={() => router.push(`/official/${communityId}/events` as never)}
               tone="blue"
-              delay={80}
+              delay={40}
             />
             <ActionTile
               icon={Icon.map}
