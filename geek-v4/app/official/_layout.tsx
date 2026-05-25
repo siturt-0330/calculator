@@ -59,7 +59,7 @@ export default function OfficialLayout() {
       <Stack.Screen name="index" />
       <Stack.Screen name="[communityId]/index" />
       <Stack.Screen name="[communityId]/post" />
-      <Stack.Screen name="[communityId]/knowledge" />
+      {/* [communityId]/knowledge は廃止 (2026-05) — Q&A 機能ごと撤去 */}
       <Stack.Screen name="[communityId]/events" />
       <Stack.Screen name="[communityId]/spots" />
       <Stack.Screen name="[communityId]/analytics" />

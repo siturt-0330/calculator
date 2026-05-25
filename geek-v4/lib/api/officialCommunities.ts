@@ -122,16 +122,9 @@ export async function fetchApplication(applicationId: string): Promise<OfficialA
   return (data as OfficialApplication) ?? null;
 }
 
-// URL 所有確認 (edge function 呼び出し)
-export async function verifyOfficialUrl(
-  applicationId: string,
-): Promise<{ status: 'verified' | 'failed'; method?: string }> {
-  const { data, error } = await supabase.functions.invoke('verify-official-url', {
-    body: { application_id: applicationId },
-  });
-  if (error) throw new Error(error.message || '検証に失敗しました');
-  return data as { status: 'verified' | 'failed'; method?: string };
-}
+// verifyOfficialUrl は廃止 (2026-05):
+// verify-official-url Edge Function ごと撤去、公式申請機能を廃止したため。
+// Geek 公式 (migration 0033 で seed) のみが is_official=true を持つ。
 
 // ----------------------------------------------------------------
 // admin 用 — pending 一覧
