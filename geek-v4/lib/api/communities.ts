@@ -147,6 +147,9 @@ export type CommunityEvent = {
   photo_url: string | null;
   created_by: string;
   created_at: string;
+  // migration 0046 で追加。会場 spot との 1:N リンク (1 spot で複数イベント可)。
+  // null の場合は location_text のみで運用 (既存イベント互換)。
+  spot_id?: string | null;
 };
 
 export type CommunityPostWithCommunity = CommunityPost & {
@@ -1431,6 +1434,9 @@ export async function createEvent(input: {
   ends_at?: string;        // ISO 8601 — null 許容
   location_text?: string;
   photo_url?: string;
+  // migration 0046: 会場 spot を指定 (任意)。指定時はサーバ側 trigger で
+  // spot.community_id == event.community_id を検証 (SPOT_COMMUNITY_MISMATCH)。
+  spot_id?: string | null;
 }): Promise<{ data: CommunityEvent | null; error: string | null }> {
   if (!UUID_RE.test(input.community_id)) {
     return { data: null, error: '不正なコミュニティ ID です' };
@@ -1463,6 +1469,9 @@ export async function createEvent(input: {
     endsAt = e.toISOString();
   }
 
+  // spot_id は UUID チェックだけ、存在検証は trigger 側 (RLS と二重防御)
+  const safeSpotId: string | null = input.spot_id && UUID_RE.test(input.spot_id) ? input.spot_id : null;
+
   const { data, error } = await supabase
     .from('community_events')
     .insert({
@@ -1473,11 +1482,84 @@ export async function createEvent(input: {
       ends_at: endsAt,
       location_text: safeLocation,
       photo_url: input.photo_url ?? null,
+      spot_id: safeSpotId,
       created_by: user.id,
     })
     .select()
     .single();
-  if (error || !data) return { data: null, error: error?.message ?? 'イベント作成に失敗しました' };
+  if (error || !data) {
+    const msg = error?.message ?? 'イベント作成に失敗しました';
+    if (msg.includes('SPOT_COMMUNITY_MISMATCH')) {
+      return { data: null, error: '指定した聖地が別コミュニティのものです' };
+    }
+    if (msg.includes('SPOT_NOT_FOUND')) {
+      return { data: null, error: '指定した聖地が見つかりません' };
+    }
+    return { data: null, error: msg };
+  }
+  return { data: data as CommunityEvent, error: null };
+}
+
+// イベント更新 (作成者 or community owner — RLS で担保)
+// migration 0046: spot_id の付け替え対応
+export async function updateEvent(
+  event_id: string,
+  patch: Partial<{
+    title: string;
+    description: string;
+    starts_at: string;
+    ends_at: string | null;
+    location_text: string | null;
+    photo_url: string | null;
+    spot_id: string | null;
+  }>,
+): Promise<{ data: CommunityEvent | null; error: string | null }> {
+  const allowed: Record<string, unknown> = {};
+  if (patch.title !== undefined) {
+    const s = sanitizeText(patch.title, { maxLength: 100 }).trim();
+    if (s.length < 1) return { data: null, error: 'タイトルは 1 文字以上必要です' };
+    allowed.title = s;
+  }
+  if (patch.description !== undefined) {
+    allowed.description = sanitizeText(patch.description, { maxLength: 1000 });
+  }
+  if (patch.starts_at !== undefined) {
+    const d = new Date(patch.starts_at);
+    if (Number.isNaN(d.getTime())) return { data: null, error: '開始日時が不正です' };
+    allowed.starts_at = d.toISOString();
+  }
+  if (patch.ends_at !== undefined) {
+    if (patch.ends_at === null) {
+      allowed.ends_at = null;
+    } else {
+      const d = new Date(patch.ends_at);
+      if (Number.isNaN(d.getTime())) return { data: null, error: '終了日時が不正です' };
+      allowed.ends_at = d.toISOString();
+    }
+  }
+  if (patch.location_text !== undefined) {
+    allowed.location_text = patch.location_text
+      ? sanitizeText(patch.location_text, { maxLength: 200 })
+      : null;
+  }
+  if (patch.photo_url !== undefined) allowed.photo_url = patch.photo_url;
+  if (patch.spot_id !== undefined) {
+    allowed.spot_id = patch.spot_id && UUID_RE.test(patch.spot_id) ? patch.spot_id : null;
+  }
+
+  const { data, error } = await supabase
+    .from('community_events')
+    .update(allowed)
+    .eq('id', event_id)
+    .select()
+    .single();
+  if (error || !data) {
+    const msg = error?.message ?? 'イベント更新に失敗しました';
+    if (msg.includes('SPOT_COMMUNITY_MISMATCH')) {
+      return { data: null, error: '指定した聖地が別コミュニティのものです' };
+    }
+    return { data: null, error: msg };
+  }
   return { data: data as CommunityEvent, error: null };
 }
 
@@ -1486,4 +1568,29 @@ export async function deleteEvent(event_id: string): Promise<{ error: string | n
   const { error } = await supabase.from('community_events').delete().eq('id', event_id);
   if (error) return { error: error.message };
   return { error: null };
+}
+
+// 1 spot に紐付く upcoming イベントを取得 (spot 詳細 / spot map で使う)
+// migration 0046 で community_events.spot_id を追加
+export async function fetchEventsBySpot(
+  spot_id: string,
+  opts: { upcomingOnly?: boolean; limit?: number } = {},
+): Promise<CommunityEvent[]> {
+  if (!UUID_RE.test(spot_id)) return [];
+  const limit = Math.max(1, Math.min(opts.limit ?? 20, 100));
+  let query = supabase
+    .from('community_events')
+    .select('*')
+    .eq('spot_id', spot_id)
+    .order('starts_at', { ascending: true })
+    .limit(limit);
+  if (opts.upcomingOnly !== false) {
+    query = query.gte('starts_at', new Date().toISOString());
+  }
+  const { data, error } = await query;
+  if (error) {
+    console.warn('[communities] fetchEventsBySpot failed:', error.message);
+    return [];
+  }
+  return (data ?? []) as CommunityEvent[];
 }
