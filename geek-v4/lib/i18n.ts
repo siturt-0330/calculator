@@ -97,6 +97,19 @@ const DICT: Dict = {
   // ※ kind バッジ (ネタ / 未完成) は機能廃止に伴い削除
   // ============================================================
 
+  // 主要 component を useT 経由化したことに伴う追加 (PR #103 D 続き)
+  'アカウント状態':                 { en: 'Account state',                 zh: '账户状态',        ko: '계정 상태',          es: 'Estado de cuenta',         fr: 'État du compte' },
+  'ここを修正したい':               { en: 'I want to fix this',            zh: '我想修复这里',    ko: '여기를 수정하고 싶다', es: 'Quiero arreglar esto',   fr: 'Je veux corriger ceci' },
+  'フィードバックを送信':           { en: 'Send feedback',                 zh: '发送反馈',        ko: '피드백 보내기',      es: 'Enviar comentarios',       fr: 'Envoyer un retour' },
+  'UIが変':                         { en: 'UI looks off',                  zh: 'UI 不对劲',       ko: 'UI 가 이상함',       es: 'La UI se ve mal',          fr: 'UI étrange' },
+
+  // AnonPostCard — CW (content warning) labels + 公式管理者 + tap-to-reveal
+  'ネタバレ':                       { en: 'Spoiler',                       zh: '剧透',            ko: '스포일러',           es: 'Spoiler',                  fr: 'Spoiler' },
+  'センシティブな内容':             { en: 'Sensitive content',             zh: '敏感内容',        ko: '민감한 내용',        es: 'Contenido sensible',       fr: 'Contenu sensible' },
+  '暴力的描写':                     { en: 'Violent content',               zh: '暴力描写',        ko: '폭력 묘사',          es: 'Contenido violento',       fr: 'Contenu violent' },
+  'タップして表示':                 { en: 'Tap to reveal',                 zh: '点击显示',        ko: '탭하여 표시',        es: 'Toca para ver',            fr: 'Toucher pour afficher' },
+  '公式管理者':                     { en: 'Official admin',                zh: '官方管理员',      ko: '공식 관리자',        es: 'Admin oficial',            fr: 'Admin officiel' },
+
   // SortTabs (components/feed/SortTabs.tsx)
   'あなた向け':                     { en: 'For you',                       zh: '为你推荐',        ko: '추천',               es: 'Para ti',                  fr: 'Pour toi' },
   '新着':                           { en: 'New',                           zh: '最新',            ko: '최신',               es: 'Nuevo',                    fr: 'Nouveau' },

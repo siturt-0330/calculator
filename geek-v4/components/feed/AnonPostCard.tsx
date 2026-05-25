@@ -4,7 +4,7 @@ import { safeOpenUrl } from '../../lib/openUrl';
 import { Icon } from '../../constants/icons';
 import type { Post } from '../../types/models';
 import { useLanguageStore } from '../../stores/languageStore';
-import { translateDynamic } from '../../lib/i18n';
+import { translateDynamic, useT } from '../../lib/i18n';
 import { MemeReactionPicker } from './MemeReactionPicker';
 import type { ReactionAgg } from '../../lib/api/reactions';
 import { C, R, SP } from '../../design/tokens';
@@ -356,6 +356,7 @@ function AnonPostCardInner({
   const Share = Icon.share;
   const More = Icon.more;
   const Warn = Icon.warn;
+  const t = useT();
 
   // ミームリアクション (props 経由で DB から取得済み)
   const [memePickerOpen, setMemePickerOpen] = useState(false);
@@ -533,7 +534,7 @@ function AnonPostCardInner({
           <View style={STYLES.officialMeta}>
             <View style={STYLES.officialNameRow}>
               <Text style={[T.smallM, STYLES.officialName]} numberOfLines={1}>
-                {post.official_author.name || '公式管理者'}
+                {post.official_author.name || t('公式管理者')}
               </Text>
             </View>
             <Text style={[T.caption, STYLES.officialSub]} numberOfLines={1}>
@@ -585,14 +586,14 @@ function AnonPostCardInner({
             {cwCategory === 'spoiler' ? '🤐' : cwCategory === 'nsfw' ? '🔞' : cwCategory === 'violence' ? '⚠️' : '🛡️'}
           </Text>
           <Text style={[T.smallM, STYLES.cwLabel]}>
-            {cwCategory === 'spoiler' ? 'ネタバレ' : cwCategory === 'nsfw' ? 'センシティブな内容' : cwCategory === 'violence' ? '暴力的描写' : '注意'}
+            {cwCategory === 'spoiler' ? t('ネタバレ') : cwCategory === 'nsfw' ? t('センシティブな内容') : cwCategory === 'violence' ? t('暴力的描写') : t('注意')}
           </Text>
           {post.content_warning && (
             <Text style={[T.caption, STYLES.cwWarning]}>
               {post.content_warning}
             </Text>
           )}
-          <Text style={[T.caption, STYLES.cwTap]}>タップして表示</Text>
+          <Text style={[T.caption, STYLES.cwTap]}>{t('タップして表示')}</Text>
         </PressableScale>
       )}
 

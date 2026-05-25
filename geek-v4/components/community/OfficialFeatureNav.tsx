@@ -4,6 +4,7 @@ import { PressableScale } from '../ui/PressableScale';
 import { Icon } from '../../constants/icons';
 import { C, SP, R } from '../../design/tokens';
 import { T } from '../../design/typography';
+import { useT } from '../../lib/i18n';
 
 // ============================================================
 // OfficialFeatureNav — 公式コミュニティの機能ナビ (Q&A / カレンダー / 地図)
@@ -21,6 +22,7 @@ export function OfficialFeatureNav({
   features: FeatureKey[];
 }) {
   const router = useRouter();
+  const t = useT();
   type Item = { key: FeatureKey; label: string; icon: typeof Icon.community; route: string };
   const items: Item[] = [];
   if (features.includes('qna')) items.push({ key: 'qna', label: 'Q&A', icon: Icon.help, route: `/community/${communityId}/qna` });
@@ -47,7 +49,7 @@ export function OfficialFeatureNav({
             onPress={() => router.push(it.route as never)}
             haptic="tap"
             scaleValue={0.97}
-            accessibilityLabel={`${it.label} を開く`}
+            accessibilityLabel={`${t(it.label)} を開く`}
             style={{
               flexDirection: 'row',
               alignItems: 'center',
@@ -61,7 +63,7 @@ export function OfficialFeatureNav({
             }}
           >
             <IconComp size={14} color={C.accentLight} strokeWidth={2.4} />
-            <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>{it.label}</Text>
+            <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>{t(it.label)}</Text>
           </PressableScale>
         );
       })}
