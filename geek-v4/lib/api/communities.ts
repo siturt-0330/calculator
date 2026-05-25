@@ -1195,6 +1195,21 @@ export async function fetchCommunitySpots(community_id: string): Promise<Communi
   return (data ?? []) as CommunitySpot[];
 }
 
+// 1 件取得 — 編集 / 詳細画面で使用
+export async function fetchSpotById(spot_id: string): Promise<CommunitySpot | null> {
+  if (!UUID_RE.test(spot_id)) return null;
+  const { data, error } = await supabase
+    .from('community_spots')
+    .select('*')
+    .eq('id', spot_id)
+    .single();
+  if (error) {
+    console.warn('[communities] fetchSpotById failed:', error.message);
+    return null;
+  }
+  return data as CommunitySpot;
+}
+
 // 聖地作成 (メンバーのみ — RLS で担保)
 // migration 0045 で category 必須 + photo_urls (複数) 追加
 export async function createSpot(input: {
