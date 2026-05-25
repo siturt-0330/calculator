@@ -157,6 +157,62 @@ export type CommunityPostWithCommunity = CommunityPost & {
 };
 
 // ============================================================
+// 自分が参加している全コミュニティの直近イベントを横串で取得
+// (マイページ集約カレンダー用 — opt-out はクライアント側で行う想定)
+// ============================================================
+// 返り値は starts_at 昇順。1 ユーザーで参加コミュ数 × 直近イベントを取るので
+// 最大件数を絞る (limit 500 ≒ コミュ数 50 × 各 10 件相当)。
+export async function fetchMyUpcomingEvents(opts: {
+  limit?: number;
+  /** 除外したい community_id (マイページ opt-out 用) */
+  excludeCommunityIds?: string[];
+} = {}): Promise<Array<CommunityEvent & { community: Pick<Community, 'id' | 'name' | 'icon_emoji' | 'icon_color' | 'icon_url'> }>> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data: memberRows, error: memErr } = await supabase
+    .from('community_members')
+    .select('community_id')
+    .eq('user_id', user.id);
+  if (memErr || !memberRows || memberRows.length === 0) return [];
+
+  const exclude = new Set(opts.excludeCommunityIds ?? []);
+  const myCommunityIds = memberRows
+    .map((r) => r.community_id as string)
+    .filter((id) => !exclude.has(id));
+  if (myCommunityIds.length === 0) return [];
+
+  const limit = Math.max(1, Math.min(opts.limit ?? 200, 500));
+  const { data, error } = await supabase
+    .from('community_events')
+    .select('*, communities!inner(id, name, icon_emoji, icon_color, icon_url)')
+    .in('community_id', myCommunityIds)
+    .gte('starts_at', new Date().toISOString())
+    .order('starts_at', { ascending: true })
+    .limit(limit);
+
+  if (error) {
+    console.warn('[communities] fetchMyUpcomingEvents failed:', error.message);
+    return [];
+  }
+
+  // Supabase embed の型 narrowing が one-to-many と判定するので unknown 経由
+  type Raw = CommunityEvent & {
+    communities?: Pick<Community, 'id' | 'name' | 'icon_emoji' | 'icon_color' | 'icon_url'> | Array<Pick<Community, 'id' | 'name' | 'icon_emoji' | 'icon_color' | 'icon_url'>> | null;
+  };
+  const rows = (data ?? []) as unknown as Raw[];
+  const out: Array<CommunityEvent & { community: Pick<Community, 'id' | 'name' | 'icon_emoji' | 'icon_color' | 'icon_url'> }> = [];
+  for (const r of rows) {
+    if (!r.communities) continue;
+    const community = Array.isArray(r.communities) ? r.communities[0] : r.communities;
+    if (!community) continue;
+    // communities フィールドを外して community で正規化
+    const { communities: _ignored, ...rest } = r;
+    out.push({ ...(rest as CommunityEvent), community });
+  }
+  return out;
+}
+
 // 自分の所属コミュニティを取得 (TopBar 用)
 // ============================================================
 export async function fetchMyCommunities(): Promise<Community[]> {
