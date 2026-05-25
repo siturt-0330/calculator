@@ -61,7 +61,12 @@ import {
   type CommunityWithMembership,
   type CommunitySpot,
   type CommunityEvent,
+  type CommunityGenre,
 } from '../../../../lib/api/communities';
+import {
+  getTabsFor,
+  type CommunityTabKey,
+} from '../../../../lib/community/tabSets';
 import { fetchCommunityPosts } from '../../../../lib/api/posts';
 import { fetchCommunityThreads } from '../../../../lib/api/bbs';
 import {
@@ -87,33 +92,10 @@ import type { Poll } from '../../../../lib/api/polls';
 // ============================================================
 // Types
 // ============================================================
-type TabKey = 'feed' | 'threads' | 'spots' | 'events' | 'compose' | 'comments';
+// タブ構成は lib/community/tabSets.ts に集約 (genre 別 + 公式コミュ別の決定論)。
+// 本ファイルは活動状態 (activeTab / visitedTabs) と panel 表示制御だけを担う。
+type TabKey = CommunityTabKey;
 type FeedSort = 'new' | 'top' | 'old';
-
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'feed', label: 'ホーム' },
-  { key: 'threads', label: '掲示板' },
-  { key: 'spots', label: '聖地' },
-  { key: 'events', label: 'カレンダー' },
-  { key: 'compose', label: '投稿' },
-];
-
-// 公式コミュニティ用のタブセット
-// - ホーム: 公式管理者のみ投稿可 (一般メンバーは閲覧のみ)
-// - Q&A: 旧「掲示板」を置換 — NotebookLM 風の質疑応答
-// - 聖地 / カレンダー: 同じ
-// - コメント: 旧「投稿」を置換 — 一般ユーザーが唯一書き込める場
-const OFFICIAL_TABS: { key: TabKey; label: string }[] = [
-  { key: 'feed', label: 'ホーム' },
-  { key: 'threads', label: 'Q&A' },
-  { key: 'spots', label: '聖地' },
-  { key: 'events', label: 'カレンダー' },
-  { key: 'comments', label: 'コメント' },
-];
-
-function getTabsFor(isOfficial: boolean) {
-  return isOfficial ? OFFICIAL_TABS : TABS;
-}
 
 const CATEGORY_COLORS: Record<string, string> = {
   '雑談': '#22D3A4', 'アニメ': '#FF6B7A', 'ゲーム': '#7CB1FF',
@@ -194,6 +176,8 @@ export default function CommunityDetailScreen() {
     events: false,
     compose: false,
     comments: false,
+    search: false,
+    profile: false,
   });
   useEffect(() => {
     if (!visitedTabs[activeTab]) {
@@ -591,6 +575,7 @@ export default function CommunityDetailScreen() {
           activeTab={activeTab}
           onChange={setActiveTab}
           isOfficial={!!community.is_official}
+          genre={community.genre}
         />
 
         {/* ============================================================
@@ -629,7 +614,102 @@ export default function CommunityDetailScreen() {
           </View>
         )}
         {/* compose tab navigates away in the effect above (一般コミュニティのみ) */}
+
+        {/* === migration 0044 で追加された新タブ (本 PR では stub) === */}
+        {visitedTabs.search && (
+          <View style={{ display: activeTab === 'search' ? 'flex' : 'none' }}>
+            <ComingSoonTab
+              emoji="🔍"
+              title="検索 (準備中)"
+              body={
+                'Instagram の発見タブのように、投稿された写真・動画を' +
+                'グリッドで一覧できる画面を予定しています。'
+              }
+            />
+          </View>
+        )}
+        {visitedTabs.profile && (
+          <View style={{ display: activeTab === 'profile' ? 'flex' : 'none' }}>
+            <ComingSoonTab
+              emoji="🪪"
+              title="マイプロフィール (準備中)"
+              body={
+                '最推し / 推し歴 / ライブ参戦数 (写真付き) / マイセトリ ' +
+                'を記録できる個人ページを予定しています。匿名アイコンを ' +
+                'タップで他メンバーのプロフィールも閲覧可能になる予定。'
+              }
+            />
+          </View>
+        )}
       </ScrollView>
+
+      {/* === 新ジャンル用の「投稿」FAB ===
+          migration 0044 で新規ジャンル (oshi / creative / experience / discussion) は
+          'compose' タブを持たないので、代替として右下に FAB を出して post create を
+          開く。legacy / official は従来通り tab 経由なので FAB は出さない。 */}
+      {!community.is_official &&
+        community.genre &&
+        community.genre !== 'legacy' && (
+          <PressableScale
+            onPress={() =>
+              router.push(`/post/create?community_id=${encodeURIComponent(id)}` as never)
+            }
+            haptic="confirm"
+            accessibilityLabel="このコミュニティに投稿する"
+            style={{
+              position: 'absolute',
+              right: SP['5'],
+              bottom: insets.bottom + TABBAR.height + SP['4'],
+              width: 56,
+              height: 56,
+              borderRadius: 28,
+              backgroundColor: C.accent,
+              alignItems: 'center',
+              justifyContent: 'center',
+              shadowColor: C.accent,
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.45,
+              shadowRadius: 12,
+              elevation: 6,
+            }}
+          >
+            <Icon.plus size={26} color="#fff" strokeWidth={2.8} />
+          </PressableScale>
+        )}
+    </View>
+  );
+}
+
+// ============================================================
+// 準備中タブの共通プレースホルダ
+// ============================================================
+// 検索 / マイプロフィール タブは migration 0044 で追加されたが、中身の実装は
+// 後続 PR。本 PR では「準備中」とビジョンを伝える stub のみを出す。
+// 引き算原則: タブだけ用意して画面が真っ白だと user が不安になる → 説明を出す。
+function ComingSoonTab({
+  emoji,
+  title,
+  body,
+}: {
+  emoji: string;
+  title: string;
+  body: string;
+}) {
+  return (
+    <View
+      style={{
+        paddingHorizontal: SP['6'],
+        paddingTop: SP['8'],
+        paddingBottom: SP['8'],
+        alignItems: 'center',
+        gap: SP['3'],
+      }}
+    >
+      <Text style={{ fontSize: 48 }}>{emoji}</Text>
+      <Text style={[T.h4, { color: C.text, textAlign: 'center' }]}>{title}</Text>
+      <Text style={[T.small, { color: C.text2, textAlign: 'center', lineHeight: 20 }]}>
+        {body}
+      </Text>
     </View>
   );
 }
@@ -713,12 +793,14 @@ function CommunityTabBar({
   activeTab,
   onChange,
   isOfficial = false,
+  genre,
 }: {
   activeTab: TabKey;
   onChange: (k: TabKey) => void;
   isOfficial?: boolean;
+  genre: CommunityGenre | undefined;
 }) {
-  const tabs = getTabsFor(isOfficial);
+  const tabs = getTabsFor(genre, isOfficial);
   const [barW, setBarW] = useState(0);
   const segW = barW / tabs.length;
   const idx = tabs.findIndex((t) => t.key === activeTab);

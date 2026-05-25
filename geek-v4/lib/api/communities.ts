@@ -6,6 +6,63 @@ import { sanitizeContent, sanitizeText } from '../sanitize';
 export type Visibility = 'open' | 'request' | 'invite';
 export type MemberRole = 'owner' | 'admin' | 'member';
 
+// ============================================================
+// コミュニティ ジャンル (migration 0044)
+// ------------------------------------------------------------
+// ジャンルごとに詳細画面のタブ構成を切替える。
+// - oshi       推し系     ホーム / 検索 / マップ / カレンダー / マイプロフ
+// - creative   作品系     ホーム / 掲示板 / マップ
+// - experience 体験系     ホーム / 掲示板 / 検索 / マップ / カレンダー / マイプロフ
+// - discussion 議論系     ホーム / 掲示板
+// - legacy     旧コミュ用 ホーム / 掲示板 / 聖地 / カレンダー / 投稿 (現状維持)
+//              既存 community は default 'legacy' で migrate される
+// ============================================================
+export type CommunityGenre =
+  | 'oshi'
+  | 'creative'
+  | 'experience'
+  | 'discussion'
+  | 'legacy';
+
+export const COMMUNITY_GENRE_META: Record<
+  CommunityGenre,
+  { label: string; emoji: string; description: string }
+> = {
+  oshi: {
+    label: '推し系',
+    emoji: '✨',
+    description: 'アイドル / VTuber / 声優 / アーティスト',
+  },
+  creative: {
+    label: '作品系',
+    emoji: '📚',
+    description: '漫画 / 小説 / アニメ / 映画 / ドラマ / ゲーム',
+  },
+  experience: {
+    label: '体験系',
+    emoji: '🍜',
+    description: 'サウナ / ラーメン / 旅行 / グルメ / カフェ巡り',
+  },
+  discussion: {
+    label: '議論系',
+    emoji: '💬',
+    description: '政治 / 学問 / ニュース / 雑談',
+  },
+  legacy: {
+    label: '従来',
+    emoji: '🕸',
+    description: '旧コミュニティ (ジャンル設定前のもの)',
+  },
+};
+
+// ユーザーが作成時に選べる genre (legacy は新規作成不可 — backward compat 用)
+export const SELECTABLE_GENRES: CommunityGenre[] = [
+  'oshi',
+  'creative',
+  'experience',
+  'discussion',
+];
+
 export type Community = {
   id: string;
   name: string;
@@ -14,6 +71,9 @@ export type Community = {
   icon_color: string;
   icon_url: string | null;
   visibility: Visibility;
+  // migration 0044 で追加。default 'legacy' で既存 community も値あり。
+  // 表記ゆれで undefined が来ても困らないよう、UI 側でも || 'legacy' で fallback。
+  genre: CommunityGenre;
   member_count: number;
   post_count: number;
   last_post_at: string | null;
@@ -268,6 +328,8 @@ export async function createCommunity(input: {
   icon_color: string;
   icon_url?: string | null;
   visibility: Visibility;
+  // migration 0044 — タブ構成を決める。新規作成では必須 (SELECTABLE_GENRES のいずれか)。
+  genre: CommunityGenre;
   tags: string[];
 }): Promise<{ data: Community | null; error: string | null }> {
   const { data: { user } } = await supabase.auth.getUser();
@@ -284,6 +346,11 @@ export async function createCommunity(input: {
   if (safeName.length < 2) {
     return { data: null, error: 'コミュニティ名は 2 文字以上にしてください' };
   }
+  // genre が allowlist 外 (legacy 含む) なら fail-safe で discussion に倒す。
+  // legacy は migration の backward compat 用で、新規作成では使わせない。
+  const safeGenre: CommunityGenre = SELECTABLE_GENRES.includes(input.genre)
+    ? input.genre
+    : 'discussion';
   const { data, error } = await supabase
     .from('communities')
     .insert({
@@ -293,6 +360,7 @@ export async function createCommunity(input: {
       icon_color: input.icon_color,
       icon_url: input.icon_url ?? null,
       visibility: input.visibility,
+      genre: safeGenre,
       created_by: user.id,
     })
     .select()
@@ -329,12 +397,12 @@ export async function createCommunity(input: {
 // / created_by / official_*) も書き換え可能だった。RLS / trigger が後段で守るが
 // defense-in-depth として API レイヤでもホワイトリスト化。
 const COMMUNITY_UPDATE_ALLOWED = [
-  'name', 'description', 'icon_emoji', 'icon_color', 'icon_url', 'visibility',
+  'name', 'description', 'icon_emoji', 'icon_color', 'icon_url', 'visibility', 'genre',
 ] as const;
 
 export async function updateCommunity(
   id: string,
-  patch: Partial<Pick<Community, 'name' | 'description' | 'icon_emoji' | 'icon_color' | 'icon_url' | 'visibility'>>,
+  patch: Partial<Pick<Community, 'name' | 'description' | 'icon_emoji' | 'icon_color' | 'icon_url' | 'visibility' | 'genre'>>,
 ): Promise<{ error: string | null }> {
   if (!UUID_RE.test(id)) return { error: '不正なコミュニティ ID です' };
 
