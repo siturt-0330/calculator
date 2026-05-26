@@ -45,7 +45,7 @@ async function fetchMyAdminMessages(userId: string): Promise<Message[]> {
 
 export default function MypageMessagesScreen() {
   const insets = useSafeAreaInsets();
-  const { user } = useAuthStore();
+  const user = useAuthStore((s) => s.user);
   const qc = useQueryClient();
   const { show } = useToastStore();
   const [expandedId, setExpandedId] = useState<string | null>(null);

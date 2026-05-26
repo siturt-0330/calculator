@@ -1,6 +1,4 @@
-import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { attachChannel } from '../lib/realtime';
 import {
   fetchIsAdmin,
   fetchAllFeedback,
@@ -32,15 +30,12 @@ export function useAllFeedback(filter?: { status?: FeedbackRow['status'] | 'all'
     staleTime: 30 * 1000,
   });
 
-  useEffect(() => {
-    return attachChannel('feedback-admin-live', (ch) =>
-      ch.on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'app_feedback' },
-        () => qc.invalidateQueries({ queryKey: ['feedback-admin'] }),
-      ),
-    );
-  }, [qc]);
+  // ★ app_feedback は migration 0011 で publication に追加されたが、
+  //   0021 で drop されたままになっている (cleanup の取り違え)。
+  //   subscribe するとそれだけで CHANNEL_ERROR が立つので撤去。
+  //   refetchOnWindowFocus + staleTime 30s で feedback 画面の鮮度は保てる。
+  //   将来 realtime が本当に必要なら 0050 系で再 add する。
+  void qc;
 
   return { feedback: (q.data ?? []) as AdminFeedbackRow[], isLoading: q.isLoading };
 }

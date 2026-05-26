@@ -20,7 +20,8 @@ export default function NicknameScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const UserIcon = Icon.mypage;
-  const { user, setUser } = useAuthStore();
+  const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
   const { show } = useToastStore();
 
   useEffect(() => {

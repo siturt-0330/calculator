@@ -34,18 +34,24 @@ export function useBBS() {
         qc.invalidateQueries({ queryKey: ['bbs-threads'] });
       }, delay);
     };
-    const detach = attachChannel('bbs-threads-list', (ch) =>
+    // ★ CLAUDE.md § 5.3 / § 11: 1 channel に複数 table を chain しない。
+    //   publication 未登録 table が 1 つでも binding に含まれると channel
+    //   全体が CHANNEL_ERROR で死ぬ。bbs_threads / bbs_replies を別 channel に分離。
+    const detachThreads = attachChannel('bbs-threads-list-threads', (ch) =>
       ch.on('postgres_changes', {
         event: '*', schema: 'public', table: 'bbs_threads',
         filter: 'visibility=eq.public',
-      }, () => invalidate(1500))
-        // 返信は filter できないが、3s debounce で集約 (返信量が多いコミュニティでも
-        // 重い fanout を吸収)
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bbs_replies' },
-          () => invalidate(3000)),
+      }, () => invalidate(1500)),
+    );
+    // 返信は filter できないが、3s debounce で集約 (返信量が多いコミュニティでも
+    // 重い fanout を吸収)
+    const detachReplies = attachChannel('bbs-threads-list-replies', (ch) =>
+      ch.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bbs_replies' },
+        () => invalidate(3000)),
     );
     return () => {
-      detach();
+      detachThreads();
+      detachReplies();
       if (debounce.current) clearTimeout(debounce.current);
     };
   }, [qc]);
@@ -95,14 +101,18 @@ export function useMyCommunityBBS() {
         qc.invalidateQueries({ queryKey: ['bbs-threads', 'my-communities', userId] });
       }, delay);
     };
-    const detach = attachChannel('bbs-threads-my-communities', (ch) =>
+    // ★ § 5.3: 1 channel / 1 table。bbs_threads と bbs_replies を別 channel に分離。
+    const detachThreads = attachChannel('bbs-threads-my-communities-threads', (ch) =>
       ch.on('postgres_changes', { event: '*', schema: 'public', table: 'bbs_threads' },
-        () => invalidate(1500))
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bbs_replies' },
-          () => invalidate(3000)),
+        () => invalidate(1500)),
+    );
+    const detachReplies = attachChannel('bbs-threads-my-communities-replies', (ch) =>
+      ch.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bbs_replies' },
+        () => invalidate(3000)),
     );
     return () => {
-      detach();
+      detachThreads();
+      detachReplies();
       if (debounce.current) clearTimeout(debounce.current);
     };
   }, [qc, userId]);

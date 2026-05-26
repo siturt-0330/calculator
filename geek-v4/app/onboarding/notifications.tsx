@@ -15,7 +15,8 @@ import { StepProgress } from './_progress';
 export default function NotificationsOnboarding() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, setUser } = useAuthStore();
+  const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
   // selector化: 全 settings store の購読をやめ、必要な action (update) のみ
   // subscribe する。他フィールド更新による無用な re-render を防止。
   const updateSetting = useSettingsStore((s) => s.update);

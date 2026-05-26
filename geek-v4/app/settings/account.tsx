@@ -18,7 +18,8 @@ import { T } from '../../design/typography';
 export default function AccountScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, setUser } = useAuthStore();
+  const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
   const showToast = useToastStore((s) => s.show);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);

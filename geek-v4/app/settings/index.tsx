@@ -20,7 +20,7 @@ import { TABBAR } from '../../design/tabbar';
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { signOut } = useAuthStore();
+  const signOut = useAuthStore((s) => s.signOut);
   const isAdmin = useIsAdmin();
   const playIntro = useIntroStore((s) => s.play);
   const [logoutOpen, setLogoutOpen] = useState(false);
