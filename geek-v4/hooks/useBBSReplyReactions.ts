@@ -75,10 +75,13 @@ export function useBBSReplyReactionToggle() {
 
   const mutation = useMutation<boolean, Error, Vars, { snapshot: Snapshot }>({
     mutationFn: ({ replyId, meme }) => toggleBBSReplyReaction(replyId, meme),
-    onMutate: ({ replyId, meme }) => {
-      // 体感速度優先: cancelQueries は fire-and-forget (await 撤廃)。
-      // 詳細は useReactionToggle の同位置コメント参照。
-      qc.cancelQueries({ queryKey: [KEY_PREFIX] }).catch(() => {});
+    onMutate: async ({ replyId, meme }) => {
+      // ★ await を復活: in-flight refetch のキャンセル完了を待ってから
+      //   optimistic を書き込む。fire-and-forget だと refetch のレスポンスが
+      //   optimistic 値を上書きして「タップしても反映されない」現象になる。
+      //   useReactionToggle 側で同じ修正が既に入っているが、こちらは旧コメント
+      //   の「体感速度優先」のまま放置されていた (3 兄弟 hook の非対称)。
+      await qc.cancelQueries({ queryKey: [KEY_PREFIX] }).catch(() => {});
       const snapshot: Snapshot = qc.getQueriesData<ReactionsByReply | undefined>({
         queryKey: [KEY_PREFIX],
       }) as Snapshot;

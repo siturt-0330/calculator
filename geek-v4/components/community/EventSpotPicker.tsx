@@ -82,7 +82,17 @@ export function EventSpotPicker({
             borderColor: (selectedMeta?.color ?? C.accent) + '55',
           }}
         >
-          <Text style={{ fontSize: 16 }}>{selectedMeta?.emoji ?? '📍'}</Text>
+          {/* 旧版は category 絵文字 prefix。装飾感を抑え color dot に置換。 */}
+          <View
+            style={{
+              width: 10,
+              height: 10,
+              borderRadius: 5,
+              backgroundColor: selectedMeta?.color ?? C.accent,
+              marginRight: 4,
+              alignSelf: 'center',
+            }}
+          />
           <View style={{ flex: 1 }}>
             <Text style={[T.smallB, { color: C.text }]} numberOfLines={1}>
               {selected.name}
@@ -117,7 +127,6 @@ export function EventSpotPicker({
           {/* なし */}
           <SpotChoice
             label="会場なし (テキストのみ)"
-            emoji="—"
             color={C.text3}
             selected={value === null}
             onPress={() => onChange(null)}
@@ -163,7 +172,6 @@ export function EventSpotPicker({
                     <SpotChoice
                       key={s.id}
                       label={s.name}
-                      emoji={meta.emoji}
                       color={meta.color}
                       categoryLabel={meta.label}
                       selected={value === s.id}
@@ -208,14 +216,12 @@ export function EventSpotPicker({
 
 function SpotChoice({
   label,
-  emoji,
   color,
   categoryLabel,
   selected,
   onPress,
 }: {
   label: string;
-  emoji: string;
   color: string;
   categoryLabel?: string;
   selected: boolean;
@@ -236,20 +242,18 @@ function SpotChoice({
         borderColor: selected ? color : C.border,
       }}
     >
+      {/* 旧版は 28x28 円の中に category 絵文字を載せていたが、AI 装飾感を抑える
+          ため category color の単純な dot に置換。 */}
       <View
         style={{
-          width: 28,
-          height: 28,
-          borderRadius: 14,
-          backgroundColor: color + '22',
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderWidth: 1,
-          borderColor: color + '55',
+          width: 10,
+          height: 10,
+          borderRadius: 5,
+          backgroundColor: color,
+          marginLeft: 4,
+          marginRight: 2,
         }}
-      >
-        <Text style={{ fontSize: 13 }}>{emoji}</Text>
-      </View>
+      />
       <View style={{ flex: 1 }}>
         <Text style={[T.smallM, { color: selected ? color : C.text, fontWeight: '700' }]} numberOfLines={1}>
           {label}

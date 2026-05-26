@@ -236,16 +236,25 @@ export default function EditSpotScreen() {
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
-                    gap: 4,
+                    gap: 6,
                     paddingHorizontal: SP['3'],
-                    paddingVertical: 6,
+                    paddingVertical: 7,
                     borderRadius: R.full,
                     backgroundColor: isSelected ? meta.color + '33' : C.bg3,
                     borderWidth: 1.5,
                     borderColor: isSelected ? meta.color : C.border,
                   }}
                 >
-                  <Text style={{ fontSize: 14 }}>{meta.emoji}</Text>
+                  {/* 装飾絵文字 (🎤 等) を撤去 → color dot のみで category 識別。spot/create と同じパターン。 */}
+                  <View
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: 3,
+                      backgroundColor: meta.color,
+                      opacity: isSelected ? 1 : 0.7,
+                    }}
+                  />
                   <Text
                     style={{
                       fontSize: 12,

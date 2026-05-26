@@ -85,7 +85,7 @@ export default function GoodsScreen() {
             alignItems: 'center',
             gap: SP['2'],
           }}>
-            <Text style={{ fontSize: 32 }}>📦</Text>
+            {/* 装飾絵文字 (📦) 撤去 */}
             <Text style={[T.body, { color: C.text2 }]}>該当するグッズがありません</Text>
           </View>
         )}

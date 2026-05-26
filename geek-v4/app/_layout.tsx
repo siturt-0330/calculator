@@ -29,6 +29,10 @@ import { initWebVitals } from '../lib/webVitals';
 import { C } from '../design/tokens';
 import { AppState } from 'react-native';
 import { supabase } from '../lib/supabase';
+import {
+  fetchMyCommunities,
+  fetchMyCommunityPostsRich,
+} from '../lib/api/communities';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -155,6 +159,25 @@ export default function RootLayout() {
       hydrateAdPrefs(),
     ]);
   }, [hydrateAuth, hydrateSettings, hydrateLang, hydrateTagFilter, hydrateAdPrefs]);
+
+  // ★ コミュニティタブ pre-warm:
+  //   ログイン済 & auth hydrate 完了で「コミュニティタブを開いたときに 1-2 秒
+  //   の白画面が出る」現象を消すため、user 確定直後に裏で fetch を流して cache
+  //   を温めておく (Tabs lazy=true の隣接 preload より早く確実)。
+  //   prefetchQuery は staleTime 30s と整合し、二重 fetch にならない。
+  useEffect(() => {
+    if (!authHydrated || !user?.id) return;
+    void qc.prefetchQuery({
+      queryKey: ['my-communities', user.id],
+      queryFn: fetchMyCommunities,
+      staleTime: 30_000,
+    });
+    void qc.prefetchQuery({
+      queryKey: ['my-community-feed-rich', user.id],
+      queryFn: () => fetchMyCommunityPostsRich(40),
+      staleTime: 30_000,
+    });
+  }, [authHydrated, user?.id]);
 
   // Web Vitals 初期化 — cleanup 関数を握って unmount 時に observer + listener を解放
   useEffect(() => {

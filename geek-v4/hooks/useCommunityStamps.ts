@@ -250,11 +250,16 @@ export function useCommunityStampReactionToggle() {
       if (error) throw new Error(error);
       return on;
     },
-    onMutate: ({ postId, stampId }) => {
-      // 体感速度優先: cancelQueries の await を撤廃して同期パス。
-      // chip 押下から visual 反映までの microtask hop を排除。
-      // (詳細は useReactionToggle の同位置コメント参照)
-      qc.cancelQueries({ queryKey: ['community-stamp-reactions'] }).catch(() => {});
+    onMutate: async ({ postId, stampId }) => {
+      // ★ await を復活: in-flight refetch のキャンセル完了を待ってから
+      //   optimistic を書き込む。これをしないと refetch のレスポンスが
+      //   optimistic 値を上書きして「タップしても反映されない」現象が起きる。
+      //   useReactionToggle 側で同じ修正が入っているのに、こちらは旧コメントの
+      //   「体感速度優先 (fire-and-forget)」のまま放置されていた。symptom 報告:
+      //   「テキストスタンプを押した瞬間は反映されず、いいねを押すと反映される」
+      //   (いいね側は await 復活済 → cache が正しく更新 → AnonPostCard re-render
+      //    → ついでに stamp 表示も最新の楽観値で描画される、という traversal)。
+      await qc.cancelQueries({ queryKey: ['community-stamp-reactions'] }).catch(() => {});
 
       // ★ setQueriesData の前にスナップショットを取る (mutation 後に取ると更新済みの値が入り revert できない)
       const snapshot: Snapshot = qc.getQueriesData<CommunityStampReactionsByPost | undefined>({

@@ -545,7 +545,7 @@ export default function BBSScreen() {
             <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'], paddingTop: SP['4'] }}>
               {showResults ? (
                 <View style={{ padding: SP['8'], alignItems: 'center', gap: SP['3'] }}>
-                  <Text style={{ fontSize: 40 }}>🔎</Text>
+                  {/* 装飾絵文字 (🔎) 撤去 */}
                   <Text style={[T.h4, { color: C.text, textAlign: 'center' }]}>
                     「{debounced}」に一致するスレッドはありません
                   </Text>

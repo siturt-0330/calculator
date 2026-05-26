@@ -135,9 +135,9 @@ export default function SpotMapScreen() {
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
-                gap: 4,
+                gap: 6,
                 paddingHorizontal: SP['3'],
-                paddingVertical: 6,
+                paddingVertical: 7,
                 borderRadius: R.full,
                 backgroundColor: on ? meta.color + '33' : C.bg3,
                 borderWidth: 1.5,
@@ -145,7 +145,16 @@ export default function SpotMapScreen() {
                 opacity: count === 0 ? 0.4 : 1,
               }}
             >
-              <Text style={{ fontSize: 14 }}>{meta.emoji}</Text>
+              {/* 装飾絵文字 → color dot に統一 (spot/create と同じパターン) */}
+              <View
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: 3,
+                  backgroundColor: meta.color,
+                  opacity: on ? 1 : 0.7,
+                }}
+              />
               <Text
                 style={{
                   fontSize: 12,
@@ -348,20 +357,18 @@ function WebSpotMap({
                 borderColor: meta.color + '55',
               }}
             >
+              {/* 旧版は 36x36 円の中に category 絵文字 (🎤 等) を載せていたが、AI 装飾感を
+                  抑えるため category color の単純な塗り circle (pin icon) に置換。 */}
               <View
                 style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 18,
-                  backgroundColor: meta.color + '33',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderWidth: 1.5,
-                  borderColor: meta.color,
+                  width: 12,
+                  height: 12,
+                  borderRadius: 6,
+                  backgroundColor: meta.color,
+                  alignSelf: 'center',
+                  marginRight: SP['1'],
                 }}
-              >
-                <Text style={{ fontSize: 16 }}>{meta.emoji}</Text>
-              </View>
+              />
               <View style={{ flex: 1, gap: 2 }}>
                 <Text style={[T.bodyB, { color: C.text }]} numberOfLines={1}>
                   {s.name}

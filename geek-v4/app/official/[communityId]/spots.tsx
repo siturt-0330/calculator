@@ -360,7 +360,9 @@ function SpotRow({
           {safePhoto ? (
             <Image source={{ uri: safePhoto }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
           ) : (
-            <Text style={{ fontSize: 28 }}>📍</Text>
+            /* 装飾絵文字 (📍) 撤去 → category color に揃えたい所だが、ここは official 専用 view で
+               meta オブジェクト無いため簡素なグレー塗りで代替。 */
+            <View style={{ width: '100%', height: '100%', backgroundColor: C.bg3 }} />
           )}
         </View>
         <View style={{ flex: 1, gap: 4 }}>

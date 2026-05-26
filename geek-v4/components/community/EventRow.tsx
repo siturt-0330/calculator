@@ -86,7 +86,8 @@ export function EventRow({ event, spot }: { event: CommunityEvent; spot?: Commun
                 borderColor: meta.color + '55',
               }}
             >
-              <Text style={{ fontSize: 11 }}>{meta.emoji}</Text>
+              {/* 装飾絵文字 → color dot に統一 (event 会場 chip も同方針) */}
+              <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: meta.color }} />
               <Text style={{ fontSize: 11, color: meta.color, fontWeight: '700' }} numberOfLines={1}>
                 {spot.name}
               </Text>

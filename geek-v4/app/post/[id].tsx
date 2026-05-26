@@ -204,7 +204,7 @@ export default function PostDetailScreen() {
   if (postError || !post) {
     return (
       <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: SP['6'], gap: SP['3'] }}>
-        <Text style={{ fontSize: 48 }}>📭</Text>
+        {/* 装飾絵文字 (📭) を撤去 — テキストだけで十分意味は通る */}
         <Text style={[T.h3, { color: C.text, textAlign: 'center' }]}>投稿を取得できませんでした</Text>
         <Text style={[T.small, { color: C.text3, textAlign: 'center' }]}>
           通信エラーまたは削除された投稿の可能性があります

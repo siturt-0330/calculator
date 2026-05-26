@@ -710,18 +710,8 @@ export default function CreateCommunityScreen() {
                   alignItems: 'center',
                 }}
               >
-                <View
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 18,
-                    backgroundColor: C.bg3,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Text style={{ fontSize: 20 }}>{meta.emoji}</Text>
-                </View>
+                {/* 旧版は 36x36 円の中に genre 絵文字 (✨ / 📚 / 🍜 / 💬) を載せていたが
+                    AI 装飾感を抑えるため削除。selected 状態は border/bg/✓ で十分伝わる。 */}
                 <View style={{ flex: 1 }}>
                   <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
                     {meta.label}
