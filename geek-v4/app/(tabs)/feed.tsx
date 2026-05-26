@@ -458,6 +458,15 @@ export default function FeedScreen() {
         viewabilityConfig={VIEWABILITY_CONFIG}
         onViewableItemsChanged={handleViewableItemsChanged}
         renderItem={renderItem}
+        // ★ extraData: FlashList は data の参照が変わらないと再 render しない。
+        //   テキストスタンプ toggle (useReactionToggle) は feed-page cache のみ
+        //   更新するため data=feedItems は不変 → FlashList が chip 行を更新せず
+        //   「他の動作 (いいね等で feed cache が書き換わる) で初めて反映される」
+        //   現象が出ていた。fullPosts (= useFeedPage の cache から生成) を
+        //   extraData に渡すことで cache 更新 → fullPosts 新参照 → 強制再 render
+        //   経路を確保する。AnonPostCard 側の memo が中身比較するので余分な
+        //   再描画は走らない。
+        extraData={fullPosts}
         keyExtractor={(item) => (isAdItem(item) ? item.key : item.id)}
         getItemType={(item) => (isAdItem(item) ? 'ad' : 'post')}
         estimatedItemSize={300}
