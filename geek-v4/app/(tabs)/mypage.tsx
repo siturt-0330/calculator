@@ -1,31 +1,28 @@
-import { useState } from 'react';
-import { View, Text, ScrollView, Image } from 'react-native';
+import { useCallback, useState } from 'react';
+import { View, Text, ScrollView, RefreshControl } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { LucideIcon } from 'lucide-react-native';
 import { useAuthStore } from '../../stores/authStore';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useMyFriends } from '../../hooks/useFriends';
 import { supabase } from '../../lib/supabase';
-import { fetchMyCommunities, type Community } from '../../lib/api/communities';
-import { fetchMyOfficialCommunities } from '../../lib/api/officialCommunities';
 import { fetchMyPhotos } from '../../lib/api/albums';
-import { sanitizeUrl } from '../../lib/sanitize';
-import { computeTrustBreakdown } from '../../lib/trust/score';
-import { Avatar } from '../../components/ui/Avatar';
 import { PressableScale } from '../../components/ui/PressableScale';
-import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { NotificationBadge } from '../../components/ui/NotificationBadge';
 import { MypageSkeleton } from '../../components/ui/Skeleton';
 import { SegmentedControl } from '../../components/ui/SegmentedControl';
+import { GlassCard } from '../../components/ui/GlassCard';
+import { PolishedButton } from '../../components/ui/PolishedButton';
 import { AlbumPhotoGrid } from '../../components/mypage/AlbumPhotoGrid';
 import { EmptyAlbums } from '../../components/mypage/EmptyAlbums';
+import { HeroAvatar } from '../../components/mypage/HeroAvatar';
 import { Icon } from '../../constants/icons';
-import { C, R, SP, SHADOW } from '../../design/tokens';
+import { C, R, SP, SHADOW, GRAD } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { TABBAR } from '../../design/tabbar';
-import { OBSIDIAN_AVAILABLE } from '../../lib/obsidian';
 import type { AlbumPhoto } from '../../types/models';
 
 type MypageStats = {
@@ -37,7 +34,6 @@ type MypageStats = {
   nickname: string | null;
   avatar_emoji: string | null;
   avatar_url: string | null;
-  bio: string | null;
 };
 
 type AlbumScope = 'mine' | 'shared' | 'all';
@@ -48,10 +44,26 @@ export default function MypageScreen() {
   // selector: 全 destructure → 必要フィールドのみ subscribe (account_state 等の他フィールド更新で
   // re-render するのを防ぐ)
   const user = useAuthStore((s) => s.user);
-  const signOut = useAuthStore((s) => s.signOut);
   const { unreadCount } = useNotifications();
-  const [logoutOpen, setLogoutOpen] = useState(false);
+  const qc = useQueryClient();
   const [albumScope, setAlbumScope] = useState<AlbumScope>('all');
+  // Pull-to-refresh state — mypage 主要 query (stats / albums / friends / communities) を一括再 fetch.
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      // broad invalidate — feed-page と異なり数十 query しかない & UX 上 staleness が見えやすい画面なので
+      // 該当 prefix を順次叩くより queryKey の先頭 1 個で広めに invalidate する。
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['mypage-stats'] }),
+        qc.invalidateQueries({ queryKey: ['album-photos'] }),
+        qc.invalidateQueries({ queryKey: ['friends'] }),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [qc, refreshing]);
 
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['mypage-stats', user?.id],
@@ -59,50 +71,13 @@ export default function MypageScreen() {
       if (!user) return null;
       const { data } = await supabase
         .from('profiles')
-        .select('post_count, like_received_count, comment_count, concern_received_count, created_at, nickname, avatar_emoji, avatar_url, bio')
+        .select('post_count, like_received_count, comment_count, concern_received_count, created_at, nickname, avatar_emoji, avatar_url')
         .eq('id', user.id)
         .single();
       return data as MypageStats | null;
     },
     enabled: !!user,
     // 自分の集計値はほぼ stale OK — 1 分は再 fetch しない
-    staleTime: 60_000,
-  });
-
-  const { data: myCommunities = [] } = useQuery<Community[]>({
-    queryKey: ['mypage-my-communities', user?.id],
-    queryFn: fetchMyCommunities,
-    enabled: !!user,
-    staleTime: 60_000,
-  });
-  const communityCount = myCommunities.length;
-
-  // 公式コミュニティを管理しているかどうか — Geek Official 行を出すか判定
-  const { data: officialCommunities = [] } = useQuery<Community[]>({
-    queryKey: ['my-official-communities', user?.id],
-    queryFn: fetchMyOfficialCommunities,
-    enabled: !!user,
-    staleTime: 60_000,
-  });
-  const hasOfficial = officialCommunities.length > 0;
-
-  // 運営からの未読メッセージ件数。 head:true + count:'exact' で行データを転送せず
-  // 件数だけ取得 — mypage Row の数字バッジ表示用。
-  // 同じ queryKey を messages.tsx 側の optimistic update でも触っているので、
-  // 既読化したらバッジは即座に減る。
-  const { data: unreadAdminMessages = 0 } = useQuery<number>({
-    queryKey: ['admin-messages-unread-count', user?.id],
-    queryFn: async () => {
-      if (!user) return 0;
-      const { count, error } = await supabase
-        .from('admin_messages')
-        .select('id', { count: 'exact', head: true })
-        .eq('recipient_id', user.id)
-        .is('read_at', null);
-      if (error) return 0;
-      return count ?? 0;
-    },
-    enabled: !!user,
     staleTime: 60_000,
   });
 
@@ -122,19 +97,6 @@ export default function MypageScreen() {
     staleTime: 30_000,
   });
 
-  const accountAge = user?.created_at
-    ? Math.floor((Date.now() - new Date(user.created_at).getTime()) / (1000 * 60 * 60 * 24))
-    : 0;
-
-  // 信用スコア: tier + 現在値を mypage の Row に表示
-  const trust = computeTrustBreakdown({
-    post_count: stats?.post_count ?? 0,
-    like_received_count: stats?.like_received_count ?? 0,
-    comment_count: stats?.comment_count ?? 0,
-    concern_received_count: stats?.concern_received_count ?? 0,
-    created_at: stats?.created_at ?? user?.created_at ?? null,
-  });
-
   if (statsLoading && !stats) {
     return (
       <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
@@ -143,8 +105,6 @@ export default function MypageScreen() {
     );
   }
 
-  const bio = stats?.bio?.trim();
-
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScrollView
@@ -152,6 +112,14 @@ export default function MypageScreen() {
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
         }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={C.accent}
+            colors={[C.accent]}
+          />
+        }
       >
         {/* ───────── 上部: アイコン2つだけのミニマルバー ───────── */}
         <View
@@ -175,84 +143,15 @@ export default function MypageScreen() {
           />
         </View>
 
-        {/* ───────── ヒーロー: 大きなアバター + 名前 + 自慢集 (bio) ───────── */}
-        <View style={{ alignItems: 'center', paddingTop: SP['4'], paddingHorizontal: SP['4'], gap: SP['3'] }}>
-          <Avatar
-            size={96}
-            name={user?.nickname ?? user?.email}
-            emoji={stats?.avatar_emoji ?? undefined}
-            uri={stats?.avatar_url ?? undefined}
-          />
-          <View style={{ alignItems: 'center', gap: 2 }}>
-            <Text style={[T.h1, { color: C.text, textAlign: 'center' }]} numberOfLines={1}>
-              {stats?.nickname ?? user?.nickname ?? 'ユーザー'}
-            </Text>
-            <Text style={[T.small, { color: C.text3, letterSpacing: 0.5 }]}>
-              匿名 · {accountAge}日目
-            </Text>
-          </View>
-
-          {/* 自慢集 (bio) — タップで profile-edit へ */}
-          <BioBlock bio={bio} onPress={() => router.push('/settings/profile-edit' as never)} />
-
-          {/* アクション 2 ボタン: プロフィール編集 / 友達追加 */}
-          <View
-            style={{
-              flexDirection: 'row',
-              gap: SP['2'],
-              alignSelf: 'stretch',
-              marginTop: SP['1'],
-            }}
-          >
-            <HeroAction
-              icon={Icon.edit}
-              label="プロフィール編集"
-              onPress={() => router.push('/settings/profile-edit' as never)}
-            />
-            <HeroAction
-              icon={Icon.friends}
-              label="友達追加"
-              badge={friendCount > 0 ? friendCount : undefined}
-              onPress={() => router.push('/mypage/friends' as never)}
-            />
-          </View>
-        </View>
-
-        {/* ───────── KPI: 3 つの大きな数字カード ───────── */}
-        <View
-          style={{
-            flexDirection: 'row',
-            marginTop: SP['6'],
-            marginHorizontal: SP['4'],
-            gap: SP['2'],
-          }}
-        >
-          <Kpi value={stats?.post_count ?? 0} label="投稿" />
-          <Kpi value={stats?.like_received_count ?? 0} label="もらった♥" />
-          <Kpi value={communityCount} label="コミュ" />
-        </View>
-
-        {/* ───────── プライマリアクション 2 つ ───────── */}
-        <View
-          style={{
-            flexDirection: 'row',
-            marginTop: SP['4'],
-            marginHorizontal: SP['4'],
-            gap: SP['2'],
-          }}
-        >
-          <PrimaryAction
-            icon={Icon.post}
-            label="投稿する"
-            onPress={() => router.push('/post/create' as never)}
-            solid
-          />
-          <PrimaryAction
-            icon={Icon.calendar}
-            label="カレンダー"
-            onPress={() => router.push('/mypage/calendar' as never)}
-          />
-        </View>
+        {/* ───────── Hero card — 上半分グラデ / 下半分 Glass の 2 段構成 ───────── */}
+        <PolishedHero
+          nickname={stats?.nickname ?? user?.nickname ?? 'ユーザー'}
+          avatarUrl={stats?.avatar_url}
+          avatarEmoji={stats?.avatar_emoji}
+          friendCount={friendCount}
+          onEditPress={() => router.push('/settings/profile-edit' as never)}
+          onFriendsPress={() => router.push('/mypage/friends' as never)}
+        />
 
         {/* ───────── アルバム: 3 タブ (mine / shared / all) ───────── */}
         <AlbumsSection
@@ -263,119 +162,14 @@ export default function MypageScreen() {
           onPhotoPress={(id) => router.push(`/mypage/photo/${id}` as never)}
         />
 
-        {/* ───────── セクション: マイコミュニティ ───────── */}
-        <MyCommunitiesSection communities={myCommunities} />
-
-        {/* ───────── セクション: アクティビティ ───────── */}
-        <Section title="アクティビティ">
-          <Row
-            icon={Icon.edit}
-            label="自分の投稿"
-            onPress={() => router.push('/mypage/posts' as never)}
-          />
-          <RowDivider />
-          <Row
-            icon={Icon.heart}
-            label="いいねした投稿"
-            onPress={() => router.push('/mypage/liked' as never)}
-          />
-          <RowDivider />
-          <Row
-            icon={Icon.save}
-            label="保存した投稿"
-            onPress={() => router.push('/mypage/saved' as never)}
-          />
-          <RowDivider />
-          {/* 運営からの DM 受信箱 — 未読があれば数字 pill */}
-          <Row
-            icon={Icon.send}
-            label="運営からのメッセージ"
-            right={unreadAdminMessages > 0 ? <Pill text={String(unreadAdminMessages)} /> : undefined}
-            onPress={() => router.push('/mypage/messages' as never)}
-          />
-          {hasOfficial && (
-            <>
-              <RowDivider />
-              <Row
-                icon={Icon.shield}
-                label="Geek Official"
-                right={<AccentPill text={`${officialCommunities.length}`} />}
-                onPress={() => router.push('/official' as never)}
-              />
-            </>
-          )}
-        </Section>
-
-        {/* ───────── セクション: アカウント ───────── */}
-        <Section title="アカウント">
-          <Row
-            icon={Icon.shield}
-            label="信用スコア"
-            right={<TierBadge emoji={trust.tier.emoji} score={trust.score} color={trust.tier.color} />}
-            onPress={() => router.push('/settings/trust-score' as never)}
-          />
-          <RowDivider />
-          <Row
-            icon={Icon.award}
-            label="プラン"
-            onPress={() => router.push('/settings/plan' as never)}
-          />
-          <RowDivider />
-          <Row
-            icon={Icon.bell}
-            label="通知"
-            right={unreadCount > 0 ? <Pill text={String(unreadCount)} /> : undefined}
-            onPress={() => router.push('/notifications' as never)}
-          />
-        </Section>
-
-        {/* ───────── セクション: プライバシー ───────── */}
-        <Section title="プライバシー">
-          <Row
-            icon={Icon.hash}
-            label="ブロックしたタグ"
-            onPress={() => router.push('/settings/blocked-tags' as never)}
-          />
-          <RowDivider />
-          <Row
-            icon={Icon.block}
-            label="ブロックしたユーザー"
-            onPress={() => router.push('/settings/blocked-users' as never)}
-          />
-          <RowDivider />
-          <Row
-            icon={Icon.settings}
-            label="すべての設定"
-            onPress={() => router.push('/settings' as never)}
-          />
-        </Section>
-
-        {OBSIDIAN_AVAILABLE && (
-          <Section title="開発">
-            <Row
-              icon={Icon.edit}
-              label="Obsidian (DEV)"
-              onPress={() => router.push('/settings/obsidian' as never)}
-            />
-          </Section>
-        )}
-
-        {/* ───────── ログアウト (控えめ) ───────── */}
-        <PressableScale
-          onPress={() => setLogoutOpen(true)}
-          haptic="warn"
-          style={{
-            marginTop: SP['8'],
-            marginHorizontal: SP['4'],
-            paddingVertical: SP['3'],
-            alignItems: 'center',
-          }}
-        >
-          <Text style={[T.smallM, { color: C.red, letterSpacing: 0.5 }]}>ログアウト</Text>
-        </PressableScale>
+        {/* 投稿する / カレンダー / マイコミュニティ / アクティビティ / アカウント / プライバシー /
+            ログアウト は 右上歯車 (/settings) に集約. このマイページは "Hero + アルバム + 友達 +
+            写真追加" のコアだけに絞る */}
       </ScrollView>
 
-      {/* ───────── FAB: 写真追加 (右下、TabBar の上) ───────── */}
+      {/* ───────── FAB: 写真追加 (右下、TabBar の上)
+           ・「赤オレンジの丸」が何のボタンか分かりづらかったため、テキスト + plus icon の
+             pill 形状 に変更. accent 色 (Geek の紫) で brand との一貫性も向上 ───────── */}
       <PressableScale
         onPress={() => router.push('/mypage/photo/add' as never)}
         haptic="confirm"
@@ -384,32 +178,35 @@ export default function MypageScreen() {
           position: 'absolute',
           right: SP['4'],
           bottom: insets.bottom + TABBAR.height + SP['4'],
-          width: 56,
-          height: 56,
-          borderRadius: 28,
-          backgroundColor: C.accent,
+          height: 52,
+          paddingHorizontal: SP['5'],
+          borderRadius: 26,
+          flexDirection: 'row',
           alignItems: 'center',
-          justifyContent: 'center',
-          ...SHADOW.accentGlow,
+          gap: SP['2'],
+          overflow: 'hidden',
+          ...SHADOW.glow,
           zIndex: 1000,
         }}
       >
-        <Icon.plus size={26} color="#fff" strokeWidth={2.6} />
+        <LinearGradient
+          colors={GRAD.primary}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+          }}
+        />
+        <Icon.plus size={20} color="#fff" strokeWidth={2.6} />
+        <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700', letterSpacing: 0.3 }}>
+          写真を追加
+        </Text>
       </PressableScale>
 
-      <ConfirmDialog
-        visible={logoutOpen}
-        title="ログアウトしますか？"
-        message="再度ログインするにはメールアドレスとパスワードが必要です。"
-        confirmLabel="ログアウト"
-        cancelLabel="キャンセル"
-        destructive
-        onCancel={() => setLogoutOpen(false)}
-        onConfirm={() => {
-          setLogoutOpen(false);
-          void signOut();
-        }}
-      />
     </View>
   );
 }
@@ -445,166 +242,115 @@ function IconButton({
   );
 }
 
-// 自慢集 (bio) — タップ可能。空なら placeholder を出す
-function BioBlock({ bio, onPress }: { bio: string | undefined; onPress: () => void }) {
-  const isEmpty = !bio || bio.length === 0;
-  return (
-    <PressableScale
-      onPress={onPress}
-      haptic="tap"
-      scaleValue={0.99}
-      style={{
-        alignSelf: 'stretch',
-        marginTop: SP['1'],
-        paddingHorizontal: SP['4'],
-        paddingVertical: SP['3'],
-        borderRadius: R.lg,
-        backgroundColor: C.bg2,
-        borderWidth: 1,
-        borderColor: isEmpty ? C.border : C.border,
-        // 空のときは破線で「ここを埋めて」感を出す
-        borderStyle: isEmpty ? 'dashed' : 'solid',
-        alignItems: 'center',
-      }}
-    >
-      {isEmpty ? (
-        <Text style={[T.small, { color: C.text3, textAlign: 'center' }]}>
-          ✏️ 自慢集を書く
-        </Text>
-      ) : (
-        <Text
-          style={[T.body, { color: C.text2, textAlign: 'center', lineHeight: 22 }]}
-          numberOfLines={3}
-        >
-          {bio}
-        </Text>
-      )}
-    </PressableScale>
-  );
-}
-
-// Hero セクションのアクションボタン (横並び 2 つ)
-function HeroAction({
-  icon: I,
-  label,
-  onPress,
-  badge,
+// ───────────────────────────────────────────────────────────────
+// PolishedHero — マイページ Hero card
+//   上半分: GRAD.primary 背景に HeroAvatar (gradient ring) + nickname
+//   下半分: アクション 2 ボタン (プロフィール編集 / 友達追加)
+//   ※ 旧仕様の bio / 信頼度 tier pill 表示は削除.
+// ───────────────────────────────────────────────────────────────
+function PolishedHero({
+  nickname,
+  avatarUrl,
+  avatarEmoji,
+  friendCount,
+  onEditPress,
+  onFriendsPress,
 }: {
-  icon: LucideIcon;
-  label: string;
-  onPress: () => void;
-  badge?: number;
+  nickname: string;
+  avatarUrl: string | null | undefined;
+  avatarEmoji: string | null | undefined;
+  friendCount: number;
+  onEditPress: () => void;
+  onFriendsPress: () => void;
 }) {
-  return (
-    <PressableScale
-      onPress={onPress}
-      haptic="tap"
-      style={{
-        flex: 1,
-        backgroundColor: C.bg2,
-        borderRadius: R.lg,
-        borderWidth: 1,
-        borderColor: C.border,
-        paddingVertical: SP['3'],
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
-        position: 'relative',
-      }}
-    >
-      <I size={16} color={C.text2} strokeWidth={2.4} />
-      <Text style={[T.smallB, { color: C.text }]}>{label}</Text>
-      {badge !== undefined && badge > 0 && (
-        <View
-          style={{
-            minWidth: 20,
-            paddingHorizontal: 6,
-            paddingVertical: 1,
-            borderRadius: R.full,
-            backgroundColor: C.accent,
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginLeft: 2,
-          }}
-        >
-          <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>
-            {badge > 99 ? '99+' : badge}
-          </Text>
-        </View>
-      )}
-    </PressableScale>
-  );
-}
-
-function Kpi({ value, label }: { value: number; label: string }) {
   return (
     <View
       style={{
-        flex: 1,
-        backgroundColor: C.bg2,
-        borderRadius: R.lg,
-        borderWidth: 1,
-        borderColor: C.border,
-        paddingVertical: SP['4'],
-        paddingHorizontal: SP['2'],
-        alignItems: 'center',
-        gap: 2,
+        marginTop: SP['2'],
+        marginHorizontal: SP['4'],
+        borderRadius: R.xl,
+        overflow: 'hidden',
+        ...SHADOW.md,
       }}
     >
-      <Text
+      {/* 上半分: グラデ背景 */}
+      <LinearGradient
+        colors={GRAD.primary}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
         style={{
-          fontSize: 26,
-          fontWeight: '800',
-          color: C.text,
-          letterSpacing: -0.5,
-          lineHeight: 30,
+          alignItems: 'center',
+          paddingTop: SP['6'],
+          paddingBottom: SP['5'],
+          paddingHorizontal: SP['4'],
+          gap: SP['3'],
         }}
       >
-        {value.toLocaleString('ja-JP')}
-      </Text>
-      <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5 }]}>{label}</Text>
-    </View>
-  );
-}
+        <HeroAvatar
+          size={96}
+          avatarUrl={avatarUrl}
+          avatarEmoji={avatarEmoji}
+          nickname={nickname}
+        />
+        <Text
+          style={[T.h2, { color: '#fff', textAlign: 'center', marginTop: SP['1'] }]}
+          numberOfLines={1}
+        >
+          {nickname}
+        </Text>
+      </LinearGradient>
 
-function PrimaryAction({
-  icon: I,
-  label,
-  onPress,
-  solid,
-}: {
-  icon: LucideIcon;
-  label: string;
-  onPress: () => void;
-  solid?: boolean;
-}) {
-  const bg = solid ? C.accent : C.bg2;
-  const border = solid ? C.accent : C.border;
-  const textColor = solid ? '#fff' : C.text;
-  const iconColor = solid ? '#fff' : C.text2;
-  return (
-    <PressableScale
-      onPress={onPress}
-      haptic={solid ? 'confirm' : 'tap'}
-      style={{
-        flex: 1,
-        backgroundColor: bg,
-        borderRadius: R.lg,
-        borderWidth: 1,
-        borderColor: border,
-        paddingVertical: SP['3'],
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
-        // solid (= primary) のみ accent halo を付与
-        ...(solid ? SHADOW.accentGlow : {}),
-      }}
-    >
-      <I size={16} color={iconColor} strokeWidth={2.4} />
-      <Text style={[T.smallB, { color: textColor }]}>{label}</Text>
-    </PressableScale>
+      {/* 下半分: GlassCard 風 (rgba background) — bio + actions */}
+      <View
+        style={{
+          backgroundColor: C.bg2,
+          paddingHorizontal: SP['4'],
+          paddingTop: SP['4'],
+          paddingBottom: SP['4'],
+          gap: SP['3'],
+        }}
+      >
+        {/* アクション 2 ボタン: プロフィール編集 / 友達追加 */}
+        <View style={{ flexDirection: 'row', gap: SP['2'] }}>
+          <PolishedButton
+            variant="outline"
+            icon={<Icon.edit size={16} color={C.accent} strokeWidth={2.2} />}
+            label="プロフィール編集"
+            onPress={onEditPress}
+            style={{ flex: 1 }}
+            fullWidth
+          />
+          <PolishedButton
+            variant="gradient"
+            gradient="primary"
+            icon={<Icon.friends size={16} color="#fff" strokeWidth={2.2} />}
+            label="友達追加"
+            onPress={onFriendsPress}
+            style={{ flex: 1 }}
+            fullWidth
+            rightIcon={
+              friendCount > 0 ? (
+                <View
+                  style={{
+                    minWidth: 20,
+                    paddingHorizontal: 6,
+                    paddingVertical: 1,
+                    borderRadius: R.full,
+                    backgroundColor: 'rgba(255,255,255,0.25)',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>
+                    {friendCount > 99 ? '99+' : friendCount}
+                  </Text>
+                </View>
+              ) : null
+            }
+          />
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -639,31 +385,34 @@ function AlbumsSection({
           style={[
             T.smallB,
             {
-              color: C.text3,
-              letterSpacing: 1.2,
-              fontSize: 11,
+              color: C.text2,
+              letterSpacing: 0.3,
+              fontSize: 12,
+              fontWeight: '700',
               flex: 1,
             },
           ]}
         >
-          {'アルバム'.toUpperCase()}
+          アルバム
         </Text>
         <Text style={[T.caption, { color: C.text4 }]}>
           {photos.length > 0 ? `${photos.length}枚` : ''}
         </Text>
       </View>
 
-      {/* SegmentedControl: mine / shared / all */}
+      {/* SegmentedControl: mine / shared / all — GlassCard で囲ってリッチに */}
       <View style={{ marginHorizontal: SP['4'] }}>
-        <SegmentedControl<AlbumScope>
-          options={[
-            { value: 'all', label: 'すべて' },
-            { value: 'mine', label: '自分のみ' },
-            { value: 'shared', label: '共有中' },
-          ]}
-          value={scope}
-          onChange={onScopeChange}
-        />
+        <GlassCard style={{ padding: SP['1'] }}>
+          <SegmentedControl<AlbumScope>
+            options={[
+              { value: 'all', label: 'すべて' },
+              { value: 'mine', label: '自分のみ' },
+              { value: 'shared', label: '共有中' },
+            ]}
+            value={scope}
+            onChange={onScopeChange}
+          />
+        </GlassCard>
       </View>
 
       {/* photo grid or empty */}
@@ -682,255 +431,3 @@ function AlbumsSection({
   );
 }
 
-// ───────────────────────────────────────────────────────────────
-// マイコミュニティ: 横スクロール — タップで /community/{id}
-// ───────────────────────────────────────────────────────────────
-function MyCommunitiesSection({ communities }: { communities: Community[] }) {
-  const router = useRouter();
-  const empty = communities.length === 0;
-
-  return (
-    <View style={{ marginTop: SP['6'] }}>
-      <Text
-        style={[
-          T.smallB,
-          {
-            color: C.text3,
-            paddingHorizontal: SP['4'],
-            paddingBottom: SP['2'],
-            letterSpacing: 1.2,
-            fontSize: 11,
-          },
-        ]}
-      >
-        {'マイコミュニティ'.toUpperCase()}
-      </Text>
-      {empty ? (
-        <View
-          style={{
-            marginHorizontal: SP['4'],
-            backgroundColor: C.bg2,
-            borderRadius: R.lg,
-            borderWidth: 1,
-            borderColor: C.border,
-            paddingVertical: SP['5'],
-            paddingHorizontal: SP['4'],
-            alignItems: 'center',
-            gap: SP['2'],
-          }}
-        >
-          <Text style={[T.body, { color: C.text2, textAlign: 'center' }]}>
-            まだ参加していません 🎯
-          </Text>
-          <PressableScale
-            onPress={() => router.push('/community/discover' as never)}
-            haptic="confirm"
-            style={{
-              paddingHorizontal: SP['4'],
-              paddingVertical: SP['2'],
-              borderRadius: R.full,
-              backgroundColor: C.accent,
-            }}
-          >
-            <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>
-              コミュニティを探す
-            </Text>
-          </PressableScale>
-        </View>
-      ) : (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: SP['4'], gap: SP['3'] }}
-        >
-          {communities.map((c) => (
-            <CommunityChip key={c.id} community={c} onPress={() => router.push(`/community/${c.id}` as never)} />
-          ))}
-          <PressableScale
-            onPress={() => router.push('/community/discover' as never)}
-            haptic="tap"
-            style={{ alignItems: 'center', gap: 6, width: 64 }}
-          >
-            <View
-              style={{
-                width: 56,
-                height: 56,
-                borderRadius: 28,
-                backgroundColor: C.bg2,
-                borderWidth: 1,
-                borderColor: C.border,
-                borderStyle: 'dashed',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Icon.plus size={22} color={C.text2} strokeWidth={2.2} />
-            </View>
-            <Text style={[T.caption, { color: C.text3, fontSize: 10 }]} numberOfLines={1}>
-              探す
-            </Text>
-          </PressableScale>
-        </ScrollView>
-      )}
-    </View>
-  );
-}
-
-function CommunityChip({ community, onPress }: { community: Community; onPress: () => void }) {
-  const safeIconUrl = community.icon_url ? sanitizeUrl(community.icon_url) : null;
-  return (
-    <PressableScale onPress={onPress} haptic="tap" style={{ alignItems: 'center', gap: 6, width: 64 }}>
-      <View
-        style={{
-          width: 56,
-          height: 56,
-          borderRadius: 28,
-          backgroundColor: safeIconUrl ? C.bg3 : community.icon_color,
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
-          borderWidth: 1,
-          borderColor: C.border,
-        }}
-      >
-        {safeIconUrl ? (
-          <Image source={{ uri: safeIconUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-        ) : (
-          <Text style={{ fontSize: 28 }}>{community.icon_emoji}</Text>
-        )}
-      </View>
-      <Text style={[T.caption, { color: C.text2, fontSize: 10 }]} numberOfLines={1}>
-        {community.name}
-      </Text>
-    </PressableScale>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={{ marginTop: SP['6'] }}>
-      <Text
-        style={[
-          T.smallB,
-          {
-            color: C.text3,
-            paddingHorizontal: SP['4'],
-            paddingBottom: SP['2'],
-            letterSpacing: 1.2,
-            fontSize: 11,
-          },
-        ]}
-      >
-        {title.toUpperCase()}
-      </Text>
-      <View
-        style={{
-          marginHorizontal: SP['4'],
-          backgroundColor: C.bg2,
-          borderRadius: R.lg,
-          borderWidth: 1,
-          borderColor: C.border,
-          overflow: 'hidden',
-        }}
-      >
-        {children}
-      </View>
-    </View>
-  );
-}
-
-function Row({
-  icon: I,
-  label,
-  right,
-  onPress,
-}: {
-  icon: LucideIcon;
-  label: string;
-  right?: React.ReactNode;
-  onPress: () => void;
-}) {
-  const ChevronR = Icon.chevronR;
-  return (
-    <PressableScale
-      onPress={onPress}
-      haptic="tap"
-      scaleValue={0.99}
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: SP['4'],
-        paddingVertical: SP['3'],
-        gap: SP['3'],
-      }}
-    >
-      <I size={19} color={C.text2} strokeWidth={2} />
-      <Text style={[T.body, { flex: 1, color: C.text }]}>{label}</Text>
-      {right}
-      <ChevronR size={16} color={C.text4} strokeWidth={2.2} />
-    </PressableScale>
-  );
-}
-
-function RowDivider() {
-  return <View style={{ height: 1, backgroundColor: C.divider, marginLeft: SP['4'] + 19 + SP['3'] }} />;
-}
-
-function Pill({ text }: { text: string }) {
-  return (
-    <View
-      style={{
-        minWidth: 22,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: R.full,
-        backgroundColor: C.red,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{text}</Text>
-    </View>
-  );
-}
-
-function AccentPill({ text }: { text: string }) {
-  return (
-    <View
-      style={{
-        minWidth: 22,
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: R.full,
-        backgroundColor: C.accentBg,
-        borderWidth: 1,
-        borderColor: C.accent + '66',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <Text style={{ color: C.accentLight, fontSize: 11, fontWeight: '800', letterSpacing: 0.3 }}>{text}</Text>
-    </View>
-  );
-}
-
-function TierBadge({ emoji, score, color }: { emoji: string; score: number; color: string }) {
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: R.full,
-        backgroundColor: C.bg3,
-        borderWidth: 1,
-        borderColor: color + '55',
-      }}
-    >
-      <Text style={{ fontSize: 12 }}>{emoji}</Text>
-      <Text style={{ color, fontSize: 11, fontWeight: '700', letterSpacing: 0.3 }}>{score}</Text>
-    </View>
-  );
-}

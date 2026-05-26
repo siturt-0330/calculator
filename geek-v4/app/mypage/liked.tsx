@@ -1,4 +1,4 @@
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +9,7 @@ import { BackButton } from '../../components/nav/BackButton';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { Avatar } from '../../components/ui/Avatar';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { SkeletonRow } from '../../components/ui/SkeletonRow';
 import { Icon } from '../../constants/icons';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -57,8 +58,9 @@ export default function LikedPosts() {
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <TopBar title="いいねした投稿" left={<BackButton />} />
       {isLoading ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator color={C.accent} />
+        // skeleton list — ActivityIndicator より「内容が来る」感が出る
+        <View style={{ padding: SP['4'] }}>
+          <SkeletonRow kind="list-item" count={6} />
         </View>
       ) : items.length === 0 ? (
         <View style={{ padding: SP['4'] }}>

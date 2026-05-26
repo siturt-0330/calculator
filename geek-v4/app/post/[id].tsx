@@ -24,7 +24,6 @@ import { TagPill } from '../../components/tag/TagPill';
 import { AddTagInline } from '../../components/tag/AddTagInline';
 import { ProgressiveImage } from '../../components/ui/ProgressiveImage';
 import { Spinner } from '../../components/ui/Spinner';
-import { TrustBadge } from '../../components/ui/TrustBadge';
 import { useToastStore } from '../../stores/toastStore';
 import { formatRelative } from '../../lib/utils/date';
 import type { Comment } from '../../types/models';
@@ -248,7 +247,6 @@ export default function PostDetailScreen() {
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], marginBottom: 4 }}>
-              <TrustBadge score={item.trust_score} />
               <Text style={[T.caption, { color: C.text3 }]}>{formatRelative(item.created_at)}</Text>
               <View style={{ flex: 1 }} />
               <ObsidianSaveButton
@@ -290,8 +288,7 @@ export default function PostDetailScreen() {
           }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
               <Avatar size={36} anonymous />
-              <TrustBadge score={post.trust_score_at_post} size="md" />
-              <Text style={[T.caption, { color: C.text3, flex: 1 }]}>· {formatRelative(post.created_at)}</Text>
+              <Text style={[T.caption, { color: C.text3, flex: 1 }]}>{formatRelative(post.created_at)}</Text>
               <ObsidianSaveButton note={postToObsidianNote(post)} size={18} />
             </View>
             <Text style={[T.body, { color: C.text, lineHeight: 24 }]}>{post.content}</Text>

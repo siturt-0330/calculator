@@ -1,14 +1,16 @@
 import { useEffect, useMemo } from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { View, Text, ScrollView, Platform } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNotifications } from '../../hooks/useNotifications';
 import { TopBar } from '../../components/nav/TopBar';
 import { BackButton } from '../../components/nav/BackButton';
 import { PressableScale } from '../../components/ui/PressableScale';
+import { PolishedButton } from '../../components/ui/PolishedButton';
 import { Icon } from '../../constants/icons';
-import { C, R, SP } from '../../design/tokens';
+import { C, GRAD, R, SHADOW, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { formatRelative } from '../../lib/utils/date';
 import { TABBAR } from '../../design/tabbar';
@@ -36,6 +38,35 @@ function bucketFor(dateStr: string): Bucket {
 type Row =
   | { kind: 'header'; bucket: Bucket; id: string }
   | { kind: 'item'; n: Notification; id: string };
+
+// type → 視覚デザイン (icon / accent color / bg)
+// like=pink, comment=blue, follow=accent purple, reply=teal/green,
+// event=amber, official_post=accent gradient, default=grey
+type NotifVisual = {
+  icon: string;
+  color: string;
+  bgSoft: string;
+  borderSoft: string;
+};
+
+function visualFor(type: Notification['type']): NotifVisual {
+  switch (type) {
+    case 'like':
+      return { icon: '💛', color: C.pink, bgSoft: C.pinkBg, borderSoft: C.pink + '55' };
+    case 'comment':
+      return { icon: '💬', color: C.blue, bgSoft: C.blueBg, borderSoft: C.blue + '55' };
+    case 'follow':
+      return { icon: '👤', color: C.accentLight, bgSoft: C.accentBg, borderSoft: C.accent + '55' };
+    case 'reply':
+      return { icon: '↩', color: C.green, bgSoft: C.greenBg, borderSoft: C.green + '55' };
+    case 'event':
+      return { icon: '📅', color: C.amber, bgSoft: C.amberBg, borderSoft: C.amber + '55' };
+    case 'official_post':
+      return { icon: '📣', color: C.accent, bgSoft: C.accentBg, borderSoft: C.accent };
+    default:
+      return { icon: '🔔', color: C.text2, bgSoft: C.bg3, borderSoft: C.border };
+  }
+}
 
 export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
@@ -82,58 +113,65 @@ export default function NotificationsScreen() {
       <View style={{ flex: 1, backgroundColor: C.bg }}>
         <TopBar title="通知" left={<BackButton />} />
         <ScrollView contentContainerStyle={{ padding: SP['4'], gap: SP['4'] }}>
-          {/* ヒーロー */}
-          <View style={{ alignItems: 'center', padding: SP['6'], gap: SP['3'] }}>
-            <View style={{
-              width: 96, height: 96, borderRadius: 48,
-              backgroundColor: C.accentBg, alignItems: 'center', justifyContent: 'center',
-              borderWidth: 1, borderColor: C.accentSoft,
-            }}>
-              <Icon.bell size={44} color={C.accent} strokeWidth={1.8} />
+          {/* ヒーロー — gradient 96x96 circle + glow */}
+          <View style={{ alignItems: 'center', paddingTop: SP['8'], paddingBottom: SP['4'], gap: SP['3'] }}>
+            <View style={[
+              { borderRadius: 48 },
+              SHADOW.glow,
+            ]}>
+              <LinearGradient
+                colors={GRAD.primary}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={{
+                  width: 96, height: 96, borderRadius: 48,
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <Icon.bell size={44} color="#fff" strokeWidth={2.2} />
+              </LinearGradient>
             </View>
-            <Text style={[T.h2, { color: C.text, textAlign: 'center' }]}>通知はまだありません</Text>
+            <Text style={[T.h2, { color: C.text, textAlign: 'center' }]}>まだ通知がありません</Text>
             <Text style={[T.body, { color: C.text2, textAlign: 'center', maxWidth: 320 }]}>
               好きなタグの新着、自分の投稿への反応がここに届きます
             </Text>
           </View>
 
-          <PressableScale
-            onPress={() => router.push('/settings/notifications' as never)}
-            haptic="tap"
-            hitSlop={10}
-            style={{
-              marginTop: SP['2'],
-              padding: SP['4'],
-              backgroundColor: C.bg2,
-              borderRadius: R.lg,
-              borderWidth: 1,
-              borderColor: C.border,
-              flexDirection: 'row', alignItems: 'center', gap: SP['3'],
-            }}
-          >
-            <Icon.settings size={20} color={C.text2} strokeWidth={2.2} />
-            <Text style={[T.bodyM, { color: C.text, flex: 1 }]}>通知設定</Text>
-            <Icon.chevronR size={18} color={C.text3} strokeWidth={2.2} />
-          </PressableScale>
+          {/* CTA — feed を見に行く / 通知設定 */}
+          <View style={{ gap: SP['2'], paddingHorizontal: SP['2'] }}>
+            <PolishedButton
+              variant="gradient"
+              gradient="primary"
+              label="フィードを見に行く"
+              icon={<Icon.home size={18} color="#fff" strokeWidth={2.2} />}
+              onPress={() => router.push('/(tabs)/feed' as never)}
+              fullWidth
+              haptic="confirm"
+            />
+            <PressableScale
+              onPress={() => router.push('/settings/notifications' as never)}
+              haptic="tap"
+              hitSlop={10}
+              style={{
+                padding: SP['4'],
+                backgroundColor: C.bg2,
+                borderRadius: R.lg,
+                borderWidth: 1,
+                borderColor: C.border,
+                flexDirection: 'row', alignItems: 'center', gap: SP['3'],
+              }}
+            >
+              <Icon.settings size={20} color={C.text2} strokeWidth={2.2} />
+              <Text style={[T.bodyM, { color: C.text, flex: 1 }]}>通知設定</Text>
+              <Icon.chevronR size={18} color={C.text3} strokeWidth={2.2} />
+            </PressableScale>
+          </View>
         </ScrollView>
       </View>
     );
   }
 
   const unreadCount = notifications.filter((n) => !n.read).length;
-
-  // type → emoji
-  const typeEmoji = (type: string): string => {
-    switch (type) {
-      case 'like': return '💛';
-      case 'comment': return '💬';
-      case 'follow': return '👤';
-      case 'reply': return '↩';
-      case 'event': return '📅';
-      case 'official_post': return '📣';
-      default: return '🔔';
-    }
-  };
 
   // 通知タップ時 — 関連 surface (タグ feed など) へ遷移する。
   // notifications table に source_id が無いケースが多いので tag_name を最優先で利用。
@@ -171,18 +209,27 @@ export default function NotificationsScreen() {
         left={<BackButton />}
         right={
           unreadCount > 0 ? (
+            // outline pill: subtle, secondary action ("すべて既読" は破壊的でない)
             <PressableScale
               onPress={() => void markAllRead()}
               haptic="confirm"
               hitSlop={10}
+              accessibilityLabel="すべて既読にする"
+              accessibilityRole="button"
               style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
                 paddingHorizontal: SP['3'],
                 paddingVertical: 6,
-                backgroundColor: C.accent,
+                backgroundColor: 'transparent',
                 borderRadius: R.full,
+                borderWidth: 1,
+                borderColor: C.accent,
               }}
             >
-              <Text style={[T.caption, { color: '#fff', fontWeight: '700' }]}>
+              <Icon.check size={12} color={C.accentLight} strokeWidth={2.4} />
+              <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>
                 すべて既読
               </Text>
             </PressableScale>
@@ -192,11 +239,13 @@ export default function NotificationsScreen() {
       <FlashList
         data={rows}
         keyExtractor={(r) => r.id}
-        estimatedItemSize={90}
+        estimatedItemSize={92}
         drawDistance={250}
         removeClippedSubviews
         decelerationRate="fast"
         contentContainerStyle={{
+          paddingTop: SP['2'],
+          paddingHorizontal: SP['3'],
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
         }}
         getItemType={(r) => r.kind}
@@ -205,9 +254,9 @@ export default function NotificationsScreen() {
             return (
               <View
                 style={{
-                  paddingHorizontal: SP['4'],
                   paddingTop: SP['4'],
                   paddingBottom: SP['2'],
+                  paddingHorizontal: SP['2'],
                   backgroundColor: C.bg,
                 }}
               >
@@ -222,72 +271,133 @@ export default function NotificationsScreen() {
               </View>
             );
           }
-          const n = item.n;
-          const isOfficial = n.type === 'official_post';
           return (
-            <PressableScale
-              onPress={() => void handleTap(n)}
-              haptic="tap"
-              scaleValue={0.99}
-              style={{
-                paddingVertical: SP['3'],
-                paddingHorizontal: SP['4'],
-                backgroundColor: n.read ? C.bg : C.accentBg,
-                flexDirection: 'row',
-                alignItems: 'flex-start',
-                gap: SP['3'],
-                borderBottomWidth: 1,
-                borderBottomColor: C.divider,
-                // 公式投稿は左に強いアクセントバーを出して可視性を上げる
-                borderLeftWidth: isOfficial ? 3 : 0,
-                borderLeftColor: isOfficial ? C.accent : 'transparent',
-              }}
-            >
-              {/* 未読インジケータ */}
-              {!n.read && (
-                <View style={{
-                  position: 'absolute', left: 6, top: '50%',
-                  marginTop: -3,
-                  width: 6, height: 6, borderRadius: 3,
-                  backgroundColor: C.accent,
-                }} />
-              )}
-              {/* type ごとの絵文字 — 公式は常にアクセント色のバッジ */}
-              <View style={{
-                width: 36, height: 36, borderRadius: 18,
-                backgroundColor: isOfficial
-                  ? C.accent
-                  : (n.read ? C.bg3 : C.accent + '33'),
-                alignItems: 'center', justifyContent: 'center',
-              }}>
-                <Text style={{ fontSize: 18 }}>{typeEmoji(n.type)}</Text>
-              </View>
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text
-                  style={[
-                    T.bodyM,
-                    {
-                      color: C.text,
-                      lineHeight: 20,
-                      fontWeight: n.read ? '500' : '700',
-                    },
-                  ]}
-                >
-                  {n.message}
-                </Text>
-                {n.tag_name && (
-                  <Text style={[T.small, { color: C.accent }]}>
-                    {isOfficial ? n.tag_name : `#${n.tag_name}`}
-                  </Text>
-                )}
-                <Text style={[T.caption, { color: C.text3 }]}>
-                  {formatRelative(n.created_at)}
-                </Text>
-              </View>
-            </PressableScale>
+            <NotificationRow
+              n={item.n}
+              onPress={() => void handleTap(item.n)}
+            />
           );
         }}
       />
     </View>
+  );
+}
+
+// ============================================================
+// NotificationRow — glass-card 風の通知行
+// ------------------------------------------------------------
+// - 未読: accent subtle bg + accent ドット + bold text + soft glow
+// - 既読: bg2 + 普通 text + 透明感少なめ
+// - type ごとに icon の色 (like=pink / comment=blue / system=grey 等)
+// - 公式投稿は左に accent bar + gradient icon
+// ============================================================
+function NotificationRow({
+  n,
+  onPress,
+}: {
+  n: Notification;
+  onPress: () => void;
+}) {
+  const visual = visualFor(n.type);
+  const isOfficial = n.type === 'official_post';
+  const unread = !n.read;
+
+  return (
+    <PressableScale
+      onPress={onPress}
+      haptic="tap"
+      scaleValue={0.98}
+      accessibilityRole="button"
+      accessibilityLabel={n.message}
+      style={[
+        {
+          marginVertical: 4,
+          paddingVertical: SP['3'],
+          paddingHorizontal: SP['3'],
+          backgroundColor: unread ? C.accentBg : C.bg2,
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          gap: SP['3'],
+          borderRadius: R.lg,
+          borderWidth: 1,
+          // 未読は accent border, 既読は subtle border
+          borderColor: unread ? C.accent + '40' : C.border,
+          // 公式投稿は左に強いアクセントバーを出して可視性を上げる
+          borderLeftWidth: isOfficial ? 3 : 1,
+          borderLeftColor: isOfficial ? C.accent : (unread ? C.accent + '40' : C.border),
+        },
+        // Web では subtle hover effect (transition は PressableScale 側が担保)
+        Platform.OS === 'web' ? ({ cursor: 'pointer' } as object) : null,
+      ]}
+    >
+      {/* type ごとの icon — 公式は gradient, それ以外は color coded soft bg */}
+      {isOfficial ? (
+        <View style={[{ borderRadius: 20 }, SHADOW.sm]}>
+          <LinearGradient
+            colors={GRAD.primary}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={{
+              width: 40, height: 40, borderRadius: 20,
+              alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <Text style={{ fontSize: 18 }}>{visual.icon}</Text>
+          </LinearGradient>
+        </View>
+      ) : (
+        <View style={{
+          width: 40, height: 40, borderRadius: 20,
+          backgroundColor: visual.bgSoft,
+          alignItems: 'center', justifyContent: 'center',
+          borderWidth: 1, borderColor: visual.borderSoft,
+        }}>
+          <Text style={{ fontSize: 18 }}>{visual.icon}</Text>
+        </View>
+      )}
+
+      {/* メッセージ + タグ + 時間 */}
+      <View style={{ flex: 1, gap: 3 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: SP['2'] }}>
+          <Text
+            style={[
+              T.bodyM,
+              {
+                color: C.text,
+                lineHeight: 20,
+                fontWeight: unread ? '700' : '500',
+                flex: 1,
+              },
+            ]}
+          >
+            {n.message}
+          </Text>
+          {/* 未読ドット — 右上に小さく */}
+          {unread && (
+            <View style={{
+              width: 8, height: 8, borderRadius: 4,
+              backgroundColor: C.accent,
+              marginTop: 6,
+            }} />
+          )}
+        </View>
+        {n.tag_name && (
+          <Text
+            style={[
+              T.small,
+              {
+                color: visual.color,
+                fontWeight: '600',
+              },
+            ]}
+          >
+            {isOfficial ? n.tag_name : `#${n.tag_name}`}
+          </Text>
+        )}
+        <Text style={[T.caption, { color: C.text3 }]}>
+          {formatRelative(n.created_at)}
+        </Text>
+      </View>
+    </PressableScale>
   );
 }

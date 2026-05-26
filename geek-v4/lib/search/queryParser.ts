@@ -103,6 +103,29 @@ export function parseQuery(raw: string): ParsedQuery {
   };
 }
 
+// ============================================================
+// Query Intent (2026-05 追加)
+// ============================================================
+// 「1 単語クエリは strict, 2 単語以上は loose (AND ベース)」 — Google 風の
+// 入力意図解釈ルール。既存 parseQuery を呼び出した後に補助的に判定する pure helper。
+//
+// strict mode → 完全一致 / プレフィックス一致を強く優先
+// loose mode  → AND マッチ (全 keyword が hit) を許容、部分一致 OK
+//
+// scoring 側で使う想定。既存 export を壊さないために `getQueryMode()` を新規追加。
+//
+// "strict" — 例: "ポケモン" — entity 一致を強く優先したい
+// "loose"  — 例: "ポケモン アニメ" — 両方の語に hit する post を引きたい
+// "phrase" — 例: '"進撃の巨人"' — exact phrase match のみ
+export type QueryMode = 'strict' | 'loose' | 'phrase';
+
+export function getQueryMode(q: ParsedQuery): QueryMode {
+  if (q.phrases.length > 0) return 'phrase';
+  // tag: operator はあくまで構文 — keywords 単独の判定基準
+  if (q.keywords.length <= 1) return 'strict';
+  return 'loose';
+}
+
 // 表示用にオペレータ説明を返す
 export function describeQuery(q: ParsedQuery): { label: string; emoji: string }[] {
   const out: { label: string; emoji: string }[] = [];

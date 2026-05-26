@@ -1,64 +1,110 @@
 // ============================================================
-// app/mypage/photo/[id].tsx — 写真詳細 + 編集
+// app/mypage/photo/[id].tsx — 写真詳細 (Instagram post detail 風 feed-style)
 // ============================================================
-// spec: docs/MYPAGE_ALBUMS_SPEC.md § 6
-// - TopBar (title=「写真」 + BackButton)
-// - フル画面 image (aspect ratio 維持)
-// - 下にフォーム:
-//   - caption Input (multiline, 編集可能)
-//   - アルバム名 (タップで変更は Phase 2 — 現状は表示のみ)
-//   - visibility SegmentedControl (private | shared)
-//   - shared 時: 共有相手選択 (friends checkbox 形式)
-//   - 「非表示にする」 toggle
-// - 「保存」 Button + 「削除」 destructive Button
-// - 保存: useUpdatePhoto({ caption, visibility, shared_with_user_ids, is_hidden })
-// - 削除: ConfirmDialog → useDeletePhoto → router.back()
+// ユーザー要望: 写真をタップしたら「閲覧画面」(Instagram の post detail と
+// 同じ feed-style) を出す。旧版はいきなり form-base な edit UI が開いて
+// いたが、 SNS の写真詳細としては不自然だった。
+//
+// レイアウト (上から):
+//   1. TopBar (左に BackButton + 右に 3-dot menu = 編集/削除 popover)
+//   2. 著者 row (avatar + nickname + 投稿日 + ピン icon を右端に)
+//   3. 写真本体 (full-width, aspect ratio 維持) + 右下に send + comment icon stack
+//   4. caption ("テスト" 等の本文) — 空ならセクション省略
+//   5. 「コメントを追加…」 input bar (画面下固定相当 — KeyboardAvoidingView)
+//
+// 機能スコープ (Phase 1):
+//   - 写真は閲覧のみ. 編集は menu → /mypage/photo/[id]/edit へ遷移
+//   - 削除は menu → ConfirmDialog → useDeletePhoto
+//   - ピン / send / comment / コメント送信は visual のみ (機能は準備中 toast)
+//
+// 著者情報は profiles.{ nickname, avatar_url, avatar_emoji } を fetch.
+// 投稿日は date-fns ja locale の formatDistanceToNow + 絶対日付の併記で表示.
 // ============================================================
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
+  TextInput,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { TopBar } from '../../../components/nav/TopBar';
 import { BackButton } from '../../../components/nav/BackButton';
-import { Input } from '../../../components/ui/Input';
-import { Button } from '../../../components/ui/Button';
 import { PressableScale } from '../../../components/ui/PressableScale';
-import { Toggle } from '../../../components/ui/Toggle';
-import { SegmentedControl } from '../../../components/ui/SegmentedControl';
 import { Avatar } from '../../../components/ui/Avatar';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
-import { fetchPhoto, fetchAlbum } from '../../../lib/api/albums';
-import { useUpdatePhoto, useDeletePhoto } from '../../../hooks/useAlbums';
-import { useMyFriends } from '../../../hooks/useFriends';
+import { fetchPhoto } from '../../../lib/api/albums';
+import { useDeletePhoto } from '../../../hooks/useAlbums';
+import { useAuthStore } from '../../../stores/authStore';
 import { useToastStore } from '../../../stores/toastStore';
+import { supabase } from '../../../lib/supabase';
+import { withApiTimeout } from '../../../lib/withApiTimeout';
 import { Icon } from '../../../constants/icons';
-import { C, R, SP } from '../../../design/tokens';
+import { C, R, SP, SHADOW } from '../../../design/tokens';
 import { T } from '../../../design/typography';
 import { sanitizeUrl } from '../../../lib/sanitize';
-import type { PhotoVisibility } from '../../../types/models';
 
-// fetchPhoto は lib/api/albums から直接 import — useAlbums には個別 photo の
-// hook が無いので、ここで useQuery(['photo', id], fetchPhoto) を組む。
+type AuthorProfile = {
+  id: string;
+  nickname: string | null;
+  avatar_url: string | null;
+  avatar_emoji: string | null;
+};
+
+// owner の profiles を取得 (author row 用)
+async function fetchAuthorProfile(userId: string): Promise<AuthorProfile | null> {
+  const { data, error } = await withApiTimeout(
+    supabase
+      .from('profiles')
+      .select('id, nickname, avatar_url, avatar_emoji')
+      .eq('id', userId)
+      .maybeSingle(),
+    'photo.fetchAuthorProfile',
+    8000,
+  );
+  if (error) {
+    console.warn('[photo] fetchAuthorProfile failed:', error.message);
+    return null;
+  }
+  return (data ?? null) as AuthorProfile | null;
+}
+
+// 投稿日を「2026年5月19日」フォーマットで返す。
+// Intl.DateTimeFormat は web / native 両方で動く (Hermes 含む)。
+function formatAbsoluteDate(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat('ja-JP', { dateStyle: 'long' }).format(d);
+  } catch {
+    return '';
+  }
+}
+
 export default function PhotoDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const qc = useQueryClient();
   const params = useLocalSearchParams<{ id: string }>();
   const id = typeof params.id === 'string' ? params.id : '';
   const { width: screenWidth } = useWindowDimensions();
   const show = useToastStore((s) => s.show);
+  const userId = useAuthStore((s) => s.user?.id);
 
+  // 写真 (useQuery cache は edit 画面と共有)
   const photoQuery = useQuery({
     queryKey: ['photo', id],
     queryFn: () => fetchPhoto(id),
@@ -66,92 +112,42 @@ export default function PhotoDetailScreen() {
     staleTime: 30_000,
   });
 
-  // album 名を表示するため、photo.album_id があれば fetchAlbum で 1 件取得
-  const albumIdForPhoto = photoQuery.data?.album_id ?? null;
-  const albumQuery = useQuery({
-    queryKey: ['album-name-for-photo', albumIdForPhoto ?? 'none'],
-    queryFn: () => fetchAlbum(albumIdForPhoto as string),
-    enabled: !!albumIdForPhoto,
+  // 著者プロフィール (photo.owner_id から取得)
+  const ownerId = photoQuery.data?.owner_id ?? null;
+  const authorQuery = useQuery({
+    queryKey: ['profile-for-photo', ownerId ?? 'none'],
+    queryFn: () => fetchAuthorProfile(ownerId as string),
+    enabled: !!ownerId,
     staleTime: 60_000,
   });
 
-  const { friends } = useMyFriends();
-  const updatePhoto = useUpdatePhoto();
   const deletePhoto = useDeletePhoto();
 
-  // フォーム state — photo 取得後に初期化
-  const [caption, setCaption] = useState('');
-  const [visibility, setVisibility] = useState<PhotoVisibility>('private');
-  const [sharedWith, setSharedWith] = useState<string[]>([]);
-  const [isHidden, setIsHidden] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  // ピン状態は phase 1 では visual only — DB 列がまだ無い (TODO 後付け)
+  const [pinned, setPinned] = useState(false);
 
-  // photo が取得できたら 1 度だけフォーム初期化
+  // 画像 fade-in animation
+  const imgOpacity = useSharedValue(0);
+  const imgAnimStyle = useAnimatedStyle(() => ({ opacity: imgOpacity.value }));
+
   useEffect(() => {
-    if (!hydrated && photoQuery.data) {
-      const p = photoQuery.data;
-      setCaption(p.caption ?? '');
-      setVisibility(p.visibility);
-      setSharedWith(p.shared_with_user_ids ?? []);
-      setIsHidden(p.is_hidden);
-      setHydrated(true);
+    if (photoQuery.data) {
+      imgOpacity.value = withTiming(1, {
+        duration: 280,
+        easing: Easing.bezier(0.22, 1, 0.36, 1),
+      });
     }
-  }, [hydrated, photoQuery.data]);
+  }, [photoQuery.data, imgOpacity]);
 
-  // 変更検知
-  const hasChanges = useMemo(() => {
-    if (!hydrated || !photoQuery.data) return false;
-    const p = photoQuery.data;
-    if ((p.caption ?? '') !== caption) return true;
-    if (p.visibility !== visibility) return true;
-    if (p.is_hidden !== isHidden) return true;
-    const origSet = new Set<string>(p.shared_with_user_ids ?? []);
-    const newSet = new Set<string>(sharedWith);
-    if (origSet.size !== newSet.size) return true;
-    for (const uid of origSet) {
-      if (!newSet.has(uid)) return true;
-    }
-    return false;
-  }, [hydrated, photoQuery.data, caption, visibility, isHidden, sharedWith]);
+  const isOwner = !!photoQuery.data && !!userId && photoQuery.data.owner_id === userId;
 
-  const toggleSharedUser = (uid: string) => {
-    setSharedWith((prev) =>
-      prev.includes(uid) ? prev.filter((x) => x !== uid) : [...prev, uid],
-    );
-  };
-
-  const handleSave = () => {
-    if (!id || updatePhoto.isPending) return;
-    if (!hasChanges) {
-      show('変更がありません', 'info');
-      return;
-    }
-    // shared だが共有相手 0 人なら警告 (album shared を継承する場合もあるので warn のみ)
-    if (visibility === 'shared' && sharedWith.length === 0 && !albumIdForPhoto) {
-      show('共有相手が 0 人です。アルバムから共有されない限り、誰も見られません', 'warn');
-    }
-
-    const patch: Parameters<typeof updatePhoto.mutate>[0]['patch'] = {
-      caption,
-      visibility,
-      shared_with_user_ids: sharedWith,
-      is_hidden: isHidden,
-    };
-    updatePhoto.mutate(
-      { id, patch },
-      {
-        onSuccess: () => {
-          show('写真を更新しました', 'success');
-          void qc.invalidateQueries({ queryKey: ['photo', id] });
-          router.back();
-        },
-        onError: (e) => {
-          const msg = e instanceof Error ? e.message : '更新に失敗しました';
-          show(msg, 'error');
-        },
-      },
-    );
+  const handleEdit = () => {
+    if (!id) return;
+    setMenuOpen(false);
+    router.push(`/mypage/photo/${id}/edit` as never);
   };
 
   const handleDelete = () => {
@@ -168,6 +164,13 @@ export default function PhotoDetailScreen() {
         setConfirmDeleteOpen(false);
       },
     });
+  };
+
+  // ----- 機能準備中 toast (Phase 1 visual-only な action 用) -----
+  const notReady = () => show('コメント機能は準備中です', 'info');
+  const togglePin = () => {
+    setPinned((v) => !v);
+    show('ピン機能は準備中です', 'info');
   };
 
   // Loading
@@ -224,272 +227,326 @@ export default function PhotoDetailScreen() {
   const photo = photoQuery.data;
   const safeUrl = photo.image_url ? sanitizeUrl(photo.image_url) : null;
 
-  // image の表示サイズを aspect ratio で計算 (width/height があれば aspect 維持)
+  // 画像 aspect — width/height があれば維持、無ければ正方形扱い
   const naturalAspect =
     photo.width && photo.height && photo.width > 0 && photo.height > 0
       ? photo.width / photo.height
       : 1;
-  // 縦長過ぎる写真でも画面に収まるように max height を入れる
-  const maxImageHeight = Math.min(560, Math.round(screenWidth * 1.4));
+  // 縦長過ぎる写真でも収まるよう max を入れる (spec: ~600px capping)
+  const maxImageHeight = Math.min(600, Math.round(screenWidth * 1.4));
   const imageWidth = screenWidth;
   let imageHeight = Math.round(imageWidth / naturalAspect);
   if (imageHeight > maxImageHeight) imageHeight = maxImageHeight;
 
-  const isSubmitting = updatePhoto.isPending || deletePhoto.isPending;
+  const author = authorQuery.data;
+  const authorName = author?.nickname ?? '名無しさん';
+  const absoluteDate = formatAbsoluteDate(photo.created_at);
+
+  const BookmarkIcon = Icon.save; // Lucide Bookmark
+  const SendIcon = Icon.send;
+  const ChatIcon = Icon.comment; // Lucide MessageCircle
+  const MoreIcon = Icon.more;
+
+  const PinIcon = BookmarkIcon;
 
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: C.bg }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <TopBar title="写真" left={<BackButton />} />
+      {/* シンプルな TopBar — 左に Back, 右に owner だけ 3-dot menu */}
+      <TopBar
+        title="写真"
+        left={<BackButton />}
+        right={
+          isOwner ? (
+            <PressableScale
+              onPress={() => setMenuOpen((v) => !v)}
+              haptic="tap"
+              hitSlop={10}
+              accessibilityLabel="メニューを開く"
+              style={{ padding: SP['2'] }}
+            >
+              <MoreIcon size={22} color={C.text} strokeWidth={2.2} />
+            </PressableScale>
+          ) : undefined
+        }
+      />
+
+      {/* 3-dot menu (popover) — owner のみ */}
+      {menuOpen && isOwner && (
+        <View
+          style={{
+            position: 'absolute',
+            top: insets.top + 52,
+            right: SP['3'],
+            zIndex: 100,
+            borderRadius: R.lg,
+            borderWidth: 1,
+            borderColor: 'rgba(255,255,255,0.14)',
+            overflow: 'hidden',
+            minWidth: 180,
+            backgroundColor: 'rgba(20,20,22,0.95)',
+            ...SHADOW.md,
+          }}
+        >
+          <PressableScale
+            onPress={handleEdit}
+            haptic="tap"
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: SP['2'],
+              paddingHorizontal: SP['4'],
+              paddingVertical: SP['3'],
+            }}
+          >
+            <Icon.edit size={16} color={C.text} strokeWidth={2.2} />
+            <Text style={[T.smallM, { color: C.text }]}>編集</Text>
+          </PressableScale>
+          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+          <PressableScale
+            onPress={() => {
+              setMenuOpen(false);
+              setConfirmDeleteOpen(true);
+            }}
+            haptic="warn"
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: SP['2'],
+              paddingHorizontal: SP['4'],
+              paddingVertical: SP['3'],
+            }}
+          >
+            <Icon.trash size={16} color={C.red} strokeWidth={2.2} />
+            <Text style={[T.smallM, { color: C.red }]}>削除</Text>
+          </PressableScale>
+        </View>
+      )}
 
       <ScrollView
         contentContainerStyle={{
-          paddingBottom: insets.bottom + SP['24'],
+          paddingBottom: insets.bottom + SP['20'],
         }}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        {/* 画像本体 */}
+        {/* ===== 著者 row (画像の上) ===== */}
         <View
           style={{
-            width: imageWidth,
-            height: imageHeight,
-            backgroundColor: '#000',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: SP['3'],
+            paddingHorizontal: SP['4'],
+            paddingVertical: SP['3'],
           }}
         >
-          {safeUrl ? (
-            <Image
-              source={{ uri: safeUrl }}
-              style={{ width: '100%', height: '100%' }}
-              contentFit="contain"
-              cachePolicy="memory-disk"
-              transition={180}
+          <Avatar
+            size={30}
+            uri={author?.avatar_url ?? undefined}
+            emoji={author?.avatar_emoji ?? undefined}
+            name={authorName}
+          />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[T.smallB, { color: C.text }]} numberOfLines={1}>
+              {authorName}
+            </Text>
+            {!!absoluteDate && (
+              <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
+                {absoluteDate}
+              </Text>
+            )}
+          </View>
+          {/* ピン (お気に入り / save 的) — phase 1: visual only */}
+          <PressableScale
+            onPress={togglePin}
+            haptic="tap"
+            hitSlop={10}
+            accessibilityLabel={pinned ? 'ピンを外す' : 'ピン留めする'}
+            accessibilityState={{ selected: pinned }}
+            style={{ padding: SP['2'] }}
+          >
+            <PinIcon
+              size={22}
+              color={pinned ? C.accent : C.text2}
+              strokeWidth={pinned ? 2.6 : 2.0}
+              fill={pinned ? C.accent : 'transparent'}
             />
-          ) : (
-            <View
+          </PressableScale>
+        </View>
+
+        {/* ===== 写真本体 + 右下 action icon stack ===== */}
+        <View style={{ width: imageWidth, position: 'relative' }}>
+          <View
+            style={{
+              width: imageWidth,
+              height: imageHeight,
+              backgroundColor: '#000',
+              overflow: 'hidden',
+            }}
+          >
+            <Animated.View style={[{ width: '100%', height: '100%' }, imgAnimStyle]}>
+              {safeUrl ? (
+                <Image
+                  source={{ uri: safeUrl }}
+                  style={{ width: '100%', height: '100%' }}
+                  contentFit="contain"
+                  cachePolicy="memory-disk"
+                  transition={180}
+                  accessibilityLabel={photo.caption ?? '写真'}
+                />
+              ) : (
+                <View
+                  style={{
+                    flex: 1,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Icon.image size={48} color={C.text3} strokeWidth={1.6} />
+                </View>
+              )}
+            </Animated.View>
+          </View>
+
+          {/* 右下 floating action stack — send + comment */}
+          <View
+            style={{
+              position: 'absolute',
+              right: SP['3'],
+              bottom: SP['3'],
+              flexDirection: 'column',
+              gap: SP['2'],
+              alignItems: 'center',
+            }}
+            pointerEvents="box-none"
+          >
+            <PressableScale
+              onPress={notReady}
+              haptic="tap"
+              hitSlop={8}
+              accessibilityLabel="送る"
               style={{
-                flex: 1,
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: 'rgba(0,0,0,0.55)',
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.18)',
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
             >
-              <Icon.image size={48} color={C.text3} strokeWidth={1.6} />
-            </View>
-          )}
-        </View>
-
-        {/* フォームセクション */}
-        <View style={{ padding: SP['4'], gap: SP['5'] }}>
-          {/* キャプション */}
-          <View style={{ gap: SP['2'] }}>
-            <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-              <Text style={[T.smallB, { color: C.text2 }]}>キャプション</Text>
-              <View style={{ flex: 1 }} />
-              <Text
-                style={[
-                  T.caption,
-                  { color: caption.length > 450 ? C.amber : C.text3 },
-                ]}
-              >
-                {caption.length} / 500
-              </Text>
-            </View>
-            <Input
-              placeholder="この 1 枚に一言"
-              value={caption}
-              onChangeText={setCaption}
-              multiline
-              numberOfLines={3}
-              maxLength={500}
-              textAlignVertical="top"
-            />
-          </View>
-
-          {/* アルバム名 (Phase 1: 表示のみ) */}
-          <View style={{ gap: SP['2'] }}>
-            <Text style={[T.smallB, { color: C.text2 }]}>アルバム</Text>
-            <View
+              <SendIcon size={20} color="#fff" strokeWidth={2.2} />
+            </PressableScale>
+            <PressableScale
+              onPress={notReady}
+              haptic="tap"
+              hitSlop={8}
+              accessibilityLabel="コメント"
               style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: SP['2'],
-                paddingHorizontal: SP['3'],
-                paddingVertical: SP['3'],
-                backgroundColor: C.bg2,
-                borderRadius: R.md,
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: 'rgba(0,0,0,0.55)',
                 borderWidth: 1,
-                borderColor: C.border,
+                borderColor: 'rgba(255,255,255,0.18)',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
-              <Icon.image size={18} color={C.text3} strokeWidth={2} />
-              <Text style={[T.body, { color: C.text2, flex: 1 }]} numberOfLines={1}>
-                {albumIdForPhoto
-                  ? albumQuery.data?.title ?? 'アルバム情報を読み込み中…'
-                  : '単独写真 (アルバムなし)'}
-              </Text>
-            </View>
+              <ChatIcon size={20} color="#fff" strokeWidth={2.2} />
+            </PressableScale>
           </View>
+        </View>
 
-          {/* visibility */}
-          <View style={{ gap: SP['2'] }}>
-            <Text style={[T.smallB, { color: C.text2 }]}>公開範囲</Text>
-            <SegmentedControl<PhotoVisibility>
-              options={[
-                { value: 'private', label: '🔒 自分だけ' },
-                { value: 'shared', label: '👥 共有' },
-              ]}
-              value={visibility}
-              onChange={setVisibility}
-            />
+        {/* ===== caption (本文) — 空なら省略 ===== */}
+        {!!photo.caption && (
+          <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'], paddingBottom: SP['2'] }}>
+            <Text style={[T.body, { color: C.text, lineHeight: 22 }]}>
+              <Text style={[T.bodyB, { color: C.text }]}>{authorName} </Text>
+              {photo.caption}
+            </Text>
           </View>
+        )}
 
-          {/* 共有相手選択 (shared のみ) */}
-          {visibility === 'shared' && (
-            <View style={{ gap: SP['2'] }}>
-              <Text style={[T.smallB, { color: C.text2 }]}>共有する友達</Text>
-              {friends.length === 0 ? (
-                <View
-                  style={{
-                    padding: SP['4'],
-                    backgroundColor: C.bg2,
-                    borderRadius: R.md,
-                    borderWidth: 1,
-                    borderColor: C.border,
-                    alignItems: 'center',
-                    gap: SP['1'],
-                  }}
-                >
-                  <Text style={[T.small, { color: C.text3, textAlign: 'center' }]}>
-                    まだ友達がいません
-                  </Text>
-                  <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
-                    マイページの「友達」から招待リンクを作って共有しよう
-                  </Text>
-                </View>
-              ) : (
-                <View
-                  style={{
-                    backgroundColor: C.bg2,
-                    borderRadius: R.md,
-                    borderWidth: 1,
-                    borderColor: C.border,
-                    overflow: 'hidden',
-                  }}
-                >
-                  {friends.map((f, idx) => {
-                    const uid = f.friend_profile.id;
-                    const selected = sharedWith.includes(uid);
-                    const name = f.friend_profile.nickname ?? '名無しさん';
-                    return (
-                      <PressableScale
-                        key={f.id}
-                        onPress={() => toggleSharedUser(uid)}
-                        haptic="tap"
-                        scaleValue={0.99}
-                        accessibilityLabel={`${name} を共有相手に${selected ? '解除' : '追加'}`}
-                        style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          gap: SP['3'],
-                          paddingHorizontal: SP['3'],
-                          paddingVertical: SP['3'],
-                          backgroundColor: selected ? C.accent + '15' : 'transparent',
-                          borderTopWidth: idx === 0 ? 0 : 1,
-                          borderTopColor: C.divider,
-                        }}
-                      >
-                        <Avatar
-                          size={32}
-                          uri={f.friend_profile.avatar_url ?? undefined}
-                          name={name}
-                          emoji={f.friend_profile.avatar_emoji ?? undefined}
-                        />
-                        <Text
-                          style={[T.bodyMd, { color: C.text, flex: 1 }]}
-                          numberOfLines={1}
-                        >
-                          {name}
-                        </Text>
-                        <View
-                          style={{
-                            width: 22,
-                            height: 22,
-                            borderRadius: 11,
-                            borderWidth: selected ? 0 : 1.5,
-                            borderColor: C.border2,
-                            backgroundColor: selected ? C.accent : 'transparent',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                          }}
-                        >
-                          {selected && (
-                            <Icon.ok size={14} color="#fff" strokeWidth={2.8} />
-                          )}
-                        </View>
-                      </PressableScale>
-                    );
-                  })}
-                </View>
-              )}
-              {friends.length > 0 && (
-                <Text style={[T.caption, { color: C.text3 }]}>
-                  選択中: {sharedWith.length} / {friends.length} 人
-                </Text>
-              )}
-            </View>
-          )}
-
-          {/* 非表示トグル */}
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: SP['3'],
-              padding: SP['4'],
-              borderRadius: R.lg,
-              backgroundColor: C.bg3,
-              borderWidth: 1,
-              borderColor: C.border,
-            }}
-          >
-            <Text style={{ fontSize: 18 }}>{isHidden ? '🚫' : '👁️'}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={[T.bodyB, { color: C.text }]}>非表示にする</Text>
-              <Text style={[T.small, { color: C.text3 }]}>
-                {isHidden
-                  ? 'この写真は一覧から隠れます (自分だけ確認できます)'
-                  : '通常通り一覧に表示されます'}
-              </Text>
-            </View>
-            <Toggle value={isHidden} onChange={setIsHidden} />
-          </View>
-
-          {/* 保存ボタン */}
-          <Button
-            label={updatePhoto.isPending ? '保存中…' : '保存'}
-            onPress={handleSave}
-            variant="primary"
-            size="lg"
-            fullWidth
-            loading={updatePhoto.isPending}
-            disabled={isSubmitting || !hasChanges}
-            haptic="confirm"
-          />
-
-          {/* 削除ボタン */}
-          <Button
-            label="この写真を削除"
-            onPress={() => setConfirmDeleteOpen(true)}
-            variant="danger"
-            size="md"
-            fullWidth
-            disabled={isSubmitting}
-            haptic="warn"
-            icon={Icon.trash}
-          />
+        {/* コメントセクションのプレースホルダ — phase 1 では空 */}
+        <View
+          style={{
+            paddingHorizontal: SP['4'],
+            paddingTop: SP['2'],
+            paddingBottom: SP['4'],
+          }}
+        >
+          <Text style={[T.caption, { color: C.text3 }]}>
+            コメント機能は準備中です
+          </Text>
         </View>
       </ScrollView>
+
+      {/* ===== コメント入力 bar (画面下固定) ===== */}
+      <View
+        style={{
+          borderTopWidth: 1,
+          borderTopColor: C.border,
+          backgroundColor: C.bg2,
+          paddingHorizontal: SP['3'],
+          paddingTop: SP['2'],
+          paddingBottom: insets.bottom + SP['2'],
+          flexDirection: 'row',
+          alignItems: 'flex-end',
+          gap: SP['2'],
+        }}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: C.bg3,
+            borderRadius: R.lg,
+            borderWidth: 1,
+            borderColor: commentText.trim() ? C.accent : C.border,
+            paddingHorizontal: SP['3'],
+            paddingVertical: 6,
+          }}
+        >
+          <TextInput
+            value={commentText}
+            onChangeText={setCommentText}
+            placeholder="コメントを追加…"
+            placeholderTextColor={C.text3}
+            multiline
+            maxLength={500}
+            keyboardAppearance="dark"
+            selectionColor={C.accent}
+            style={[
+              T.body,
+              { color: C.text, maxHeight: 100, minHeight: 24, paddingVertical: 0 },
+            ]}
+          />
+        </View>
+        <PressableScale
+          onPress={notReady}
+          haptic="tap"
+          accessibilityLabel="コメントを送信"
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            backgroundColor: commentText.trim() ? C.accent : C.bg4,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderWidth: 2,
+            borderColor: commentText.trim() ? C.accent : C.border,
+          }}
+        >
+          <SendIcon
+            size={20}
+            color={commentText.trim() ? '#fff' : C.text3}
+            strokeWidth={2.4}
+          />
+        </PressableScale>
+      </View>
 
       {/* 削除確認 */}
       <ConfirmDialog

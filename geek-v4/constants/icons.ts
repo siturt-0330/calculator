@@ -22,6 +22,7 @@ import {
   Send, Hash, AtSign, Phone, Clock,
   Users2, Globe2,
   Gamepad2,
+  Copy,
 } from 'lucide-react-native';
 
 export const Icon = {
@@ -36,7 +37,7 @@ export const Icon = {
   sparkles: Sparkles, award: Award, flag: Flag,
   settings: Settings, logout: LogOut, help: HelpCircle, info: Info,
   arrowL: ArrowLeft, arrowUL: ArrowUpLeft,
-  eye: Eye, eyeOff: EyeOff, edit: Edit3, trash: Trash2,
+  eye: Eye, eyeOff: EyeOff, edit: Edit3, trash: Trash2, copy: Copy,
   send: Send, hash: Hash, at: AtSign, phone: Phone, clock: Clock,
   community: Users2, globe: Globe2,
   // TabIcon.tsx の TabKey 'game' から参照されている (dead route だが型に存在)

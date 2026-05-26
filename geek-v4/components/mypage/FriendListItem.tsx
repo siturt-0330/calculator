@@ -9,12 +9,22 @@
 //
 // avatar の優先順位: avatar_url > avatar_emoji > nickname の頭文字 (Avatar component に委譲)。
 // nickname が null の場合は「匿名さん」を表示 (DB の安全な fallback)。
+//
+// UI Polish (Phase 2):
+// - 全体を GlassCard で巻く (rgba 半透明 + 1px white border)
+// - Avatar の周りに gradient ring (LinearGradient で 1.5px 円リング)
+// - PolishedButton で承認 / 拒否 / キャンセルを統一
+// - SHADOW.xs を加えて柔らかい立体感
 // ============================================================
 
 import { View, Text, ActivityIndicator } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { PressableScale } from '../ui/PressableScale';
 import { Avatar } from '../ui/Avatar';
-import { C, R, SP } from '../../design/tokens';
+import { GlassCard } from '../ui/GlassCard';
+import { PolishedButton } from '../ui/PolishedButton';
+import { Icon } from '../../constants/icons';
+import { C, GRAD, R, SHADOW, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import type { FriendshipWithProfile } from '../../lib/api/friends';
 
@@ -35,6 +45,67 @@ type Props = {
 };
 
 const NICKNAME_FALLBACK = '匿名さん';
+const AVATAR_SIZE = 48;
+// gradient ring は avatar の周りに 1.5px の輪 — 透けた背景に映える
+const RING_THICKNESS = 1.5;
+
+/**
+ * Avatar の周りに gradient ring を描く wrapper.
+ * LinearGradient で正円を描き、中央に通常の Avatar を重ねる (overflow:'hidden' で円形に clip)。
+ */
+function GradientRingAvatar({
+  uri,
+  emoji,
+  name,
+}: {
+  uri?: string | null;
+  emoji?: string | null;
+  name?: string;
+}) {
+  const outer = AVATAR_SIZE + RING_THICKNESS * 2;
+  return (
+    <View
+      style={{
+        width: outer,
+        height: outer,
+        borderRadius: outer / 2,
+        overflow: 'hidden',
+      }}
+    >
+      <LinearGradient
+        colors={GRAD.primary}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={{
+          width: outer,
+          height: outer,
+          borderRadius: outer / 2,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <View
+          style={{
+            width: AVATAR_SIZE,
+            height: AVATAR_SIZE,
+            borderRadius: AVATAR_SIZE / 2,
+            backgroundColor: C.bg2,
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+          }}
+        >
+          <Avatar
+            size={AVATAR_SIZE}
+            uri={uri ?? undefined}
+            emoji={emoji ?? undefined}
+            name={name}
+          />
+        </View>
+      </LinearGradient>
+    </View>
+  );
+}
 
 export function FriendListItem({
   friendship,
@@ -49,117 +120,115 @@ export function FriendListItem({
   const nickname = profile.nickname?.trim() || NICKNAME_FALLBACK;
   const bio = profile.bio?.trim();
 
-  // mode='friend' なら全体を tappable、それ以外は単に View
-  const cardContent = (
+  // mode 別の背景 highlight:
+  // - incoming は subtle accent tint (申請者が目を引くように)
+  // - outgoing / friend は transparent (GlassCard だけで十分な階層感)
+  const highlightBg =
+    mode === 'incoming' ? 'rgba(124,106,247,0.05)' : 'transparent';
+
+  const cardInner = (
     <View
       style={{
         flexDirection: 'row',
         alignItems: 'center',
         gap: SP['3'],
-        padding: SP['3'],
-        backgroundColor: C.bg2,
-        borderRadius: R.lg,
-        borderWidth: 1,
-        borderColor: C.border,
       }}
     >
-      <Avatar
-        size={44}
-        uri={profile.avatar_url ?? undefined}
-        emoji={profile.avatar_emoji ?? undefined}
+      <GradientRingAvatar
+        uri={profile.avatar_url}
+        emoji={profile.avatar_emoji}
         name={nickname}
       />
       <View style={{ flex: 1, gap: 2 }}>
-        <Text style={[T.bodyB, { color: C.text }]} numberOfLines={1}>
+        <Text
+          style={[T.bodyMd, { color: C.text, fontWeight: '700' }]}
+          numberOfLines={1}
+        >
           {nickname}
         </Text>
         {bio ? (
           <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
             {bio}
           </Text>
-        ) : (
-          mode === 'outgoing' && (
-            <Text style={[T.caption, { color: C.amber }]}>申請中…</Text>
-          )
-        )}
+        ) : mode === 'outgoing' ? (
+          // 「申請中…」を chip 風に (subtle background)
+          <View
+            style={{
+              alignSelf: 'flex-start',
+              paddingHorizontal: SP['2'],
+              paddingVertical: 2,
+              borderRadius: R.full,
+              backgroundColor: 'rgba(245,166,35,0.12)',
+              marginTop: 2,
+            }}
+          >
+            <Text style={[T.caption, { color: C.amber, fontWeight: '700' }]}>
+              申請中…
+            </Text>
+          </View>
+        ) : null}
       </View>
       {/* 右側のアクション群: mode で切替 */}
       {mode === 'incoming' && (
         <View style={{ flexDirection: 'row', gap: SP['2'] }}>
-          <ActionButton
-            label={busy ? '…' : '承認'}
-            onPress={onAccept}
-            tone="accent"
-            disabled={busy}
+          <PolishedButton
+            variant="gradient"
+            gradient="success"
+            size="sm"
+            label="承認"
+            icon={<Icon.ok size={14} color="#fff" strokeWidth={2.4} />}
+            onPress={() => onAccept?.()}
+            disabled={busy || !onAccept}
+            loading={busy}
+            haptic="confirm"
           />
-          <ActionButton
+          <PolishedButton
+            variant="outline"
+            size="sm"
             label="拒否"
-            onPress={onDecline}
-            tone="ghost"
-            disabled={busy}
+            icon={<Icon.close size={14} color={C.accent} strokeWidth={2.4} />}
+            onPress={() => onDecline?.()}
+            disabled={busy || !onDecline}
+            haptic="tap"
           />
         </View>
       )}
       {mode === 'outgoing' && (
-        <ActionButton
+        <PolishedButton
+          variant="outline"
+          size="sm"
           label={busy ? '…' : 'キャンセル'}
-          onPress={onCancel}
-          tone="ghost"
-          disabled={busy}
+          onPress={() => onCancel?.()}
+          disabled={busy || !onCancel}
+          loading={busy}
+          haptic="tap"
         />
       )}
       {mode === 'friend' && busy && <ActivityIndicator color={C.accent} />}
     </View>
   );
 
+  // GlassCard + SHADOW.xs で柔らかい立体感. 内側に highlight bg を重ねる.
+  const card = (
+    <GlassCard style={{ padding: SP['3'], ...SHADOW.xs }}>
+      <View
+        style={{
+          backgroundColor: highlightBg,
+          borderRadius: R.md,
+          padding: SP['1'],
+        }}
+      >
+        {cardInner}
+      </View>
+    </GlassCard>
+  );
+
   if (mode === 'friend' && onPress) {
     return (
       <PressableScale onPress={onPress} haptic="tap" disabled={busy}>
-        {cardContent}
+        {card}
       </PressableScale>
     );
   }
-  return cardContent;
-}
-
-// ============================================================
-// 小さい button (FriendListItem の右側専用)
-// ============================================================
-function ActionButton({
-  label,
-  onPress,
-  tone,
-  disabled,
-}: {
-  label: string;
-  onPress?: () => void;
-  tone: 'accent' | 'ghost';
-  disabled?: boolean;
-}) {
-  const isAccent = tone === 'accent';
-  return (
-    <PressableScale
-      onPress={onPress}
-      haptic={isAccent ? 'confirm' : 'tap'}
-      disabled={disabled || !onPress}
-      style={{
-        paddingHorizontal: SP['3'],
-        paddingVertical: SP['2'],
-        borderRadius: R.full,
-        backgroundColor: isAccent ? C.accent : C.bg3,
-        borderWidth: 1,
-        borderColor: isAccent ? C.accent : C.border,
-        opacity: disabled ? 0.5 : 1,
-      }}
-    >
-      <Text
-        style={[
-          T.smallM,
-          { color: isAccent ? '#fff' : C.text2, fontWeight: '700' },
-        ]}
-      >
-        {label}
-      </Text>
-    </PressableScale>
-  );
+  return card;
 }

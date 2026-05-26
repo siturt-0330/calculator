@@ -1,5 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
-import { View, Text, ScrollView, ActivityIndicator, TextInput } from 'react-native';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { View, Text, ScrollView, ActivityIndicator, TextInput, Platform } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming, interpolateColor } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -12,8 +14,9 @@ import { PressableScale } from '../components/ui/PressableScale';
 import { Avatar } from '../components/ui/Avatar';
 import { HighlightedText } from '../components/ui/HighlightedText';
 import { Icon } from '../constants/icons';
-import { C, R, SP } from '../design/tokens';
+import { C, GRAD, R, SHADOW, SP } from '../design/tokens';
 import { T } from '../design/typography';
+import { TIMING_FAST } from '../design/motion';
 import { formatRelative } from '../lib/utils/date';
 import { useTagGraphStore } from '../stores/tagGraphStore';
 import { useSearchHistoryStore } from '../stores/searchHistoryStore';
@@ -26,11 +29,11 @@ import { normalize, deepNormalize } from '../lib/search/tokenize';
 import { scorePost, scoreTagItem, type PostDoc, type TagDoc } from '../lib/search/scoring';
 import { findClosest, findClosestK } from '../lib/search/typoCorrect';
 import { generateVariants, previewVariants } from '../lib/search/variants';
+import { getAutocompleteSuggestions } from '../lib/search/autocomplete';
 import { useLanguageStore } from '../stores/languageStore';
 import { useSavedSearches, useCreateSavedSearch, useDeleteSavedSearch } from '../hooks/useSavedSearches';
 import { useToastStore } from '../stores/toastStore';
 import { logEvent } from '../lib/personalize';
-import { searchTags as searchTagsV2 } from '../lib/search/tagSearchV2';
 import { useTagSearchV3 } from '../hooks/useTagSearchV3';
 import { useSearchClickStore } from '../stores/searchClickStore';
 import { generateRelatedQueries } from '../lib/search/relatedSearches';
@@ -43,6 +46,9 @@ import { DiscoverPhotoGrid } from '../components/search/DiscoverPhotoGrid';
 type BBSResult = { id: string; title: string; category: string; replies_count: number; created_at: string };
 type Category = 'all' | 'posts' | 'tags' | 'bbs';
 type SortMode = 'relevance' | 'newest' | 'popular';
+
+// Google 風の "all" ビュー: 各セクション max 3 件 + 「もっと見る」で展開
+const PREVIEW_LIMIT = 3;
 
 // ============= サーバー検索 =============
 async function fetchTags(queries: string[]): Promise<TagDoc[]> {
@@ -137,6 +143,13 @@ export default function SearchScreen() {
   const [debounced, setDebounced] = useState('');
   const [category, setCategory] = useState<Category>('all');
   const [sortMode, setSortMode] = useState<SortMode>('relevance');
+  // Google 風: 'all' タブで各 section の「もっと見る」展開状態を持つ
+  const [expandedPosts, setExpandedPosts] = useState(false);
+  const [expandedTags, setExpandedTags] = useState(false);
+  const [expandedBBS, setExpandedBBS] = useState(false);
+  // 検索 input の focus 状態 (glow shadow / animated border 用)
+  const [inputFocused, setInputFocused] = useState(false);
+  const inputRef = useRef<TextInput | null>(null);
   // Infinite scroll prep — cursor / nextOffset for future paged fetches.
   // Reset on every new debounced query.
   const [, setNextOffset] = useState<number>(0);
@@ -490,9 +503,26 @@ export default function SearchScreen() {
   };
 
   // Reset pagination cursor whenever the active query changes.
+  // 同時に「もっと見る」の展開状態も resetする (新クエリは初期 preview から見せる)
   useEffect(() => {
     setNextOffset(0);
+    setExpandedPosts(false);
+    setExpandedTags(false);
+    setExpandedBBS(false);
   }, [debounced]);
+
+  // 検索入力 focus を Reanimated で滑らかに遷移 (border + halo)
+  const focusProgress = useSharedValue(0);
+  useEffect(() => {
+    focusProgress.value = withTiming(inputFocused ? 1 : 0, TIMING_FAST);
+  }, [inputFocused, focusProgress]);
+  const aSearchBorder = useAnimatedStyle(() => ({
+    borderColor: interpolateColor(
+      focusProgress.value,
+      [0, 1],
+      ['rgba(255,255,255,0.08)', C.accent],
+    ),
+  }));
 
   // Realtime: subscribe to new posts whose tag_names intersect the current query.
   // Cap = 1 channel per screen — we detach the previous channel before attaching the next.
@@ -552,6 +582,25 @@ export default function SearchScreen() {
     staleTime: 5 * 60_000,
   });
 
+  // Fallback autocomplete: V3 tag engine が候補を出せなかった時に
+  // history + popular tags でカバーする (lib/search/autocomplete 経由)
+  const fallbackSuggestions = useMemo(() => {
+    if (q.trim().length < 1) return [];
+    const popularTags = (trending.data ?? []).map((t) => ({
+      name: t.name,
+      count: t.member_count,
+    }));
+    return getAutocompleteSuggestions(
+      q.trim().split(/\s+/).pop() ?? '',
+      {
+        history,
+        popularTags,
+        existingTagSuggestions: autocomplete,
+      },
+      5,
+    );
+  }, [q, history, trending.data, autocomplete]);
+
   const loading = tagsQ.isLoading || postsQ.isLoading || bbsQ.isLoading;
   const showResults = debounced.length > 0;
   const totalResults = rankedPosts.length + rankedTags.length + (bbsQ.data?.length ?? 0);
@@ -565,20 +614,43 @@ export default function SearchScreen() {
 
       {/* 検索入力 + クエリチップ */}
       <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'], gap: SP['2'] }}>
-        <View style={{
-          flexDirection: 'row', alignItems: 'center', gap: SP['2'],
-          paddingHorizontal: SP['3'], paddingVertical: SP['2'],
-          backgroundColor: C.bg2,
-          borderRadius: R.full,
-          borderWidth: 1, borderColor: C.border,
-        }}>
-          <Icon.search size={18} color={C.text3} strokeWidth={2.2} />
+        {/* prominent glass search bar — focus 時に accent border + halo */}
+        <Animated.View
+          style={[
+            {
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: SP['2'],
+              paddingHorizontal: SP['4'],
+              paddingVertical: 10,
+              // 半透明 glass 風 surface — Native は subtle blur 風、Web は rgba で十分
+              backgroundColor: C.bg2,
+              borderRadius: R.full,
+              borderWidth: 1.5,
+            },
+            aSearchBorder,
+            // focus 中: 紫 glow shadow を盛る (Native は SHADOW.glow, Web は CSS halo)
+            inputFocused ? SHADOW.glow : SHADOW.sm,
+            Platform.OS === 'web' && inputFocused
+              ? // RN-web は box-shadow を直接通す
+                ({ boxShadow: '0 0 0 4px rgba(124,106,247,0.22)' } as object)
+              : null,
+          ]}
+        >
+          <Icon.search
+            size={20}
+            color={inputFocused ? C.accent : C.text3}
+            strokeWidth={2.2}
+          />
           <View style={{ flex: 1, position: 'relative', justifyContent: 'center' }}>
             <TextInput
+              ref={inputRef}
               value={q}
               onChangeText={setQ}
-              placeholder="検索"
+              placeholder="タグ・投稿・掲示板を検索"
               placeholderTextColor={C.text3}
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
               onSubmitEditing={commit}
               returnKeyType="search"
               blurOnSubmit={false}
@@ -587,6 +659,7 @@ export default function SearchScreen() {
               autoCapitalize="none"
               keyboardAppearance="dark"
               selectionColor={C.accent}
+              cursorColor={C.accent}
               accessibilityLabel="検索キーワード入力"
               style={[T.body, { color: C.text, paddingVertical: 0 }]}
             />
@@ -607,16 +680,21 @@ export default function SearchScreen() {
           </View>
           {q.length > 0 && (
             <PressableScale
-              onPress={() => { setQ(''); setDebounced(''); }}
+              onPress={() => { setQ(''); setDebounced(''); inputRef.current?.focus(); }}
               haptic="tap"
               hitSlop={10}
               accessibilityLabel="入力をクリア"
               accessibilityRole="button"
+              style={{
+                width: 24, height: 24, borderRadius: 12,
+                alignItems: 'center', justifyContent: 'center',
+                backgroundColor: C.bg4,
+              }}
             >
-              <Icon.close size={16} color={C.text3} strokeWidth={2.2} />
+              <Icon.close size={14} color={C.text2} strokeWidth={2.4} />
             </PressableScale>
           )}
-        </View>
+        </Animated.View>
 
         {/* 保存ボタン (検索中) — アイコン付きで意図を明確化 */}
         {debounced.trim().length > 0 && (
@@ -695,37 +773,41 @@ export default function SearchScreen() {
           </View>
         )}
 
-        {/* オートコンプリート候補 — YouTube 風: 🕐 履歴 / 🔍 新規 + ↖ 入力欄に取り込む */}
-        {autocomplete.length > 0 && q.length > 0 && (
-          <View style={{
-            backgroundColor: C.bg2,
-            borderRadius: R.md,
-            borderWidth: 1,
-            borderColor: C.border,
-            overflow: 'hidden',
-          }}>
-            {autocomplete.map((name) => {
+        {/* オートコンプリート候補 — Google 風: 🕐 履歴 / 🔍 タグ / # 人気 + ↖ 入力欄に取り込む */}
+        {(autocomplete.length > 0 || fallbackSuggestions.length > 0) && q.length > 0 && (
+          <View style={[
+            {
+              backgroundColor: C.bg2,
+              borderRadius: R.lg,
+              borderWidth: 1,
+              borderColor: C.border,
+              overflow: 'hidden',
+            },
+            SHADOW.md,
+          ]}>
+            {autocomplete.map((name, idx) => {
               // 過去に検索 / クリックされていれば「履歴」アイコン (🕐) で示す
               const inHistory = history.includes(name);
               const clickedBefore = (clickStats[q.trim()] ?? {})[name] !== undefined && clickStats[q.trim()]![name]! > 0;
               const seen = inHistory || clickedBefore;
+              const isLast = idx === autocomplete.length - 1 && fallbackSuggestions.length === 0;
               return (
                 <View
-                  key={name}
+                  key={`v3:${name}`}
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
                     paddingHorizontal: SP['3'],
-                    paddingVertical: SP['2'],
-                    borderBottomWidth: 1,
+                    paddingVertical: SP['2'] + 2,
+                    borderBottomWidth: isLast ? 0 : 1,
                     borderBottomColor: C.border + '40',
                   }}
                 >
-                  {/* 左: 履歴 or 検索アイコン */}
+                  {/* 左: 履歴 or タグアイコン */}
                   {seen ? (
                     <Icon.clock size={16} color={C.text3} strokeWidth={2} />
                   ) : (
-                    <Icon.search size={16} color={C.text3} strokeWidth={2} />
+                    <Icon.hash size={16} color={C.accent} strokeWidth={2} />
                   )}
                   {/* 中: タグ名 — タップで実検索 */}
                   <PressableScale
@@ -756,6 +838,57 @@ export default function SearchScreen() {
                 </View>
               );
             })}
+            {/* fallback: lib/search/autocomplete (history + popular tag merge) */}
+            {fallbackSuggestions.map((item, idx) => {
+              const isLast = idx === fallbackSuggestions.length - 1;
+              const IconC = item.kind === 'history' ? Icon.clock : Icon.sparkles;
+              const iconColor = item.kind === 'history' ? C.text3 : C.accentLight;
+              return (
+                <View
+                  key={`fb:${item.kind}:${item.text}`}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    paddingHorizontal: SP['3'],
+                    paddingVertical: SP['2'] + 2,
+                    borderBottomWidth: isLast ? 0 : 1,
+                    borderBottomColor: C.border + '40',
+                  }}
+                >
+                  <IconC size={16} color={iconColor} strokeWidth={2} />
+                  <PressableScale
+                    onPress={() => {
+                      setQ(item.text);
+                      setDebounced(item.text);
+                      addHist(item.text);
+                    }}
+                    haptic="select"
+                    hitSlop={4}
+                    accessibilityLabel={`${item.text} で検索`}
+                    accessibilityRole="button"
+                    style={{ flex: 1, paddingHorizontal: SP['2'], paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                  >
+                    <Text style={[T.smallM, { color: C.text, flex: 1 }]} numberOfLines={1}>
+                      {item.text}
+                    </Text>
+                    {item.detail && (
+                      <Text style={[T.caption, { color: C.text3 }]}>
+                        {item.detail}
+                      </Text>
+                    )}
+                  </PressableScale>
+                  <PressableScale
+                    onPress={() => setQ(item.text)}
+                    haptic="tap"
+                    hitSlop={8}
+                    accessibilityLabel={`${item.text} を入力欄に取り込む`}
+                    style={{ padding: 4 }}
+                  >
+                    <Icon.arrowUL size={18} color={C.text3} strokeWidth={2} />
+                  </PressableScale>
+                </View>
+              );
+            })}
           </View>
         )}
 
@@ -776,21 +909,25 @@ export default function SearchScreen() {
                       key={c}
                       onPress={() => setCategory(c)}
                       haptic="select"
+                      accessibilityState={{ selected: active }}
                       style={{
                         flexDirection: 'row', alignItems: 'center', gap: 4,
-                        paddingHorizontal: SP['3'], paddingVertical: 6,
-                        backgroundColor: active ? C.accent : C.bg3,
+                        paddingHorizontal: SP['3'], paddingVertical: 7,
+                        // active: 紫 accentBg + 紫 border (柔らかい "選択中" 表現)
+                        // inactive: glass-like bg2 + subtle border
+                        backgroundColor: active ? C.accentBg : C.bg2,
                         borderRadius: R.full,
-                        borderWidth: 1, borderColor: active ? C.accent : C.border,
+                        borderWidth: 1,
+                        borderColor: active ? C.accent : C.border,
                       }}
                     >
                       <Text style={{ fontSize: 11 }}>{meta.emoji}</Text>
-                      <Text style={[T.caption, { color: active ? '#fff' : C.text, fontWeight: '700' }]}>
+                      <Text style={[T.caption, { color: active ? C.accentLight : C.text, fontWeight: '700' }]}>
                         {meta.label}
                       </Text>
                       <View style={{
-                        paddingHorizontal: 4, paddingVertical: 1,
-                        backgroundColor: active ? 'rgba(255,255,255,0.2)' : C.bg4,
+                        paddingHorizontal: 5, paddingVertical: 1,
+                        backgroundColor: active ? C.accent : C.bg4,
                         borderRadius: R.sm,
                       }}>
                         <Text style={{ fontSize: 9, color: active ? '#fff' : C.text3, fontWeight: '700' }}>
@@ -896,20 +1033,56 @@ export default function SearchScreen() {
                 </View>
               </View>
             ) : !savedSearches.length && (
-              // ⭐ 履歴も保存検索もまだ無いユーザー向けの welcome 案内
+              // ⭐ 履歴も保存検索もまだ無い真っさらユーザー — gradient circle + CTA で
+              // 「ここで何が出来るか」を一目で伝える
               <View style={{
-                padding: SP['3'],
-                backgroundColor: C.bg2,
-                borderRadius: R.md,
-                borderWidth: 1,
-                borderColor: C.border,
-                gap: SP['1'],
+                alignItems: 'center',
+                paddingVertical: SP['6'],
+                paddingHorizontal: SP['4'],
+                gap: SP['3'],
               }}>
-                <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>🔎 何でも検索</Text>
-                <Text style={[T.caption, { color: C.text2, lineHeight: 18 }]}>
-                  タグ・投稿・掲示板を一気に検索。半角/全角・カタカナ/ひらがな・読み方の違いも自動で吸収します。
-                  例:「ホロライブ」「ｲｺﾗﾌﾞ」「ぽけもん」
+                <View style={{
+                  borderRadius: 48,
+                  ...SHADOW.glow,
+                }}>
+                  <LinearGradient
+                    colors={GRAD.primary}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={{
+                      width: 96, height: 96, borderRadius: 48,
+                      alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >
+                    <Icon.search size={42} color="#fff" strokeWidth={2.2} />
+                  </LinearGradient>
+                </View>
+                <Text style={[T.h3, { color: C.text, textAlign: 'center' }]}>
+                  何でも検索しよう
                 </Text>
+                <Text style={[T.small, { color: C.text2, textAlign: 'center', maxWidth: 320, lineHeight: 20 }]}>
+                  タグ・投稿・掲示板を一気に検索。{'\n'}
+                  半角/全角・カタカナ/ひらがな・読み方の違いも自動で吸収します。
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+                  {['ホロライブ', 'ぽけもん', 'ｲｺﾗﾌﾞ'].map((ex) => (
+                    <PressableScale
+                      key={ex}
+                      onPress={() => { setQ(ex); setDebounced(ex); addHist(ex); }}
+                      haptic="tap"
+                      style={{
+                        paddingHorizontal: SP['3'], paddingVertical: 6,
+                        backgroundColor: C.accentBg,
+                        borderRadius: R.full,
+                        borderWidth: 1, borderColor: C.accent + '55',
+                      }}
+                    >
+                      <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>
+                        {ex}
+                      </Text>
+                    </PressableScale>
+                  ))}
+                </View>
               </View>
             )}
 
@@ -1004,86 +1177,31 @@ export default function SearchScreen() {
               </View>
             )}
 
-            {/* タグ結果 */}
-            {showTags && rankedTags.length > 0 && (
-              <View style={{ gap: SP['2'] }}>
-                <Text style={[T.smallM, { color: C.text3 }]}>#️⃣ タグ ({rankedTags.length})</Text>
-                {rankedTags.map(({ item: tg, reasons }) => (
-                  <PressableScale
-                    key={tg.name}
-                    onPress={() => {
-                      commit();
-                      recordSignal({ kind: 'tag', id: tg.name, tags: [tg.name] });
-                      router.push(`/tag/${encodeURIComponent(tg.name)}` as never);
-                    }}
-                    haptic="tap"
-                    style={{
-                      flexDirection: 'row', alignItems: 'center', gap: SP['3'],
-                      padding: SP['3'],
-                      backgroundColor: C.bg2,
-                      borderRadius: R.lg,
-                      borderWidth: 1, borderColor: C.border,
-                    }}
-                  >
-                    <View style={{
-                      width: 40, height: 40, borderRadius: 20,
-                      backgroundColor: C.accentSoft,
-                      alignItems: 'center', justifyContent: 'center',
-                    }}>
-                      <Text style={{ fontSize: 18, color: C.accent, fontWeight: '700' }}>#</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <HighlightedText text={`#${tg.name}`} terms={highlightTerms} style={T.bodyMd} />
-                      <Text style={[T.caption, { color: C.text3 }]}>
-                        {tg.member_count.toLocaleString('ja-JP')} メンバー · {tg.post_count.toLocaleString('ja-JP')} 投稿
-                      </Text>
-                    </View>
-                    <ReasonBadges reasons={reasons} />
-                  </PressableScale>
-                ))}
-              </View>
-            )}
-
-            {/* BBS スレッド */}
-            {showBBS && (bbsQ.data?.length ?? 0) > 0 && (
-              <View style={{ gap: SP['2'] }}>
-                <Text style={[T.smallM, { color: C.text3 }]}>💬 掲示板 ({bbsQ.data!.length})</Text>
-                {bbsQ.data!.slice(0, 12).map((t) => (
-                  <PressableScale
-                    key={t.id}
-                    onPress={() => {
-                      commit();
-                      recordSignal({ kind: 'bbs', id: t.id, tags: [t.category] });
-                      router.push(`/bbs/${t.id}` as never);
-                    }}
-                    haptic="tap"
-                    style={{
-                      padding: SP['3'],
-                      backgroundColor: C.bg2,
-                      borderRadius: R.lg,
-                      borderWidth: 1, borderColor: C.border,
-                      gap: 4,
-                    }}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-                      <Text style={{ fontSize: 14 }}>💬</Text>
-                      <View style={{ flex: 1 }}>
-                        <HighlightedText text={t.title} terms={highlightTerms} style={T.bodyMd} numberOfLines={1} />
-                      </View>
-                    </View>
-                    <Text style={[T.caption, { color: C.text3 }]}>
-                      {t.category} · {t.replies_count.toLocaleString('ja-JP')} 返信 · {formatRelative(t.created_at)}
-                    </Text>
-                  </PressableScale>
-                ))}
-              </View>
-            )}
+            {/*
+              Google 風セグメント結果:
+                - 'all' タブ → 投稿 / コミュニティ(タグ) / タグ / ユーザー の順、各 max 3 + 「もっと見る」
+                - その他のタブ → そのカテゴリだけ全件表示
+              現状の rankedPosts / rankedTags / bbsQ.data はそれぞれ後段で
+              スライスして「preview limit」を適用する。
+            */}
 
             {/* 投稿結果 */}
             {showPosts && rankedPosts.length > 0 && (
-              <View style={{ gap: SP['2'] }}>
-                <Text style={[T.smallM, { color: C.text3 }]}>📝 投稿 ({rankedPosts.length})</Text>
-                {rankedPosts.map(({ item: p, reasons }) => (
+              <SectionContainer
+                title="投稿"
+                icon="📝"
+                total={rankedPosts.length}
+                expanded={expandedPosts}
+                limit={category === 'all' ? PREVIEW_LIMIT : rankedPosts.length}
+                onExpand={() => {
+                  setCategory('posts');
+                  setExpandedPosts(true);
+                }}
+              >
+                {(category === 'all' && !expandedPosts
+                  ? rankedPosts.slice(0, PREVIEW_LIMIT)
+                  : rankedPosts
+                ).map(({ item: p, reasons }) => (
                   <PressableScale
                     key={p.id}
                     onPress={() => {
@@ -1121,23 +1239,119 @@ export default function SearchScreen() {
                         ))}
                       </View>
                     )}
-                    {/* 履歴シグナル: 過去にクリック / 検索したことがあれば 1 つだけ
-                        subtle なバッジで「履歴あり」とだけ伝える (色付き種類別バッジは廃止) */}
                     <ReasonBadges reasons={reasons} />
-                    {/* デバッグ用 (開発者のみ) - reasons の中身を console に */}
                   </PressableScale>
                 ))}
-              </View>
+              </SectionContainer>
+            )}
+
+            {/* 掲示板スレッド */}
+            {showBBS && (bbsQ.data?.length ?? 0) > 0 && (
+              <SectionContainer
+                title="掲示板"
+                icon="💬"
+                total={bbsQ.data!.length}
+                expanded={expandedBBS}
+                limit={category === 'all' ? PREVIEW_LIMIT : bbsQ.data!.length}
+                onExpand={() => {
+                  setCategory('bbs');
+                  setExpandedBBS(true);
+                }}
+              >
+                {(category === 'all' && !expandedBBS
+                  ? bbsQ.data!.slice(0, PREVIEW_LIMIT)
+                  : bbsQ.data!.slice(0, 12)
+                ).map((t) => (
+                  <PressableScale
+                    key={t.id}
+                    onPress={() => {
+                      commit();
+                      recordSignal({ kind: 'bbs', id: t.id, tags: [t.category] });
+                      router.push(`/bbs/${t.id}` as never);
+                    }}
+                    haptic="tap"
+                    style={{
+                      padding: SP['3'],
+                      backgroundColor: C.bg2,
+                      borderRadius: R.lg,
+                      borderWidth: 1, borderColor: C.border,
+                      gap: 4,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+                      <Text style={{ fontSize: 14 }}>💬</Text>
+                      <View style={{ flex: 1 }}>
+                        <HighlightedText text={t.title} terms={highlightTerms} style={T.bodyMd} numberOfLines={1} />
+                      </View>
+                    </View>
+                    <Text style={[T.caption, { color: C.text3 }]}>
+                      {t.category} · {t.replies_count.toLocaleString('ja-JP')} 返信 · {formatRelative(t.created_at)}
+                    </Text>
+                  </PressableScale>
+                ))}
+              </SectionContainer>
+            )}
+
+            {/* タグ結果 */}
+            {showTags && rankedTags.length > 0 && (
+              <SectionContainer
+                title="タグ"
+                icon="#️⃣"
+                total={rankedTags.length}
+                expanded={expandedTags}
+                limit={category === 'all' ? PREVIEW_LIMIT : rankedTags.length}
+                onExpand={() => {
+                  setCategory('tags');
+                  setExpandedTags(true);
+                }}
+              >
+                {(category === 'all' && !expandedTags
+                  ? rankedTags.slice(0, PREVIEW_LIMIT)
+                  : rankedTags
+                ).map(({ item: tg, reasons }) => (
+                  <PressableScale
+                    key={tg.name}
+                    onPress={() => {
+                      commit();
+                      recordSignal({ kind: 'tag', id: tg.name, tags: [tg.name] });
+                      router.push(`/tag/${encodeURIComponent(tg.name)}` as never);
+                    }}
+                    haptic="tap"
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', gap: SP['3'],
+                      padding: SP['3'],
+                      backgroundColor: C.bg2,
+                      borderRadius: R.lg,
+                      borderWidth: 1, borderColor: C.border,
+                    }}
+                  >
+                    <View style={{
+                      width: 40, height: 40, borderRadius: 20,
+                      backgroundColor: C.accentSoft,
+                      alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <Text style={{ fontSize: 18, color: C.accent, fontWeight: '700' }}>#</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <HighlightedText text={`#${tg.name}`} terms={highlightTerms} style={T.bodyMd} />
+                      <Text style={[T.caption, { color: C.text3 }]}>
+                        {tg.member_count.toLocaleString('ja-JP')} メンバー · {tg.post_count.toLocaleString('ja-JP')} 投稿
+                      </Text>
+                    </View>
+                    <ReasonBadges reasons={reasons} />
+                  </PressableScale>
+                ))}
+              </SectionContainer>
             )}
 
             {totalResults === 0 && !suggestion && (
               <View style={{ padding: SP['8'], alignItems: 'center', gap: SP['4'] }}>
                 <View style={{
-                  width: 72, height: 72, borderRadius: 36,
+                  width: 96, height: 96, borderRadius: 48,
                   backgroundColor: C.amberBg, alignItems: 'center', justifyContent: 'center',
-                  borderWidth: 1, borderColor: C.amber + '33',
+                  borderWidth: 1, borderColor: C.amber + '40',
                 }}>
-                  <Icon.search size={32} color={C.amber} strokeWidth={2} />
+                  <Icon.search size={40} color={C.amber} strokeWidth={2} />
                 </View>
                 <Text style={[T.h4, { color: C.text, textAlign: 'center' }]}>
                   「{debounced}」に一致する結果はありません
@@ -1150,6 +1364,80 @@ export default function SearchScreen() {
           </>
         )}
       </ScrollView>
+    </View>
+  );
+}
+
+// ============================================================
+// SectionContainer — Google 風セグメント結果セクションのフレーム
+// ------------------------------------------------------------
+// title + icon + 件数 + 子コンポーネント を共通レイアウトで描画する。
+// preview mode (limit < total) では「もっと見る」ボタンを下に出す。
+// ============================================================
+function SectionContainer({
+  title,
+  icon,
+  total,
+  limit,
+  expanded,
+  onExpand,
+  children,
+}: {
+  title: string;
+  icon: string;
+  total: number;
+  limit: number;
+  expanded: boolean;
+  onExpand: () => void;
+  children: React.ReactNode;
+}) {
+  const showMore = !expanded && total > limit;
+  return (
+    <View style={{ gap: SP['2'] }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text style={{ fontSize: 14 }}>{icon}</Text>
+          <Text style={[T.smallM, { color: C.text2, fontWeight: '700', letterSpacing: 0.3 }]}>
+            {title}
+          </Text>
+          <View style={{
+            paddingHorizontal: 6, paddingVertical: 1,
+            backgroundColor: C.bg3,
+            borderRadius: R.sm,
+          }}>
+            <Text style={{ fontSize: 10, color: C.text3, fontWeight: '700' }}>
+              {total}
+            </Text>
+          </View>
+        </View>
+      </View>
+      {children}
+      {showMore && (
+        <PressableScale
+          onPress={onExpand}
+          haptic="tap"
+          accessibilityRole="button"
+          accessibilityLabel={`${title}をもっと見る`}
+          style={{
+            marginTop: SP['1'],
+            paddingVertical: SP['2'] + 2,
+            paddingHorizontal: SP['3'],
+            backgroundColor: C.bg2,
+            borderRadius: R.full,
+            borderWidth: 1,
+            borderColor: C.accent + '40',
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 4,
+          }}
+        >
+          <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>
+            {title}をもっと見る ({total - limit})
+          </Text>
+          <Icon.chevronR size={14} color={C.accentLight} strokeWidth={2.2} />
+        </PressableScale>
+      )}
     </View>
   );
 }

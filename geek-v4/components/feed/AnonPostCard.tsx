@@ -22,7 +22,6 @@ import { PollCard } from './PollCard';
 import { useFeatureFlag } from '../../hooks/useFeatureFlag';
 import type { Poll } from '../../lib/api/polls';
 import { Avatar } from '../ui/Avatar';
-import { TrustBadge } from '../ui/TrustBadge';
 import { formatRelative } from '../../lib/utils/date';
 import { SHADOW } from '../../design/shadows';
 import { sanitizeUrl } from '../../lib/sanitize';
@@ -122,16 +121,16 @@ const STYLES = StyleSheet.create({
   },
   lowTrustText: { color: C.amber, flex: 1 },
 
-  // ヘッダー
+  // ヘッダー — gap を増やして nickname と avatar を分離、 type も明確に
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SP['2'],
+    gap: SP['3'],
   },
   officialAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: C.accentBg,
     borderWidth: 1.5,
     borderColor: C.accent,
@@ -145,18 +144,20 @@ const STYLES = StyleSheet.create({
     gap: 6,
     flexWrap: 'wrap',
   },
-  officialName: { color: C.text, fontWeight: '700' },
+  // 公式管理者の名前は少し太く. fontSize は smallM の 13 を引き継ぐ
+  officialName: { color: C.text, fontWeight: '700', letterSpacing: 0.2 },
   officialSub: { color: C.text3 },
   anonRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    flexDirection: 'column',
+    alignItems: 'flex-start',
     flex: 1,
-    flexWrap: 'wrap',
+    minWidth: 0,
+    gap: 1,
   },
-  anonLabel: { color: C.text },
-  anonRelative: { color: C.text3 },
-  morePress: { padding: 2 },
+  // 「匿」をやや強めに、relative time は subtle に — Twitter/Threads と同じ階層感
+  anonLabel: { color: C.text, fontWeight: '700', letterSpacing: 0.2 },
+  anonRelative: { color: C.text3, fontSize: 11, lineHeight: 14 },
+  morePress: { padding: 4 },
 
   // コミュニティピル
   communityWrap: {
@@ -204,9 +205,9 @@ const STYLES = StyleSheet.create({
     overflow: 'hidden',
   },
 
-  // 本文
-  bodyInner: { paddingTop: SP['2'], paddingBottom: SP['1'] },
-  bodyText: { color: C.text, lineHeight: 22 },
+  // 本文 — 行間/サイズを引き上げて読みやすさを優先 (15→16 / 22→24)
+  bodyInner: { paddingTop: SP['3'], paddingBottom: SP['1'] },
+  bodyText: { color: C.text, fontSize: 15, lineHeight: 24 },
   // 出典
   sourceBtn: {
     marginTop: SP['2'],
@@ -223,28 +224,34 @@ const STYLES = StyleSheet.create({
   sourceEmoji: { fontSize: 14 },
   sourceText: { color: C.text2, flex: 1 },
 
-  // タグ群
+  // タグ群 — 上 padding を SP['3'] に上げて本文との視覚分離を強める
   tagsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingTop: SP['2'],
+    paddingTop: SP['3'],
     gap: SP['2'],
     alignItems: 'center',
   },
 
-  // アクション行
+  // アクション行 — gap を揃え、左 4 アクション + spacer + 右 3 アクション の整列に
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: SP['2'],
+    paddingTop: SP['3'],
     paddingBottom: 0,
-    gap: SP['4'],
+    gap: SP['5'],
   },
-  actionPress: { flexDirection: 'row', alignItems: 'center', gap: SP['1'] },
-  commentCount: { color: C.text2 },
-  reactionEmoji: { fontSize: 18 },
+  // 各 action は icon + count を gap:6 で詰める. tap target は hitSlop で確保 (44pt)
+  actionPress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 28,
+  },
+  commentCount: { color: C.text2, fontSize: 13, fontWeight: '600' },
+  reactionEmoji: { fontSize: 20 },
   spacer: { flex: 1 },
-  iconBtn: { padding: 2 },
+  iconBtn: { padding: 4 },
 
   // リアクション表示行
   reactionsRow: {
@@ -466,18 +473,28 @@ function AnonPostCardInner({
   };
 
   // ── 動的 style: props/state に依存するもののみ useMemo 化 ──
-  // ルート Container — lowTrust によって border の色が変わるのみ
+  // ルート Container — modern glass card 風. 1 投稿 = 1 浮遊カード として扱う。
+  //   - 背景: bg2 (elevated)
+  //   - 角: R.xl
+  //   - 細い 1px border (lowTrust 時は amber 強調)
+  //   - subtle shadow (SHADOW.sm)
+  //   - 横 padding は feed.tsx 側 (FlashList contentContainer) で吸収するため
+  //     card 自体には marginHorizontal を持たせない。
+  //   - card 間 gap は marginBottom で確保。
   const containerStyle = useMemo(
     () => ({
-      backgroundColor: C.bg,
-      borderBottomWidth: 1,
-      borderBottomColor: lowTrust ? C.amber + '44' : C.divider,
+      backgroundColor: C.bg2,
+      borderWidth: 1,
+      borderColor: lowTrust ? C.amber + '44' : 'rgba(255,255,255,0.06)',
+      borderRadius: R.xl,
       paddingHorizontal: SP['4'],
-      paddingTop: SP['3'],
+      paddingTop: SP['4'],
       paddingBottom: SP['3'],
+      marginBottom: SP['3'],
       maxWidth: 720,
       alignSelf: 'center' as const,
       width: '100%' as const,
+      ...SHADOW.sm,
     }),
     [lowTrust],
   );
@@ -525,10 +542,10 @@ function AnonPostCardInner({
             style={STYLES.officialAvatar}
             accessibilityLabel="公式管理者"
           >
-            <Icon.shield size={18} color={C.accent} strokeWidth={2.4} />
+            <Icon.shield size={20} color={C.accent} strokeWidth={2.4} />
           </View>
         ) : (
-          <Avatar size={36} anonymous />
+          <Avatar size={40} anonymous />
         )}
         {post.official_author ? (
           <View style={STYLES.officialMeta}>
@@ -544,13 +561,17 @@ function AnonPostCardInner({
             </Text>
           </View>
         ) : (
+          // anon: 「匿」を 1 行目、relative time を 2 行目に分けて typography 階層を作る
           <View style={STYLES.anonRow}>
-            <Text style={[T.smallM, STYLES.anonLabel]}>匿</Text>
-            <TrustBadge score={post.trust_score_at_post} />
-            <Text style={[T.small, STYLES.anonRelative]}>· {formatRelative(post.created_at)}</Text>
+            <Text style={[T.smallM, STYLES.anonLabel]} numberOfLines={1}>
+              {t('匿')}
+            </Text>
+            <Text style={STYLES.anonRelative} numberOfLines={1}>
+              {formatRelative(post.created_at)}
+            </Text>
           </View>
         )}
-        <PressableScale onPress={onMore} hitSlop={8} style={STYLES.morePress}>
+        <PressableScale onPress={onMore} hitSlop={10} style={STYLES.morePress}>
           <More size={20} color={C.text3} strokeWidth={2.2} />
         </PressableScale>
       </View>
@@ -693,8 +714,10 @@ function AnonPostCardInner({
         )}
       </View>
 
-      {/* アクション行 — hitSlop で 44pt 以上の tap target を確保 (icon 自体は 20-22 だが
-          押下範囲を上下左右 +10 まで広げて誤タップ/反応しない問題を解消) */}
+      {/* アクション行 — icon を 20px に統一. hitSlop:10 で 44pt 以上の tap target を確保
+          (icon 自体は 20 だが押下範囲を上下左右 +10 で誤タップ防止)。
+          gap は SP['5'] で各アクションを規則的に配置 — 「♥ 15 / 💬 9 / ⚠ / 🪶 15」 が
+          視覚的にリズミカルに並ぶ。 */}
       <View style={STYLES.actionsRow}>
         <PressableScale
           onPress={onLike}
@@ -703,7 +726,7 @@ function AnonPostCardInner({
           accessibilityLabel={liked ? 'いいね済み' : 'いいね'}
           style={STYLES.actionPress}
         >
-          <Heart size={22} color={liked ? C.pink : C.text2} fill={liked ? C.pink : 'transparent'} strokeWidth={2.2} />
+          <Heart size={20} color={liked ? C.pink : C.text2} fill={liked ? C.pink : 'transparent'} strokeWidth={2.2} />
           {likesCount > 0 && (
             <Text style={[T.smallM, likeCountTextStyle]}>{likesCount}</Text>
           )}
@@ -715,7 +738,7 @@ function AnonPostCardInner({
           accessibilityLabel="コメントを開く"
           style={STYLES.actionPress}
         >
-          <Comment size={22} color={C.text2} strokeWidth={2.2} />
+          <Comment size={20} color={C.text2} strokeWidth={2.2} />
           {commentsCount > 0 && (
             <Text style={[T.smallM, STYLES.commentCount]}>{commentsCount}</Text>
           )}
@@ -755,7 +778,7 @@ function AnonPostCardInner({
           accessibilityLabel="共有"
           style={STYLES.iconBtn}
         >
-          <Share size={20} color={C.text2} strokeWidth={2.2} />
+          <Share size={18} color={C.text2} strokeWidth={2.2} />
         </PressableScale>
         <PressableScale
           onPress={onSave}
@@ -764,7 +787,7 @@ function AnonPostCardInner({
           accessibilityLabel={saved ? '保存済み' : '保存'}
           style={STYLES.iconBtn}
         >
-          <Save size={20} color={saved ? C.amber : C.text2} fill={saved ? C.amber : 'transparent'} strokeWidth={2.2} />
+          <Save size={18} color={saved ? C.amber : C.text2} fill={saved ? C.amber : 'transparent'} strokeWidth={2.2} />
         </PressableScale>
       </View>
 

@@ -22,14 +22,20 @@ const SHIMMER_DURATION_MS = 1400;
 export function Skeleton({
   width = '100%',
   height = 16,
-  radius = R.md,
+  radius,
+  borderRadius,
   style,
 }: {
   width?: DimensionValue;
   height?: number;
+  /** 既存 API (`radius`) — 後方互換のため残す */
   radius?: number;
+  /** 新規 API (`borderRadius`) — UI Polish (Phase 2) の SkeletonRow 等から使用。指定があれば radius より優先 */
+  borderRadius?: number;
   style?: ViewStyle;
 }) {
+  // borderRadius が指定されればそれ、無ければ radius、どちらも無ければ R.md (legacy default)
+  const effectiveRadius = borderRadius ?? radius ?? R.md;
   // Track measured width so the shimmer band sweeps fully across.
   const [measuredW, setMeasuredW] = useState<number>(0);
   const progress = useSharedValue(0);
@@ -60,7 +66,7 @@ export function Skeleton({
         {
           width,
           height,
-          borderRadius: radius,
+          borderRadius: effectiveRadius,
           backgroundColor: C.bg3,
           overflow: 'hidden',
         },

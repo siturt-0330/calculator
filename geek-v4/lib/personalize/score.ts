@@ -9,6 +9,7 @@
 import type { UserInterestProfile } from './profile';
 import { deepNormalize } from '../search/tokenize';
 import type { CooccurMap } from '../tagClustering/suggest';
+import type { Post } from '../../types/models';
 
 // 候補のタグを profile キーと突き合わせる前に deepNormalize する。
 // (events.logEvent でも同じ正規化を通しているので、両側が hiragana lowercase で揃う)
@@ -415,4 +416,292 @@ export function rankFeed(
   }
 
   return picked.slice(0, targetCount);
+}
+
+// ============================================================
+// YouTube-style ranking (Phase 3)
+// ------------------------------------------------------------
+// computePostScore は「興味」「品質」「鮮度」「新規性」「探索」を 1 つの
+// 重み付き合計に集約する pure 関数。rankFeed が候補プールに対して
+// scoreCandidate を回すのと違い、こちらは Post 型をそのまま受け取って
+// 単独の score を返すシンプルな contract。
+//
+// 重み (initial values):
+//   - Tag Affinity (Jaccard × TF-IDF):  係数 18
+//       自分が過去にいいねしたタグと候補タグの共通度。共通タグの IDF が
+//       高い (= 全体では稀) ほど boost。Google PageRank の rare boost に
+//       インスパイアされた挙動。
+//   - Engagement (log scale):           係数 6
+//       Hacker News 風 log(1 + likes) + log(1 + comments) + log(1 + concern boost)
+//       — like を重く、comment は中程度、concern は少しマイナス。
+//   - Time decay (HN style):            乗数 1 / (hours + 2) ** decayExp
+//       engagement が多い post は decayExp を緩める (1.8 → 1.4)
+//   - Fresh boost (1 時間以内):           +6
+//   - Fresh-user exploration:            自分のアカウント年齢 < 7 日なら
+//       小さなランダムノイズ (±2) を score に加算 — 探索促進
+// ============================================================
+
+export interface ScoreInput {
+  post: Post;
+  /** tag (normalized) → 自分がいいねした回数 */
+  userLikedTagsFreq: Map<string, number>;
+  /** tag (normalized) → 全体出現数 (TF-IDF の document frequency) */
+  globalTagFreq: Map<string, number>;
+  now: Date;
+  /** 自分のアカウントの作成からの経過日数 (小数可) */
+  myAccountAgeDays: number;
+  /** 全体の post 総数 (IDF の分子 N — 未指定なら globalTagFreq の最大値で近似) */
+  totalPosts?: number;
+  /** noise を deterministic にしたい test 用に注入できる (default Math.random) */
+  random?: () => number;
+}
+
+// ----------------------------------------------------------------
+// Tag affinity helper — Jaccard × TF-IDF
+// ----------------------------------------------------------------
+// 投稿のタグ集合 P と「自分が過去にいいねしたタグ集合」 L の交差を取り、
+// 各交差タグについて IDF 重み = log((N + 1) / (df + 1)) を計算して合計。
+// 全体を |P ∪ L| で割って Jaccard 風に正規化する。
+//
+// IDF 強調: 全体で稀なタグ (df 小) ほど log((N+1)/(df+1)) が大きく、
+// rare tag boost として効く。これが「自分が好きな niche tag が刺さる」
+// 体験を作る。
+// ----------------------------------------------------------------
+function tagAffinityScore(
+  postTags: string[],
+  userLikedTagsFreq: Map<string, number>,
+  globalTagFreq: Map<string, number>,
+  totalPosts?: number,
+): number {
+  if (postTags.length === 0 || userLikedTagsFreq.size === 0) return 0;
+  const postNorm = new Set<string>();
+  for (const t of postTags) {
+    const n = deepNormalize(t);
+    if (n) postNorm.add(n);
+  }
+  if (postNorm.size === 0) return 0;
+
+  // user liked tags も normalize 済みである前提だが、念のため normalize して比較
+  const likedNorm = new Map<string, number>();
+  for (const [t, freq] of userLikedTagsFreq) {
+    const n = deepNormalize(t);
+    if (n) likedNorm.set(n, (likedNorm.get(n) ?? 0) + freq);
+  }
+  if (likedNorm.size === 0) return 0;
+
+  // N (total posts) を推定: 未指定なら globalTagFreq の max を使う
+  let N = totalPosts ?? 0;
+  if (N <= 0) {
+    for (const v of globalTagFreq.values()) if (v > N) N = v;
+  }
+  if (N <= 0) N = 1;
+
+  // 交差タグの IDF 重み付き likeFreq を加算
+  let weightedInter = 0;
+  for (const t of postNorm) {
+    const likeFreq = likedNorm.get(t);
+    if (likeFreq === undefined) continue;
+    const df = globalTagFreq.get(t) ?? 1;
+    const idf = Math.log((N + 1) / (df + 1)) + 1; // +1 で floor (df==N でも >0)
+    // like 回数の log で head タグの過剰評価を抑え、IDF で rare boost
+    weightedInter += Math.log(1 + likeFreq) * idf;
+  }
+  if (weightedInter === 0) return 0;
+
+  // Jaccard 風正規化: |P ∪ L| で割る
+  const union = new Set<string>([...postNorm, ...likedNorm.keys()]);
+  return weightedInter / Math.sqrt(union.size);
+}
+
+// ----------------------------------------------------------------
+// Engagement (log scale, Hacker News-inspired)
+// ----------------------------------------------------------------
+function engagementScore(post: Post): number {
+  const likes = Math.max(0, post.likes_count ?? 0);
+  const comments = Math.max(0, post.comments_count ?? 0);
+  const concerns = Math.max(0, post.concern_count ?? 0);
+  // like を主軸、comment は会話の盛り上がり、concern は質の警告 (マイナス)
+  const positive = Math.log(1 + likes) * 1.0 + Math.log(1 + comments) * 0.6;
+  const negative = Math.log(1 + concerns) * 0.4;
+  return positive - negative;
+}
+
+// ----------------------------------------------------------------
+// Time decay (Hacker News style: score / (hours + 2) ** decayExp)
+// engagement が多い post は decayExp を 1.8 → 1.4 に緩める
+// ----------------------------------------------------------------
+function timeDecayMultiplier(post: Post, now: Date): number {
+  const t = new Date(post.created_at).getTime();
+  if (!Number.isFinite(t)) return 0.1;
+  const hours = Math.max(0, (now.getTime() - t) / 3_600_000);
+  const eng = (post.likes_count ?? 0) + (post.comments_count ?? 0);
+  // 反応が多いほど (>= 50) decay を緩める。連続線形補間で滑らかに。
+  const slack = Math.min(eng / 100, 1); // 0 → 1
+  const decayExp = 1.8 - 0.4 * slack;
+  return 1 / Math.pow(hours + 2, decayExp);
+}
+
+// ----------------------------------------------------------------
+// Public: computePostScore
+// ----------------------------------------------------------------
+export function computePostScore(input: ScoreInput): number {
+  const { post, userLikedTagsFreq, globalTagFreq, now, myAccountAgeDays } = input;
+
+  // --- 1. tag affinity (Jaccard × TF-IDF) ---
+  const tags = post.tag_names ?? [];
+  const aff = tagAffinityScore(tags, userLikedTagsFreq, globalTagFreq, input.totalPosts);
+
+  // --- 2. engagement (log scale) ---
+  const eng = engagementScore(post);
+
+  // --- 3. time decay ---
+  const decay = timeDecayMultiplier(post, now);
+
+  // --- 4. fresh boost: 1 時間以内 ---
+  const t = new Date(post.created_at).getTime();
+  const hours = Number.isFinite(t) ? Math.max(0, (now.getTime() - t) / 3_600_000) : Infinity;
+  const freshBoost = hours <= 1 ? 6 : 0;
+
+  // --- 5. fresh-user exploration noise (< 7 日) ---
+  let exploreNoise = 0;
+  if (myAccountAgeDays >= 0 && myAccountAgeDays < 7) {
+    const rnd = input.random ?? Math.random;
+    // 0..1 → -1..1 → ±2
+    exploreNoise = (rnd() - 0.5) * 4;
+  }
+
+  // 重み付き合計
+  // - tag affinity を主軸 (18) — 個人化の核
+  // - engagement (6) は中程度 — 良質な popular post を浮かせる
+  // - time decay は乗数で全体に効く
+  const base = 18 * aff + 6 * eng;
+  return base * decay + freshBoost + exploreNoise;
+}
+
+// ============================================================
+// diversifyFeed — post-process: 同じ author / 同じ tag set が連続しないように
+// ------------------------------------------------------------
+// 上位 maxConsecutiveFromSameAuthor 件 (default 2) までは score 順で出すが、
+// それ以上連続で同じ author が並ぶ場合は次の候補と入れ替える。
+// 1 つの post の dominantTag (= tag_names[0]) も同じ key として扱われる。
+//
+// ベスト 3 までは "本当に score が高いもの" を優先したいので diversity を
+// 適用しない (要件 4)。3 件目以降から diversity penalty が効く。
+// ============================================================
+export function diversifyFeed(
+  scored: Array<{ post: Post; score: number }>,
+  maxConsecutiveFromSameAuthor = 2,
+): Post[] {
+  if (scored.length === 0) return [];
+
+  // score 降順で sort (caller が既に sort 済でも安全に走る)
+  const sorted = scored.slice().sort((a, b) => b.score - a.score);
+
+  const TOP_PRESERVE = 3; // ベスト 3 までは原 score 順を維持
+  const out: Post[] = [];
+  // 出力末尾の "連続した同 author/tag 数" を追跡
+  let lastAuthor: string | null = null;
+  let lastAuthorRun = 0;
+  let lastDomTag: string | null = null;
+  let lastDomTagRun = 0;
+  const placed = new Set<number>();
+
+  const dominantTag = (p: Post): string | null => {
+    const tags = p.tag_names ?? [];
+    return tags[0] ?? null;
+  };
+  const authorOf = (p: Post): string | null => p.author_id ?? null;
+
+  for (let i = 0; i < sorted.length; i++) {
+    if (placed.has(i)) continue;
+
+    // 上位 TOP_PRESERVE 個は score 順を強制
+    if (out.length < TOP_PRESERVE) {
+      const item = sorted[i];
+      if (!item) continue;
+      const p = item.post;
+      out.push(p);
+      placed.add(i);
+      const a = authorOf(p);
+      const d = dominantTag(p);
+      lastAuthorRun = a !== null && a === lastAuthor ? lastAuthorRun + 1 : 1;
+      lastAuthor = a;
+      lastDomTagRun = d !== null && d === lastDomTag ? lastDomTagRun + 1 : 1;
+      lastDomTag = d;
+      continue;
+    }
+
+    // diversity 適用: 連続 author / tag 上限に当たったら下を探す
+    const item = sorted[i];
+    if (!item) continue;
+    const candidate = item.post;
+    const cAuthor = authorOf(candidate);
+    const cDomTag = dominantTag(candidate);
+    const wouldExceedAuthor =
+      cAuthor !== null && cAuthor === lastAuthor && lastAuthorRun >= maxConsecutiveFromSameAuthor;
+    const wouldExceedTag =
+      cDomTag !== null && cDomTag === lastDomTag && lastDomTagRun >= maxConsecutiveFromSameAuthor;
+
+    if (!wouldExceedAuthor && !wouldExceedTag) {
+      out.push(candidate);
+      placed.add(i);
+      lastAuthorRun = cAuthor !== null && cAuthor === lastAuthor ? lastAuthorRun + 1 : 1;
+      lastAuthor = cAuthor;
+      lastDomTagRun = cDomTag !== null && cDomTag === lastDomTag ? lastDomTagRun + 1 : 1;
+      lastDomTag = cDomTag;
+      continue;
+    }
+
+    // 次以降から「異なる author/tag の候補」を探す
+    let swappedIdx = -1;
+    for (let j = i + 1; j < sorted.length; j++) {
+      if (placed.has(j)) continue;
+      const altItem = sorted[j];
+      if (!altItem) continue;
+      const altAuthor = authorOf(altItem.post);
+      const altDomTag = dominantTag(altItem.post);
+      const altExceedsAuthor =
+        altAuthor !== null && altAuthor === lastAuthor && lastAuthorRun >= maxConsecutiveFromSameAuthor;
+      const altExceedsTag =
+        altDomTag !== null && altDomTag === lastDomTag && lastDomTagRun >= maxConsecutiveFromSameAuthor;
+      if (!altExceedsAuthor && !altExceedsTag) {
+        swappedIdx = j;
+        break;
+      }
+    }
+    if (swappedIdx >= 0) {
+      const swapped = sorted[swappedIdx];
+      if (swapped) {
+        out.push(swapped.post);
+        placed.add(swappedIdx);
+        const a = authorOf(swapped.post);
+        const d = dominantTag(swapped.post);
+        lastAuthorRun = a !== null && a === lastAuthor ? lastAuthorRun + 1 : 1;
+        lastAuthor = a;
+        lastDomTagRun = d !== null && d === lastDomTag ? lastDomTagRun + 1 : 1;
+        lastDomTag = d;
+        // 元の i 番目は次の iteration で再評価される (placed には入れない)
+        // ただし無限ループ防止のため、次の周回で進めるよう本ループの i は据え置く。
+        // forループは i++ で必ず進むので、現候補は最終的に末尾でフォールバックされる。
+      }
+      continue;
+    }
+
+    // 適切な代替が無ければ、上限を破ってでも採用 (= fallback)
+    out.push(candidate);
+    placed.add(i);
+    lastAuthorRun = cAuthor !== null && cAuthor === lastAuthor ? lastAuthorRun + 1 : 1;
+    lastAuthor = cAuthor;
+    lastDomTagRun = cDomTag !== null && cDomTag === lastDomTag ? lastDomTagRun + 1 : 1;
+    lastDomTag = cDomTag;
+  }
+
+  // 漏れた要素 (placed されてない) を末尾に追加 (見落とし防止)
+  for (let i = 0; i < sorted.length; i++) {
+    if (placed.has(i)) continue;
+    const item = sorted[i];
+    if (item) out.push(item.post);
+  }
+
+  return out;
 }

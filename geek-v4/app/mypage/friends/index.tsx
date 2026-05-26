@@ -3,9 +3,13 @@
 // ============================================================
 // 友達一覧 + 申請管理 (incoming / outgoing) を 1 画面 3 タブで提供。
 // - TopBar: 戻る + 右に「招待」ボタン (招待コード生成画面へ)
-// - SegmentedControl で 3 タブ切替
+// - SegmentedControl で 3 タブ切替 (申請に件数 badge)
 // - 各タブで FriendListItem / EmptyFriends を render
 // - 承認 / 拒否 / キャンセル mutation は hook 経由
+//
+// UI Polish (Phase 2):
+// - SegmentedControl を GlassCard で包んで階層感を出す
+// - FriendListItem 側で GlassCard + gradient ring + PolishedButton に upgrade
 // ============================================================
 
 import { useState } from 'react';
@@ -16,6 +20,7 @@ import { TopBar } from '../../../components/nav/TopBar';
 import { BackButton } from '../../../components/nav/BackButton';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { SegmentedControl } from '../../../components/ui/SegmentedControl';
+import { GlassCard } from '../../../components/ui/GlassCard';
 import { FriendListItem } from '../../../components/mypage/FriendListItem';
 import { EmptyFriends } from '../../../components/mypage/EmptyFriends';
 import {
@@ -100,16 +105,22 @@ export default function MyFriendsScreen() {
     show('プロフィール画面は近日公開です', 'info');
   };
 
+  // ============================================================
+  // SegmentedControl の label 組み立て
+  // ============================================================
+  // 申請タブ (incoming) は未読件数を括弧書きで強調 (例: 「申請 (3)」)。
+  // 0 件のときは数字を出さず「申請」のみ。
+  const friendsLabel =
+    friends.length > 0 ? `友達 ${friends.length}` : '友達';
+  const incomingLabel =
+    incoming.length > 0 ? `申請 (${incoming.length})` : '申請';
+  const outgoingLabel =
+    outgoing.length > 0 ? `送信 ${outgoing.length}` : '送信';
+
   const segmentOptions: { value: Tab; label: string }[] = [
-    { value: 'friends', label: `友達${friends.length ? ` ${friends.length}` : ''}` },
-    {
-      value: 'incoming',
-      label: `申請${incoming.length ? ` ${incoming.length}` : ''}`,
-    },
-    {
-      value: 'outgoing',
-      label: `送信${outgoing.length ? ` ${outgoing.length}` : ''}`,
-    },
+    { value: 'friends', label: friendsLabel },
+    { value: 'incoming', label: incomingLabel },
+    { value: 'outgoing', label: outgoingLabel },
   ];
 
   // 右上の「招待」button
@@ -137,12 +148,15 @@ export default function MyFriendsScreen() {
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <TopBar title="友達" left={<BackButton />} right={inviteButton} />
 
+      {/* SegmentedControl を GlassCard で包む — 階層感を出す */}
       <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'] }}>
-        <SegmentedControl<Tab>
-          options={segmentOptions}
-          value={tab}
-          onChange={setTab}
-        />
+        <GlassCard style={{ padding: SP['1'] }}>
+          <SegmentedControl<Tab>
+            options={segmentOptions}
+            value={tab}
+            onChange={setTab}
+          />
+        </GlassCard>
       </View>
 
       {isLoading ? (
@@ -154,7 +168,7 @@ export default function MyFriendsScreen() {
           contentContainerStyle={{
             padding: SP['4'],
             paddingBottom: insets.bottom + SP['10'],
-            gap: SP['2'],
+            gap: SP['3'],
           }}
         >
           {tab === 'friends' &&
