@@ -57,14 +57,20 @@ export function useAddTag() {
     mutationFn: ({ postId, tag }: { postId: string; tag: string }) => addPostTag(postId, tag),
     onMutate: async ({ postId, tag }) => {
       await qc.cancelQueries({ queryKey: [KEY_PREFIX] });
-      qc.setQueriesData({ queryKey: [KEY_PREFIX] }, (old: Record<string, string[]> | undefined) => {
-        if (!old) return old;
+      // ★ CLAUDE.md § 5.2 対策: partial-match `setQueriesData` 廃止 → exact-key 書き戻し。
+      //   `[KEY_PREFIX, sortedIdsJoinString]` 派生キーが複数あるケースで
+      //   一部だけ更新されない問題を回避する。
+      const entries = qc.getQueriesData<Record<string, string[]> | undefined>({
+        queryKey: [KEY_PREFIX],
+      });
+      for (const [exactKey, old] of entries) {
+        if (!old) continue;
         const next = { ...old };
         const arr = (next[postId] ?? []).slice();
         if (!arr.includes(tag)) arr.push(tag);
         next[postId] = arr;
-        return next;
-      });
+        qc.setQueryData(exactKey, next);
+      }
       // 個別 queryKey もある (post detail)
       qc.invalidateQueries({ queryKey: ['post-added-tags', postId] });
     },

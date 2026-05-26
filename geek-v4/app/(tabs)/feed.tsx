@@ -187,9 +187,8 @@ export default function FeedScreen() {
         },
         onConcern: () => {
           void logEvent({ kind: 'post_concern', tags: tagNames, post_id: id });
-          // RPC 経路 → fullPosts、fallback → legacy map
-          const cur = fullPosts.get(id)?.my_concern ?? !!legacyMyConcerns[id];
-          toggleConcern(id, cur);
+          // current は useConcern 内部で cache から判定 (smart-queue + race-safe)
+          toggleConcern(id);
         },
         onComment: () => {
           void logEvent({ kind: 'post_view', tags: tagNames, post_id: id, dwell_ms: 0 });

@@ -1258,7 +1258,7 @@ type FeedPostRowProps = {
   addedTags: string[];
   poll: Poll | undefined;
   toggleLike: (id: string) => void;
-  toggleConcern: (id: string, current: boolean) => void;
+  toggleConcern: (id: string) => void;
   toggleSave: (id: string) => void;
   toggleReact: (id: string, meme: string) => void;
   share: (title: string, path: string) => Promise<void>;
@@ -1283,8 +1283,8 @@ const FeedPostRow = memo(function FeedPostRow({
 }: FeedPostRowProps) {
   const onLike = useCallback(() => toggleLike(post.id), [toggleLike, post.id]);
   const onConcern = useCallback(
-    () => toggleConcern(post.id, concerned),
-    [toggleConcern, post.id, concerned],
+    () => toggleConcern(post.id),
+    [toggleConcern, post.id],
   );
   const onComment = useCallback(
     () => router.push(`/post/${post.id}` as never),
