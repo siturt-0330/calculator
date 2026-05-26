@@ -104,6 +104,14 @@ export async function cropImageOnWebCanvas(input: {
 // gesture (pan/pinch) が極端に重くなる。事前に 1024x1024 程度の
 // preview data URL を生成して、それを画面表示に使う。
 // crop 計算は元画像 (imageSize) で行うので、preview のサイズは表示用のみ。
+//
+// ★ 「たまに cropper の中身が真っ黒」事故対策:
+//   1) iOS Safari / WKWebView (TikTok 等 in-app browser) は HEIC や
+//      巨大画像で <img>.onload を発火させつつ naturalWidth=0 を返すケースがある.
+//      この状態で drawImage しても透明な canvas になり, toDataURL が無音で
+//      'data:,' や極端に短い文字列を返す.
+//   2) WebView の Canvas メモリ不足でも drawImage / toDataURL が無音失敗する.
+//   検出して throw すれば caller の .catch で displayUri=sourceUri が維持される.
 export async function makeWebPreviewDataUrl(
   sourceUri: string,
   maxEdge = 1024,
@@ -118,15 +126,25 @@ export async function makeWebPreviewDataUrl(
     el.onerror = () => reject(new Error('Image load failed (preview)'));
     el.src = sourceUri;
   });
-  const aspect = img.width / img.height;
+  // ★ HEIC silent-onload ガード: naturalWidth/Height が 0 でも onload が
+  //   発火する WebView があるので明示的に検出する.
+  const natW = img.naturalWidth || img.width;
+  const natH = img.naturalHeight || img.height;
+  if (!natW || !natH || natW < 1 || natH < 1) {
+    throw new Error(`preview: naturalWidth/Height が無効 (${natW}x${natH}) — HEIC または decode 失敗の可能性`);
+  }
+  const aspect = natW / natH;
   let outW: number;
   let outH: number;
   if (aspect >= 1) {
-    outW = Math.min(maxEdge, img.width);
+    outW = Math.min(maxEdge, natW);
     outH = Math.round(outW / aspect);
   } else {
-    outH = Math.min(maxEdge, img.height);
+    outH = Math.min(maxEdge, natH);
     outW = Math.round(outH * aspect);
+  }
+  if (outW < 1 || outH < 1) {
+    throw new Error(`preview: 計算後サイズが無効 (${outW}x${outH})`);
   }
   const canvas = document.createElement('canvas');
   canvas.width = outW;
@@ -136,7 +154,16 @@ export async function makeWebPreviewDataUrl(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'medium'; // preview なので medium で十分
   ctx.drawImage(img, 0, 0, outW, outH);
-  return canvas.toDataURL('image/jpeg', 0.8);
+  const out = canvas.toDataURL('image/jpeg', 0.8);
+  // ★ toDataURL 無音失敗ガード: WebView Canvas memory 不足や tainted canvas で
+  //   'data:,' / 極端に短い data URL が返る事故を検出する.
+  //   有効な JPEG data URL は base64 でほぼ確実に 200 文字以上.
+  if (!out || !out.startsWith('data:image/') || out.length < 200) {
+    throw new Error(
+      `preview: toDataURL が無効な結果を返した (len=${out?.length ?? 0}, head="${out?.slice(0, 32) ?? ''}")`,
+    );
+  }
+  return out;
 }
 
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
