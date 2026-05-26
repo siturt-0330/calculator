@@ -123,3 +123,72 @@ export type TrustScoreBreakdown = {
   like_received: number;
   report_received: number;
 };
+
+// ============================================================
+// 友達追加 + 写真アルバム (migration 0051 / 0052)
+// ------------------------------------------------------------
+// docs/MYPAGE_ALBUMS_SPEC.md § 3 を反映。
+// - friendships: 互恵承認制 (pending → accepted)
+// - friend_invites: 招待リンク (検索なし運用)
+// - albums / album_photos: photo 単位 + album 単位 共有
+// ============================================================
+
+export type FriendshipStatus = 'pending' | 'accepted' | 'blocked';
+
+export interface Friendship {
+  id: string;
+  requester_id: string;
+  recipient_id: string;
+  status: FriendshipStatus;
+  created_at: string;
+  accepted_at?: string | null;
+  // join 時に付加: 相手 (= 自分でない方) の profile
+  friend_profile?: {
+    id: string;
+    nickname: string | null;
+    avatar_url: string | null;
+    avatar_emoji: string | null;
+    bio: string | null;
+  };
+}
+
+export interface FriendInvite {
+  code: string;
+  created_by: string;
+  used_by?: string | null;
+  created_at: string;
+  expires_at: string;
+  used_at?: string | null;
+}
+
+export type PhotoVisibility = 'private' | 'shared';
+
+export interface Album {
+  id: string;
+  owner_id: string;
+  title: string;
+  description?: string | null;
+  cover_photo_id?: string | null;
+  cover_url?: string | null;  // join 時に付加 (album_photos から)
+  visibility: PhotoVisibility;
+  shared_with_user_ids: string[];
+  photo_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AlbumPhoto {
+  id: string;
+  owner_id: string;
+  album_id?: string | null;
+  image_url: string;
+  caption?: string | null;
+  visibility: PhotoVisibility;
+  shared_with_user_ids: string[];
+  is_hidden: boolean;
+  width?: number | null;
+  height?: number | null;
+  blurhash?: string | null;
+  position: number;
+  created_at: string;
+}

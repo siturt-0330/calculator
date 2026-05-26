@@ -6,9 +6,11 @@ import { useQuery } from '@tanstack/react-query';
 import type { LucideIcon } from 'lucide-react-native';
 import { useAuthStore } from '../../stores/authStore';
 import { useNotifications } from '../../hooks/useNotifications';
+import { useMyFriends } from '../../hooks/useFriends';
 import { supabase } from '../../lib/supabase';
 import { fetchMyCommunities, type Community } from '../../lib/api/communities';
 import { fetchMyOfficialCommunities } from '../../lib/api/officialCommunities';
+import { fetchMyPhotos } from '../../lib/api/albums';
 import { sanitizeUrl } from '../../lib/sanitize';
 import { computeTrustBreakdown } from '../../lib/trust/score';
 import { Avatar } from '../../components/ui/Avatar';
@@ -16,11 +18,15 @@ import { PressableScale } from '../../components/ui/PressableScale';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { NotificationBadge } from '../../components/ui/NotificationBadge';
 import { MypageSkeleton } from '../../components/ui/Skeleton';
+import { SegmentedControl } from '../../components/ui/SegmentedControl';
+import { AlbumPhotoGrid } from '../../components/mypage/AlbumPhotoGrid';
+import { EmptyAlbums } from '../../components/mypage/EmptyAlbums';
 import { Icon } from '../../constants/icons';
 import { C, R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { TABBAR } from '../../design/tabbar';
 import { OBSIDIAN_AVAILABLE } from '../../lib/obsidian';
+import type { AlbumPhoto } from '../../types/models';
 
 type MypageStats = {
   post_count: number;
@@ -31,7 +37,10 @@ type MypageStats = {
   nickname: string | null;
   avatar_emoji: string | null;
   avatar_url: string | null;
+  bio: string | null;
 };
+
+type AlbumScope = 'mine' | 'shared' | 'all';
 
 export default function MypageScreen() {
   const insets = useSafeAreaInsets();
@@ -42,6 +51,7 @@ export default function MypageScreen() {
   const signOut = useAuthStore((s) => s.signOut);
   const { unreadCount } = useNotifications();
   const [logoutOpen, setLogoutOpen] = useState(false);
+  const [albumScope, setAlbumScope] = useState<AlbumScope>('all');
 
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['mypage-stats', user?.id],
@@ -49,7 +59,7 @@ export default function MypageScreen() {
       if (!user) return null;
       const { data } = await supabase
         .from('profiles')
-        .select('post_count, like_received_count, comment_count, concern_received_count, created_at, nickname, avatar_emoji, avatar_url')
+        .select('post_count, like_received_count, comment_count, concern_received_count, created_at, nickname, avatar_emoji, avatar_url, bio')
         .eq('id', user.id)
         .single();
       return data as MypageStats | null;
@@ -96,6 +106,22 @@ export default function MypageScreen() {
     staleTime: 60_000,
   });
 
+  // 友達一覧 — count を Hero アクション boxes の badge に出す
+  // spec § 5 (hooks/useFriends.ts) — useMyFriends() は accepted のみ返す
+  const { friends } = useMyFriends();
+  const friendCount = friends.length;
+
+  // アルバム/写真一覧 — segmented control の scope に応じて切替
+  // spec § 4.2 (lib/api/albums.ts) — fetchMyPhotos(scope) は owner=self 視点で
+  // visibility で絞った AlbumPhoto[] を返す。
+  // queryKey は M2 (hooks/useAlbums.ts) と一貫させるため ['album-photos', scope, userId]。
+  const { data: photos = [], isLoading: photosLoading } = useQuery<AlbumPhoto[]>({
+    queryKey: ['album-photos', albumScope, user?.id ?? 'anon'],
+    queryFn: () => fetchMyPhotos(albumScope),
+    enabled: !!user,
+    staleTime: 30_000,
+  });
+
   const accountAge = user?.created_at
     ? Math.floor((Date.now() - new Date(user.created_at).getTime()) / (1000 * 60 * 60 * 24))
     : 0;
@@ -116,6 +142,8 @@ export default function MypageScreen() {
       </View>
     );
   }
+
+  const bio = stats?.bio?.trim();
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -147,7 +175,7 @@ export default function MypageScreen() {
           />
         </View>
 
-        {/* ───────── ヒーロー: 大きなアバター + 名前 ───────── */}
+        {/* ───────── ヒーロー: 大きなアバター + 名前 + 自慢集 (bio) ───────── */}
         <View style={{ alignItems: 'center', paddingTop: SP['4'], paddingHorizontal: SP['4'], gap: SP['3'] }}>
           <Avatar
             size={96}
@@ -163,22 +191,31 @@ export default function MypageScreen() {
               匿名 · {accountAge}日目
             </Text>
           </View>
-          <PressableScale
-            onPress={() => router.push('/settings/profile-edit' as never)}
-            haptic="tap"
+
+          {/* 自慢集 (bio) — タップで profile-edit へ */}
+          <BioBlock bio={bio} onPress={() => router.push('/settings/profile-edit' as never)} />
+
+          {/* アクション 2 ボタン: プロフィール編集 / 友達追加 */}
+          <View
             style={{
+              flexDirection: 'row',
+              gap: SP['2'],
+              alignSelf: 'stretch',
               marginTop: SP['1'],
-              paddingHorizontal: SP['4'],
-              paddingVertical: SP['2'],
-              borderRadius: R.full,
-              borderWidth: 1,
-              borderColor: C.border2,
-              // 控えめなインタラクションだが micro-interaction で「押せる」感を強化
-              backgroundColor: C.bg2,
             }}
           >
-            <Text style={[T.smallM, { color: C.text2, letterSpacing: 0.3 }]}>プロフィールを編集</Text>
-          </PressableScale>
+            <HeroAction
+              icon={Icon.edit}
+              label="プロフィール編集"
+              onPress={() => router.push('/settings/profile-edit' as never)}
+            />
+            <HeroAction
+              icon={Icon.friends}
+              label="友達追加"
+              badge={friendCount > 0 ? friendCount : undefined}
+              onPress={() => router.push('/mypage/friends' as never)}
+            />
+          </View>
         </View>
 
         {/* ───────── KPI: 3 つの大きな数字カード ───────── */}
@@ -216,6 +253,15 @@ export default function MypageScreen() {
             onPress={() => router.push('/mypage/calendar' as never)}
           />
         </View>
+
+        {/* ───────── アルバム: 3 タブ (mine / shared / all) ───────── */}
+        <AlbumsSection
+          scope={albumScope}
+          onScopeChange={setAlbumScope}
+          photos={photos}
+          isLoading={photosLoading}
+          onPhotoPress={(id) => router.push(`/mypage/photo/${id}` as never)}
+        />
 
         {/* ───────── セクション: マイコミュニティ ───────── */}
         <MyCommunitiesSection communities={myCommunities} />
@@ -329,6 +375,28 @@ export default function MypageScreen() {
         </PressableScale>
       </ScrollView>
 
+      {/* ───────── FAB: 写真追加 (右下、TabBar の上) ───────── */}
+      <PressableScale
+        onPress={() => router.push('/mypage/photo/add' as never)}
+        haptic="confirm"
+        accessibilityLabel="写真を追加"
+        style={{
+          position: 'absolute',
+          right: SP['4'],
+          bottom: insets.bottom + TABBAR.height + SP['4'],
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          backgroundColor: C.accent,
+          alignItems: 'center',
+          justifyContent: 'center',
+          ...SHADOW.accentGlow,
+          zIndex: 1000,
+        }}
+      >
+        <Icon.plus size={26} color="#fff" strokeWidth={2.6} />
+      </PressableScale>
+
       <ConfirmDialog
         visible={logoutOpen}
         title="ログアウトしますか？"
@@ -373,6 +441,98 @@ function IconButton({
     >
       <I size={22} color={C.text} strokeWidth={2.2} />
       {badge !== undefined && <NotificationBadge count={badge} top={4} right={4} />}
+    </PressableScale>
+  );
+}
+
+// 自慢集 (bio) — タップ可能。空なら placeholder を出す
+function BioBlock({ bio, onPress }: { bio: string | undefined; onPress: () => void }) {
+  const isEmpty = !bio || bio.length === 0;
+  return (
+    <PressableScale
+      onPress={onPress}
+      haptic="tap"
+      scaleValue={0.99}
+      style={{
+        alignSelf: 'stretch',
+        marginTop: SP['1'],
+        paddingHorizontal: SP['4'],
+        paddingVertical: SP['3'],
+        borderRadius: R.lg,
+        backgroundColor: C.bg2,
+        borderWidth: 1,
+        borderColor: isEmpty ? C.border : C.border,
+        // 空のときは破線で「ここを埋めて」感を出す
+        borderStyle: isEmpty ? 'dashed' : 'solid',
+        alignItems: 'center',
+      }}
+    >
+      {isEmpty ? (
+        <Text style={[T.small, { color: C.text3, textAlign: 'center' }]}>
+          ✏️ 自慢集を書く
+        </Text>
+      ) : (
+        <Text
+          style={[T.body, { color: C.text2, textAlign: 'center', lineHeight: 22 }]}
+          numberOfLines={3}
+        >
+          {bio}
+        </Text>
+      )}
+    </PressableScale>
+  );
+}
+
+// Hero セクションのアクションボタン (横並び 2 つ)
+function HeroAction({
+  icon: I,
+  label,
+  onPress,
+  badge,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onPress: () => void;
+  badge?: number;
+}) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      haptic="tap"
+      style={{
+        flex: 1,
+        backgroundColor: C.bg2,
+        borderRadius: R.lg,
+        borderWidth: 1,
+        borderColor: C.border,
+        paddingVertical: SP['3'],
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        position: 'relative',
+      }}
+    >
+      <I size={16} color={C.text2} strokeWidth={2.4} />
+      <Text style={[T.smallB, { color: C.text }]}>{label}</Text>
+      {badge !== undefined && badge > 0 && (
+        <View
+          style={{
+            minWidth: 20,
+            paddingHorizontal: 6,
+            paddingVertical: 1,
+            borderRadius: R.full,
+            backgroundColor: C.accent,
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginLeft: 2,
+          }}
+        >
+          <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>
+            {badge > 99 ? '99+' : badge}
+          </Text>
+        </View>
+      )}
     </PressableScale>
   );
 }
@@ -445,6 +605,80 @@ function PrimaryAction({
       <I size={16} color={iconColor} strokeWidth={2.4} />
       <Text style={[T.smallB, { color: textColor }]}>{label}</Text>
     </PressableScale>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────
+// アルバム 3 タブ section
+// ───────────────────────────────────────────────────────────────
+function AlbumsSection({
+  scope,
+  onScopeChange,
+  photos,
+  isLoading,
+  onPhotoPress,
+}: {
+  scope: AlbumScope;
+  onScopeChange: (s: AlbumScope) => void;
+  photos: AlbumPhoto[];
+  isLoading: boolean;
+  onPhotoPress: (id: string) => void;
+}) {
+  return (
+    <View style={{ marginTop: SP['6'] }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: SP['4'],
+          paddingBottom: SP['2'],
+          gap: SP['2'],
+        }}
+      >
+        <Text
+          style={[
+            T.smallB,
+            {
+              color: C.text3,
+              letterSpacing: 1.2,
+              fontSize: 11,
+              flex: 1,
+            },
+          ]}
+        >
+          {'アルバム'.toUpperCase()}
+        </Text>
+        <Text style={[T.caption, { color: C.text4 }]}>
+          {photos.length > 0 ? `${photos.length}枚` : ''}
+        </Text>
+      </View>
+
+      {/* SegmentedControl: mine / shared / all */}
+      <View style={{ marginHorizontal: SP['4'] }}>
+        <SegmentedControl<AlbumScope>
+          options={[
+            { value: 'all', label: 'すべて' },
+            { value: 'mine', label: '自分のみ' },
+            { value: 'shared', label: '共有中' },
+          ]}
+          value={scope}
+          onChange={onScopeChange}
+        />
+      </View>
+
+      {/* photo grid or empty */}
+      <View style={{ marginTop: SP['3'], marginHorizontal: SP['4'] }}>
+        {photos.length === 0 && !isLoading ? (
+          <EmptyAlbums scope={scope} />
+        ) : (
+          <AlbumPhotoGrid
+            photos={photos}
+            onPhotoPress={onPhotoPress}
+            isLoading={isLoading}
+          />
+        )}
+      </View>
+    </View>
   );
 }
 
