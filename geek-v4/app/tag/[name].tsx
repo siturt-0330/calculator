@@ -227,6 +227,11 @@ export default function TagDetailScreen() {
           data={posts}
           keyExtractor={(item) => item.id}
           renderItem={renderPost}
+          // ★ extraData: useReactionToggle が data 配列を直接書き換えない経路
+          //   (legacy ['reactions'] cache のみ更新) でも FlashList が visible
+          //   item を再 render するように reactionsByPost を渡す。
+          //   詳細は feed.tsx / community/index.tsx の同位置コメント参照。
+          extraData={reactionsByPost}
           estimatedItemSize={300}
           // スワイプフリック時の慣性減速を速める (iOS デフォルトの "normal" は
           // ややダラダラ滑るので、リスト系では "fast" のほうがキビキビ感が出る)。
