@@ -1,18 +1,20 @@
 // ============================================================
-// app/mypage/photo/[id].tsx — 写真詳細 + 編集
+// app/mypage/photo/[id].tsx — 写真詳細 + 編集 (UI Polish Phase 2)
 // ============================================================
-// spec: docs/MYPAGE_ALBUMS_SPEC.md § 6
+// spec: docs/UI_POLISH_SPEC.md § 4 + docs/MYPAGE_ALBUMS_SPEC.md § 6
+//
+// 構成:
 // - TopBar (title=「写真」 + BackButton)
-// - フル画面 image (aspect ratio 維持)
-// - 下にフォーム:
-//   - caption Input (multiline, 編集可能)
-//   - アルバム名 (タップで変更は Phase 2 — 現状は表示のみ)
-//   - visibility SegmentedControl (private | shared)
-//   - shared 時: 共有相手選択 (friends checkbox 形式)
-//   - 「非表示にする」 toggle
-// - 「保存」 Button + 「削除」 destructive Button
-// - 保存: useUpdatePhoto({ caption, visibility, shared_with_user_ids, is_hidden })
-// - 削除: ConfirmDialog → useDeletePhoto → router.back()
+// - 上部に full-width 画像 (aspectRatio 維持) — max height: min(560, width * 1.4)
+//   - mount 時に Reanimated useSharedValue で opacity 0 → 1 (300ms) fade-in
+// - form 部分は GlassCard でラップ:
+//   - caption Input (multiline, font-size 16/line-height 24)
+//   - アルバム名表示 (Phase 1: 表示のみ)
+//   - visibility SegmentedControl (private / shared) — container を GlassCard で巻く
+//   - shared 時: 共有相手選択を chip grid (Avatar + nickname の card 横並び flex wrap)
+//   - 非表示 toggle
+//   - 保存 button = PolishedButton variant=gradient gradient=primary
+//   - 削除 button = PolishedButton variant=gradient destructive
 // ============================================================
 
 import { useEffect, useMemo, useState } from 'react';
@@ -25,6 +27,12 @@ import {
   ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -32,12 +40,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TopBar } from '../../../components/nav/TopBar';
 import { BackButton } from '../../../components/nav/BackButton';
 import { Input } from '../../../components/ui/Input';
-import { Button } from '../../../components/ui/Button';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { Toggle } from '../../../components/ui/Toggle';
 import { SegmentedControl } from '../../../components/ui/SegmentedControl';
 import { Avatar } from '../../../components/ui/Avatar';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
+import { GlassCard } from '../../../components/ui/GlassCard';
+import { PolishedButton } from '../../../components/ui/PolishedButton';
 import { fetchPhoto, fetchAlbum } from '../../../lib/api/albums';
 import { useUpdatePhoto, useDeletePhoto } from '../../../hooks/useAlbums';
 import { useMyFriends } from '../../../hooks/useFriends';
@@ -48,8 +57,6 @@ import { T } from '../../../design/typography';
 import { sanitizeUrl } from '../../../lib/sanitize';
 import type { PhotoVisibility } from '../../../types/models';
 
-// fetchPhoto は lib/api/albums から直接 import — useAlbums には個別 photo の
-// hook が無いので、ここで useQuery(['photo', id], fetchPhoto) を組む。
 export default function PhotoDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -87,7 +94,13 @@ export default function PhotoDetailScreen() {
   const [hydrated, setHydrated] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
-  // photo が取得できたら 1 度だけフォーム初期化
+  // 画像 fade-in animation (mount 時に 0 → 1, 300ms)
+  const imgOpacity = useSharedValue(0);
+  const imgAnimStyle = useAnimatedStyle(() => ({
+    opacity: imgOpacity.value,
+  }));
+
+  // photo が取得できたら 1 度だけフォーム初期化 + image fade を発火
   useEffect(() => {
     if (!hydrated && photoQuery.data) {
       const p = photoQuery.data;
@@ -96,8 +109,13 @@ export default function PhotoDetailScreen() {
       setSharedWith(p.shared_with_user_ids ?? []);
       setIsHidden(p.is_hidden);
       setHydrated(true);
+      // image を fade-in
+      imgOpacity.value = withTiming(1, {
+        duration: 300,
+        easing: Easing.bezier(0.22, 1, 0.36, 1),
+      });
     }
-  }, [hydrated, photoQuery.data]);
+  }, [hydrated, photoQuery.data, imgOpacity]);
 
   // 変更検知
   const hasChanges = useMemo(() => {
@@ -250,39 +268,42 @@ export default function PhotoDetailScreen() {
         }}
         keyboardShouldPersistTaps="handled"
       >
-        {/* 画像本体 */}
+        {/* ===== 画像本体 (fade-in) ===== */}
         <View
           style={{
             width: imageWidth,
             height: imageHeight,
             backgroundColor: '#000',
+            overflow: 'hidden',
           }}
         >
-          {safeUrl ? (
-            <Image
-              source={{ uri: safeUrl }}
-              style={{ width: '100%', height: '100%' }}
-              contentFit="contain"
-              cachePolicy="memory-disk"
-              transition={180}
-            />
-          ) : (
-            <View
-              style={{
-                flex: 1,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Icon.image size={48} color={C.text3} strokeWidth={1.6} />
-            </View>
-          )}
+          <Animated.View style={[{ width: '100%', height: '100%' }, imgAnimStyle]}>
+            {safeUrl ? (
+              <Image
+                source={{ uri: safeUrl }}
+                style={{ width: '100%', height: '100%' }}
+                contentFit="contain"
+                cachePolicy="memory-disk"
+                transition={180}
+              />
+            ) : (
+              <View
+                style={{
+                  flex: 1,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Icon.image size={48} color={C.text3} strokeWidth={1.6} />
+              </View>
+            )}
+          </Animated.View>
         </View>
 
-        {/* フォームセクション */}
-        <View style={{ padding: SP['4'], gap: SP['5'] }}>
+        {/* ===== フォームセクション (GlassCard 内) ===== */}
+        <View style={{ padding: SP['4'], gap: SP['4'] }}>
           {/* キャプション */}
-          <View style={{ gap: SP['2'] }}>
+          <GlassCard style={{ gap: SP['2'] }}>
             <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
               <Text style={[T.smallB, { color: C.text2 }]}>キャプション</Text>
               <View style={{ flex: 1 }} />
@@ -303,11 +324,13 @@ export default function PhotoDetailScreen() {
               numberOfLines={3}
               maxLength={500}
               textAlignVertical="top"
+              // 上品な typography: 16/24
+              style={{ fontSize: 16, lineHeight: 24 }}
             />
-          </View>
+          </GlassCard>
 
           {/* アルバム名 (Phase 1: 表示のみ) */}
-          <View style={{ gap: SP['2'] }}>
+          <GlassCard style={{ gap: SP['2'] }}>
             <Text style={[T.smallB, { color: C.text2 }]}>アルバム</Text>
             <View
               style={{
@@ -316,10 +339,10 @@ export default function PhotoDetailScreen() {
                 gap: SP['2'],
                 paddingHorizontal: SP['3'],
                 paddingVertical: SP['3'],
-                backgroundColor: C.bg2,
+                backgroundColor: 'rgba(255,255,255,0.04)',
                 borderRadius: R.md,
                 borderWidth: 1,
-                borderColor: C.border,
+                borderColor: 'rgba(255,255,255,0.08)',
               }}
             >
               <Icon.image size={18} color={C.text3} strokeWidth={2} />
@@ -329,10 +352,10 @@ export default function PhotoDetailScreen() {
                   : '単独写真 (アルバムなし)'}
               </Text>
             </View>
-          </View>
+          </GlassCard>
 
-          {/* visibility */}
-          <View style={{ gap: SP['2'] }}>
+          {/* visibility — SegmentedControl を GlassCard で巻く */}
+          <GlassCard style={{ gap: SP['2'] }}>
             <Text style={[T.smallB, { color: C.text2 }]}>公開範囲</Text>
             <SegmentedControl<PhotoVisibility>
               options={[
@@ -342,20 +365,20 @@ export default function PhotoDetailScreen() {
               value={visibility}
               onChange={setVisibility}
             />
-          </View>
+          </GlassCard>
 
-          {/* 共有相手選択 (shared のみ) */}
+          {/* 共有相手選択 (shared のみ) — chip 風 grid */}
           {visibility === 'shared' && (
-            <View style={{ gap: SP['2'] }}>
+            <GlassCard style={{ gap: SP['2'] }}>
               <Text style={[T.smallB, { color: C.text2 }]}>共有する友達</Text>
               {friends.length === 0 ? (
                 <View
                   style={{
                     padding: SP['4'],
-                    backgroundColor: C.bg2,
+                    backgroundColor: 'rgba(255,255,255,0.04)',
                     borderRadius: R.md,
                     borderWidth: 1,
-                    borderColor: C.border,
+                    borderColor: 'rgba(255,255,255,0.08)',
                     alignItems: 'center',
                     gap: SP['1'],
                   }}
@@ -370,64 +393,24 @@ export default function PhotoDetailScreen() {
               ) : (
                 <View
                   style={{
-                    backgroundColor: C.bg2,
-                    borderRadius: R.md,
-                    borderWidth: 1,
-                    borderColor: C.border,
-                    overflow: 'hidden',
+                    flexDirection: 'row',
+                    flexWrap: 'wrap',
+                    gap: SP['2'],
                   }}
                 >
-                  {friends.map((f, idx) => {
+                  {friends.map((f) => {
                     const uid = f.friend_profile.id;
                     const selected = sharedWith.includes(uid);
                     const name = f.friend_profile.nickname ?? '名無しさん';
                     return (
-                      <PressableScale
+                      <FriendChip
                         key={f.id}
+                        name={name}
+                        avatarUri={f.friend_profile.avatar_url ?? undefined}
+                        avatarEmoji={f.friend_profile.avatar_emoji ?? undefined}
+                        selected={selected}
                         onPress={() => toggleSharedUser(uid)}
-                        haptic="tap"
-                        scaleValue={0.99}
-                        accessibilityLabel={`${name} を共有相手に${selected ? '解除' : '追加'}`}
-                        style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          gap: SP['3'],
-                          paddingHorizontal: SP['3'],
-                          paddingVertical: SP['3'],
-                          backgroundColor: selected ? C.accent + '15' : 'transparent',
-                          borderTopWidth: idx === 0 ? 0 : 1,
-                          borderTopColor: C.divider,
-                        }}
-                      >
-                        <Avatar
-                          size={32}
-                          uri={f.friend_profile.avatar_url ?? undefined}
-                          name={name}
-                          emoji={f.friend_profile.avatar_emoji ?? undefined}
-                        />
-                        <Text
-                          style={[T.bodyMd, { color: C.text, flex: 1 }]}
-                          numberOfLines={1}
-                        >
-                          {name}
-                        </Text>
-                        <View
-                          style={{
-                            width: 22,
-                            height: 22,
-                            borderRadius: 11,
-                            borderWidth: selected ? 0 : 1.5,
-                            borderColor: C.border2,
-                            backgroundColor: selected ? C.accent : 'transparent',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                          }}
-                        >
-                          {selected && (
-                            <Icon.ok size={14} color="#fff" strokeWidth={2.8} />
-                          )}
-                        </View>
-                      </PressableScale>
+                      />
                     );
                   })}
                 </View>
@@ -437,39 +420,37 @@ export default function PhotoDetailScreen() {
                   選択中: {sharedWith.length} / {friends.length} 人
                 </Text>
               )}
-            </View>
+            </GlassCard>
           )}
 
           {/* 非表示トグル */}
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: SP['3'],
-              padding: SP['4'],
-              borderRadius: R.lg,
-              backgroundColor: C.bg3,
-              borderWidth: 1,
-              borderColor: C.border,
-            }}
-          >
-            <Text style={{ fontSize: 18 }}>{isHidden ? '🚫' : '👁️'}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={[T.bodyB, { color: C.text }]}>非表示にする</Text>
-              <Text style={[T.small, { color: C.text3 }]}>
-                {isHidden
-                  ? 'この写真は一覧から隠れます (自分だけ確認できます)'
-                  : '通常通り一覧に表示されます'}
-              </Text>
+          <GlassCard>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: SP['3'],
+              }}
+            >
+              <Text style={{ fontSize: 18 }}>{isHidden ? '🚫' : '👁️'}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[T.bodyB, { color: C.text }]}>非表示にする</Text>
+                <Text style={[T.small, { color: C.text3 }]}>
+                  {isHidden
+                    ? 'この写真は一覧から隠れます (自分だけ確認できます)'
+                    : '通常通り一覧に表示されます'}
+                </Text>
+              </View>
+              <Toggle value={isHidden} onChange={setIsHidden} />
             </View>
-            <Toggle value={isHidden} onChange={setIsHidden} />
-          </View>
+          </GlassCard>
 
-          {/* 保存ボタン */}
-          <Button
+          {/* 保存 / 削除 (PolishedButton) */}
+          <PolishedButton
             label={updatePhoto.isPending ? '保存中…' : '保存'}
             onPress={handleSave}
-            variant="primary"
+            variant="gradient"
+            gradient="primary"
             size="lg"
             fullWidth
             loading={updatePhoto.isPending}
@@ -477,16 +458,16 @@ export default function PhotoDetailScreen() {
             haptic="confirm"
           />
 
-          {/* 削除ボタン */}
-          <Button
+          <PolishedButton
             label="この写真を削除"
             onPress={() => setConfirmDeleteOpen(true)}
-            variant="danger"
+            variant="gradient"
+            destructive
             size="md"
             fullWidth
             disabled={isSubmitting}
             haptic="warn"
-            icon={Icon.trash}
+            icon={<Icon.trash size={18} color="#fff" strokeWidth={2.4} />}
           />
         </View>
       </ScrollView>
@@ -503,5 +484,66 @@ export default function PhotoDetailScreen() {
         onCancel={() => setConfirmDeleteOpen(false)}
       />
     </KeyboardAvoidingView>
+  );
+}
+
+// ============================================================
+// FriendChip — 共有相手選択の chip 風 card (Avatar + nickname)
+// ============================================================
+function FriendChip({
+  name,
+  avatarUri,
+  avatarEmoji,
+  selected,
+  onPress,
+}: {
+  name: string;
+  avatarUri?: string;
+  avatarEmoji?: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      haptic="select"
+      scaleValue={0.95}
+      accessibilityLabel={`${name} を共有相手に${selected ? '解除' : '追加'}`}
+      accessibilityState={{ selected }}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SP['2'],
+        paddingHorizontal: SP['2'] + 2,
+        paddingVertical: SP['2'],
+        borderRadius: R.full,
+        backgroundColor: selected ? C.accentBg : 'transparent',
+        borderWidth: selected ? 2 : 1,
+        borderColor: selected ? C.accent : C.border,
+      }}
+    >
+      <Avatar
+        size={28}
+        uri={avatarUri}
+        name={name}
+        emoji={avatarEmoji}
+      />
+      <Text
+        style={[
+          T.smallM,
+          {
+            color: selected ? C.text : C.text2,
+            fontWeight: selected ? '700' : '600',
+            maxWidth: 120,
+          },
+        ]}
+        numberOfLines={1}
+      >
+        {name}
+      </Text>
+      {selected && (
+        <Icon.ok size={14} color={C.accent} strokeWidth={2.8} />
+      )}
+    </PressableScale>
   );
 }

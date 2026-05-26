@@ -62,6 +62,19 @@ export const GRAD = {
   trust:       [C.trustLow, C.trustMid, C.trustHi] as const,
   storyRing:   [C.accent, C.pink, C.amber] as const,
   goldBadge:   ['#F5C842', '#E5A823'] as const,
+  // ----- UI Polish (Phase 2) — keep above legacy keys intact -----
+  // 紫 → 桃 (アクション・hero 系) — Geek の核となるアクセント
+  primary:     ['#7C6AF7', '#B47AF7', '#F87AB4'] as const,
+  // 紫 → 藍 (落ち着いた hero 背景)
+  primarySoft: ['#7C6AF7', '#6B7AF7'] as const,
+  // ピンク → オレンジ (CTA、強調)
+  warm:        ['#F87AB4', '#FBAC72'] as const,
+  // 緑系 (success / 成功時)
+  success:     ['#52D49B', '#52C4D4'] as const,
+  // ニュートラル glass overlay (背景に重ねる)
+  glass:       ['rgba(124,106,247,0.15)', 'rgba(180,122,247,0.08)', 'rgba(0,0,0,0)'] as const,
+  // 赤グラデ — destructive な action 用 (PolishedButton destructive)
+  destructive: ['#F87A7A', '#F86B5A'] as const,
 } as const;
 
 export const SP = {
@@ -143,5 +156,36 @@ export const SHADOW = {
     shadowOpacity: 0.32,
     shadowRadius: 14,
     elevation: 4,
+  },
+  // ----- UI Polish (Phase 2) — keep above legacy keys intact -----
+  none: {},
+  xs: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  sm: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  md: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  // accent shadow (色付き影 — 紫 glow) — PolishedButton / GradientCard 用
+  glow: {
+    shadowColor: '#7C6AF7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 6,
   },
 } as const;
