@@ -41,7 +41,7 @@ async function fetchMyPosts(userId: string): Promise<Item[]> {
 export default function MyPosts() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user } = useAuthStore();
+  const user = useAuthStore((s) => s.user);
   const { show } = useToastStore();
   const qc = useQueryClient();
   const [deleteId, setDeleteId] = useState<string | null>(null);
