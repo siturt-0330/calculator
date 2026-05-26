@@ -106,8 +106,8 @@ export default function FeedScreen() {
   // --- RPC 経路: get_feed_page で周辺データを 1 RTT で取得 ---
   // 旧 6 hook (useLikes/useConcerns/useSaves/useReactions/useAddedTags/usePolls)
   // を 1 RPC に統合。失敗 / ENV flag 無効時は legacy hook 群へフォールバック。
-  const { fullPosts, isLoading: rpcLoading, isDisabled: rpcDisabled, isEmpty: rpcEmpty } =
-    useFeedPage(postIds);
+  // rpcLoading / rpcEmpty は使わない (旧 fallback ロジック用) — 上記コメント参照。
+  const { fullPosts, isDisabled: rpcDisabled } = useFeedPage(postIds);
 
   // ★ Realtime 反映 — RPC 経路でも post_reactions / likes / concerns / saves の
   //   変更を購読する。useReactions(legacyIds) の中の subscription は legacyIds=[]
@@ -117,10 +117,19 @@ export default function FeedScreen() {
   // fallback 判定:
   //   - ENV flag で RPC が無効 (= isDisabled)
   //   - RPC は走ったが空集合 (= isEmpty かつ postIds は非空)
-  //     → RPC 未適用 / RLS 全 deny / 全件削除 等の可能性
-  //   いずれかなら legacy hook 群を起動 (postIds を渡す)
-  const useLegacy =
-    rpcDisabled || (!rpcLoading && rpcEmpty && postIds.length > 0);
+  //   - **RPC 起動中も並列で legacy を起動**しておく (2026-05-26 修正)
+  //
+  // 旧版は「RPC が empty 確定後に legacy fetch を起動」だったため、user 視点で:
+  //   - 起動 → posts 表示 (~500ms)
+  //   - RPC 完了して空判明 (~500ms 追加)
+  //   - legacy fetch 起動 (~500ms 追加)
+  //   - リアクション chip ようやく表示
+  // 合計 1.5-2 秒のラグで「テキストスタンプが最初は出ず、別タブから戻ると出る」
+  // (= 戻る頃には全 fetch が完了している) という UX 不具合を産んでいた。
+  // 並列 fire に変えると RPC 成功時に legacy も走るが、各 query は staleTime
+  // 30-60s でキャッシュされ二重 fetch にならない。renderItem 側は full?.reactions
+  // ?? legacy[id] の順なので RPC 結果が優先される。
+  const useLegacy = rpcDisabled || postIds.length > 0;
   const legacyIds = useLegacy ? postIds : EMPTY_LEGACY_IDS;
 
   const { data: legacyMyLikes = EMPTY_BOOL_MAP } = useLikes(legacyIds);
