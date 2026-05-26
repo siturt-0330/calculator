@@ -32,6 +32,15 @@ import * as FileSystem from 'expo-file-system';
 //
 // 引数の crop rect は **rotation 適用後の自然座標系** で渡す
 // (cropper の handleNext で計算されたもの)
+//
+// ★ 「アイコン登録時に真っ黒な画像が upload される」事故対策:
+//   1) iOS Safari / WKWebView (TikTok 等 in-app browser) は HEIC や巨大画像で
+//      <img>.onload を発火させつつ naturalWidth=0 を返すケースがある.
+//      この状態で drawImage しても透明な canvas になり, toDataURL が無音で
+//      'data:,' / 極端に短い文字列を返す → 0byte 相当の JPEG が Supabase に上がる.
+//   2) WebView の Canvas メモリ不足でも drawImage / toDataURL が無音失敗する.
+//   検出して throw すれば caller (image-cropper.tsx handleNext) の catch で
+//   FileReader fallback → 最終的には sourceUri に巻き戻すロジックに繋がる.
 export async function cropImageOnWebCanvas(input: {
   sourceUri: string;
   imageSize: { w: number; h: number };
@@ -58,6 +67,14 @@ export async function cropImageOnWebCanvas(input: {
     el.onerror = () => reject(new Error('Image load failed'));
     el.src = sourceUri;
   });
+
+  // ★ HEIC silent-onload ガード: naturalWidth/Height が 0 でも onload が
+  //   発火する WebView があるので明示的に検出する.
+  const natW = img.naturalWidth || img.width;
+  const natH = img.naturalHeight || img.height;
+  if (!natW || !natH || natW < 1 || natH < 1) {
+    throw new Error(`crop: naturalWidth/Height が無効 (${natW}x${natH}) — HEIC または decode 失敗の可能性`);
+  }
 
   // 2) 回転後の自然サイズ
   const swap = rotation === 90 || rotation === 270;
@@ -94,7 +111,16 @@ export async function cropImageOnWebCanvas(input: {
   octx.drawImage(interCanvas, safeX, safeY, safeW, safeH, 0, 0, outSize, outSize);
 
   // 5) JPEG data URL を生成
-  return outCanvas.toDataURL('image/jpeg', quality);
+  const out = outCanvas.toDataURL('image/jpeg', quality);
+  // ★ toDataURL 無音失敗ガード: WebView Canvas memory 不足や tainted canvas で
+  //   'data:,' / 極端に短い data URL が返る事故を検出する.
+  //   有効な JPEG data URL は base64 でほぼ確実に 200 文字以上.
+  if (!out || !out.startsWith('data:image/') || out.length < 200) {
+    throw new Error(
+      `crop: toDataURL が無効な結果を返した (len=${out?.length ?? 0}, head="${out?.slice(0, 32) ?? ''}")`,
+    );
+  }
+  return out;
 }
 
 // ============================================================
@@ -271,6 +297,12 @@ export async function prepareImageUpload(
       }
       if (bytes.byteLength > maxSizeBytes) {
         throw new Error(`画像が大きすぎます (${Math.round(bytes.byteLength / 1024)}KB / 上限 ${Math.round(maxSizeBytes / 1024)}KB)`);
+      }
+      // ★ 最小サイズ検証: 1x1 透明 / 黒 JPEG (~140byte) が通って Supabase に
+      //   upload されると「アイコンが真っ黒」事故になるので、上限と同じパターンで
+      //   下限も明示的にチェックする.
+      if (bytes.byteLength < 200) {
+        throw new Error(`画像のデータが小さすぎます (${bytes.byteLength}byte) — decode 失敗の可能性があります`);
       }
       // magic byte の二重確認 (data: URL の mime ヘッダ偽装防止)
       const detectedMagic = detectImageTypeFromBytes(bytes.subarray(0, 12));
