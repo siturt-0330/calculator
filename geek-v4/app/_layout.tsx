@@ -390,6 +390,12 @@ export default function RootLayout() {
                   <Stack.Screen name="mypage/saved" />
                   <Stack.Screen name="mypage/liked" />
                   <Stack.Screen name="mypage/posts" />
+                  <Stack.Screen name="mypage/friends/index" />
+                  <Stack.Screen name="mypage/friends/invite" />
+                  <Stack.Screen name="mypage/album/[id]" />
+                  <Stack.Screen name="mypage/photo/[id]" />
+                  <Stack.Screen name="mypage/photo/add" />
+                  <Stack.Screen name="invite/[code]" />
                   {/* community/* routes live inside (tabs)/community/ so the
                       bottom tab bar stays visible on detail / sub-routes. */}
                   {/* 隠し開発者 admin panel — /admin URL 直打ちのみで到達。
