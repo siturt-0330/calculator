@@ -31,15 +31,35 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { Icon } from '../constants/icons';
 import { C, SP } from '../design/tokens';
 import { PressableScale } from '../components/ui/PressableScale';
-import { resolveCropper } from '../lib/imageCropper';
+import { resolveCropper, consumePendingSource } from '../lib/imageCropper';
 import { cropImageOnWebCanvas, makeWebPreviewDataUrl } from '../lib/image';
 
 type Rotation = 0 | 90 | 180 | 270;
 
 export default function ImageCropperScreen() {
-  const params = useLocalSearchParams<{ uri?: string | string[] }>();
-  const sourceUri =
+  // 旧仕様: params.uri に sourceUri を直接乗せていた (blob:/data: URL).
+  // 新仕様: params.id だけ受け取り, lib/imageCropper.ts の module-level Map から
+  // sourceUri を取得する. 4K HEIC を base64 化した 13MB+ の data URL を URL 長制限
+  // (iOS Safari ~80K chars) で truncate する事故 (cropper が「写真選んでも何も起きない」)
+  // を防ぐため. uri 互換は後方互換用に残す (古い caller / deeplink が事故らないように).
+  const params = useLocalSearchParams<{ id?: string | string[]; uri?: string | string[] }>();
+  const paramId =
+    typeof params.id === 'string' ? params.id : Array.isArray(params.id) ? params.id[0] ?? '' : '';
+  const legacyUri =
     typeof params.uri === 'string' ? params.uri : Array.isArray(params.uri) ? params.uri[0] ?? '' : '';
+  // useMemo で同一の id に対して同一の sourceUri を返す.
+  // (consumePendingSource 自体は副作用なしの read なので毎 render 呼んでも安全だが,
+  //  log scope の意味で useMemo に閉じ込めておく.)
+  const sourceUri = useMemo(() => {
+    if (paramId) {
+      const fromMap = consumePendingSource(paramId);
+      if (!fromMap) {
+        console.warn('[image-cropper] paramId が Map に無い — refresh で in-memory が消えた可能性:', paramId);
+      }
+      return fromMap ?? '';
+    }
+    return legacyUri;
+  }, [paramId, legacyUri]);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: screenW, height: screenH } = Dimensions.get('window');
@@ -91,7 +111,20 @@ export default function ImageCropperScreen() {
     Image.getSize(
       sourceUri,
       (w, h) => {
-        if (alive) setImageSize({ w, h });
+        if (!alive) return;
+        // ★ HEIC silent-decode ガード: iOS Safari / WKWebView (TikTok 等 in-app)
+        //   は HEIC で onload を発火させつつ naturalWidth=0 を返す挙動を持つ.
+        //   その状態で setImageSize({w:0, h:0}) すると fitDims が NaN 化 → Image が
+        //   描画されず真っ黒画面のまま操作不能 (onError も発火しないので PR #122 の
+        //   Image onError revert が効かない) という事故になる. 明示的に検出してエラー表示.
+        if (!w || !h || w < 1 || h < 1) {
+          console.warn('[image-cropper] getSize returned invalid dims:', w, h, '— treating as decode failure');
+          // imageSize は null のまま (= ActivityIndicator も非表示にする条件にできる)
+          // 「画像を表示できません」 overlay を出してユーザに別画像を選んでもらう
+          setRenderError(true);
+          return;
+        }
+        setImageSize({ w, h });
       },
       (err) => {
         console.warn('[image-cropper] getSize failed:', err);
@@ -413,11 +446,16 @@ export default function ImageCropperScreen() {
                 ]}
                 resizeMode="cover"
               />
+            ) : renderError ? (
+              // H1: getSize が w=0,h=0 で success した場合 (HEIC silent-decode)
+              // imageSize=null のままなので Animated.Image は描画されない. ここでは
+              // ActivityIndicator も出さず, 下の renderError overlay だけ見せる.
+              null
             ) : (
               <ActivityIndicator size="large" color="#fff" />
             )}
             {/* render error 時に明示メッセージを出す — 真っ黒で何も分からない状態を防ぐ */}
-            {renderError && imageSize && (
+            {renderError && (
               <View
                 style={{
                   position: 'absolute',

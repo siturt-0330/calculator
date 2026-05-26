@@ -36,6 +36,7 @@ import {
   uploadCommunityIcon,
 } from '../../../../lib/api/communities';
 import { prepareImageUpload } from '../../../../lib/image';
+import { openCropper } from '../../../../lib/imageCropper';
 import { sanitizeUrl } from '../../../../lib/sanitize';
 import { TABBAR } from '../../../../design/tabbar';
 
@@ -112,18 +113,30 @@ export default function EditCommunityScreen() {
       const r = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: 'images',
         quality: 1,
-        allowsEditing: true,
-        aspect: [1, 1],
+        // Web では allowsEditing/aspect が完全に無視される (expo-image-picker の制約)。
+        // しかも 4K HEIC が ~13MB の base64 data URL で返ってきて Canvas decode に
+        // 失敗して silent に「真っ黒な JPEG」が upload される事故が起きるので、
+        // Web は自前の openCropper (circular crop UI) を挟む。
+        // native (iOS/Android) は OS の crop UI を出す方が UX 自然なので従来通り。
+        allowsEditing: Platform.OS !== 'web',
+        aspect: Platform.OS !== 'web' ? [1, 1] : undefined,
       });
       if (r.canceled || !r.assets[0]) return;
       const asset = r.assets[0];
-      const prepared = await prepareImageUpload(asset.uri, {
+      // Web のみ自前 cropper を挟む。native は allowsEditing で既に square。
+      let croppedUri: string = asset.uri;
+      if (Platform.OS === 'web') {
+        const cropped = await openCropper(asset.uri);
+        if (!cropped) return; // ユーザーが cancel
+        croppedUri = cropped;
+      }
+      const prepared = await prepareImageUpload(croppedUri, {
         maxSizeBytes: 5 * 1024 * 1024,
         maxWidth: 512,
         maxHeight: 512,
         quality: 0.85,
       });
-      setNewIconUri(asset.uri);
+      setNewIconUri(croppedUri);
       setNewIconBlob(prepared.blob);
       setNewIconMime(prepared.mime);
     } catch (e) {

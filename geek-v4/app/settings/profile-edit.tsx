@@ -13,6 +13,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
 import { supabase } from '../../lib/supabase';
 import { prepareImageUpload } from '../../lib/image';
+import { openCropper } from '../../lib/imageCropper';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { Icon } from '../../constants/icons';
@@ -63,15 +64,27 @@ export default function ProfileEditScreen() {
     }
     const r = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: 'images',
-      allowsEditing: true,
-      aspect: [1, 1],
+      // Web では allowsEditing/aspect が完全に無視される (expo-image-picker の制約)。
+      // しかも 4K HEIC が ~13MB の base64 data URL で返ってきて Canvas decode に
+      // 失敗して silent に「真っ黒な JPEG」が upload される事故が起きるので、
+      // Web は自前の openCropper (circular crop UI) を挟む。
+      // native (iOS/Android) は OS の crop UI を出す方が UX 自然なので従来通り。
+      allowsEditing: Platform.OS !== 'web',
+      aspect: Platform.OS !== 'web' ? [1, 1] : undefined,
       quality: 0.8,
     });
     if (r.canceled || !r.assets[0]) return;
     const asset = r.assets[0];
+    // Web のみ自前 cropper を挟む。native は allowsEditing で既に square。
+    let croppedUri: string = asset.uri;
+    if (Platform.OS === 'web') {
+      const cropped = await openCropper(asset.uri);
+      if (!cropped) return; // ユーザーが cancel
+      croppedUri = cropped;
+    }
     setUploading(true);
     try {
-      const prepared = await prepareImageUpload(asset.uri, { maxSizeBytes: 5 * 1024 * 1024 });
+      const prepared = await prepareImageUpload(croppedUri, { maxSizeBytes: 5 * 1024 * 1024 });
       const path = `${user.id}/${Date.now()}.${prepared.ext}`;
       const { error: upErr } = await supabase.storage.from('avatars').upload(path, prepared.blob, {
         contentType: prepared.mime,
