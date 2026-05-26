@@ -416,10 +416,19 @@ export default function CommunityScreen() {
         data={feedItems}
         renderItem={renderItem}
         keyExtractor={keyExtractor}
-        estimatedItemSize={380}
+        estimatedItemSize={520}
         drawDistance={250}
         viewabilityConfig={VIEWABILITY_CONFIG}
         onViewableItemsChanged={handleViewableItemsChanged}
+        // ★ extraData: useReactionToggle が legacy ['reactions'] cache のみ更新
+        //   する経路でも FlashList の data=feedItems は不変。reactionsByPost
+        //   (= ['reactions', sortedKey] cache subscribe) を extraData に渡して
+        //   cache 更新 → 強制再 render 経路を確保。
+        //   feed.tsx と同じ修正パターン。
+        //   estimatedItemSize: 380 → 520 — 実 post の高さ (画像 + 操作行 + メタ)
+        //   に近づける。低すぎると FlashList がスクロール中に layout 再計算を
+        //   多発させ「めっちゃ切れる」(コンテンツ瞬間消失/位置ズレ) が出る。
+        extraData={reactionsByPost}
         ListHeaderComponent={ListHeader}
         ListEmptyComponent={ListEmpty}
         refreshControl={
