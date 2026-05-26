@@ -329,7 +329,7 @@ export default function MapScreen() {
           backgroundColor: C.bg2, alignItems: 'center', justifyContent: 'center',
           borderWidth: 1, borderColor: C.border, gap: SP['2'],
         }}>
-          <Text style={{ fontSize: 40 }}>🗺</Text>
+          {/* 装飾絵文字 (🗺) 撤去 */}
           <Text style={[T.smallM, { color: C.text2 }]}>モバイル版マップは近日対応</Text>
         </View>
       )}

@@ -265,15 +265,18 @@ export default function CreateSpotScreen() {
                       borderColor: isSelected ? meta.color : 'transparent',
                     }}
                   >
+                    {/* 旧版は 28x28 円の中にカテゴリ絵文字 (🎤 / ⛩ / ☕ / 🛍 / 📸 / 🍜 / 📍 等)
+                        を載せていたが、AI 生成 UI 感の元になるため撤去。category 識別は
+                        meta.color の border / bg / 小さな color dot で表現する。 */}
                     <View
                       style={{
-                        width: 28, height: 28, borderRadius: 14,
-                        backgroundColor: isSelected ? meta.color + '33' : C.bg2,
-                        alignItems: 'center', justifyContent: 'center',
+                        width: 8,
+                        height: 8,
+                        borderRadius: 4,
+                        backgroundColor: meta.color,
+                        opacity: isSelected ? 1 : 0.7,
                       }}
-                    >
-                      <Text style={{ fontSize: 14 }}>{meta.emoji}</Text>
-                    </View>
+                    />
                     <Text
                       style={{
                         flex: 1,

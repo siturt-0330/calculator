@@ -58,7 +58,7 @@ export function CommunityMyProfileTab({
   if (!isMember) {
     return (
       <View style={{ padding: SP['6'], gap: SP['3'], alignItems: 'center' }}>
-        <Text style={{ fontSize: 48 }}>🪪</Text>
+        {/* 装飾絵文字 (🪪) 撤去 */}
         <Text style={[T.h4, { color: C.text, textAlign: 'center' }]}>
           コミュニティに参加するとマイプロフが使えます
         </Text>
@@ -264,7 +264,7 @@ function EmptyProfileCta({ onCreate }: { onCreate: () => void }) {
         alignItems: 'center',
       }}
     >
-      <Text style={{ fontSize: 48 }}>🪪</Text>
+      {/* 装飾絵文字 (🪪) 撤去 */}
       <Text style={[T.h4, { color: C.text, textAlign: 'center' }]}>
         マイプロフィールを書こう
       </Text>

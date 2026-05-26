@@ -354,7 +354,7 @@ export default function BBSThreadScreen() {
               width: '100%', maxWidth: MAX_W,
               padding: SP['6'], alignItems: 'center', gap: SP['2'],
             }}>
-              <Text style={{ fontSize: 40 }}>💬</Text>
+              {/* 装飾絵文字 (💬) 撤去 */}
               <Text style={[T.bodyMd, { color: C.text2 }]}>
                 まだ返信はありません
               </Text>

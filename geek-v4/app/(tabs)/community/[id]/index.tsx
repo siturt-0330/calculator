@@ -1710,7 +1710,9 @@ const SpotsTab = memo(function SpotsTab({
           {safePhoto ? (
             <Image source={{ uri: safePhoto }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
           ) : (
-            <Text style={{ fontSize: 28 }}>{meta.emoji}</Text>
+            /* 旧版は写真なし時 category 絵文字 (🎤 等) を 28px で大きく表示。AI 装飾感を抑え
+               category color の塗りつぶしブロック (写真欄ぽい代替) に置換。 */
+            <View style={{ width: '100%', height: '100%', backgroundColor: meta.color + '33' }} />
           )}
         </View>
         <View style={{ flex: 1, gap: 4 }}>
@@ -1774,22 +1776,22 @@ const SpotsTab = memo(function SpotsTab({
               <Icon.edit size={12} color={C.text2} strokeWidth={2.4} />
             </PressableScale>
           </View>
-          {/* カテゴリ chip */}
+          {/* カテゴリ chip — 装飾絵文字は撤去、color dot だけ残して category 識別 */}
           <View
             style={{
               alignSelf: 'flex-start',
               flexDirection: 'row',
               alignItems: 'center',
-              gap: 3,
+              gap: 4,
               paddingHorizontal: 6,
-              paddingVertical: 1,
+              paddingVertical: 2,
               backgroundColor: meta.color + '22',
               borderRadius: R.full,
               borderWidth: 1,
               borderColor: meta.color + '55',
             }}
           >
-            <Text style={{ fontSize: 10 }}>{meta.emoji}</Text>
+            <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: meta.color }} />
             <Text style={{ fontSize: 10, color: meta.color, fontWeight: '700' }}>
               {meta.label}
             </Text>
