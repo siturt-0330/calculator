@@ -97,8 +97,6 @@ export default function SettingsScreen() {
         <SectionHeader title="アカウント" />
         <ListItem icon={Icon.edit} label="プロフィール編集" onPress={() => router.push('/settings/profile-edit' as never)} />
         <Divider />
-        <ListItem icon={Icon.shield} label="信頼スコア" onPress={() => router.push('/settings/trust-score' as never)} />
-        <Divider />
         <ListItem icon={Icon.award} label="プラン" onPress={() => router.push('/settings/plan' as never)} />
 
         <SectionHeader title="カスタマイズ" />

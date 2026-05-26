@@ -394,6 +394,7 @@ export default function RootLayout() {
                   <Stack.Screen name="mypage/friends/invite" />
                   <Stack.Screen name="mypage/album/[id]" />
                   <Stack.Screen name="mypage/photo/[id]" />
+                  <Stack.Screen name="mypage/photo/[id]/edit" />
                   <Stack.Screen name="mypage/photo/add" />
                   <Stack.Screen name="invite/[code]" />
                   {/* community/* routes live inside (tabs)/community/ so the

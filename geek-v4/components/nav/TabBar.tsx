@@ -1,9 +1,7 @@
-import { View, Text, Platform } from 'react-native';
+import { View, Platform } from 'react-native';
 import { memo } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { C } from '../../design/tokens';
-import { T } from '../../design/typography';
 import { TabIcon, type TabKey } from './TabIcon';
 import { HapticTab } from './HapticTab';
 import { useNotifications } from '../../hooks/useNotifications';
@@ -16,19 +14,16 @@ const ROUTE_TO_TAB: Record<string, TabKey> = {
   mypage: 'mypage',
 };
 
-const LABELS: Record<TabKey, string> = {
-  home: 'ホーム',
-  bbs: '掲示板',
-  game: 'ゲーム',
-  community: 'コミュニティ',
-  mypage: 'マイ',
-};
+// 各 tab の固定サイズ — 全 tab 等幅で container 全体の幅が変動しないようにする
+const TAB_WIDTH = 48;
+const TAB_HEIGHT = 40;
+const TAB_BR = 20;
 
 // ============================================================
 // Slack 風 浮遊型タブバー (dark)
 // - 画面下に余白を持って "浮く" pill
-// - active タブだけが accent 色の小さな pill で強調される
-// - 背景は深い black + 薄い border / shadow で立体感
+// - 全 tab は icon-only / 等幅。active は背景 fill + icon 色変化で示す
+// - label テキストは表示しない (active で幅が伸びて container サイズが揺れる事故対策)
 // ============================================================
 export function TabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
@@ -48,17 +43,16 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
         paddingBottom: bottomMargin,
       }}
     >
-      {/* pill 本体 — 浮遊型の dark capsule */}
-      {/* ★ 末尾 active タブの pill (borderRadius 22) が container の rounded corner
-           (borderRadius 32) からはみ出して見える事故対策で overflow: hidden + paddingH を
-           少し増やしてマージンを確保. */}
+      {/* pill 本体 — 浮遊型の dark capsule
+           全 tab が等幅 (TAB_WIDTH) で active 切替時も container 全幅が変わらない.
+           pill の BR は container BR より小さく取り, paddingH で角差を吸収. */}
       <View
         style={[
           {
             flexDirection: 'row',
             backgroundColor: '#141417',
-            borderRadius: 32,
-            paddingHorizontal: 12,
+            borderRadius: 28,
+            paddingHorizontal: 8,
             paddingVertical: 6,
             gap: 2,
             borderWidth: 1,
@@ -73,7 +67,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
           },
           // web 用に backdrop-blur をオーバーレイ
           // パフォーマンス監査: 20px → 14px に削減 (Safari の scroll 時 re-composite cost -25%)
-          // saturate も外して filter チェーンを単純化
           Platform.OS === 'web'
             ? ({
                 backgroundColor: 'rgba(20,20,23,0.94)',
@@ -117,6 +110,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
 
 // 個別の「ピル」型タブ — memo 化して unreadCount 変更時に
 // mypage 以外の pill が再 render しないようにする
+// 全 tab 同一サイズ (TAB_WIDTH x TAB_HEIGHT). active state は背景色のみで表現.
 const TabPill = memo(function TabPill({
   tab,
   focused,
@@ -126,21 +120,18 @@ const TabPill = memo(function TabPill({
   focused: boolean;
   badgeCount?: number;
 }) {
-  // active 時は accent 色の半透明 fill + icon/label が accent 色になる
   return (
     <View
       style={{
-        flexDirection: 'row',
+        width: TAB_WIDTH,
+        height: TAB_HEIGHT,
         alignItems: 'center',
-        gap: 6,
-        paddingVertical: 9,
-        paddingHorizontal: focused ? 14 : 12,
-        borderRadius: 22,
+        justifyContent: 'center',
+        borderRadius: TAB_BR,
         backgroundColor: focused ? 'rgba(124,106,247,0.18)' : 'transparent',
         // active 時は subtle border + glow
         borderWidth: focused ? 1 : 0,
         borderColor: focused ? 'rgba(124,106,247,0.45)' : 'transparent',
-        minHeight: 40,
       }}
     >
       <View style={{ overflow: 'visible' }}>
@@ -149,21 +140,6 @@ const TabPill = memo(function TabPill({
           <NotificationBadge count={badgeCount} top={-4} right={-6} />
         )}
       </View>
-      {focused && (
-        <Text
-          style={[
-            T.caption,
-            {
-              color: C.accent,
-              fontWeight: '700',
-              letterSpacing: 0.2,
-            },
-          ]}
-          numberOfLines={1}
-        >
-          {LABELS[tab]}
-        </Text>
-      )}
     </View>
   );
 });

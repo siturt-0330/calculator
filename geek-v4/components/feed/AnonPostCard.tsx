@@ -22,7 +22,6 @@ import { PollCard } from './PollCard';
 import { useFeatureFlag } from '../../hooks/useFeatureFlag';
 import type { Poll } from '../../lib/api/polls';
 import { Avatar } from '../ui/Avatar';
-import { TrustBadge } from '../ui/TrustBadge';
 import { formatRelative } from '../../lib/utils/date';
 import { SHADOW } from '../../design/shadows';
 import { sanitizeUrl } from '../../lib/sanitize';
@@ -546,7 +545,6 @@ function AnonPostCardInner({
         ) : (
           <View style={STYLES.anonRow}>
             <Text style={[T.smallM, STYLES.anonLabel]}>匿</Text>
-            <TrustBadge score={post.trust_score_at_post} />
             <Text style={[T.small, STYLES.anonRelative]}>· {formatRelative(post.created_at)}</Text>
           </View>
         )}

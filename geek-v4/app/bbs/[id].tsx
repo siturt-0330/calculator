@@ -14,7 +14,6 @@ import { T } from '../../design/typography';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { Avatar } from '../../components/ui/Avatar';
 import { Spinner } from '../../components/ui/Spinner';
-import { TrustBadge } from '../../components/ui/TrustBadge';
 import { formatRelative } from '../../lib/utils/date';
 import { randomAvatarColor } from '../../lib/utils/color';
 import type { BBSReply } from '../../types/models';
@@ -182,7 +181,6 @@ export default function BBSThreadScreen() {
               {/* 右: 内容 */}
               <View style={{ flex: 1, minWidth: 0 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], marginBottom: 4 }}>
-                  <TrustBadge score={item.trust_score} />
                   <Text style={[T.caption, { color: C.text3 }]}>{formatRelative(item.created_at)}</Text>
                   <View style={{ flex: 1 }} />
                   {/* >>N で返信 */}
