@@ -1,3 +1,4 @@
+import { useCallback, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useToastStore } from '../stores/toastStore';
@@ -26,7 +27,7 @@ async function getMySaves(postIds: string[]): Promise<Record<string, boolean>> {
 
 // SELECT を省略して 1 RTT で完了。wasSaved は呼び出し側 (キャッシュ) が知っている。
 // unique 制約で race condition (連打) を吸収。
-async function toggle({ postId, wasSaved }: { postId: string; wasSaved: boolean }): Promise<boolean> {
+async function toggleSaveApi({ postId, wasSaved }: { postId: string; wasSaved: boolean }): Promise<boolean> {
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) throw new Error('Not authenticated');
@@ -51,19 +52,26 @@ export function useSaves(postIds: string[]) {
   });
 }
 
+// ============================================================
+// useSave — 楽観 toggle + snapshot/revert + smart-queue
+// ============================================================
+// useLike と同じパターン。連打で upsert/delete が並走して DB 状態が不定になる
+// race を smart-queue で吸収。`setQueriesData` partial-match → exact-key 書き戻し。
+// ============================================================
 export function useSave() {
   const qc = useQueryClient();
   // scoped selector — avoid re-render on every toast push/dismiss
   const show = useToastStore((s) => s.show);
+  const pending = useRef<Map<string, number>>(new Map());
 
   type Vars = { postId: string; wasSaved: boolean };
   type Ctx = {
-    prevSaves: Array<[readonly unknown[], unknown]>;
+    prevSaves: Array<[readonly unknown[], Record<string, boolean> | undefined]>;
     prevFeedPage: Array<[readonly unknown[], FeedPagePost[] | undefined]>;
   };
 
-  const { mutateAsync } = useMutation<boolean, Error, Vars, Ctx>({
-    mutationFn: toggle,
+  const mutation = useMutation<boolean, Error, Vars, Ctx>({
+    mutationFn: toggleSaveApi,
     onMutate: async ({ postId, wasSaved }) => {
       // ★ await でレース防止
       await Promise.all([
@@ -71,16 +79,21 @@ export function useSave() {
         qc.cancelQueries({ queryKey: ['feed-page'] }).catch(() => {}),
       ]);
 
-      const prevSaves = qc.getQueriesData({ queryKey: ['my-saves'] });
+      const prevSaves = qc.getQueriesData<Record<string, boolean> | undefined>({
+        queryKey: ['my-saves'],
+      });
       const prevFeedPage = snapshotFeedPage(qc);
 
-      // 1) legacy my-saves cache
-      qc.setQueriesData({ queryKey: ['my-saves'] }, (old: Record<string, boolean> | undefined) => {
-        const next = { ...(old ?? {}) };
+      // 1) legacy my-saves cache — exact-key 書き戻し (partial-match 廃止)
+      const savesEntries = qc.getQueriesData<Record<string, boolean> | undefined>({
+        queryKey: ['my-saves'],
+      });
+      for (const [exactKey, old] of savesEntries) {
+        const next: Record<string, boolean> = { ...(old ?? {}) };
         if (next[postId]) delete next[postId];
         else next[postId] = true;
-        return next;
-      });
+        qc.setQueryData(exactKey, next);
+      }
 
       // 2) ★ RPC cache (feed-page) — my_save
       patchFeedPagePost(qc, postId, (p) => ({
@@ -107,30 +120,42 @@ export function useSave() {
     },
   });
 
-  return {
-    toggle: (postId: string) => {
-      // 現在の保存状態を React Query キャッシュから取得 — my-saves と feed-page 両方
-      let wasSaved = false;
-      const cached = qc.getQueriesData<Record<string, boolean> | undefined>({ queryKey: ['my-saves'] });
-      for (const [, d] of cached) {
-        if (d?.[postId]) { wasSaved = true; break; }
+  // cache から「現在 saved かどうか」を判定 — my-saves と feed-page 両方
+  const readSavedFromCache = useCallback((postId: string): boolean => {
+    const cached = qc.getQueriesData<Record<string, boolean> | undefined>({ queryKey: ['my-saves'] });
+    for (const [, d] of cached) {
+      if (d?.[postId]) return true;
+    }
+    const cachedFeedPage = qc.getQueriesData<FeedPagePost[] | undefined>({ queryKey: ['feed-page'] });
+    for (const [, rows] of cachedFeedPage) {
+      if (!Array.isArray(rows)) continue;
+      for (const r of rows) {
+        if (r.id === postId && r.my_save) return true;
       }
-      if (!wasSaved) {
-        const cachedFeedPage = qc.getQueriesData<FeedPagePost[] | undefined>({ queryKey: ['feed-page'] });
-        outer: for (const [, rows] of cachedFeedPage) {
-          if (!Array.isArray(rows)) continue;
-          for (const r of rows) {
-            if (r.id === postId && r.my_save) {
-              wasSaved = true;
-              break outer;
-            }
-          }
-        }
-      }
-      // onError でトーストを出すのでここでは握り潰す (unhandled rejection 防止)
-      return mutateAsync({ postId, wasSaved }).catch((e: unknown) => {
-        console.warn('[useSave] toggle failed:', e);
-      });
-    },
-  };
+    }
+    return false;
+  }, [qc]);
+
+  // smart-queue: 連打を吸収。in-flight 中の追加 tap は count を加算し、
+  // settle 時に余剰の parity が奇数なら再 dispatch。
+  const fire = useCallback((postId: string) => {
+    pending.current.set(postId, 1);
+    const wasSaved = readSavedFromCache(postId);
+    mutation.mutate({ postId, wasSaved }, {
+      onSettled: () => {
+        const total = pending.current.get(postId) ?? 1;
+        pending.current.delete(postId);
+        const extra = total - 1;
+        if (extra % 2 === 1) fire(postId);
+      },
+    });
+  }, [mutation, readSavedFromCache]);
+
+  const toggle = useCallback((postId: string) => {
+    const cur = pending.current.get(postId);
+    if (cur === undefined) fire(postId);
+    else pending.current.set(postId, cur + 1);
+  }, [fire]);
+
+  return { toggle, isPending: mutation.isPending };
 }

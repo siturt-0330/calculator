@@ -1,3 +1,4 @@
+import { useCallback, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useToastStore } from '../stores/toastStore';
@@ -29,7 +30,7 @@ async function getMyLikes(postIds: string[]): Promise<Record<string, boolean>> {
 // 既知の現在状態 (キャッシュ由来) を受け取り、SELECT を省略して 1 RTT で toggle する。
 // 1000 並行ユーザー時にも各 like 操作が server に 1 リクエストしか出さない。
 // 不一致時 (キャッシュ stale) は onError で revert される。
-async function toggle({ postId, wasLiked }: { postId: string; wasLiked: boolean }): Promise<void> {
+async function toggleLikeApi({ postId, wasLiked }: { postId: string; wasLiked: boolean }): Promise<void> {
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) throw new Error('Not authenticated');
@@ -53,18 +54,36 @@ export function useLikes(postIds: string[]) {
   });
 }
 
+// ============================================================
+// useLike — 楽観 toggle + snapshot/revert + smart-queue
+// ============================================================
+// 改訂理由 (race condition + propagation バグ対応):
+//   1. smart-queue を導入。同一 postId への連打で INSERT/DELETE が並走して
+//      DB 状態が不定になる race を防ぐ。in-flight 中の追加 tap は count を
+//      加算するだけで、settle 時に余剰の parity が奇数なら net toggle を
+//      再 dispatch する (useReactionToggle と同じパターン)。
+//   2. `setQueriesData` の partial-match 書き込みを廃止して `getQueriesData`
+//      → for-loop `setQueryData(exactKey, next)` に変更。
+//      CLAUDE.md § 5.2 にある「partial-match が散発的に伝播しない react-query v5
+//      issue」対策。`['my-likes', sortedIdsJoinString]` 派生キーが複数あるとき
+//      一部だけ更新されない問題を解消。
+//   3. wasLiked は fire 内で最新 cache から判定。再 dispatch 時にも正しく動く。
+// ============================================================
 export function useLike() {
   const qc = useQueryClient();
+  // postId → そのキーについて settle 待ち中の累積 tap 数。
+  // 1 = 初回 dispatch のみ。2+ = in-flight 中に追加 tap があった。
+  const pending = useRef<Map<string, number>>(new Map());
 
   type Vars = { postId: string; wasLiked: boolean };
   type Ctx = {
-    prevLikes: Array<[readonly unknown[], unknown]>;
+    prevLikes: Array<[readonly unknown[], Record<string, boolean> | undefined]>;
     prevFeed: Array<[readonly unknown[], unknown]>;
     prevFeedPage: Array<[readonly unknown[], FeedPagePost[] | undefined]>;
   };
 
-  const { mutateAsync } = useMutation<void, Error, Vars, Ctx>({
-    mutationFn: toggle,
+  const mutation = useMutation<void, Error, Vars, Ctx>({
+    mutationFn: toggleLikeApi,
     onMutate: async ({ postId, wasLiked }) => {
       // ★ await でレース防止 (in-flight refetch が optimistic を上書きする現象の修正)
       await Promise.all([
@@ -73,24 +92,31 @@ export function useLike() {
         qc.cancelQueries({ queryKey: ['feed-page'] }).catch(() => {}),
       ]);
 
-      const prevLikes = qc.getQueriesData({ queryKey: ['my-likes'] });
+      // snapshot は patch 前 (= mutation 適用前の真の値) で取る
+      const prevLikes = qc.getQueriesData<Record<string, boolean> | undefined>({
+        queryKey: ['my-likes'],
+      });
       const prevFeed = qc.getQueriesData({ queryKey: ['feed'] });
       const prevFeedPage = snapshotFeedPage(qc);
 
-      // 1) legacy my-likes cache (fallback 経路)
-      qc.setQueriesData({ queryKey: ['my-likes'] }, (old: Record<string, boolean> | undefined) => {
-        const next = { ...(old ?? {}) };
+      // 1) legacy my-likes cache — exact-key 書き戻し (partial-match 廃止)
+      const likesEntries = qc.getQueriesData<Record<string, boolean> | undefined>({
+        queryKey: ['my-likes'],
+      });
+      for (const [exactKey, old] of likesEntries) {
+        const next: Record<string, boolean> = { ...(old ?? {}) };
         if (next[postId]) delete next[postId];
         else next[postId] = true;
-        return next;
-      });
+        qc.setQueryData(exactKey, next);
+      }
 
-      // 2) useFeed の infinite query cache — likes_count を ±1
-      qc.setQueriesData({ queryKey: ['feed'] }, (data: unknown) => {
-        if (!data || typeof data !== 'object') return data;
+      // 2) useFeed の infinite query cache — likes_count を ±1 (exact-key)
+      const feedEntries = qc.getQueriesData<unknown>({ queryKey: ['feed'] });
+      for (const [exactKey, data] of feedEntries) {
+        if (!data || typeof data !== 'object') continue;
         const old = data as { pages?: Array<{ posts: Array<{ id: string; likes_count: number }> }> };
-        if (!old.pages) return data;
-        return {
+        if (!old.pages) continue;
+        const next = {
           ...old,
           pages: old.pages.map((p) => ({
             ...p,
@@ -101,7 +127,8 @@ export function useLike() {
             ),
           })),
         };
-      });
+        qc.setQueryData(exactKey, next);
+      }
 
       // 3) ★ RPC cache (feed-page) — my_like + likes_count を更新
       //    feed.tsx は full.my_like / post.likes_count を参照するので、ここを更新しないと UI 反映 0。
@@ -125,33 +152,50 @@ export function useLike() {
     },
   });
 
-  // toggle() のシグネチャは旧来通り postId のみ — wasLiked はキャッシュから自動判定
-  return {
-    toggle: (postId: string) => {
-      // キャッシュから wasLiked を判定: my-likes と feed-page の両方を見る
-      let wasLiked = false;
-      const cachedLikes = qc.getQueriesData<Record<string, boolean> | undefined>({ queryKey: ['my-likes'] });
-      for (const [, d] of cachedLikes) {
-        if (d?.[postId]) { wasLiked = true; break; }
+  // cache から「現在 liked かどうか」を判定。my-likes と feed-page の両方を見る。
+  const readLikedFromCache = useCallback((postId: string): boolean => {
+    const cachedLikes = qc.getQueriesData<Record<string, boolean> | undefined>({ queryKey: ['my-likes'] });
+    for (const [, d] of cachedLikes) {
+      if (d?.[postId]) return true;
+    }
+    const cachedFeedPage = qc.getQueriesData<FeedPagePost[] | undefined>({ queryKey: ['feed-page'] });
+    for (const [, rows] of cachedFeedPage) {
+      if (!Array.isArray(rows)) continue;
+      for (const r of rows) {
+        if (r.id === postId && r.my_like) return true;
       }
-      if (!wasLiked) {
-        // RPC cache を fallback で見る (my-likes が空でも feed-page にはあるかも)
-        const cachedFeedPage = qc.getQueriesData<FeedPagePost[] | undefined>({ queryKey: ['feed-page'] });
-        outer: for (const [, rows] of cachedFeedPage) {
-          if (!Array.isArray(rows)) continue;
-          for (const r of rows) {
-            if (r.id === postId && r.my_like) {
-              wasLiked = true;
-              break outer;
-            }
-          }
-        }
-      }
-      return mutateAsync({ postId, wasLiked }).catch((e: unknown) => {
+    }
+    return false;
+  }, [qc]);
+
+  // smart-queue: 初回 tap → 即 dispatch、in-flight 中の追加 tap は count を加算するだけ。
+  // settle 時に (count - 1) が奇数なら net toggle を再 dispatch することで
+  // 「N 連打した結果の parity」が server-truth に反映される。
+  const fire = useCallback((postId: string) => {
+    pending.current.set(postId, 1);
+    const wasLiked = readLikedFromCache(postId);
+    mutation.mutate({ postId, wasLiked }, {
+      onSettled: () => {
+        const total = pending.current.get(postId) ?? 1;
+        pending.current.delete(postId);
+        const extra = total - 1;
+        if (extra % 2 === 1) fire(postId); // 余剰が奇数 → もう一度 toggle
+      },
+      onError: (e: unknown) => {
         const msg = e instanceof Error ? e.message : '';
-        // 楽観更新の rollback は onError で実行済み — ここではユーザー通知だけ
-        useToastStore.getState().show(msg ? `いいねに失敗しました: ${msg}` : 'いいねに失敗しました', 'error');
-      });
-    },
-  };
+        useToastStore.getState().show(
+          msg ? `いいねに失敗しました: ${msg}` : 'いいねに失敗しました',
+          'error',
+        );
+      },
+    });
+  }, [mutation, readLikedFromCache]);
+
+  const toggle = useCallback((postId: string) => {
+    const cur = pending.current.get(postId);
+    if (cur === undefined) fire(postId);
+    else pending.current.set(postId, cur + 1); // in-flight 中: count を加算
+  }, [fire]);
+
+  return { toggle, isPending: mutation.isPending };
 }

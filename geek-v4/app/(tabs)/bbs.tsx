@@ -412,6 +412,10 @@ export default function BBSScreen() {
         estimatedItemSize={110}
         // フリック時の慣性減速を速める
         decelerationRate="fast"
+        // ★ extraData: communityMeta は遅延 fetch なので、初回 render 後に
+        //   data が空 → 値ありに変わったときに re-render させないと
+        //   コミュバッジが表示されないまま固まる。
+        extraData={communityMeta}
         contentContainerStyle={{
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
         }}

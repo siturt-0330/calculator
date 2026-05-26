@@ -171,7 +171,7 @@ export default function CommunityScreen() {
       const tagNames = p.tag_names ?? [];
       dict[id] = {
         onLike: () => toggleLike(id),
-        onConcern: () => toggleConcern(id, !!myConcerns[id]),
+        onConcern: () => toggleConcern(id),
         onComment: () => router.push(`/post/${id}` as never),
         onSave: () => toggleSave(id),
         onShare: () => share(`Geek の投稿 #${tagNames[0] ?? '雑談'}`, `/post/${id}`),
@@ -187,6 +187,14 @@ export default function CommunityScreen() {
     return dict;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [posts, toggleLike, toggleConcern, toggleSave, toggleReact, share, router, handleAddTag, myConcerns]);
+
+  // ★ FlashList extraData 用の合成 object。useReactionToggle 以外
+  //   (useLike / useConcern / useSave / useAddTag) も legacy cache のみ更新する
+  //   経路があるため、補助データを全部含めて参照変化を伝える。
+  const feedExtra = useMemo(
+    () => ({ myLikes, myConcerns, mySaves, reactionsByPost, addedTagsByPost, polls }),
+    [myLikes, myConcerns, mySaves, reactionsByPost, addedTagsByPost, polls],
+  );
 
   // -------------------------------------------------------------------
   // FlashList の data — Post + community を同梱した安定 key 付きアイテム
@@ -420,15 +428,15 @@ export default function CommunityScreen() {
         drawDistance={250}
         viewabilityConfig={VIEWABILITY_CONFIG}
         onViewableItemsChanged={handleViewableItemsChanged}
-        // ★ extraData: useReactionToggle が legacy ['reactions'] cache のみ更新
-        //   する経路でも FlashList の data=feedItems は不変。reactionsByPost
-        //   (= ['reactions', sortedKey] cache subscribe) を extraData に渡して
-        //   cache 更新 → 強制再 render 経路を確保。
-        //   feed.tsx と同じ修正パターン。
+        // ★ extraData: useReactionToggle / useLike / useConcern / useSave /
+        //   useAddTag が data 配列を直接書き換えない経路 (legacy cache のみ更新)
+        //   でも FlashList の visible item を再 render するように補助データ全部を渡す。
+        //   reactionsByPost だけだと like/concern/save/addedTags の即時反映が漏れる。
+        //   `feedExtra` を useMemo で安定化 → 値変化時のみ参照変更が伝わる。
         //   estimatedItemSize: 380 → 520 — 実 post の高さ (画像 + 操作行 + メタ)
         //   に近づける。低すぎると FlashList がスクロール中に layout 再計算を
         //   多発させ「めっちゃ切れる」(コンテンツ瞬間消失/位置ズレ) が出る。
-        extraData={reactionsByPost}
+        extraData={feedExtra}
         ListHeaderComponent={ListHeader}
         ListEmptyComponent={ListEmpty}
         refreshControl={

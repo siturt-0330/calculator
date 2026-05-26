@@ -122,17 +122,19 @@ export function useDeleteCommunityStamp(communityId: string | undefined) {
         );
       }
       // 2) 各 post の reactions からも除外 (孤児表示を防ぐ)
-      qc.setQueriesData<CommunityStampReactionsByPost | undefined>(
-        { queryKey: ['community-stamp-reactions'] },
-        (old) => {
-          if (!old) return old;
-          const next: CommunityStampReactionsByPost = {};
-          for (const [pid, list] of Object.entries(old)) {
-            next[pid] = list.filter((r) => r.stamp.id !== stampId);
-          }
-          return next;
-        },
-      );
+      //    ★ CLAUDE.md § 5.2 対策: partial-match `setQueriesData` 廃止 → exact-key 書き戻し。
+      //    useCommunityStampReactionToggle と同じ pattern。
+      const allReactionEntries = qc.getQueriesData<CommunityStampReactionsByPost | undefined>({
+        queryKey: ['community-stamp-reactions'],
+      });
+      for (const [exactKey, old] of allReactionEntries) {
+        if (!old) continue;
+        const next: CommunityStampReactionsByPost = {};
+        for (const [pid, list] of Object.entries(old)) {
+          next[pid] = list.filter((r) => r.stamp.id !== stampId);
+        }
+        qc.setQueryData(exactKey, next);
+      }
 
       return { listSnap, reactionsSnap };
     },

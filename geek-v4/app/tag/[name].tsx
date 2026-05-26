@@ -110,6 +110,13 @@ export default function TagDetailScreen() {
   const { data: addedTagsByPost } = useAddedTags(postIds);
   const { addTag } = useAddTag();
 
+  // ★ FlashList extraData 用の合成 object。reactions だけだと
+  //   like/concern/addedTags の即時反映が漏れるので補助データを全部含める。
+  const listExtra = useMemo(
+    () => ({ myLikes, myConcerns, reactionsByPost, addedTagsByPost }),
+    [myLikes, myConcerns, reactionsByPost, addedTagsByPost],
+  );
+
   const handleAddTag = async (postId: string, tag: string) => {
     try {
       await addTag(postId, tag);
@@ -144,7 +151,7 @@ export default function TagDetailScreen() {
       reactions={reactionsByPost[item.id] ?? []}
       addedTags={addedTagsByPost[item.id] ?? []}
       onLike={() => like(item.id)}
-      onConcern={() => concern(item.id, !!myConcerns[item.id])}
+      onConcern={() => concern(item.id)}
       onComment={() => router.push(`/post/${item.id}` as never)}
       onSave={() => save(item.id)}
       onShare={() => share(`Geek の投稿 #${name}`, `/post/${item.id}`)}
@@ -227,11 +234,11 @@ export default function TagDetailScreen() {
           data={posts}
           keyExtractor={(item) => item.id}
           renderItem={renderPost}
-          // ★ extraData: useReactionToggle が data 配列を直接書き換えない経路
-          //   (legacy ['reactions'] cache のみ更新) でも FlashList が visible
-          //   item を再 render するように reactionsByPost を渡す。
-          //   詳細は feed.tsx / community/index.tsx の同位置コメント参照。
-          extraData={reactionsByPost}
+          // ★ extraData: useReactionToggle / useLike / useConcern / useAddTag が
+          //   data 配列を直接書き換えない経路 (legacy cache のみ更新) でも
+          //   FlashList が visible item を再 render するように補助データ全部を渡す。
+          //   reactionsByPost だけだと like/concern/addedTags の即時反映が漏れる。
+          extraData={listExtra}
           estimatedItemSize={300}
           // スワイプフリック時の慣性減速を速める (iOS デフォルトの "normal" は
           // ややダラダラ滑るので、リスト系では "fast" のほうがキビキビ感が出る)。
