@@ -209,12 +209,11 @@ export const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY, {
     flowType: 'pkce',
   },
   // 1000+ 並行ユーザー時に Realtime fanout の過剰配信を抑える。
-  // events/sec の上限を 10 にすることで、人気投稿に大量反応が来ても
+  // events/sec の上限を 5 にすることで、人気投稿に大量反応が来ても
   // クライアント側の throttle で過剰な invalidate/re-render を防ぐ。
-  // (デフォルトは 10/sec だが明示する — 将来 supabase-js のデフォルトが
-  //  変わっても性能特性が固定される)
+  // (旧 10 → 5 へ更に conservative に。1000 並行ユーザー時の fanout 過剰を抑制)
   realtime: {
-    params: { eventsPerSecond: 10 },
+    params: { eventsPerSecond: 5 },
   },
   // PostgREST の Accept-Profile を毎回送らない (重複ヘッダで RTT が長くなる小さい最適化)
   // → REST API のリクエストヘッダが軽量化

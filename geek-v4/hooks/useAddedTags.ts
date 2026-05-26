@@ -47,7 +47,12 @@ export function useAddedTags(postIds: string[]) {
         },
       ),
     );
-  }, [sortedKey, postIds, qc]);
+    // ★ deps を sortedKey + qc に限定 (postIds は配列参照で毎 render 変わるため
+    //   含めると channel が無限に detach/attach され Supabase pool を枯渇させる).
+    //   postIds の中身は sortedKey に含意されているので sortedKey 一致中は
+    //   closure 内の postIds は安定 (slice(0,30) も同じ結果になる).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortedKey, qc]);
 
   return { data: (q.data ?? {}) as Record<string, string[]>, isLoading: q.isLoading };
 }
