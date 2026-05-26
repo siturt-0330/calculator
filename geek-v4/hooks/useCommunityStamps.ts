@@ -275,33 +275,37 @@ export function useCommunityStampReactionToggle() {
         if (hit) { stampEntry = hit; break; }
       }
 
-      // 全 community-stamp-reactions キャッシュを総当たりして楽観更新
-      qc.setQueriesData<CommunityStampReactionsByPost | undefined>(
-        { queryKey: ['community-stamp-reactions'] },
-        (old) => {
-          if (!old) return old;
-          if (!(postId in old)) return old;
-          const next: CommunityStampReactionsByPost = { ...old };
-          const list = (next[postId] ?? []).slice();
-          const idx = list.findIndex((r) => r.stamp.id === stampId);
-          if (idx >= 0) {
-            const cur = list[idx];
-            if (!cur) return old;
-            if (cur.mine) {
-              const newCount = cur.count - 1;
-              if (newCount <= 0) list.splice(idx, 1);
-              else list[idx] = { stamp: cur.stamp, count: newCount, mine: false };
-            } else {
-              list[idx] = { stamp: cur.stamp, count: cur.count + 1, mine: true };
-            }
-          } else if (stampEntry) {
-            list.push({ stamp: stampEntry, count: 1, mine: true });
+      // 全 community-stamp-reactions キャッシュを総当たりして楽観更新。
+      // ★ CLAUDE.md § 5.2 にある「partial-match の setQueriesData が散発的に
+      //   伝播しない react-query v5 issue」対策: getQueriesData で exact key を
+      //   列挙して setQueryData (exact-key) で逐次書き戻す。
+      //   useReactionToggle / patchFeedPagePost と同じ pattern。
+      const allReactionEntries = qc.getQueriesData<CommunityStampReactionsByPost | undefined>({
+        queryKey: ['community-stamp-reactions'],
+      });
+      for (const [exactKey, old] of allReactionEntries) {
+        if (!old) continue;
+        if (!(postId in old)) continue;
+        const next: CommunityStampReactionsByPost = { ...old };
+        const list = (next[postId] ?? []).slice();
+        const idx = list.findIndex((r) => r.stamp.id === stampId);
+        if (idx >= 0) {
+          const cur = list[idx];
+          if (!cur) continue;
+          if (cur.mine) {
+            const newCount = cur.count - 1;
+            if (newCount <= 0) list.splice(idx, 1);
+            else list[idx] = { stamp: cur.stamp, count: newCount, mine: false };
+          } else {
+            list[idx] = { stamp: cur.stamp, count: cur.count + 1, mine: true };
           }
-          list.sort((a, b) => b.count - a.count);
-          next[postId] = list;
-          return next;
-        },
-      );
+        } else if (stampEntry) {
+          list.push({ stamp: stampEntry, count: 1, mine: true });
+        }
+        list.sort((a, b) => b.count - a.count);
+        next[postId] = list;
+        qc.setQueryData(exactKey, next);
+      }
 
       return { snapshot };
     },

@@ -85,31 +85,33 @@ export function useBBSReplyReactionToggle() {
       const snapshot: Snapshot = qc.getQueriesData<ReactionsByReply | undefined>({
         queryKey: [KEY_PREFIX],
       }) as Snapshot;
-      qc.setQueriesData<ReactionsByReply | undefined>(
-        { queryKey: [KEY_PREFIX] },
-        (old) => {
-          if (!old) return old;
-          if (!(replyId in old)) return old;
-          const next = { ...old };
-          const list = (next[replyId] ?? []).slice();
-          const idx = list.findIndex((r) => r.meme === meme);
-          const cur = idx >= 0 ? list[idx] : undefined;
-          if (cur) {
-            if (cur.mine) {
-              const newCount = cur.count - 1;
-              if (newCount <= 0) list.splice(idx, 1);
-              else list[idx] = { meme: cur.meme, count: newCount, mine: false };
-            } else {
-              list[idx] = { meme: cur.meme, count: cur.count + 1, mine: true };
-            }
+      // ★ CLAUDE.md § 5.2 「partial-match setQueriesData が伝播しない」issue 対策:
+      //   getQueriesData で exact key 列挙 → setQueryData 逐次。
+      const entries = qc.getQueriesData<ReactionsByReply | undefined>({
+        queryKey: [KEY_PREFIX],
+      });
+      for (const [exactKey, old] of entries) {
+        if (!old) continue;
+        if (!(replyId in old)) continue;
+        const next = { ...old };
+        const list = (next[replyId] ?? []).slice();
+        const idx = list.findIndex((r) => r.meme === meme);
+        const cur = idx >= 0 ? list[idx] : undefined;
+        if (cur) {
+          if (cur.mine) {
+            const newCount = cur.count - 1;
+            if (newCount <= 0) list.splice(idx, 1);
+            else list[idx] = { meme: cur.meme, count: newCount, mine: false };
           } else {
-            list.push({ meme, count: 1, mine: true });
+            list[idx] = { meme: cur.meme, count: cur.count + 1, mine: true };
           }
-          list.sort((a, b) => b.count - a.count);
-          next[replyId] = list;
-          return next;
-        },
-      );
+        } else {
+          list.push({ meme, count: 1, mine: true });
+        }
+        list.sort((a, b) => b.count - a.count);
+        next[replyId] = list;
+        qc.setQueryData(exactKey, next);
+      }
       return { snapshot };
     },
     onError: (e, _vars, ctx) => {
