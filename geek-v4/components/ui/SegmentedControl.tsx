@@ -6,6 +6,10 @@ import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { SPRING_TIGHT } from '../../design/motion';
 
+// container の内側 padding. indicator が container の rounded edge をはみ出さないように
+// 全方向 (top/bottom/left/right) で同じ値を使う + segW を inner width で計算する.
+const PAD = 3;
+
 export function SegmentedControl<V extends string>({
   options,
   value,
@@ -16,7 +20,12 @@ export function SegmentedControl<V extends string>({
   onChange: (v: V) => void;
 }) {
   const [w, setW] = useState(0);
-  const segW = w / options.length;
+  // ★ padding を引いた inner area の幅でセグメント幅を算出.
+  //   w (= 全幅) で割ると, 末尾セグメントの indicator が右端 PAD だけ container の rounded
+  //   border をはみ出す現象が起きる. inner area で計算すれば indicator は container の内側に
+  //   ちゃんと収まる.
+  const innerW = Math.max(0, w - PAD * 2);
+  const segW = innerW / options.length;
   const idx = options.findIndex((o) => o.value === value);
   const x = useSharedValue(0);
 
@@ -33,16 +42,20 @@ export function SegmentedControl<V extends string>({
         flexDirection: 'row',
         backgroundColor: C.bg3,
         borderRadius: R.full,
-        padding: 3,
+        padding: PAD,
         position: 'relative',
+        // safety net — indicator が万一はみ出ても rounded shape で clip する
+        overflow: 'hidden',
       }}
     >
       <Animated.View
         style={[
           {
             position: 'absolute',
-            top: 3,
-            bottom: 3,
+            top: PAD,
+            bottom: PAD,
+            // indicator の left を PAD に固定 (translateX 0 のときに左 PAD から始まる)
+            left: PAD,
             borderRadius: R.full,
             backgroundColor: C.bg5,
           },

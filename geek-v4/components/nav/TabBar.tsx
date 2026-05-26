@@ -4,7 +4,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { C } from '../../design/tokens';
 import { T } from '../../design/typography';
-import { TABBAR } from '../../design/tabbar';
 import { TabIcon, type TabKey } from './TabIcon';
 import { HapticTab } from './HapticTab';
 import { useNotifications } from '../../hooks/useNotifications';
@@ -50,17 +49,21 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
       }}
     >
       {/* pill 本体 — 浮遊型の dark capsule */}
+      {/* ★ 末尾 active タブの pill (borderRadius 22) が container の rounded corner
+           (borderRadius 32) からはみ出して見える事故対策で overflow: hidden + paddingH を
+           少し増やしてマージンを確保. */}
       <View
         style={[
           {
             flexDirection: 'row',
             backgroundColor: '#141417',
             borderRadius: 32,
-            paddingHorizontal: 8,
+            paddingHorizontal: 12,
             paddingVertical: 6,
             gap: 2,
             borderWidth: 1,
             borderColor: 'rgba(255,255,255,0.06)',
+            overflow: 'hidden',
             // shadow
             shadowColor: '#000',
             shadowOpacity: 0.5,
