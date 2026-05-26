@@ -340,7 +340,7 @@ export default function PostDetailScreen() {
             </View>
             {addedTags.length > 0 && (
               <Text style={[T.caption, { color: C.sameGenre }]}>
-                🏷️ オレンジ色のタグは他のユーザーが追加したタグです
+                オレンジ色のタグは他のユーザーが追加したタグです
               </Text>
             )}
 

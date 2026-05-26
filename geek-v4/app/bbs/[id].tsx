@@ -285,6 +285,11 @@ export default function BBSThreadScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderReply}
         estimatedItemSize={120}
+        // ★ extraData: useBBSReplyReactionToggle が legacy ['bbs-reply-reactions']
+        //   cache のみ更新するため data=replies は不変 → FlashList が chip を
+        //   描き直さない。reactionsByReply を extraData に渡して cache 更新
+        //   時に強制再 render させる。詳細は feed.tsx の同位置コメント参照。
+        extraData={reactionsByReply}
         // 返信入力中に >>N ボタンを 1 タップで操作できるよう keyboard を保持
         keyboardShouldPersistTaps="handled"
         // スワイプフリック時の慣性減速を速める (スクロール感がキビキビになる)
