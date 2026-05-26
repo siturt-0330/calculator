@@ -74,6 +74,8 @@ export function SearchBar({
         onSubmitEditing={onSubmit}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
+        // memory DoS 対策: 検索クエリは 200 文字 cap
+        maxLength={200}
         style={[T.body, { flex: 1, color: C.text }]}
       />
       {value.length > 0 && (

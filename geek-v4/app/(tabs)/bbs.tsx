@@ -302,6 +302,8 @@ export default function BBSScreen() {
               onSubmitEditing={() => setDebounced(search.trim())}
               // 検索バーは常に focusable に — focus が即外れる/連続入力で消える bug を防ぐ
               blurOnSubmit={false}
+              // memory DoS 対策: 検索クエリは 200 文字 cap
+              maxLength={200}
             />
             {search.length > 0 && (
               <PressableScale

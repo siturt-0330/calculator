@@ -81,6 +81,23 @@ if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
+// 定数時間比較 — Authorization ヘッダ等の secret 比較で timing attack を防ぐ。
+// 通常の `===` は engine 依存で early-exit する可能性があり、攻撃者がレスポンス時間から
+// 一致 prefix 長を推測できる余地がある。下記は max length まで必ずループし、
+// 長さの違いも XOR 結果に反映する。
+function timingSafeEqual(a: string, b: string): boolean {
+  const al = a.length;
+  const bl = b.length;
+  const maxLen = Math.max(al, bl);
+  let mismatch = al ^ bl;
+  for (let i = 0; i < maxLen; i++) {
+    const ac = i < al ? a.charCodeAt(i) : 0;
+    const bc = i < bl ? b.charCodeAt(i) : 0;
+    mismatch |= ac ^ bc;
+  }
+  return mismatch === 0;
+}
+
 // type → クライアント遷移先 URL のマッピング (service worker の notification.data に渡す)
 function urlForNotification(n: NotificationRow): string {
   switch (n.type) {
@@ -124,8 +141,8 @@ serve(async (req) => {
   if (PUSH_WEBHOOK_SECRET) {
     const auth = req.headers.get('authorization') ?? '';
     const expected = `Bearer ${PUSH_WEBHOOK_SECRET}`;
-    // タイミング攻撃に対する弱い defense (定数時間比較ではないが許容)
-    if (auth !== expected) {
+    // 定数時間比較で timing attack を防ぐ (§ timingSafeEqual)
+    if (!timingSafeEqual(auth, expected)) {
       return new Response(
         JSON.stringify({ error: 'unauthorized' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },

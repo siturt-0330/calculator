@@ -120,6 +120,8 @@ export default function BlockedTagsSettingsScreen() {
                 onSubmitEditing={handleAdd}
                 returnKeyType="done"
                 autoCapitalize="none"
+                // memory DoS 対策: tag 名は 40 文字 cap
+                maxLength={40}
               />
             </View>
             <PressableScale

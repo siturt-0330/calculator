@@ -152,6 +152,8 @@ export default function FilterScreen() {
                 onSubmitEditing={handleAddLiked}
                 returnKeyType="done"
                 autoCapitalize="none"
+                // memory DoS 対策: tag 名は 40 文字 cap
+                maxLength={40}
               />
             </View>
             <PressableScale
@@ -253,6 +255,8 @@ export default function FilterScreen() {
                 onSubmitEditing={handleAddBlocked}
                 returnKeyType="done"
                 autoCapitalize="none"
+                // memory DoS 対策: tag 名は 40 文字 cap
+                maxLength={40}
               />
             </View>
             <PressableScale

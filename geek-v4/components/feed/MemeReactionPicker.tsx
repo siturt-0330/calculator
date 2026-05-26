@@ -214,6 +214,8 @@ export function MemeReactionPicker({
               returnKeyType="search"
               clearButtonMode="while-editing"
               keyboardAppearance="dark"
+              // memory DoS 対策: 検索クエリは 200 文字 cap
+              maxLength={200}
             />
           </View>
 

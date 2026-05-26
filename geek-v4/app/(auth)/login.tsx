@@ -266,6 +266,8 @@ export default function LoginScreen() {
             onSubmitEditing={() => passwordRef.current?.focus()}
             keyboardAppearance="dark"
             selectionColor={C.accent}
+            // RFC 5321 上限 (memory DoS 対策)
+            maxLength={254}
           />
           <Input
             ref={passwordRef}
@@ -283,6 +285,8 @@ export default function LoginScreen() {
             onSubmitEditing={handleLogin}
             keyboardAppearance="dark"
             selectionColor={C.accent}
+            // bcrypt 上限 72 文字 + 余裕 (memory DoS 対策)
+            maxLength={128}
             right={
               <PressableScale
                 onPress={() => setShowPass((v) => !v)}

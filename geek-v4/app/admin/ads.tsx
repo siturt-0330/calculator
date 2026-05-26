@@ -530,6 +530,8 @@ function AdFormModal({
               style={inputStyle}
               autoCapitalize="none"
               keyboardType="url"
+              // memory DoS 対策: URL は 2048 文字 cap
+              maxLength={2048}
             />
           </Field>
 
@@ -542,6 +544,8 @@ function AdFormModal({
               style={inputStyle}
               autoCapitalize="none"
               keyboardType="url"
+              // memory DoS 対策: URL は 2048 文字 cap
+              maxLength={2048}
             />
           </Field>
 
@@ -568,6 +572,8 @@ function AdFormModal({
                 onSubmitEditing={() => addTag('target')}
                 returnKeyType="done"
                 autoCapitalize="none"
+                // memory DoS 対策: tag 1 個 = 40 文字 cap
+                maxLength={40}
               />
               <PressableScale
                 onPress={() => addTag('target')}
@@ -603,6 +609,8 @@ function AdFormModal({
                 onSubmitEditing={() => addTag('exclude')}
                 returnKeyType="done"
                 autoCapitalize="none"
+                // memory DoS 対策: tag 1 個 = 40 文字 cap
+                maxLength={40}
               />
               <PressableScale
                 onPress={() => addTag('exclude')}
@@ -664,6 +672,8 @@ function AdFormModal({
               placeholderTextColor={C.text3}
               style={inputStyle}
               autoCapitalize="none"
+              // memory DoS 対策: ISO 8601 は max 32 文字
+              maxLength={32}
             />
           </Field>
           <Field label="配信終了 (任意)" hint="ISO 8601 形式">
@@ -674,6 +684,8 @@ function AdFormModal({
               placeholderTextColor={C.text3}
               style={inputStyle}
               autoCapitalize="none"
+              // memory DoS 対策: ISO 8601 は max 32 文字
+              maxLength={32}
             />
           </Field>
 
@@ -689,6 +701,8 @@ function AdFormModal({
               placeholderTextColor={C.text3}
               style={inputStyle}
               keyboardType="number-pad"
+              // memory DoS 対策: 円単位の予算は max 10 桁 (100 億円)
+              maxLength={10}
             />
           </Field>
         </ScrollView>

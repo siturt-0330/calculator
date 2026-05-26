@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { attachChannel } from '../lib/realtime';
 import { addPostTag, fetchAddedTagsForPosts, removePostTag } from '../lib/api/tags';
+import { useToastStore } from '../stores/toastStore';
 
 const KEY_PREFIX = 'post-added-tags-batch';
 
@@ -83,16 +84,25 @@ export function useAddTag() {
   };
 }
 
+// ★ 2026-05 修正: 失敗を catch(() => {}) で握りつぶしていたのを onError 通知に変更。
+// onSettled は cache 整合性のため成功 / 失敗関わらず invalidate を継続。
+// 戻り値の signature (removeTag(postId, tag) → Promise) は変更しない。
 export function useRemoveTag() {
   const qc = useQueryClient();
+  const show = useToastStore((s) => s.show);
   const { mutateAsync } = useMutation({
     mutationFn: ({ postId, tag }: { postId: string; tag: string }) => removePostTag(postId, tag),
     onSettled: () => {
+      // invalidate は成功 / 失敗 関係なく走る (cache整合性のため)
       qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
       qc.invalidateQueries({ queryKey: ['post-added-tags'] });
     },
+    onError: (err) => {
+      console.warn('[removeTag] error:', err);
+      show('タグの削除に失敗しました', 'error');
+    },
   });
   return {
-    removeTag: (postId: string, tag: string) => mutateAsync({ postId, tag }).catch(() => {}),
+    removeTag: (postId: string, tag: string) => mutateAsync({ postId, tag }),
   };
 }

@@ -1300,6 +1300,8 @@ function SearchInput({ value, onChange, placeholder }: { value: string; onChange
           placeholderTextColor={C.text3}
           autoCapitalize="none"
           autoCorrect={false}
+          // memory DoS 対策: 検索クエリは 200 文字 cap
+          maxLength={200}
           style={[
             T.body,
             { color: C.text, flex: 1, paddingVertical: 10 },

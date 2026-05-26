@@ -397,6 +397,8 @@ export default function TagGraphScreen() {
               onChangeText={setSearch}
               placeholder="検索 (タグ名・別名)"
               placeholderTextColor={C.text3}
+              // memory DoS 対策: 検索クエリは 200 文字 cap
+              maxLength={200}
               style={[T.body, { flex: 1, color: C.text, paddingVertical: SP['2'], paddingHorizontal: SP['2'] }]}
             />
             {search.length > 0 && (
@@ -724,6 +726,8 @@ export default function TagGraphScreen() {
               placeholderTextColor={C.text3}
               autoFocus
               onSubmitEditing={submitAction}
+              // memory DoS 対策: tag list 入力 (カンマ区切り複数) は 500 文字 cap
+              maxLength={500}
               style={[
                 T.body,
                 {

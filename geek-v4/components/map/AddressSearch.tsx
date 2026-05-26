@@ -147,6 +147,8 @@ export function AddressSearch({ onSelect, onMapFallback, initialQuery = '' }: Pr
             clearButtonMode="while-editing"
             keyboardAppearance="dark"
             accessibilityLabel="施設名や住所"
+            // memory DoS 対策: 住所/施設名は 200 文字 cap
+            maxLength={200}
           />
           {loading && <ActivityIndicator size="small" color={C.accent} />}
         </View>

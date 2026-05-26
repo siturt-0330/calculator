@@ -9,6 +9,7 @@
 
 import { supabase } from '../supabase';
 import { withApiTimeout } from '../withApiTimeout';
+import { checkRate, rateLimitMessage } from '../rateLimit';
 import type { Friendship, FriendInvite } from '../../types/models';
 
 // friend_profile が必ず付いた状態を返す型 (UI 側で undefined 判定不要にする)
@@ -282,6 +283,13 @@ export async function acceptInvite(code: string): Promise<{
   error?: string;
   friendshipId?: string;
 }> {
+  // brute-force による invite code 総当たり防止 (1 分間に 5 回まで)。
+  // ネットワーク往復前にローカルで弾くので、無駄な API 呼び出しも抑制できる。
+  const rl = checkRate('friend_invite_accept');
+  if (!rl.ok) {
+    throw new Error(rateLimitMessage('friend_invite_accept', rl.retryAfterMs));
+  }
+
   // セッションが古いと RPC 内の auth.uid() が null になる事故を防ぐ
   await supabase.auth.refreshSession().catch(() => {});
 

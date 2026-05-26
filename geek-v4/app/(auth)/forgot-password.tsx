@@ -105,6 +105,8 @@ export default function ForgotPasswordScreen() {
           autoFocus
           keyboardAppearance="dark"
           selectionColor={C.accent}
+          // RFC 5321 上限 (memory DoS 対策)
+          maxLength={254}
         />
         <Button label={sent ? '再送信' : '送信'} onPress={handleReset} loading={loading} />
         {sent && (

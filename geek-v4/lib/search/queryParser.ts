@@ -29,11 +29,14 @@ export type ParsedQuery = {
 //   - OPERATOR_REGEX: 値部分を最大 80 文字に
 //   - PHRASE_REGEX: ネスト引用符の問題を避けるため escape も許可
 //   - NEG_REGEX: token 最大 80 文字に
+// いずれも `{n,m}` 上限つきで内部は単一クラス (否定セット) を 1 回繰り返すだけ
+// → linear time matching, catastrophic backtracking は発生しない。
 const OPERATOR_REGEX = /\b(tag|from|has|before|after|score|kind):([^\s"]{1,80})/gi;
 const PHRASE_REGEX = /"((?:[^"\\]|\\.){0,200})"/g;
 const NEG_REGEX = /(?:^|\s)-(\S{1,80})/g;
 // クエリ全体の最大長 — これ以上は ReDoS / メモリ食いつぶし対策で truncate
-const MAX_QUERY_LEN = 500;
+// 200 字以上の検索クエリは現実的なニーズが無いため厳しめに切り詰める。
+const MAX_QUERY_LEN = 200;
 
 export function parseQuery(raw: string): ParsedQuery {
   let work = raw.trim().slice(0, MAX_QUERY_LEN);

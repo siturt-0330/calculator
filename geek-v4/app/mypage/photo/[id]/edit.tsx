@@ -47,6 +47,7 @@ import { Icon } from '../../../../constants/icons';
 import { C, R, SP } from '../../../../design/tokens';
 import { T } from '../../../../design/typography';
 import { sanitizeUrl } from '../../../../lib/sanitize';
+import { isValidUuid } from '../../../../lib/validation';
 import type { PhotoVisibility } from '../../../../types/models';
 
 export default function PhotoEditScreen() {
@@ -54,13 +55,15 @@ export default function PhotoEditScreen() {
   const router = useRouter();
   const qc = useQueryClient();
   const params = useLocalSearchParams<{ id: string }>();
-  const id = typeof params.id === 'string' ? params.id : '';
+  // route param を UUID validation して cache DoS を防ぐ (詳細は lib/validation.ts)
+  const rawId = typeof params.id === 'string' ? params.id : '';
+  const id = isValidUuid(rawId) ? rawId : null;
   const { width: screenWidth } = useWindowDimensions();
   const show = useToastStore((s) => s.show);
 
   const photoQuery = useQuery({
     queryKey: ['photo', id],
-    queryFn: () => fetchPhoto(id),
+    queryFn: () => fetchPhoto(id!),
     enabled: !!id,
     staleTime: 30_000,
   });
@@ -181,6 +184,18 @@ export default function PhotoEditScreen() {
       },
     });
   };
+
+  // route param validation 失敗 → cache 汚染を防ぐため早期 return
+  if (!id) {
+    return (
+      <View style={{ flex: 1, backgroundColor: C.bg }}>
+        <TopBar title="" left={<BackButton />} />
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: SP['6'] }}>
+          <Text style={[T.body, { color: C.text2 }]}>無効な URL です</Text>
+        </View>
+      </View>
+    );
+  }
 
   // Loading
   if (photoQuery.isLoading && !photoQuery.data) {

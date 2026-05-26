@@ -23,6 +23,7 @@ import type { ReactionAgg } from '../../lib/api/bbsReplyReactions';
 import { Icon } from '../../constants/icons';
 import { notify, Haptics } from '../../lib/haptics';
 import { useToastStore } from '../../stores/toastStore';
+import { isValidUuid } from '../../lib/validation';
 
 const CATEGORY_COLORS: Record<string, string> = {
   '雑談': '#22D3A4', 'アニメ': '#FF6B7A', 'ゲーム': '#7CB1FF',
@@ -33,7 +34,12 @@ const CATEGORY_COLORS: Record<string, string> = {
 const MAX_W = 720;
 
 export default function BBSThreadScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id: rawId } = useLocalSearchParams<{ id: string }>();
+  // route param を UUID validation して cache DoS を防ぐ (詳細は lib/validation.ts)
+  // BBS thread の id は UUID (supabase/migrations/0001_schema.sql の
+  // bbs_threads.id uuid を参照). 不正なら空文字を渡して useBBSThread の
+  // queryKey を bounded な ['bbs-thread', ''] に固定し、render 前に早期 return。
+  const id = isValidUuid(rawId) ? rawId : null;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -43,7 +49,7 @@ export default function BBSThreadScreen() {
   const SendIcon = Icon.send;
   const BackIcon = Icon.arrowL;
 
-  const { thread, replies, loading, refreshing, refresh, reply, error } = useBBSThread(id);
+  const { thread, replies, loading, refreshing, refresh, reply, error } = useBBSThread(id ?? '');
   const { show: showToast } = useToastStore();
 
   // 入力欄への ref。クォート返信時に focus する。
@@ -95,6 +101,18 @@ export default function BBSThreadScreen() {
       setSending(false);
     }
   };
+
+  // route param validation 失敗 → cache 汚染を防ぐため早期 return
+  if (!id) {
+    return (
+      <View style={{ flex: 1, backgroundColor: C.bg }}>
+        <Header insets={insets} router={router} BackIcon={BackIcon} />
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: SP['6'] }}>
+          <Text style={[T.body, { color: C.text2 }]}>無効な URL です</Text>
+        </View>
+      </View>
+    );
+  }
 
   if (loading) {
     return (

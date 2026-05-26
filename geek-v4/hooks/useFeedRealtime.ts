@@ -117,11 +117,18 @@ export function useFeedRealtime(postIds: string[]): void {
     }
 
     return () => {
+      // ★ timer を必ず clear + null 化 (unmount 後の fire 防止)
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
-      for (const detach of detachers) detach();
+      for (const detach of detachers) {
+        try {
+          detach();
+        } catch {
+          // detach の失敗は cleanup 続行を妨げない
+        }
+      }
     };
     // postIds は中身が変わると sortedKey が変わるので、それだけを依存に
     // eslint-disable-next-line react-hooks/exhaustive-deps

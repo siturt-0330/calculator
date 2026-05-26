@@ -443,12 +443,16 @@ function AddEventModal({
             value={title}
             onChangeText={setTitle}
             placeholder="例: 推しライブ"
+            // memory DoS 対策: タイトルは 80 文字 cap
+            maxLength={80}
           />
           <Input
             label="日付"
             value={date}
             onChangeText={setDate}
             placeholder="YYYY-MM-DD"
+            // memory DoS 対策: 日付 string は 10 文字 (YYYY-MM-DD)
+            maxLength={10}
           />
           <Input
             label={scope === 'proposal' ? 'タグ（必須）' : 'タグ（任意）'}
@@ -456,12 +460,16 @@ function AddEventModal({
             onChangeText={setTag}
             placeholder="例: アニメ"
             icon={Icon.hash}
+            // memory DoS 対策: tag 名は 40 文字 cap
+            maxLength={40}
           />
           <Input
             label="場所（任意）"
             value={location}
             onChangeText={setLocation}
             placeholder="例: 渋谷"
+            // memory DoS 対策: 場所は 200 文字 cap
+            maxLength={200}
           />
 
           <Button label="追加" onPress={submit} loading={saving} />

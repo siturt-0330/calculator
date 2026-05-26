@@ -245,6 +245,8 @@ export default function OfficialSpotsScreen() {
                       placeholderTextColor={C.text3}
                       keyboardType="numbers-and-punctuation"
                       style={fieldStyle}
+                      // memory DoS 対策: 緯度は max ±90.xxxxxx の数値
+                      maxLength={20}
                     />
                   </Field>
                 </View>
@@ -257,12 +259,15 @@ export default function OfficialSpotsScreen() {
                       placeholderTextColor={C.text3}
                       keyboardType="numbers-and-punctuation"
                       style={fieldStyle}
+                      // memory DoS 対策: 経度は max ±180.xxxxxx の数値
+                      maxLength={20}
                     />
                   </Field>
                 </View>
               </View>
               <Field label="画像 URL (任意)">
-                <TextInput value={photoUrl} onChangeText={setPhotoUrl} placeholder="https://..." placeholderTextColor={C.text3} autoCapitalize="none" autoCorrect={false} style={fieldStyle} />
+                {/* memory DoS 対策: URL は 2048 文字 cap (browser 標準 URL 上限) */}
+                <TextInput value={photoUrl} onChangeText={setPhotoUrl} placeholder="https://..." placeholderTextColor={C.text3} autoCapitalize="none" autoCorrect={false} style={fieldStyle} maxLength={2048} />
               </Field>
             </ScrollView>
             <PressableScale

@@ -391,8 +391,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       try { useOfflineQueueStore.getState().clear(); } catch (e) { console.warn('offlineQueue clear error:', e); }
       // onboarded キャッシュ + supabase auth キーを掃除
       // - onboarded は MMKV / localStorage 経由 (同期)
-      // - supabase auth は AsyncStorage に session を持つので AsyncStorage 直叩き
-      //   (Web は localStorage)
+      // - supabase auth の storage 自体は supabase.auth.signOut() が
+      //   storage.removeItem('geek-v4-auth') を呼んでくれるが、念のため
+      //   旧 AsyncStorage 残骸も両方掃除して移行漏れを防ぐ。
       try {
         if (u) storageRemove(onboardedKey(u.id));
       } catch (e) { swallow('storage.onboarded.remove', e); }
@@ -400,6 +401,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
           window.localStorage.removeItem('geek-v4-auth');
         } else {
+          // 旧 AsyncStorage に残骸があるかもしれないので削除
+          // (新規 session は SecureStore に保存される — そちらは
+          //  supabase.auth.signOut() が storage adapter 経由で削除済み)
           await AsyncStorage.removeItem('geek-v4-auth');
         }
       } catch (e) { swallow('storage.auth-key.remove', e); }
