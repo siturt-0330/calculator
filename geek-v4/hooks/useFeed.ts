@@ -13,8 +13,9 @@ import { GOSSIP_TRENDING_BLOCKLIST_SET } from '../stores/tagFilterStore';
 import { deepNormalize } from '../lib/search/tokenize';
 import type { Post } from '../types/models';
 import { useQuery as useReactQuery } from '@tanstack/react-query';
-import { getEvents, computeProfile, rankFeed } from '../lib/personalize';
+import { getEvents, computeProfile, rankFeed, computePostScore, diversifyFeed } from '../lib/personalize';
 import type { FeedEvent, RankableCandidate, RankReason } from '../lib/personalize';
+import { useAuthStore } from '../stores/authStore';
 import { fetchTargetedAds, type Ad } from '../lib/api/ads';
 import { useAdPreferencesStore } from '../stores/adPreferencesStore';
 
@@ -147,6 +148,28 @@ export function useFeed() {
     return s;
   }, [likedTags, profile.tagAffinity]);
 
+  // ----------------------------------------------------------------
+  // YouTube-style ranking 用の補助 input
+  // - userLikedTagsFreq: profile.tagAffinity からそのまま借りる
+  //   (events.ts は post_like 等で各タグに重み w を加算するので「いいねした回数」の
+  //    近似として使える。完全に等しくはないが Map<tag, number> として意味が一致)
+  // - globalTagFreq: 現在 feed に乗っている post の tag 出現数。本来は全 DB 集計
+  //   が望ましいが、(a) 余計な fetch を増やしたくない (b) feed 内分布で十分 IDF が
+  //   効く ので近似で済ませる
+  // - myAccountAgeDays: auth user の created_at から計算
+  // ----------------------------------------------------------------
+  // ★ zustand selector の中で Date.now() を使うと毎 render 値が変わって infinite
+  //   re-render loop (React error #185) になる. selector は stable な created_at
+  //   だけ取り出し, day 数の計算は useMemo に閉じ込める. integer 化で 1 日に 1 回
+  //   だけ値が変わるので下流の useMemo も無駄に走らない.
+  const userCreatedAt = useAuthStore((s) => s.user?.created_at);
+  const myAccountAgeDays = useMemo(() => {
+    if (!userCreatedAt) return 0;
+    const t = new Date(userCreatedAt).getTime();
+    if (!Number.isFinite(t)) return 0;
+    return Math.floor(Math.max(0, (Date.now() - t) / 86_400_000));
+  }, [userCreatedAt]);
+
   const { posts, reasonsMap }: { posts: Post[]; reasonsMap: Record<string, RankReason> } = useMemo(() => {
     if (sort === 'for-you') {
       // For-You は personalize 基盤で再ランク。blocked タグはクライアント側で先に除去。
@@ -175,17 +198,49 @@ export function useFeed() {
       });
       const byId: Record<string, Post> = {};
       for (const p of visiblePosts) byId[p.id] = p;
-      const ordered: Post[] = [];
       const reasons: Record<string, RankReason> = {};
-      const pickedIds = new Set<string>();
-      for (const s of ranked) {
-        const p = byId[s.id];
-        if (!p) continue;
-        ordered.push(p);
-        reasons[s.id] = s.reason;
-        pickedIds.add(s.id);
+      // rankFeed 経由で reasonsMap を確保 (UI の説明文用)
+      for (const s of ranked) reasons[s.id] = s.reason;
+
+      // ----------------------------------------------------------------
+      // Phase 3: YouTube-style re-rank + diversity
+      // 1) tag affinity (Jaccard × TF-IDF), engagement (log scale),
+      //    time decay (HN), fresh boost, fresh-user noise を 1 score に
+      // 2) diversifyFeed で同 author / 同 dominant tag の連続を抑制
+      // ----------------------------------------------------------------
+      const userLikedTagsFreq = new Map<string, number>(
+        Object.entries(profile.tagAffinity),
+      );
+      const globalTagFreq = new Map<string, number>();
+      for (const p of visiblePosts) {
+        for (const t of p.tag_names ?? []) {
+          const n = deepNormalize(t);
+          if (!n) continue;
+          globalTagFreq.set(n, (globalTagFreq.get(n) ?? 0) + 1);
+        }
       }
-      // ランカーが拾い切れなかった残りは末尾に追加 (見落としを避ける)
+      const now = new Date();
+      const scoredPosts: Array<{ post: Post; score: number }> = visiblePosts.map((p) => ({
+        post: p,
+        score: computePostScore({
+          post: p,
+          userLikedTagsFreq,
+          globalTagFreq,
+          now,
+          myAccountAgeDays,
+          totalPosts: visiblePosts.length,
+        }),
+      }));
+      const diversified = diversifyFeed(scoredPosts, 2);
+
+      // rankFeed が拾えなかった post (= reason が無いもの) は「新着」扱いに
+      const ordered: Post[] = [];
+      const pickedIds = new Set<string>();
+      for (const p of diversified) {
+        ordered.push(p);
+        pickedIds.add(p.id);
+        if (!reasons[p.id]) reasons[p.id] = { kind: 'fresh', text: '新着' };
+      }
       for (const p of visiblePosts) {
         if (!pickedIds.has(p.id)) ordered.push(p);
       }
@@ -206,7 +261,7 @@ export function useFeed() {
     }, sort);
     return { posts: sorted, reasonsMap: {} };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawPosts, sort, likedTags, blockedTags, signals.tagFreq, signals.recentTags, trendingTags, ctrBoosts, profile, cooccur, interestTagsNorm]);
+  }, [rawPosts, sort, likedTags, blockedTags, signals.tagFreq, signals.recentTags, trendingTags, ctrBoosts, profile, cooccur, interestTagsNorm, myAccountAgeDays]);
 
   // ----------------------------------------------------------------
   // タグターゲティング広告 — プライバシー保護 (個人 id は送らず、タグだけで配信)

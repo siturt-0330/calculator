@@ -54,9 +54,10 @@ import { PressableScale } from '../../components/ui/PressableScale';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Icon } from '../../constants/icons';
-import { C, SP, SHADOW } from '../../design/tokens';
+import { C, SP, SHADOW, GRAD } from '../../design/tokens';
 import { FONT } from '../../design/typography';
 import { TABBAR } from '../../design/tabbar';
+import { LinearGradient } from 'expo-linear-gradient';
 import type { Post } from '../../types/models';
 
 export default function FeedScreen() {
@@ -346,7 +347,23 @@ export default function FeedScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <View style={{ alignItems: 'center', backgroundColor: C.bg }}>
+      {/* 上部 hero エリア — bg は flat だと無機質なので、ごく弱い紫 → 透明のグラデを
+          被せてブランド色のニュアンスを忍ばせる。コンテンツ自体は読みやすさ重視で
+          subtle に留める (opacity も低め)。 */}
+      <View style={{ alignItems: 'center', backgroundColor: C.bg, position: 'relative' }}>
+        <LinearGradient
+          colors={GRAD.glass}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+          }}
+        />
         <View style={{
           width: '100%', maxWidth: 720,
           paddingTop: insets.top + SP['2'],
@@ -361,14 +378,27 @@ export default function FeedScreen() {
             hitSlop={8}
             accessibilityLabel="新規投稿"
             style={{
-              width: 36, height: 36, borderRadius: 18,
-              backgroundColor: C.accent,
+              width: 38, height: 38, borderRadius: 19,
               alignItems: 'center', justifyContent: 'center',
               marginRight: SP['3'],
+              overflow: 'hidden',
               // primary CTA halo を付けて「最も主要な action」をひと目で示す
               ...SHADOW.accentGlow,
             }}
           >
+            {/* gradient ベースの新規投稿 FAB — 単色 accent より brand 感が出る */}
+            <LinearGradient
+              colors={GRAD.primary}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top: 0,
+                bottom: 0,
+              }}
+            />
             <Plus size={20} color="#fff" strokeWidth={2.6} />
           </PressableScale>
           {/* Geek brand wordmark — Orbitron Black + accent gradient (web) + glow */}
@@ -407,25 +437,46 @@ export default function FeedScreen() {
           >
             Geek
           </Text>
+          {/* 右側 icon: glass 風の subtle 円形コンテナで上品な質感に */}
           <PressableScale
             onPress={() => router.push('/search' as never)}
             hitSlop={10}
             haptic="tap"
             accessibilityLabel="検索"
-            style={{ padding: SP['2'] }}
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 19,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.08)',
+              marginLeft: SP['1'],
+            }}
           >
-            <Search size={22} color={C.text} strokeWidth={2.2} />
+            <Search size={20} color={C.text} strokeWidth={2.2} />
           </PressableScale>
           <PressableScale
             onPress={() => router.push('/notifications' as never)}
             hitSlop={10}
             haptic="tap"
             accessibilityLabel={`通知${unreadCount > 0 ? ` ${unreadCount}件` : ''}`}
-            style={{ padding: SP['2'] }}
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 19,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.08)',
+              marginLeft: SP['1'],
+            }}
           >
             <View>
-              <Bell size={22} color={C.text} strokeWidth={2.2} />
-              <NotificationBadge count={unreadCount} top={-4} right={-6} />
+              <Bell size={20} color={C.text} strokeWidth={2.2} />
+              <NotificationBadge count={unreadCount} top={-6} right={-8} />
             </View>
           </PressableScale>
         </View>
@@ -445,8 +496,9 @@ export default function FeedScreen() {
         </View>
       </View>
 
-      {/* ヘッダーとリストの境界を 1px の hairline で示す — 他タブ画面と統一感 */}
-      <View style={{ height: 1, backgroundColor: C.divider }} />
+      {/* ヘッダーとリストの境界 — glass card style に合わせて hairline を弱めに
+          (旧 C.divider はカードと衝突して "二重 border" に見えていた) */}
+      <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.04)' }} />
 
       <FlashList
         ref={listRef}
@@ -476,7 +528,11 @@ export default function FeedScreen() {
         onEndReached={loadMore}
         onEndReachedThreshold={0.6}
         contentContainerStyle={{
-          paddingTop: SP['2'],
+          // post 間の余白を確保するため top padding を増やす
+          paddingTop: SP['3'],
+          // 横方向: card は自身で角丸 + shadow を持つので、左右にちょっと余白を作って
+          //  「浮いてる感」を出す。card 自体は maxWidth:720 + alignSelf:center.
+          paddingHorizontal: SP['3'],
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
         }}
         ListEmptyComponent={

@@ -1,17 +1,17 @@
 import { useState, useMemo, useEffect } from 'react';
 import { View, Text, ScrollView, TextInput, useWindowDimensions, RefreshControl } from 'react-native';
 import { FlashList, type ListRenderItem } from '@shopify/flash-list';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { useBBS, useMyCommunityBBS } from '../../hooks/useBBS';
 import type { BBSThread } from '../../types/models';
 import { PressableScale } from '../../components/ui/PressableScale';
-import { EmptyState } from '../../components/ui/EmptyState';
 import { HighlightedText } from '../../components/ui/HighlightedText';
 import { ThreadCardSkeleton } from '../../components/ui/Skeleton';
 import { Icon } from '../../constants/icons';
-import { C, R, SP, SHADOW } from '../../design/tokens';
+import { C, R, SP, SHADOW, GRAD } from '../../design/tokens';
 import { T, FONT } from '../../design/typography';
 import { TABBAR } from '../../design/tabbar';
 import { formatRelative } from '../../lib/utils/date';
@@ -259,13 +259,20 @@ export default function BBSScreen() {
               haptic="confirm"
               accessibilityLabel="新しいスレッドを作成"
               style={{
-                flexDirection: 'row', alignItems: 'center', gap: 4,
+                flexDirection: 'row', alignItems: 'center', gap: 6,
                 paddingHorizontal: SP['3'], paddingVertical: SP['2'],
-                backgroundColor: C.accent, borderRadius: R.full,
-                // primary CTA: soft halo
-                ...SHADOW.accentGlow,
+                borderRadius: R.full,
+                overflow: 'hidden',
+                // primary CTA: 紫グラデ + soft halo (mypage と同じ pill)
+                ...SHADOW.glow,
               }}
             >
+              <LinearGradient
+                colors={GRAD.primary}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+              />
               <Icon.plus size={16} color="#fff" strokeWidth={2.6} />
               <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>{tr('bbs.create_thread')}</Text>
             </PressableScale>
@@ -328,6 +335,12 @@ export default function BBSScreen() {
               {CATEGORIES.map((cat) => {
                 const active = category === cat;
                 const color = cat === 'すべて' ? C.accent : (CATEGORY_COLORS[cat] ?? C.accent);
+                // active chip は accent gradient で塗る — mypage の "PolishedHero" と同じテイスト。
+                // 「すべて」だけは紫主体の GRAD.primary、それ以外は category color → accent への
+                // 軽い 2 色グラデで差別化 (色は category 色を残しつつ glow 感を出す)。
+                const gradColors: readonly [string, string] = cat === 'すべて'
+                  ? ([GRAD.primary[0], GRAD.primary[1]] as const)
+                  : ([color, C.accent] as const);
                 return (
                   <PressableScale
                     key={cat}
@@ -337,11 +350,22 @@ export default function BBSScreen() {
                     accessibilityLabel={`カテゴリ ${cat}${active ? ' (選択中)' : ''}`}
                     style={{
                       paddingHorizontal: SP['3'], paddingVertical: 6,
-                      backgroundColor: active ? color : C.bg2,
+                      backgroundColor: active ? 'transparent' : C.bg2,
                       borderRadius: R.full,
-                      borderWidth: 1, borderColor: active ? color : C.border,
+                      borderWidth: 1,
+                      borderColor: active ? color : C.border,
+                      overflow: 'hidden',
+                      ...(active ? SHADOW.xs : null),
                     }}
                   >
+                    {active && (
+                      <LinearGradient
+                        colors={gradColors}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+                      />
+                    )}
                     <Text style={[T.caption, { color: active ? '#fff' : C.text2, fontWeight: '700' }]}>
                       {cat}
                     </Text>
@@ -437,17 +461,27 @@ export default function BBSScreen() {
                   router.push(`/bbs/${item.id}` as never);
                 }}
                 haptic="tap"
+                // glass 風: 半透明 background + 細い縁 + ふんわり shadow.xs
+                // (FlashList の recycle 性能を保つため BlurView は使わない. View only)
                 style={{
                   flexDirection: 'row',
                   borderRadius: R.lg,
-                  backgroundColor: C.bg2,
+                  backgroundColor: 'rgba(255,255,255,0.04)',
                   borderWidth: 1,
-                  borderColor: C.border,
+                  borderColor: 'rgba(255,255,255,0.08)',
                   overflow: 'hidden',
+                  ...SHADOW.xs,
                 }}
               >
-                {/* 左カラーバー */}
-                <View style={{ width: 4, backgroundColor: catColor }} />
+                {/* 左カラーバー — accent gradient で grad 化 (active chip と統一) */}
+                <View style={{ width: 4, overflow: 'hidden' }}>
+                  <LinearGradient
+                    colors={[catColor, C.accent] as const}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 0, y: 1 }}
+                    style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+                  />
+                </View>
                 {/* 本体 */}
                 <View style={{ flex: 1, padding: SP['3'], gap: SP['2'] }}>
                   {/* コミュニティ紐付けバッジ (一般公開 + community_id がある場合)
@@ -502,11 +536,14 @@ export default function BBSScreen() {
                     <HighlightedText
                       text={item.title}
                       terms={highlightTerms}
-                      style={[T.h4, { color: C.text, fontWeight: '700' }]}
+                      style={[T.h4, { color: C.text, fontWeight: '700', letterSpacing: -0.2, lineHeight: 23 }]}
                       numberOfLines={2}
                     />
                   ) : (
-                    <Text style={[T.h4, { color: C.text, fontWeight: '700' }]} numberOfLines={2}>
+                    <Text
+                      style={[T.h4, { color: C.text, fontWeight: '700', letterSpacing: -0.2, lineHeight: 23 }]}
+                      numberOfLines={2}
+                    >
                       {item.title}
                     </Text>
                   )}
@@ -587,9 +624,17 @@ export default function BBSScreen() {
                     style={{
                       marginTop: SP['2'],
                       paddingHorizontal: SP['4'], paddingVertical: SP['2'],
-                      backgroundColor: C.accent, borderRadius: R.full,
+                      borderRadius: R.full,
+                      overflow: 'hidden',
+                      ...SHADOW.glow,
                     }}
                   >
+                    <LinearGradient
+                      colors={GRAD.primary}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+                    />
                     <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>
                       ＋ このトピックでスレ立てする
                     </Text>
@@ -609,13 +654,12 @@ export default function BBSScreen() {
                       コミュニティに参加すると、そのコミュニティの掲示板がここに集まります。
                     </Text>
                   </View>
-                  <EmptyState
-                    icon={Icon.community}
+                  <PolishedEmpty
+                    emoji="🧭"
                     title="まずコミュニティに参加しよう"
                     message="興味のあるコミュニティを探して、議論に参加してみよう"
                     actionLabel="コミュニティを探す"
                     onAction={() => router.push('/(tabs)/community/discover' as never)}
-                    tone="accent"
                   />
                 </>
               ) : (
@@ -631,13 +675,12 @@ export default function BBSScreen() {
                       時系列で流れない議論用スペース。アニメ実況、相談、議論など、まとまった話題を続けられます。
                     </Text>
                   </View>
-                  <EmptyState
-                    icon={Icon.bbs}
+                  <PolishedEmpty
+                    emoji="💬"
                     title={effectiveScope === 'community' ? '参加コミュにまだスレッドがありません' : 'まだスレッドがありません'}
                     message={effectiveScope === 'community' ? '最初の 1 本を立てて議論を始めよう' : '最初のスレッドを立ててみよう'}
                     actionLabel="スレ立てする"
                     onAction={() => router.push('/bbs/create' as never)}
-                    tone="accent"
                   />
                 </>
               )}
@@ -645,6 +688,80 @@ export default function BBSScreen() {
           )
         }
       />
+    </View>
+  );
+}
+
+// ============================================================
+// PolishedEmpty — 96x96 gradient circle + emoji + CTA gradient pill
+// ============================================================
+// mypage hero と同じ GRAD.primary を使った emoji 円 + CTA pill。
+// 既存 EmptyState (icon + Button) より hero っぽさを出すための内部 component。
+// BBS タブ専用 (community タブにも同等 component を別途用意).
+function PolishedEmpty({
+  emoji,
+  title,
+  message,
+  actionLabel,
+  onAction,
+}: {
+  emoji: string;
+  title: string;
+  message?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <View style={{ padding: SP['8'], alignItems: 'center', gap: SP['4'] }}>
+      <View
+        style={{
+          width: 96, height: 96, borderRadius: 48,
+          alignItems: 'center', justifyContent: 'center',
+          overflow: 'hidden',
+          ...SHADOW.glow,
+        }}
+      >
+        <LinearGradient
+          colors={GRAD.primary}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+        />
+        <Text style={{ fontSize: 44 }} accessibilityLabel="">{emoji}</Text>
+      </View>
+      <Text
+        style={[T.h3, { color: C.text, textAlign: 'center', letterSpacing: -0.3 }]}
+      >
+        {title}
+      </Text>
+      {message && (
+        <Text style={[T.body, { color: C.text2, textAlign: 'center', maxWidth: 320 }]}>
+          {message}
+        </Text>
+      )}
+      {actionLabel && onAction && (
+        <PressableScale
+          onPress={onAction}
+          haptic="confirm"
+          style={{
+            marginTop: SP['2'],
+            paddingHorizontal: SP['5'], paddingVertical: SP['3'],
+            borderRadius: R.full,
+            overflow: 'hidden',
+            ...SHADOW.glow,
+          }}
+        >
+          <LinearGradient
+            colors={GRAD.primary}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+          />
+          <Text style={[T.bodyMd, { color: '#fff', fontWeight: '700', letterSpacing: 0.2 }]}>
+            {actionLabel}
+          </Text>
+        </PressableScale>
+      )}
     </View>
   );
 }

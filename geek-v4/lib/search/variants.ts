@@ -130,7 +130,7 @@ const VOWEL_OF = { a: 'a', i: 'i', u: 'u', e: 'e', o: 'o' } as Record<string, st
  */
 export function hiraganaToRomaji(s: string): string {
   // まずカタカナをひらがなに統一
-  let cur = s.replace(/[ァ-ヶ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+  const cur = s.replace(/[ァ-ヶ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
   let out = '';
   let i = 0;
   while (i < cur.length) {
@@ -329,6 +329,38 @@ const COMMON_SYNONYMS: Record<string, string[]> = {
   'retweet': ['リツイート', 'リポスト'],
   'ファボ': ['いいね', 'お気に入り', 'like', 'favorite', 'fav'],
   'like': ['いいね', 'ファボ', 'お気に入り', 'favorite'],
+
+  // ============ 2026-05 追加: ゲーム / IT / 一般同義語強化 ============
+  // gaming category 強化 — "ゲーミング" 等
+  'ゲーミング': ['gaming', 'ゲーム', 'game', 'げーみんぐ'],
+  'gaming': ['ゲーミング', 'ゲーム', 'げーみんぐ'],
+  'ぽけもん': ['ポケモン', 'pokemon', 'pokémon', 'pkmn'],
+  // IT / プログラミング
+  'プログラミング': ['programming', 'coding', 'code', 'ぷろぐらみんぐ'],
+  'programming': ['プログラミング', 'coding', 'コーディング'],
+  'コーディング': ['coding', 'programming', 'プログラミング'],
+  'エンジニア': ['engineer', 'developer', 'えんじにあ', 'デベロッパー'],
+  'engineer': ['エンジニア', 'developer', 'えんじにあ'],
+  'AI': ['ai', 'artificial intelligence', '人工知能', 'えーあい', 'aI'],
+  'ai': ['AI', '人工知能', 'artificial intelligence'],
+  '機械学習': ['ml', 'machine learning', 'machinelearning', 'きかいがくしゅう'],
+  'ml': ['機械学習', 'machine learning', 'きかいがくしゅう'],
+  // 映画 / TV
+  '映画': ['movie', 'film', 'えいが', 'cinema'],
+  'movie': ['映画', 'film', 'えいが', 'cinema'],
+  'ドラマ': ['drama', 'tv', 'どらま', 'television'],
+  'drama': ['ドラマ', 'どらま', 'tv'],
+  // 食
+  'ラーメン': ['ramen', 'らーめん', 'らあめん'],
+  'ramen': ['ラーメン', 'らーめん'],
+  'カフェ': ['cafe', 'coffee', 'かふぇ', 'コーヒー'],
+  'cafe': ['カフェ', 'かふぇ', 'coffee'],
+  // 旅行
+  '旅行': ['travel', 'trip', 'りょこう', 'tour'],
+  'travel': ['旅行', 'りょこう', 'trip'],
+  // ファッション
+  'ファッション': ['fashion', 'ふぁっしょん', '服'],
+  'fashion': ['ファッション', 'ふぁっしょん', '服'],
 };
 
 // DoS 防止: variant 数の上限 — 異常に大きいクエリで爆発しないよう全 push に

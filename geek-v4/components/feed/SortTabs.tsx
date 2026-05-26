@@ -1,6 +1,7 @@
 import { View, Text } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { PressableScale } from '../ui/PressableScale';
-import { C, R, SP } from '../../design/tokens';
+import { C, R, SP, GRAD, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { useT } from '../../lib/i18n';
 import type { SortMode } from '../../lib/api/posts';
@@ -22,16 +23,21 @@ export function SortTabs({
 }) {
   const t = useT();
   return (
-    <View style={{
-      flexDirection: 'row',
-      backgroundColor: C.bg3,
-      borderRadius: R.full,
-      padding: 3,
-      borderWidth: 1,
-      borderColor: C.border,
-    }}>
+    <View
+      style={{
+        flexDirection: 'row',
+        // inactive は subtle (灰色背景) — bg3 で柔らかい segmented container 風
+        backgroundColor: C.bg3,
+        borderRadius: R.full,
+        padding: 3,
+        borderWidth: 1,
+        borderColor: C.border,
+      }}
+    >
       {ORDER.map((m) => {
         const active = value === m.v;
+        // active 時は GRAD.primary のグラデを overlay。inactive は背景透明で
+        // container の bg3 がそのまま見える。
         return (
           <PressableScale
             key={m.v}
@@ -42,16 +48,33 @@ export function SortTabs({
               paddingVertical: SP['2'],
               paddingHorizontal: SP['2'],
               borderRadius: R.full,
-              backgroundColor: active ? C.accent : 'transparent',
               alignItems: 'center',
+              overflow: 'hidden',
+              // active の場合だけ subtle glow を付けて「選ばれている」感を出す
+              ...(active ? SHADOW.glow : null),
             }}
           >
+            {active && (
+              <LinearGradient
+                colors={GRAD.primary}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                }}
+              />
+            )}
             <Text
               style={[
                 T.smallM,
                 {
                   color: active ? '#fff' : C.text2,
                   fontWeight: active ? '700' : '500',
+                  letterSpacing: active ? 0.3 : 0,
                 },
               ]}
             >

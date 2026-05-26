@@ -2,15 +2,15 @@ import { View, Text, ScrollView, RefreshControl, Image } from 'react-native';
 import { useEffect, useCallback, useMemo } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import { Image as ExpoImage } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { C, R, SP, SHADOW } from '../../../design/tokens';
+import { C, R, SP, SHADOW, GRAD } from '../../../design/tokens';
 import { T } from '../../../design/typography';
 import { TABBAR } from '../../../design/tabbar';
 import { Icon } from '../../../constants/icons';
 import { PressableScale } from '../../../components/ui/PressableScale';
-import { EmptyState } from '../../../components/ui/EmptyState';
 import { OfficialBadge } from '../../../components/community/OfficialBadge';
 import { AnonPostCard } from '../../../components/feed/AnonPostCard';
 import { thumbedUrl } from '../../../lib/utils/imageUrl';
@@ -327,11 +327,12 @@ export default function CommunityScreen() {
 
   // -------------------------------------------------------------------
   // ListEmptyComponent — 参加無し or 投稿なし
+  // polish: 96x96 gradient circle + emoji + CTA gradient button
   // -------------------------------------------------------------------
   const ListEmpty = useMemo(() => (
-    <View style={{ paddingTop: SP['10'], paddingHorizontal: SP['4'] }}>
-      <EmptyState
-        icon={Icon.community}
+    <View style={{ paddingTop: SP['8'], paddingHorizontal: SP['4'] }}>
+      <CommunityPolishedEmpty
+        emoji={myCommunities.length === 0 ? '🌐' : '📭'}
         title={myCommunities.length === 0 ? 'コミュニティに参加しよう' : 'まだ投稿がありません'}
         message={
           myCommunities.length === 0
@@ -340,31 +341,40 @@ export default function CommunityScreen() {
         }
       />
       {myCommunities.length === 0 && (
-        <View style={{ gap: SP['2'], marginTop: SP['4'] }}>
+        <View style={{ gap: SP['2'], marginTop: SP['5'], paddingHorizontal: SP['2'] }}>
+          {/* primary CTA: gradient pill */}
           <PressableScale
             onPress={() => router.push('/community/discover' as never)}
             haptic="confirm"
             style={{
               paddingVertical: SP['3'],
-              backgroundColor: C.accent,
-              borderRadius: R.md,
+              borderRadius: R.full,
               alignItems: 'center',
+              overflow: 'hidden',
+              ...SHADOW.glow,
             }}
           >
-            <Text style={[T.bodyMd, { color: '#fff', fontWeight: '700' }]}>
+            <LinearGradient
+              colors={GRAD.primary}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+            />
+            <Text style={[T.bodyMd, { color: '#fff', fontWeight: '700', letterSpacing: 0.2 }]}>
               コミュニティを探す
             </Text>
           </PressableScale>
+          {/* secondary CTA: glass outline */}
           <PressableScale
             onPress={() => router.push('/community/create' as never)}
             haptic="tap"
             style={{
               paddingVertical: SP['3'],
-              backgroundColor: C.bg3,
-              borderRadius: R.md,
+              backgroundColor: 'rgba(255,255,255,0.04)',
+              borderRadius: R.full,
               alignItems: 'center',
               borderWidth: 1,
-              borderColor: C.border,
+              borderColor: 'rgba(255,255,255,0.10)',
             }}
           >
             <Text style={[T.bodyMd, { color: C.text, fontWeight: '600' }]}>
@@ -378,43 +388,61 @@ export default function CommunityScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* 上部ヘッダ */}
+      {/* 上部ヘッダ — polish: title typography 強化 + search glass icon + 作成 gradient pill */}
       <View
         style={{
           paddingTop: insets.top + SP['2'],
           paddingHorizontal: SP['4'],
-          paddingBottom: SP['2'],
+          paddingBottom: SP['3'],
           flexDirection: 'row',
           alignItems: 'center',
-          gap: SP['3'],
+          gap: SP['2'],
           backgroundColor: C.bg,
           borderBottomWidth: 1,
           borderBottomColor: C.border,
         }}
       >
-        <Text style={[T.h2, { flex: 1, color: C.text, letterSpacing: -0.5 }]}>コミュニティ</Text>
+        <Text
+          style={[T.h2, { flex: 1, color: C.text, letterSpacing: -0.5, fontWeight: '800' }]}
+        >
+          コミュニティ
+        </Text>
         <PressableScale
           onPress={() => router.push('/community/discover' as never)}
           haptic="tap"
-          style={{ padding: SP['2'] }}
+          style={{
+            width: 40, height: 40, borderRadius: 20,
+            alignItems: 'center', justifyContent: 'center',
+            // 軽い glass 風: 半透明 + 1px 縁
+            backgroundColor: 'rgba(255,255,255,0.06)',
+            borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+          }}
           accessibilityLabel="コミュニティを検索"
         >
-          <Icon.search size={22} color={C.text} strokeWidth={2.2} />
+          <Icon.search size={20} color={C.text} strokeWidth={2.2} />
         </PressableScale>
         <PressableScale
           onPress={() => router.push('/community/create' as never)}
           haptic="confirm"
+          accessibilityLabel="新しいコミュニティを作成"
           style={{
             paddingHorizontal: SP['3'],
             paddingVertical: SP['2'],
             flexDirection: 'row',
             alignItems: 'center',
-            gap: 4,
-            backgroundColor: C.accent,
+            gap: 6,
             borderRadius: R.full,
-            ...SHADOW.accentGlow,
+            overflow: 'hidden',
+            // mypage と同じ gradient pill
+            ...SHADOW.glow,
           }}
         >
+          <LinearGradient
+            colors={GRAD.primary}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+          />
           <Icon.plus size={16} color="#fff" strokeWidth={2.6} />
           <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>作成</Text>
         </PressableScale>
@@ -471,15 +499,38 @@ function CommunityListHeader({ myCommunities, loading, router }: ListHeaderProps
             alignItems: 'center',
             justifyContent: 'space-between',
             paddingHorizontal: SP['4'],
-            marginBottom: SP['2'],
+            marginBottom: SP['3'],
           }}
         >
-          <Text style={[T.smallB, { color: C.text2, letterSpacing: 0.4, fontWeight: '700' }]}>
-            参加中
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+            <Text
+              style={[
+                T.smallB,
+                { color: C.text, letterSpacing: 0.3, fontWeight: '800', fontSize: 13 },
+              ]}
+            >
+              参加中
+            </Text>
             {myCommunities.length > 0 && (
-              <Text style={[T.smallB, { color: C.text3 }]}>  {myCommunities.length}</Text>
+              <View
+                style={{
+                  minWidth: 22,
+                  paddingHorizontal: 7,
+                  paddingVertical: 1,
+                  borderRadius: R.full,
+                  backgroundColor: C.accentBg,
+                  borderWidth: 1,
+                  borderColor: C.accentSoft,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text style={{ color: C.accentLight, fontSize: 11, fontWeight: '800' }}>
+                  {myCommunities.length}
+                </Text>
+              </View>
             )}
-          </Text>
+          </View>
           {myCommunities.length > 4 && (
             <Text style={[T.caption, { color: C.text3 }]}>← スワイプで全部見る</Text>
           )}
@@ -487,17 +538,17 @@ function CommunityListHeader({ myCommunities, loading, router }: ListHeaderProps
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: SP['4'], gap: SP['3'] }}
+          contentContainerStyle={{ paddingHorizontal: SP['4'], gap: SP['4'] }}
         >
           {myCommunities.length === 0 && !loading ? (
             <View
               style={{
                 paddingVertical: SP['3'],
                 paddingHorizontal: SP['4'],
-                backgroundColor: C.bg2,
+                backgroundColor: 'rgba(255,255,255,0.04)',
                 borderRadius: R.md,
                 borderWidth: 1,
-                borderColor: C.border,
+                borderColor: 'rgba(255,255,255,0.10)',
                 borderStyle: 'dashed',
               }}
             >
@@ -511,27 +562,43 @@ function CommunityListHeader({ myCommunities, loading, router }: ListHeaderProps
                 key={c.id}
                 onPress={() => router.push(`/community/${c.id}` as never)}
                 haptic="tap"
+                scaleValue={0.92}
                 style={{ alignItems: 'center', width: 70 }}
               >
                 <View style={{ position: 'relative' }}>
+                  {/* gradient ring (常時): mypage HeroAvatar と同じテイスト
+                      公式は ring を強める (accent gradient → glow shadow を加算) */}
                   <View
                     style={{
-                      width: 56,
-                      height: 56,
-                      borderRadius: 28,
-                      backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      borderWidth: c.is_official ? 2 : 1,
-                      borderColor: c.is_official ? C.accent : C.border,
+                      width: 60, height: 60, borderRadius: 30,
+                      alignItems: 'center', justifyContent: 'center',
                       overflow: 'hidden',
+                      ...(c.is_official ? SHADOW.glow : null),
                     }}
                   >
-                    {c.icon_url ? (
-                      <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                    ) : (
-                      <Text style={{ fontSize: 28 }}>{c.icon_emoji}</Text>
-                    )}
+                    <LinearGradient
+                      colors={GRAD.primary}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+                    />
+                    <View
+                      style={{
+                        width: 54,
+                        height: 54,
+                        borderRadius: 27,
+                        backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {c.icon_url ? (
+                        <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                      ) : (
+                        <Text style={{ fontSize: 28 }}>{c.icon_emoji}</Text>
+                      )}
+                    </View>
                   </View>
                   {c.is_official && (
                     <View
@@ -550,7 +617,7 @@ function CommunityListHeader({ myCommunities, loading, router }: ListHeaderProps
                 </View>
                 <Text
                   numberOfLines={1}
-                  style={[T.caption, { color: C.text2, marginTop: 4, textAlign: 'center' }]}
+                  style={[T.caption, { color: C.text2, marginTop: 6, textAlign: 'center', fontWeight: '600' }]}
                 >
                   {c.name}
                 </Text>
@@ -558,22 +625,23 @@ function CommunityListHeader({ myCommunities, loading, router }: ListHeaderProps
             ))
           )}
 
-          {/* 末尾に「探す」ボタン */}
+          {/* 末尾に「探す」ボタン — glass outline (gradient ring 無し) */}
           <PressableScale
             onPress={() => router.push('/community/discover' as never)}
             haptic="tap"
+            scaleValue={0.92}
             style={{ alignItems: 'center', width: 70 }}
           >
             <View
               style={{
-                width: 56,
-                height: 56,
-                borderRadius: 28,
-                backgroundColor: C.bg3,
+                width: 60,
+                height: 60,
+                borderRadius: 30,
+                backgroundColor: 'rgba(255,255,255,0.04)',
                 alignItems: 'center',
                 justifyContent: 'center',
                 borderWidth: 1,
-                borderColor: C.border,
+                borderColor: 'rgba(255,255,255,0.12)',
                 borderStyle: 'dashed',
               }}
             >
@@ -581,7 +649,7 @@ function CommunityListHeader({ myCommunities, loading, router }: ListHeaderProps
             </View>
             <Text
               numberOfLines={1}
-              style={[T.caption, { color: C.text3, marginTop: 4, textAlign: 'center' }]}
+              style={[T.caption, { color: C.text3, marginTop: 6, textAlign: 'center', fontWeight: '600' }]}
             >
               探す
             </Text>
@@ -592,6 +660,50 @@ function CommunityListHeader({ myCommunities, loading, router }: ListHeaderProps
       {/* 区切り */}
       <View style={{ height: 1, backgroundColor: C.divider, marginHorizontal: SP['4'] }} />
       <View style={{ height: SP['2'] }} />
+    </View>
+  );
+}
+
+// ============================================================
+// CommunityPolishedEmpty — 96x96 gradient circle + emoji + (subtitle)
+// ============================================================
+// mypage hero と同じ GRAD.primary を使った emoji 円 + title + message。
+// CTA pill は呼び出し側で表示する想定 (参加無し / 投稿無し で挙動を変えるため)。
+function CommunityPolishedEmpty({
+  emoji,
+  title,
+  message,
+}: {
+  emoji: string;
+  title: string;
+  message?: string;
+}) {
+  return (
+    <View style={{ paddingTop: SP['6'], paddingBottom: SP['4'], alignItems: 'center', gap: SP['4'] }}>
+      <View
+        style={{
+          width: 96, height: 96, borderRadius: 48,
+          alignItems: 'center', justifyContent: 'center',
+          overflow: 'hidden',
+          ...SHADOW.glow,
+        }}
+      >
+        <LinearGradient
+          colors={GRAD.primary}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+        />
+        <Text style={{ fontSize: 44 }} accessibilityLabel="">{emoji}</Text>
+      </View>
+      <Text style={[T.h3, { color: C.text, textAlign: 'center', letterSpacing: -0.3 }]}>
+        {title}
+      </Text>
+      {message && (
+        <Text style={[T.body, { color: C.text2, textAlign: 'center', maxWidth: 320 }]}>
+          {message}
+        </Text>
+      )}
     </View>
   );
 }
