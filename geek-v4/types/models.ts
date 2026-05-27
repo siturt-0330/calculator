@@ -30,6 +30,9 @@ export type Post = {
   content_warning?: string | null;
   cw_category?: CWCategory;
   visibility?: PostVisibility;
+  // Q&A モード (migration 0067) — post author が enable すると、コメント sort で
+  //   author が返信したスレッドが上位に来る (lib/utils/qaSort.ts)。AMA 用途。
+  qa_mode?: boolean;
   created_at: string;
   // posts.author_id — RLS で誰でも読める。公式管理者識別のため fetch する。
   author_id?: string;
@@ -47,6 +50,20 @@ export type Comment = {
   avatar_color: string;
   created_at: string;
   trust_score?: number | null;  // 著者の現在の信頼スコア
+  // ============================================================
+  // コメントツリー (migration 0059)
+  // ------------------------------------------------------------
+  // - parent_comment_id: 直接の親 (返信ボタンで指定)。NULL = ルート。
+  //   trigger で 4 段超は NULL に矯正されるので、クライアントは
+  //   depth = 0..3 までを想定して良い。
+  // - reply_to_comment_id: メンション通知の宛先 comment。深い階層で
+  //   parent が nullify されても、特定の発言を狙えるようにするための field。
+  // - children / depth は client side で buildCommentTree が組み立てる派生 field。
+  // ============================================================
+  parent_comment_id?: string | null;
+  reply_to_comment_id?: string | null;
+  children?: Comment[];
+  depth?: number;
 };
 
 export type Tag = {
@@ -76,6 +93,10 @@ export type BBSReply = {
   color: string;
   created_at: string;
   trust_score?: number | null;  // 著者の現在の信頼スコア
+  // 投稿者 user_id。クライアントは「スレ内 ID」表示用に hash する
+  // (lib/utils/threadUserId.ts)。RLS bbs_replies_read で公開済なので
+  // 露出自体は新規露出ではなく、SELECT 漏れを補う形。
+  author_id?: string;
 };
 
 export type Notification = {

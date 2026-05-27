@@ -579,6 +579,55 @@ export function computePostScore(input: ScoreInput): number {
 }
 
 // ============================================================
+// risingVelocity — Reddit 風「急上昇」用の純粋な速度スコア
+// ------------------------------------------------------------
+// 計算: post.likes_count / max(minutes_since_post, 1)
+//
+//   - personalize/score モジュールが提供する Post→number の helper として
+//     公開。Rising モードでは個人化シグナル (tagAffinity 等) は使わず、
+//     純粋な「分あたり like 速度」だけで並べる。
+//   - 主実装と test は lib/utils/risingScore.ts に集約してあり、ここは
+//     既存 personalize 系 import の慣性で呼び出せるよう薄く delegate するのみ。
+//   - 投稿時刻が不正/未来の場合は 0 を返す (詳細は computeRisingScore)。
+// ============================================================
+import { computeRisingScore } from '../utils/risingScore';
+
+export function risingVelocity(post: Post, now: Date | number = Date.now()): number {
+  const nowMs = typeof now === 'number' ? now : now.getTime();
+  const createdAtMs = Date.parse(post.created_at);
+  const likes = Math.max(0, post.likes_count ?? 0);
+  return computeRisingScore(likes, createdAtMs, nowMs);
+}
+
+// ============================================================
+// hotScore — Reddit 風「Hot」用の純粋スコア
+// ------------------------------------------------------------
+// supabase/migrations/0058_hot_score.sql の generated column と同じ式を
+// JS から呼べるよう、lib/utils/hotScore.ts の純実装を Post 型で薄くラップ。
+//
+// 用途:
+//   - 新規投稿の optimistic insert 後、サーバ side の hot_score が
+//     反映されるまでの間 client 側で sort を安定させる fallback。
+//   - rankFeed / diversifyFeed の組合せで hot 軸の補助シグナルにする
+//     ことも可能 (現状は posts.ts の order 句が主経路)。
+//
+// 既存 helper との関係:
+//   - risingVelocity = likes/min (短期 velocity)
+//   - hotScore       = log10(|s|) + sign(s)*t/28800 (累積 ranking)
+//   両者は別目的なので重複定義ではない。
+// ============================================================
+export { GEEK_LAUNCH_EPOCH, HOT_TIME_DIVISOR } from '../utils/hotScore';
+import { computeHotScore as computeHotScoreCore } from '../utils/hotScore';
+
+export function hotScore(post: Post): number {
+  return computeHotScoreCore({
+    likesCount: Math.max(0, post.likes_count ?? 0),
+    concernCount: Math.max(0, post.concern_count ?? 0),
+    createdAt: post.created_at,
+  });
+}
+
+// ============================================================
 // diversifyFeed — post-process: 同じ author / 同じ tag set が連続しないように
 // ------------------------------------------------------------
 // 上位 maxConsecutiveFromSameAuthor 件 (default 2) までは score 順で出すが、

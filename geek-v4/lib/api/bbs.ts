@@ -1,5 +1,5 @@
 import { supabase } from '../supabase';
-import type { BBSThread, BBSReply, Comment, ThreadVisibility } from '../../types/models';
+import type { BBSThread, BBSReply, ThreadVisibility } from '../../types/models';
 import { sanitizeContent } from '../sanitize';
 import { checkRate, rateLimitMessage } from '../rateLimit';
 
@@ -186,13 +186,16 @@ export async function fetchReplies(threadId: string): Promise<BBSReply[]> {
     content: string;
     color: string;
     created_at: string;
+    author_id: string;  // スレ内 ID 表示用 (lib/utils/threadUserId で hash)
     author?: { trust_score?: number } | { trust_score?: number }[] | null;
   };
 
-  // 1st try: 著者の trust_score も一緒に取る (FK 明示)
+  // 1st try: 著者の trust_score + author_id も一緒に取る (FK 明示)
+  // author_id は RLS bbs_replies_read for select using(true) で公開済なので
+  // SELECT に含めても新規 disclosure ではない。スレ内 ID hash 表示のため必須。
   const withAuthor = await supabase
     .from('bbs_replies')
-    .select('id, thread_id, content, color, created_at, author:profiles!bbs_replies_author_id_fkey(trust_score)')
+    .select('id, thread_id, content, color, created_at, author_id, author:profiles!bbs_replies_author_id_fkey(trust_score)')
     .eq('thread_id', threadId)
     .order('created_at', { ascending: true })
     .limit(500);  // DoS 防止: 巨大スレッドで OOM/UI フリーズ防止
@@ -207,6 +210,7 @@ export async function fetchReplies(threadId: string): Promise<BBSReply[]> {
         color: r.color,
         created_at: r.created_at,
         trust_score: a?.trust_score ?? null,
+        author_id: r.author_id,
       } as BBSReply;
     });
   }
@@ -215,7 +219,7 @@ export async function fetchReplies(threadId: string): Promise<BBSReply[]> {
   console.warn('[fetchReplies] author join failed, falling back without trust_score:', withAuthor.error.message);
   const fallback = await supabase
     .from('bbs_replies')
-    .select('id, thread_id, content, color, created_at')
+    .select('id, thread_id, content, color, created_at, author_id')
     .eq('thread_id', threadId)
     .order('created_at', { ascending: true })
     .limit(500);  // DoS 防止: 巨大スレッドで OOM/UI フリーズ防止
@@ -227,6 +231,7 @@ export async function fetchReplies(threadId: string): Promise<BBSReply[]> {
     color: r.color,
     created_at: r.created_at,
     trust_score: null,
+    author_id: r.author_id,
   })) as BBSReply[];
 }
 
@@ -244,65 +249,26 @@ export async function createReply(threadId: string, content: string): Promise<vo
   if (error) throw error;
 }
 
-// 投稿へのコメント（BBS返信とは別テーブル）
-// fetchReplies と同じ PGRST201 リスクがあるので FK 明示 + フォールバック構成
-export async function fetchComments(postId: string): Promise<Comment[]> {
-  type RawComment = {
-    id: string;
-    post_id: string;
-    content: string;
-    avatar_color: string;
-    created_at: string;
-    author?: { trust_score?: number } | { trust_score?: number }[] | null;
-  };
+// ============================================================
+// 投稿コメント (public.comments) は lib/api/comments.ts に切り出し
+// ------------------------------------------------------------
+// 0059 でコメントツリー化 (parent_comment_id / reply_to_comment_id) を
+// 入れたタイミングで実装ファイルを分離した。既存の `import { fetchComments,
+// createComment } from '../lib/api/bbs'` は壊さないよう、ここで re-export する。
+// 新規 component / hook は直接 `lib/api/comments` から import するのが推奨。
+// ============================================================
+export { fetchComments, createComment } from './comments';
+export type { CreateCommentOpts } from './comments';
 
-  const withAuthor = await supabase
-    .from('comments')
-    .select('id, post_id, content, avatar_color, created_at, author:profiles!comments_author_id_fkey(trust_score)')
-    .eq('post_id', postId)
-    .order('created_at', { ascending: true });
-
-  if (!withAuthor.error) {
-    return (withAuthor.data ?? []).map((c: RawComment) => {
-      const a = Array.isArray(c.author) ? c.author[0] : c.author;
-      return {
-        id: c.id,
-        post_id: c.post_id,
-        content: c.content,
-        avatar_color: c.avatar_color,
-        created_at: c.created_at,
-        trust_score: a?.trust_score ?? null,
-      } as Comment;
-    });
-  }
-
-  console.warn('[fetchComments] author join failed, falling back:', withAuthor.error.message);
-  const fallback = await supabase
-    .from('comments')
-    .select('id, post_id, content, avatar_color, created_at')
-    .eq('post_id', postId)
-    .order('created_at', { ascending: true });
-  if (fallback.error) throw fallback.error;
-  return (fallback.data ?? []).map((c) => ({
-    id: c.id,
-    post_id: c.post_id,
-    content: c.content,
-    avatar_color: c.avatar_color,
-    created_at: c.created_at,
-    trust_score: null,
-  })) as Comment[];
-}
-
-export async function createComment(postId: string, content: string): Promise<void> {
-  const rl = checkRate('comment');
-  if (!rl.ok) throw new Error(rateLimitMessage('comment', rl.retryAfterMs));
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-  const safeContent = sanitizeContent(content, { maxLength: 500 });
-  if (!safeContent) throw new Error('内容を入力してください');
-  const color = `hsl(${Math.floor(Math.random() * 360)}, 60%, 70%)`;
-  const { error } = await supabase
-    .from('comments')
-    .insert({ post_id: postId, content: safeContent, avatar_color: color, author_id: user.id });
-  if (error) throw error;
-}
+// ============================================================
+// Best ソート (post コメント用 — Reddit 風 score)
+// ------------------------------------------------------------
+// 実装は副作用なし pure helper として lib/utils/commentBestScore.ts に隔離
+// (supabase 依存のこの file に書くと Jest の transformIgnore で parse error
+// になるため)。呼出側は bbs.ts から従来通り import できるよう re-export。
+// ============================================================
+export {
+  computeCommentBestScore,
+  sortCommentsByBest,
+} from '../utils/commentBestScore';
+export type { CommentLike } from '../utils/commentBestScore';

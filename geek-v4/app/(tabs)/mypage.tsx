@@ -19,6 +19,7 @@ import { PolishedButton } from '../../components/ui/PolishedButton';
 import { AlbumPhotoGrid } from '../../components/mypage/AlbumPhotoGrid';
 import { EmptyAlbums } from '../../components/mypage/EmptyAlbums';
 import { HeroAvatar } from '../../components/mypage/HeroAvatar';
+import { AccountStateCard } from '../../components/mypage/AccountStateCard';
 import { Icon } from '../../constants/icons';
 import { C, R, SP, SHADOW, GRAD } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -152,6 +153,10 @@ export default function MypageScreen() {
           onEditPress={() => router.push('/settings/profile-edit' as never)}
           onFriendsPress={() => router.push('/mypage/friends' as never)}
         />
+
+        {/* ───────── アカウント制限の透明性 Card (Reddit ガイド #11)
+             account_state が 'healthy' のときは null render. 影響なし. ───────── */}
+        <AccountStateCard />
 
         {/* ───────── アルバム: 3 タブ (mine / shared / all) ───────── */}
         <AlbumsSection

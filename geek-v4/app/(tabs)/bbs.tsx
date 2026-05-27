@@ -1,10 +1,16 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, TextInput, useWindowDimensions, RefreshControl } from 'react-native';
 import { FlashList, type ListRenderItem } from '@shopify/flash-list';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
 import { useBBS, useMyCommunityBBS } from '../../hooks/useBBS';
 import type { BBSThread } from '../../types/models';
 import { PressableScale } from '../../components/ui/PressableScale';
@@ -215,6 +221,34 @@ export default function BBSScreen() {
 
   const showResults = debounced.length > 0;
 
+  // ===== 「上に戻る」ボタン用: scroll 位置に応じて表示を fade in/out =====
+  // FlashList の ref を保持して scrollToOffset で先頭に戻す。
+  // reanimated の useSharedValue + withTiming で fade in/out (native driver でない
+  // が opacity / transform は worklet-free でも十分軽い)。
+  const listRef = useRef<FlashList<{ item: BBSThread; score: number }>>(null);
+  const backToTopOpacity = useSharedValue(0);
+  const backToTopStyle = useAnimatedStyle(() => ({
+    opacity: backToTopOpacity.value,
+    transform: [
+      { translateY: (1 - backToTopOpacity.value) * 16 }, // 下から ふわっ
+    ],
+  }));
+  // 400px 超で表示。pull-to-refresh の負値域では出さない。
+  const handleScroll = (e: { nativeEvent: { contentOffset: { y: number } } }) => {
+    const y = e.nativeEvent.contentOffset.y;
+    const shouldShow = y > 400;
+    const target = shouldShow ? 1 : 0;
+    if (backToTopOpacity.value !== target) {
+      backToTopOpacity.value = withTiming(target, {
+        duration: 180,
+        easing: Easing.out(Easing.quad),
+      });
+    }
+  };
+  const scrollToTop = () => {
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       {/* ヘッダー (中央寄せ) */}
@@ -422,6 +456,7 @@ export default function BBSScreen() {
       {/* スレッドリスト — FlashList で virtualization。FlatList より recycle が
           効くので長い検索結果でも体感が滑らかになる。 */}
       <FlashList
+        ref={listRef}
         data={filtered}
         keyExtractor={({ item }) => item.id}
         refreshControl={
@@ -430,12 +465,15 @@ export default function BBSScreen() {
         // 検索中に keyboard を表示したままスレッドをタップ → 1 タップで遷移したい
         // ('handled': タップが処理されたら keyboard を閉じる)
         keyboardShouldPersistTaps="handled"
-        // viewport 外で +250px 先読み — スクロール中の白セル防止
-        drawDistance={250}
+        // viewport 外で +320px 先読み — スクロール中の白セル防止
+        drawDistance={320}
         // 大量にあるスレッドカードを virtualization で省メモリ化
         removeClippedSubviews
-        // タイトル 2 行 + メタ情報 1 行で大体 110px くらい
-        estimatedItemSize={110}
+        // 「上に戻る」ボタン用: 16ms throttle で過剰 re-render 防止 (60fps 想定)
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        // タイトル 2 行 + メタ情報 1 行 + 余白 + (community badge) で大体 132px くらい
+        estimatedItemSize={132}
         // フリック時の慣性減速を速める
         decelerationRate="fast"
         // ★ extraData: communityMeta は遅延 fetch なので、初回 render 後に
@@ -449,6 +487,10 @@ export default function BBSScreen() {
           const item = row.item;
           const catColor = item.category ? (CATEGORY_COLORS[item.category] ?? C.accent) : C.accent;
           const community = item.community_id ? communityMeta[item.community_id] : undefined;
+          // 「hot」判定 — 返信 20 件超 or (10 件超 + 直近 24h で活発)
+          const lastReplyMs = new Date(item.last_reply_at ?? item.created_at).getTime();
+          const recentH = (Date.now() - lastReplyMs) / 3600000;
+          const isHot = item.replies_count > 20 || (item.replies_count > 10 && recentH < 24);
           return (
             <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'], paddingBottom: SP['3'], alignSelf: 'center' }}>
               <PressableScale
@@ -464,21 +506,23 @@ export default function BBSScreen() {
                 }}
                 haptic="tap"
                 // glass 風: 半透明 background + 細い縁 + ふんわり shadow.xs
+                // hot スレは少し強い border + glow shadow で前に出す。
                 // (FlashList の recycle 性能を保つため BlurView は使わない. View only)
                 style={{
                   flexDirection: 'row',
                   borderRadius: R.lg,
-                  backgroundColor: 'rgba(255,255,255,0.04)',
+                  backgroundColor: isHot ? 'rgba(248,122,180,0.06)' : 'rgba(255,255,255,0.04)',
                   borderWidth: 1,
-                  borderColor: 'rgba(255,255,255,0.08)',
+                  borderColor: isHot ? 'rgba(248,122,180,0.22)' : 'rgba(255,255,255,0.08)',
                   overflow: 'hidden',
-                  ...SHADOW.xs,
+                  ...(isHot ? SHADOW.sm : SHADOW.xs),
                 }}
               >
-                {/* 左カラーバー — accent gradient で grad 化 (active chip と統一) */}
-                <View style={{ width: 4, overflow: 'hidden' }}>
+                {/* 左カラーバー — hot スレは GRAD.warm (桃→橙) で厚め (6px)。
+                    それ以外は category color → accent への gradient で 4px。 */}
+                <View style={{ width: isHot ? 6 : 4, overflow: 'hidden' }}>
                   <LinearGradient
-                    colors={[catColor, C.accent] as const}
+                    colors={isHot ? GRAD.warm : ([catColor, C.accent] as const)}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 0, y: 1 }}
                     style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
@@ -530,9 +574,13 @@ export default function BBSScreen() {
                       </View>
                     )}
                     <View style={{ flex: 1 }} />
-                    <Text style={[T.caption, { color: C.text3, fontSize: 11 }]}>
-                      {formatRelative(item.last_reply_at ?? item.created_at)}
-                    </Text>
+                    {/* 最終返信時刻 — 控えめだが clock icon で意味を明示 */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                      <Icon.clock size={11} color={C.text3} strokeWidth={2.2} />
+                      <Text style={[T.caption, { color: C.text3, fontSize: 11 }]}>
+                        {formatRelative(item.last_reply_at ?? item.created_at)}
+                      </Text>
+                    </View>
                   </View>
                   {showResults ? (
                     <HighlightedText
@@ -550,21 +598,35 @@ export default function BBSScreen() {
                     </Text>
                   )}
                   <View style={{ flexDirection: 'row', gap: SP['3'], alignItems: 'center' }}>
+                    {/* 返信数 — hot は色強調 + サイズ up で前に出す */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                      <Icon.comment size={13} color={C.text3} strokeWidth={2.2} />
-                      <Text style={[T.small, { color: C.text3, fontWeight: '600' }]}>
+                      <Icon.comment
+                        size={14}
+                        color={isHot ? C.pink : C.text2}
+                        strokeWidth={2.2}
+                      />
+                      <Text style={[T.small, {
+                        color: isHot ? C.pink : C.text2,
+                        fontWeight: '700',
+                        fontSize: 13,
+                      }]}>
                         {item.replies_count.toLocaleString('ja-JP')}
                       </Text>
+                      <Text style={[T.caption, { color: C.text3, fontSize: 11, marginLeft: 1 }]}>
+                        返信
+                      </Text>
                     </View>
-                    {item.replies_count > 10 && (
+                    {isHot && (
                       <View style={{
                         flexDirection: 'row', alignItems: 'center', gap: 2,
                         paddingHorizontal: 6, paddingVertical: 1,
-                        backgroundColor: 'rgba(255,140,48,0.15)',
+                        backgroundColor: 'rgba(248,122,180,0.15)',
                         borderRadius: R.sm,
+                        borderWidth: 1,
+                        borderColor: 'rgba(248,122,180,0.32)',
                       }}>
                         <Text style={{ fontSize: 10 }}>🔥</Text>
-                        <Text style={{ fontSize: 10, color: '#FF8C30', fontWeight: '700' }}>賑わい中</Text>
+                        <Text style={{ fontSize: 10, color: '#F87AB4', fontWeight: '700' }}>賑わい中</Text>
                       </View>
                     )}
                   </View>
@@ -582,7 +644,7 @@ export default function BBSScreen() {
         ListEmptyComponent={
           loading ? (
             <View>
-              {Array.from({ length: 5 }).map((_, i) => <ThreadCardSkeleton key={`skel-thread-${i}`} />)}
+              {Array.from({ length: 6 }).map((_, i) => <ThreadCardSkeleton key={`skel-thread-${i}`} />)}
             </View>
           ) : (
             <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'], paddingTop: SP['4'] }}>
@@ -690,6 +752,48 @@ export default function BBSScreen() {
           )
         }
       />
+
+      {/* 「上に戻る」FAB — スクロール 400px 超で表示 (reanimated でふわっと in/out)。
+          TABBAR の上に乗せる位置に固定。pointerEvents は opacity=0 のときも
+          子要素がタッチを吸わないように 'box-none' (不可視時は実質 no-op)。 */}
+      <Animated.View
+        pointerEvents="box-none"
+        style={[
+          {
+            position: 'absolute',
+            right: SP['4'],
+            bottom: TABBAR.height + insets.bottom + SP['3'],
+          },
+          backToTopStyle,
+        ]}
+      >
+        <PressableScale
+          onPress={scrollToTop}
+          haptic="tap"
+          accessibilityLabel="一番上に戻る"
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            paddingHorizontal: SP['3'],
+            paddingVertical: SP['2'],
+            borderRadius: R.full,
+            overflow: 'hidden',
+            ...SHADOW.glow,
+          }}
+        >
+          <LinearGradient
+            colors={GRAD.primary}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+          />
+          <Icon.chevronU size={16} color="#fff" strokeWidth={2.6} />
+          <Text style={[T.caption, { color: '#fff', fontWeight: '700', fontSize: 11 }]}>
+            上に戻る
+          </Text>
+        </PressableScale>
+      </Animated.View>
     </View>
   );
 }

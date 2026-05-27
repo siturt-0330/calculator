@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { attachChannel } from '../lib/realtime';
 import { useToastStore } from '../stores/toastStore';
@@ -11,28 +11,36 @@ import { stableKeyFor } from '../lib/utils/queryKey';
 
 const KEY_PREFIX = 'bbs-reply-reactions';
 
-function keyForIds(replyIds: string[]) {
-  return [KEY_PREFIX, stableKeyFor(replyIds.slice().sort())];
-}
-
 export function useBBSReplyReactions(replyIds: string[]) {
   const qc = useQueryClient();
-  const sortedIds = replyIds.slice().sort();
-  const sortedKey = stableKeyFor(sortedIds);
+
+  // ★ useMemo で sortedIds / sortedKey を安定化。
+  //   replyIds (配列参照) は parent の useMemo 経由で来るとはいえ、ここで
+  //   毎 render 新オブジェクトを作ると下流の Set / useQuery key / effect deps が
+  //   churn する可能性があるため明示的に memo 化する。
+  //   依存は sortedKey (string プリミティブ) に集約 — replyIds そのものは deps に
+  //   入れない (= polls/reactions 兄弟 hook と同じ pattern)。
+  const sortedKey = useMemo(() => stableKeyFor(replyIds.slice().sort()), [replyIds]);
+  const idSet = useMemo(() => new Set(replyIds), [replyIds]);
 
   const q = useQuery({
-    queryKey: keyForIds(replyIds),
+    queryKey: [KEY_PREFIX, sortedKey],
     queryFn: () => fetchReactionsForReplies(replyIds),
     enabled: replyIds.length > 0,
     staleTime: 30_000,
   });
 
+  // 最新の idSet / replyIds を ref で参照 (effect 依存を sortedKey + qc に絞るため)
+  const idSetRef = useRef(idSet);
+  idSetRef.current = idSet;
+  const replyIdsRef = useRef(replyIds);
+  replyIdsRef.current = replyIds;
+
   useEffect(() => {
     if (!sortedKey) return;
-    const idSet = new Set(sortedIds);
     // server-side filter: 現在表示中の reply_id のみ。全 BBS スレッドのリアクションを
-    // 受け取ると無駄な fanout が発生する。
-    const serverIds = sortedIds.slice(0, 30);
+    // 受け取ると無駄な fanout が発生する。30 件 cap は filter 文字列長 + 性能の trade-off。
+    const serverIds = replyIdsRef.current.slice().sort().slice(0, 30);
     return attachChannel(`bbs-reply-reactions:${sortedKey.slice(0, 64)}`, (ch) =>
       ch.on(
         'postgres_changes',
@@ -44,7 +52,8 @@ export function useBBSReplyReactions(replyIds: string[]) {
         },
         (payload) => {
           const row = (payload.new ?? payload.old) as { reply_id?: string } | null;
-          if (row?.reply_id && idSet.has(row.reply_id)) {
+          // idSet の参照は ref 経由 (deps churn を避けるため)
+          if (row?.reply_id && idSetRef.current.has(row.reply_id)) {
             // 全 KEY_PREFIX 総当たりではなく、現在の sortedKey のクエリだけを invalidate
             // (他の BBS スレッドが同時に開かれている場合に巻き込まない)
             qc.invalidateQueries({ queryKey: [KEY_PREFIX, sortedKey] });
@@ -52,7 +61,6 @@ export function useBBSReplyReactions(replyIds: string[]) {
         },
       ),
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortedKey, qc]);
 
   return { data: (q.data ?? {}) as ReactionsByReply, isLoading: q.isLoading };

@@ -2,12 +2,16 @@ import { supabase } from '../supabase';
 import type { Post, PostVisibility } from '../../types/models';
 
 export type { PostVisibility } from '../../types/models';
-export type SortMode = 'for-you' | 'hot' | 'new' | 'top';
+// 'rising' = Reddit 風 "急上昇" — 直近 3h 内で likes/min が高い post を上位に。
+//   server 側は実質 'new' (created_at desc limit 100) で取得し、
+//   client 側 (hooks/useFeed) で lib/utils/risingScore.ts により再ランクする。
+//   RPC/DB スキーマ変更不要。詳細は risingScore.ts のヘッダコメント参照。
+export type SortMode = 'for-you' | 'hot' | 'new' | 'top' | 'rising';
 
 // posts SELECT で取得するカラム一覧 (一箇所でメンテ可能)
 // author_id は公式コミュ管理者投稿を de-anonymize する判定に使う (RLS で誰でも読める)
 const POSTS_SELECT_COLS =
-  'id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, created_at, author_id';
+  'id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, qa_mode, created_at, author_id';
 
 // UUID 形式チェック (壊れた URL や古い ID 対策) — fetchPostById と fetchCommunityPosts で使う
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -34,9 +38,21 @@ export async function fetchPosts({
 }: FetchPostsOpts): Promise<{ posts: Post[]; nextCursor: string | null }> {
   // 'for-you' は内部的に 'hot' と同じ広い候補プールを取りつつ、クライアント側で
   // パーソナライズ再ランクするので、候補数を 1.5x にしてランカー側に余白を与える。
+  // 'rising' は 'new' の created_at desc を引数 100 件で取得し、client 側で
+  // likes/分 速度で再ランク → 上位 30 を表示。ページングはせず 1 ページのみ。
   const isForYou = sort === 'for-you';
-  const effectiveLimit = isForYou ? Math.ceil(limit * 1.5) : limit;
-  const effectiveSort: 'hot' | 'new' | 'top' = isForYou ? 'hot' : sort;
+  const isRising = sort === 'rising';
+  const RISING_FETCH_LIMIT = 100;
+  const effectiveLimit = isForYou
+    ? Math.ceil(limit * 1.5)
+    : isRising
+      ? RISING_FETCH_LIMIT
+      : limit;
+  const effectiveSort: 'hot' | 'new' | 'top' = isForYou
+    ? 'hot'
+    : isRising
+      ? 'new'
+      : sort;
 
   let query = supabase
     .from('posts')
@@ -71,7 +87,9 @@ export async function fetchPosts({
   // cursor 検証ヘルパ — 不正な cursor で偽 pagination が動くのを防ぐ
   // 期待フォーマット:
   //   new mode:        ISO timestamp (e.g. '2026-05-19T12:34:56.789Z')
-  //   hot/top mode:    '<integer>|<ISO timestamp>'  e.g. '42|2026-05-19T12:34:56.789Z'
+  //   top mode:        '<integer>|<ISO timestamp>'   e.g. '42|2026-05-19T12:34:56.789Z'
+  //   hot mode:        '<float>|<ISO timestamp>'     e.g. '4.213|2026-05-19T12:34:56.789Z'
+  //                    (hot は hot_score = double precision なので浮動小数を受け付ける)
   const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
   function parseTimestampCursor(c: string): string | null {
     return ISO_RE.test(c) ? c : null;
@@ -89,6 +107,30 @@ export async function fetchPosts({
     if (!ISO_RE.test(ts)) return null;
     return { likes, ts };
   }
+  // hot 用 cursor: hot_score (double precision, 負値あり) + ISO timestamp
+  // 値域は double precision そのものなので、数値表記を緩めに許可しつつ
+  // Number.isFinite で最終チェック。
+  function parseHotCursor(c: string): { hot: number; ts: string } | null {
+    const parts = c.split('|');
+    if (parts.length !== 2) return null;
+    const hotStr = parts[0];
+    const ts = parts[1];
+    if (!hotStr || !ts) return null;
+    // -123.456 / 0 / 7.89e-3 / -1.5e+10 など。NaN/Infinity は弾く。
+    if (!/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(hotStr)) return null;
+    const hot = Number(hotStr);
+    if (!Number.isFinite(hot)) return null;
+    if (!ISO_RE.test(ts)) return null;
+    return { hot, ts };
+  }
+
+  // ----------------------------------------------------------------
+  // hot は hot_score (generated column, 0058_hot_score.sql) で並べる。
+  // 環境によっては migration 未 apply で column が無いケースがあるので
+  // legacy fallback (likes_count desc, created_at desc) を用意し、
+  // 「column does not exist」エラーで自動切替する。
+  // ----------------------------------------------------------------
+  const isHot = effectiveSort === 'hot';
 
   if (effectiveSort === 'new') {
     query = query.order('created_at', { ascending: false });
@@ -106,28 +148,98 @@ export async function fetchPosts({
       }
     }
   } else {
-    // hot: いいね順 + 新しい順（時間制限なしで全件表示）
+    // hot: Reddit 風 hot_score (= log10(|s|) + sign(s)*t/28800) で並べる。
+    // generated column が未 apply な環境 (= 旧 schema) では下のエラー検知 → fallback。
     query = query
-      .order('likes_count', { ascending: false })
+      .order('hot_score', { ascending: false })
       .order('created_at', { ascending: false });
     if (cursor) {
-      const parsed = parseCompositeCursor(cursor);
+      const parsed = parseHotCursor(cursor);
       if (parsed) {
-        query = query.or(`likes_count.lt.${parsed.likes},and(likes_count.eq.${parsed.likes},created_at.lt.${parsed.ts})`);
+        // hot_score < parsed.hot OR (hot_score = parsed.hot AND created_at < parsed.ts)
+        query = query.or(
+          `hot_score.lt.${parsed.hot},and(hot_score.eq.${parsed.hot},created_at.lt.${parsed.ts})`,
+        );
       }
     }
   }
 
-  const { data, error } = await query;
+  let { data, error } = await query;
+
+  // ----------------------------------------------------------------
+  // hot fallback: hot_score column が無い環境 (PG: 42703 undefined_column)
+  // の場合、旧 likes_count desc に戻して再 fetch する。
+  // PostgREST は code='42703' を返してくる (Supabase JS で error.code が
+  // 露出する)。message でも "hot_score" を含むので二重チェック。
+  // ----------------------------------------------------------------
+  let usedHotFallback = false;
+  if (isHot && error) {
+    const code = (error as { code?: string }).code ?? '';
+    const msg = (error as { message?: string }).message ?? '';
+    const isMissingColumn =
+      code === '42703' ||
+      /hot_score/i.test(msg) ||
+      /does not exist/i.test(msg);
+    if (isMissingColumn) {
+      // 旧 query を組み直して再実行 (likes_count desc, created_at desc)
+      let fb = supabase
+        .from('posts')
+        .select(POSTS_SELECT_COLS)
+        .eq('is_anonymous', true)
+        .eq('is_public', true)
+        .limit(effectiveLimit);
+      if (home) fb = fb.in('visibility', ['public', 'community_public']);
+      if (blockedTags.length > 0) {
+        const SERVER_LIMIT = 80;
+        const serverSide = blockedTags.length > SERVER_LIMIT
+          ? blockedTags.slice(0, SERVER_LIMIT)
+          : blockedTags;
+        fb = fb.not('tag_names', 'cs', `{${serverSide.join(',')}}`);
+      }
+      if (filterTags && filterTags.length > 0) {
+        fb = fb.overlaps('tag_names', filterTags);
+      }
+      fb = fb
+        .order('likes_count', { ascending: false })
+        .order('created_at', { ascending: false });
+      if (cursor) {
+        const parsed = parseCompositeCursor(cursor);
+        if (parsed) {
+          fb = fb.or(
+            `likes_count.lt.${parsed.likes},and(likes_count.eq.${parsed.likes},created_at.lt.${parsed.ts})`,
+          );
+        }
+      }
+      const fbResult = await fb;
+      data = fbResult.data;
+      error = fbResult.error;
+      usedHotFallback = true;
+      if (!error) {
+        console.warn('[posts] hot_score column missing — using legacy likes_count fallback');
+      }
+    }
+  }
+
   if (error) throw error;
 
   const posts = (data ?? []) as Post[];
   let nextCursor: string | null = null;
-  if (posts.length === effectiveLimit) {
+  // rising モードは client side 再ランクで上位 30 件しか出さないため、
+  // ページングしても意味がない (= 31 件目以下を server 側で fetch しても
+  // 速度上位は前ページに既に含まれている)。常に nextCursor=null で打ち切る。
+  if (!isRising && posts.length === effectiveLimit) {
     const last = posts[posts.length - 1];
     if (last) {
       if (effectiveSort === 'new') nextCursor = last.created_at;
-      else nextCursor = `${last.likes_count}|${last.created_at}`;
+      else if (isHot && !usedHotFallback) {
+        // hot 通常経路: hot_score|created_at の合成 cursor
+        const hotVal = (last as { hot_score?: number | null }).hot_score;
+        const hotStr = typeof hotVal === 'number' && Number.isFinite(hotVal) ? String(hotVal) : '0';
+        nextCursor = `${hotStr}|${last.created_at}`;
+      } else {
+        // top / hot fallback: likes_count|created_at
+        nextCursor = `${last.likes_count}|${last.created_at}`;
+      }
     }
   }
   const decorated = await attachOfficialAuthor(posts);
@@ -376,7 +488,8 @@ export async function fetchCommunityPosts({
       .order('likes_count', { ascending: false })
       .order('created_at', { ascending: false });
   } else {
-    // new または for-you (for-you はクライアント側ランカー前提で時系列を渡す)
+    // new / for-you / rising — いずれもクライアント側で再ランクされる前提で時系列を渡す。
+    // (for-you=パーソナライズ、rising=likes/分 速度。詳細は SortMode コメント参照)
     postsQuery = postsQuery.order('created_at', { ascending: false });
   }
 
@@ -519,4 +632,42 @@ export async function fetchCommunitiesForPosts(
     grouped[r.post_id] = arr;
   }
   return grouped;
+}
+
+// ============================================================
+// Q&A モード (migration 0067) — post の author が enable/disable
+// ------------------------------------------------------------
+// - 認証必須 (Not authenticated → throw)
+// - post.author_id === auth.uid() のチェックは server 側 RLS でも掛かるが、
+//   silent failure を避けるため client でも 1 行 fetch して比較する。
+// - 並び替えは server で再計算せず client side (lib/utils/qaSort.ts) に置く
+//   → 既存 comments fetch / publication / cache key を一切いじらない契約。
+// ============================================================
+export async function togglePostQAMode(
+  postId: string,
+  enabled: boolean,
+): Promise<void> {
+  if (!postId || !UUID_RE.test(postId)) throw new Error('Invalid post id');
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  // author check — RLS でも弾かれるが、UI で明示 error を出すために事前 fetch
+  const { data: row, error: readErr } = await supabase
+    .from('posts')
+    .select('author_id')
+    .eq('id', postId)
+    .maybeSingle();
+  if (readErr) throw readErr;
+  if (!row) throw new Error('Post not found');
+  const ownerId = (row as { author_id?: string | null }).author_id;
+  if (!ownerId || ownerId !== user.id) {
+    throw new Error('Q&A モードは投稿者のみが切替可能です');
+  }
+
+  const { error } = await supabase
+    .from('posts')
+    .update({ qa_mode: enabled })
+    .eq('id', postId);
+  if (error) throw error;
 }

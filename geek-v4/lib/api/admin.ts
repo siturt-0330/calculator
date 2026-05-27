@@ -15,6 +15,8 @@ export type AdminUser = {
   post_count: number;
   concern_received_count: number;
   is_admin: boolean;
+  // 0061_shadowban で追加。 migration 適用前の env では undefined のまま動くよう optional に。
+  shadowbanned?: boolean;
   created_at: string;
 };
 
@@ -32,7 +34,7 @@ export type AdminPost = {
 export async function fetchAllUsers(opts?: { search?: string; limit?: number }): Promise<AdminUser[]> {
   let q = supabase
     .from('profiles')
-    .select('id, nickname, account_state, trust_score, post_count, concern_received_count, is_admin, created_at')
+    .select('id, nickname, account_state, trust_score, post_count, concern_received_count, is_admin, shadowbanned, created_at')
     .order('created_at', { ascending: false })
     .limit(opts?.limit ?? 100);
   if (opts?.search && opts.search.trim().length > 0) {
@@ -266,7 +268,7 @@ export async function fetchUserDetail(userId: string): Promise<{
   const [userRes, postsRes, concernsRes, modRes, msgRes] = await Promise.all([
     supabase
       .from('profiles')
-      .select('id, nickname, account_state, trust_score, post_count, concern_received_count, is_admin, created_at')
+      .select('id, nickname, account_state, trust_score, post_count, concern_received_count, is_admin, shadowbanned, created_at')
       .eq('id', userId)
       .single(),
     supabase
@@ -574,4 +576,68 @@ export async function fetchAdminDashboardStats(): Promise<{
     suspendedUsers: suspendedRes.count ?? 0,
     openReports: reportsRes.count ?? 0,
   };
+}
+
+// ============================================================
+// Shadowban API (0061_shadowban)
+// ============================================================
+// Reddit ガイド #10 / 6.9 章 — 「本人にだけ見える ban」。
+// admin だけが trigger でき、RLS は posts/bbs_replies/comments の
+// SELECT policy で「auth.uid()==author OR not shadowbanned」を強制する。
+// API としては toggle + 検索 + 一覧の 3 つだけ提供。
+
+/**
+ * 指定ユーザーの shadowbanned フラグを切り替える。
+ * - admin 以外が呼ぶと RPC 側で `admin only` で reject。
+ * - 自分自身に対しては DB 側で `cannot shadowban yourself` で reject。
+ * - 成功すると moderation_log に `shadowban` / `unshadowban` が best-effort で残る。
+ */
+export async function toggleShadowban(targetId: string, banned: boolean): Promise<void> {
+  const { error } = await supabase.rpc('admin_toggle_shadowban', {
+    target_id: targetId,
+    banned,
+  });
+  if (error) throw error;
+}
+
+/**
+ * ユーザー検索 (admin/users 画面の検索 input から呼ばれる)。
+ * - email は profiles に同期されていない + RLS で auth.users を引けないため、
+ *   nickname の ilike 検索のみ。空クエリの時は最新登録順を返す。
+ * - 余計な情報を返さないよう AdminUser に絞って返す (shadowbanned 含む)。
+ */
+export async function searchUsers(query: string, limit = 20): Promise<AdminUser[]> {
+  const trimmed = query.trim();
+  let q = supabase
+    .from('profiles')
+    .select(
+      'id, nickname, account_state, trust_score, post_count, concern_received_count, is_admin, shadowbanned, created_at',
+    )
+    .order('created_at', { ascending: false })
+    .limit(Math.min(Math.max(limit, 1), 100));
+  if (trimmed.length > 0) {
+    // ilike は前方/部分一致いずれもサポート。% を含むユーザー入力は escape しないと
+    // 余計な意味を持つので簡易 sanitize する (% と \ のみ)。
+    const safe = trimmed.replace(/[\\%]/g, '\\$&');
+    q = q.ilike('nickname', `%${safe}%`);
+  }
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data ?? []) as AdminUser[];
+}
+
+/**
+ * shadowbanned=true なユーザー一覧 (admin/users の「現在ban中」リスト表示用)。
+ */
+export async function fetchShadowbannedUsers(limit = 100): Promise<AdminUser[]> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select(
+      'id, nickname, account_state, trust_score, post_count, concern_received_count, is_admin, shadowbanned, created_at',
+    )
+    .eq('shadowbanned', true)
+    .order('created_at', { ascending: false })
+    .limit(Math.min(Math.max(limit, 1), 500));
+  if (error) throw error;
+  return (data ?? []) as AdminUser[];
 }
