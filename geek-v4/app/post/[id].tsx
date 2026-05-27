@@ -1,18 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, useWindowDimensions,
+  View, Text, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, useWindowDimensions, ScrollView,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FlashList } from '@shopify/flash-list';
 import { getLastViewed, setLastViewed } from '../../lib/utils/lastViewed';
-import { getDisplayCommentLikes } from '../../lib/utils/commentDisplay';
 import { fetchPostById, fetchCommunitiesForPosts } from '../../lib/api/posts';
 import { fetchSimilarPosts } from '../../lib/api/similarPosts';
-import { fetchComments, createComment } from '../../lib/api/bbs';
+import { fetchComments, createComment } from '../../lib/api/comments';
 import { fetchPostAddedTags, addPostTag } from '../../lib/api/tags';
-import { supabase } from '../../lib/supabase';
 import { attachChannel } from '../../lib/realtime';
 import { useFeedPage } from '../../hooks/useFeedPage';
 import { useReactionToggle } from '../../hooks/useReactions';
@@ -31,7 +28,10 @@ import { formatRelative } from '../../lib/utils/date';
 import type { Comment } from '../../types/models';
 import { Icon } from '../../constants/icons';
 import { ObsidianSaveButton } from '../../components/ui/ObsidianSaveButton';
-import { postToObsidianNote, commentToObsidianNote } from '../../hooks/useObsidian';
+import { postToObsidianNote } from '../../hooks/useObsidian';
+import { CommentThreadItem } from '../../components/post/CommentThreadItem';
+import { buildCommentTree } from '../../lib/utils/commentTree';
+import { getThreadUserId } from '../../lib/utils/threadUserId';
 import * as Haptics from 'expo-haptics';
 import { isValidUuid } from '../../lib/validation';
 
@@ -67,8 +67,18 @@ export default function PostDetailScreen() {
   const [lastViewedSnapshot, setLastViewedSnapshot] = useState<number | null>(null);
   // 連続 setLastViewed を避けるためのフラグ
   const lastViewedSavedRef = useRef(false);
-  // 新着までのスクロール用 FlashList ref
-  const listRef = useRef<FlashList<Comment>>(null);
+  // 新着までのスクロール用 ref (タップで scroll する用)
+  const scrollRef = useRef<ScrollView>(null);
+
+  // ============================================================
+  // 返信モード (migration 0059)
+  // ------------------------------------------------------------
+  // 「このコメントに返信」をタップしたら replyTo に Comment をセットする。
+  //   - 送信時: parentId = replyTo.id, replyToId = replyTo.id を attach
+  //   - draft 先頭に「↳ #<rootIndex> さんへ」を自動挿入
+  //   - キャンセル ✕ ボタンで replyTo を null に戻す
+  // ============================================================
+  const [replyTo, setReplyTo] = useState<Comment | null>(null);
 
   const { data: post, isLoading: postLoading, isError: postError } = useQuery({
     queryKey: ['post', id],
@@ -134,10 +144,16 @@ export default function PostDetailScreen() {
   const { show } = useToastStore();
 
   const { mutateAsync: submitReply, isPending } = useMutation({
-    mutationFn: (content: string) => createComment(id!, content),
+    // 返信モード時は parent_comment_id / reply_to_comment_id をセット
+    mutationFn: (args: { content: string; parentId?: string; replyToId?: string }) =>
+      createComment(id!, args.content, {
+        parentId: args.parentId ?? null,
+        replyToId: args.replyToId ?? null,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['post-comments', id] });
       setText('');
+      setReplyTo(null);
       safeHaptic(Haptics.NotificationFeedbackType.Success);
     },
     onError: (e: unknown) => {
@@ -185,6 +201,34 @@ export default function PostDetailScreen() {
     }
     return { unreadIds: set, firstUnreadIndex: firstIdx };
   }, [replies, lastViewedSnapshot]);
+
+  // ============================================================
+  // コメントツリー化 (migration 0059)
+  // ------------------------------------------------------------
+  // - commentTree: buildCommentTree で組み立てた root[] (各 root に children/depth)
+  // - rootIndexById: id → root の index (#1, #2, ...)。root 自身 + 子孫すべてに
+  //   同じ index を貼って表示に使う。 _rootOfId は子孫 id → root id を引く逆引き map。
+  // ============================================================
+  const commentTree = useMemo(() => buildCommentTree(replies), [replies]);
+
+  const { rootIndexById, rootOfId } = useMemo(() => {
+    const idx = new Map<string, number>();
+    const rootOf = new Map<string, string>();
+    commentTree.forEach((root, i) => {
+      idx.set(root.id, i);
+      rootOf.set(root.id, root.id);
+      const visit = (nodes: Comment[]) => {
+        for (const n of nodes) {
+          rootOf.set(n.id, root.id);
+          if (n.children && n.children.length > 0) visit(n.children);
+        }
+      };
+      if (root.children && root.children.length > 0) visit(root.children);
+    });
+    return { rootIndexById: idx, rootOfId: rootOf };
+  }, [commentTree]);
+
+  const rootOfCommentId = (cid: string): string => rootOfId.get(cid) ?? cid;
 
   // Realtime: 同じ投稿への新規コメント + 投稿カウンター更新 + リアクション
   //
@@ -245,11 +289,29 @@ export default function PostDetailScreen() {
 
   const handleSend = async () => {
     if (!text.trim() || isPending) return;
+    // 返信モードなら parent_comment_id / reply_to_comment_id を attach
+    const args = replyTo
+      ? { content: text.trim(), parentId: replyTo.id, replyToId: replyTo.id }
+      : { content: text.trim() };
     // mutateAsync は失敗時に reject するが、onError でトーストを出すので
     // ここでは握り潰して UI を壊さない (unhandled rejection 防止)
-    await submitReply(text.trim()).catch((e: unknown) => {
+    await submitReply(args).catch((e: unknown) => {
       console.warn('[post/handleSend] submit failed:', e);
     });
+  };
+
+  // 返信ボタン押下: replyTo セット + draft に「↳ #N さんへ」を挿入
+  // (UI 上は人間に読めるラベル / DB 上は reply_to_comment_id の uuid で正規化)
+  const handleReply = (c: Comment) => {
+    setReplyTo(c);
+    // root index は flat 順 (replies の index + 1) を使う — buildCommentTree の
+    // root だけ index 付与してるので、 reply 対象が child の場合は親 root の番号
+    // を表示したい。ここでは comment id から root index を逆引きする。
+    const idx = rootIndexById.get(rootOfCommentId(c.id)) ?? 0;
+    const hash = getThreadUserId(c.id, id ?? '');
+    const prefix = `↳ #${idx + 1} (${hash}) さんへ `;
+    // 既に prefix がある場合は重複させない
+    setText((cur) => (cur.startsWith('↳ ') ? cur : prefix + cur));
   };
 
   // route param validation 失敗 → cache 汚染を防ぐため早期 return
@@ -294,73 +356,8 @@ export default function PostDetailScreen() {
     );
   }
 
-  const renderReply = ({ item, index }: { item: Comment; index: number }) => {
-    const isUnread = unreadIds.has(item.id);
-    // Comment 型に likes_count は無いが、サーバー側で同名フィールドが
-    // 付与されてくる可能性に備えて optional に拾う (型は narrow に保つ)。
-    const likesRaw = (item as Comment & { likes_count?: number }).likes_count;
-    const likesDisplay = getDisplayCommentLikes(item.created_at, likesRaw);
-
-    return (
-      <View style={{ width: '100%', alignItems: 'center' }}>
-        <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: SP['4'], paddingVertical: SP['2'] }}>
-          <View style={{
-            flexDirection: 'row', gap: SP['3'],
-            padding: SP['3'],
-            // 未読は accent tint + 左 vertical bar で強調
-            backgroundColor: isUnread ? C.accentBg : C.bg2,
-            borderRadius: R.lg,
-            borderWidth: 1, borderColor: isUnread ? C.accent : C.border,
-            // 左の太い縦バー (3px) — 未読インジケータ。borderLeftWidth は
-            // borderColor と一括設定だと右辺まで accent になるので、上下右は
-            // 通常 border のまま borderLeftColor だけ別指定する。
-            borderLeftWidth: isUnread ? 3 : 1,
-            borderLeftColor: isUnread ? C.accent : C.border,
-          }}>
-            <View style={{ alignItems: 'center', gap: 2, width: 36 }}>
-              <Avatar size={32} color={item.avatar_color} name={String(index + 1)} />
-              <View style={{
-                paddingHorizontal: 4, paddingVertical: 1,
-                backgroundColor: C.bg3, borderRadius: R.sm,
-                minWidth: 24, alignItems: 'center',
-              }}>
-                <Text style={{ fontSize: 9, color: C.text3, fontWeight: '700' }}>#{index + 1}</Text>
-              </View>
-            </View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], marginBottom: 4 }}>
-                <Text style={[T.caption, { color: C.text3 }]}>{formatRelative(item.created_at)}</Text>
-                {/* スコア表示遅延 (issue #20): 投稿直後 30 分間は数値を出さない */}
-                {likesRaw !== undefined && (
-                  <Text style={[T.caption, { color: C.text3 }]} accessibilityLabel={`いいね ${likesDisplay}`}>
-                    · 💛 {likesDisplay}
-                  </Text>
-                )}
-                {isUnread && (
-                  <View
-                    style={{
-                      paddingHorizontal: 6, paddingVertical: 1,
-                      backgroundColor: C.accent,
-                      borderRadius: R.sm,
-                    }}
-                    accessibilityLabel="未読のコメント"
-                  >
-                    <Text style={{ fontSize: 9, color: '#fff', fontWeight: '800' }}>NEW</Text>
-                  </View>
-                )}
-                <View style={{ flex: 1 }} />
-                <ObsidianSaveButton
-                  note={commentToObsidianNote(item, post.content, post.id)}
-                  size={14}
-                />
-              </View>
-              <Text style={[T.body, { color: C.text, lineHeight: 22 }]}>{item.content}</Text>
-            </View>
-          </View>
-        </View>
-      </View>
-    );
-  };
+  // renderReply は CommentThreadItem に切り出した (migration 0059)。
+  // ツリー化されたコメント (commentTree) を再帰的に描画する。
 
   const ListHeader = () => (
     <View style={{ alignItems: 'center' }}>
@@ -624,30 +621,51 @@ export default function PostDetailScreen() {
       style={{ flex: 1, backgroundColor: C.bg }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <FlashList
-        ref={listRef}
-        data={replies}
-        keyExtractor={(item) => item.id}
-        renderItem={renderReply}
-        estimatedItemSize={72}
-        // 入力 focus 中でも 1 タップで戻るボタン/タグ/類似投稿に届くように
+      {/* ============================================================
+          コメントツリー (migration 0059)
+          ------------------------------------------------------------
+          - FlashList から ScrollView に切替: 階層描画では item の高さが
+            可変かつ再帰なので flash list の recycler は活かしづらい。
+            投稿あたりのコメント数は通常 50 件以下 (1 root + 子孫合計でも
+            ~200 件程度) なので ScrollView で十分。
+          - ListHeader (投稿本体カード + 類似投稿 + コメント件数) はそのまま。
+          - 各 root を CommentThreadItem に渡して再帰描画。
+          ============================================================ */}
+      <ScrollView
+        ref={scrollRef}
         keyboardShouldPersistTaps="handled"
-        ListHeaderComponent={<ListHeader />}
-        ListEmptyComponent={
-          repliesLoading ? (
-            <View style={{ padding: SP['6'], alignItems: 'center' }}>
-              <ActivityIndicator color={C.accent} />
-            </View>
-          ) : (
-            <View style={{ padding: SP['6'], alignItems: 'center' }}>
-              <Text style={[T.small, { color: C.text3 }]}>コメントはまだありません</Text>
-            </View>
-          )
-        }
+        contentContainerStyle={{ paddingBottom: SP['8'] }}
         refreshControl={
           <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={C.accent} />
         }
-      />
+      >
+        <ListHeader />
+        {repliesLoading ? (
+          <View style={{ padding: SP['6'], alignItems: 'center' }}>
+            <ActivityIndicator color={C.accent} />
+          </View>
+        ) : commentTree.length === 0 ? (
+          <View style={{ padding: SP['6'], alignItems: 'center' }}>
+            <Text style={[T.small, { color: C.text3 }]}>コメントはまだありません</Text>
+          </View>
+        ) : (
+          <View style={{ alignItems: 'center' }}>
+            <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: SP['4'] }}>
+              {commentTree.map((root, idx) => (
+                <CommentThreadItem
+                  key={root.id}
+                  comment={root}
+                  rootIndex={idx + 1}
+                  unread={unreadIds.has(root.id)}
+                  postContent={post.content}
+                  postId={post.id}
+                  onReply={handleReply}
+                />
+              ))}
+            </View>
+          </View>
+        )}
+      </ScrollView>
 
       {/* 新着 N 件アンカー (issue #18) — 未読が 1 件以上ある時のみ表示。
           tap で最初の未読までスクロール。Modal ではないので入力欄の上に
@@ -668,13 +686,11 @@ export default function PostDetailScreen() {
           <PressableScale
             onPress={() => {
               try {
-                listRef.current?.scrollToIndex({
-                  index: firstUnreadIndex,
-                  animated: true,
-                  // ListHeader 分のオフセット (上にヘッダがあるので少し下に余白)
-                  viewOffset: 80,
-                  viewPosition: 0,
-                });
+                // ScrollView では index 指定の scroll が無い。コメントツリー化で
+                // 各 row の高さが不定なので、ここでは end まで飛ばす近似 (best-effort)。
+                // FlashList 時代の scrollToIndex に比べ精度は落ちるが、未読 UX
+                // 自体は維持できる (画面下に新着のはず)。
+                scrollRef.current?.scrollToEnd({ animated: true });
               } catch {
                 /* swallow — scroll は best-effort */
               }
@@ -707,6 +723,43 @@ export default function PostDetailScreen() {
         </View>
       )}
       <View style={{ width: '100%', alignItems: 'center', borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.bg2 }}>
+        {/* 返信モードバナー (migration 0059) — replyTo がセットされてる時のみ */}
+        {replyTo && (
+          <View style={{
+            width: '100%', maxWidth: MAX_W,
+            paddingHorizontal: SP['3'], paddingTop: SP['2'],
+          }}>
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: SP['2'],
+              paddingHorizontal: SP['3'],
+              paddingVertical: 6,
+              backgroundColor: C.accentBg,
+              borderRadius: R.md,
+              borderWidth: 1, borderColor: C.accent,
+            }}>
+              <Icon.arrowUL size={14} color={C.accent} strokeWidth={2.4} />
+              <Text style={[T.caption, { color: C.accent, fontWeight: '700' }]} numberOfLines={1}>
+                #{(rootIndexById.get(rootOfCommentId(replyTo.id)) ?? 0) + 1} さんに返信中
+              </Text>
+              <View style={{ flex: 1 }} />
+              <PressableScale
+                onPress={() => {
+                  setReplyTo(null);
+                  // prefix を text から取り除く (1 行目だけ消す素朴な実装)
+                  setText((cur) => cur.replace(/^↳[^\n]*\n?/, ''));
+                }}
+                haptic="tap"
+                hitSlop={8}
+                accessibilityLabel="返信モードを解除"
+                style={{ padding: 2 }}
+              >
+                <Icon.close size={14} color={C.accent} strokeWidth={2.4} />
+              </PressableScale>
+            </View>
+          </View>
+        )}
         <View style={{
           width: '100%', maxWidth: MAX_W,
           paddingHorizontal: SP['3'],
@@ -728,7 +781,7 @@ export default function PostDetailScreen() {
             <TextInput
               value={text}
               onChangeText={setText}
-              placeholder="コメントを入力…"
+              placeholder={replyTo ? '返信内容を入力…' : 'コメントを入力…'}
               placeholderTextColor={C.text3}
               multiline
               maxLength={500}

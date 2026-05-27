@@ -87,7 +87,9 @@ export async function fetchPosts({
   // cursor 検証ヘルパ — 不正な cursor で偽 pagination が動くのを防ぐ
   // 期待フォーマット:
   //   new mode:        ISO timestamp (e.g. '2026-05-19T12:34:56.789Z')
-  //   hot/top mode:    '<integer>|<ISO timestamp>'  e.g. '42|2026-05-19T12:34:56.789Z'
+  //   top mode:        '<integer>|<ISO timestamp>'   e.g. '42|2026-05-19T12:34:56.789Z'
+  //   hot mode:        '<float>|<ISO timestamp>'     e.g. '4.213|2026-05-19T12:34:56.789Z'
+  //                    (hot は hot_score = double precision なので浮動小数を受け付ける)
   const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
   function parseTimestampCursor(c: string): string | null {
     return ISO_RE.test(c) ? c : null;
@@ -105,6 +107,30 @@ export async function fetchPosts({
     if (!ISO_RE.test(ts)) return null;
     return { likes, ts };
   }
+  // hot 用 cursor: hot_score (double precision, 負値あり) + ISO timestamp
+  // 値域は double precision そのものなので、数値表記を緩めに許可しつつ
+  // Number.isFinite で最終チェック。
+  function parseHotCursor(c: string): { hot: number; ts: string } | null {
+    const parts = c.split('|');
+    if (parts.length !== 2) return null;
+    const hotStr = parts[0];
+    const ts = parts[1];
+    if (!hotStr || !ts) return null;
+    // -123.456 / 0 / 7.89e-3 / -1.5e+10 など。NaN/Infinity は弾く。
+    if (!/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(hotStr)) return null;
+    const hot = Number(hotStr);
+    if (!Number.isFinite(hot)) return null;
+    if (!ISO_RE.test(ts)) return null;
+    return { hot, ts };
+  }
+
+  // ----------------------------------------------------------------
+  // hot は hot_score (generated column, 0058_hot_score.sql) で並べる。
+  // 環境によっては migration 未 apply で column が無いケースがあるので
+  // legacy fallback (likes_count desc, created_at desc) を用意し、
+  // 「column does not exist」エラーで自動切替する。
+  // ----------------------------------------------------------------
+  const isHot = effectiveSort === 'hot';
 
   if (effectiveSort === 'new') {
     query = query.order('created_at', { ascending: false });
@@ -122,19 +148,78 @@ export async function fetchPosts({
       }
     }
   } else {
-    // hot: いいね順 + 新しい順（時間制限なしで全件表示）
+    // hot: Reddit 風 hot_score (= log10(|s|) + sign(s)*t/28800) で並べる。
+    // generated column が未 apply な環境 (= 旧 schema) では下のエラー検知 → fallback。
     query = query
-      .order('likes_count', { ascending: false })
+      .order('hot_score', { ascending: false })
       .order('created_at', { ascending: false });
     if (cursor) {
-      const parsed = parseCompositeCursor(cursor);
+      const parsed = parseHotCursor(cursor);
       if (parsed) {
-        query = query.or(`likes_count.lt.${parsed.likes},and(likes_count.eq.${parsed.likes},created_at.lt.${parsed.ts})`);
+        // hot_score < parsed.hot OR (hot_score = parsed.hot AND created_at < parsed.ts)
+        query = query.or(
+          `hot_score.lt.${parsed.hot},and(hot_score.eq.${parsed.hot},created_at.lt.${parsed.ts})`,
+        );
       }
     }
   }
 
-  const { data, error } = await query;
+  let { data, error } = await query;
+
+  // ----------------------------------------------------------------
+  // hot fallback: hot_score column が無い環境 (PG: 42703 undefined_column)
+  // の場合、旧 likes_count desc に戻して再 fetch する。
+  // PostgREST は code='42703' を返してくる (Supabase JS で error.code が
+  // 露出する)。message でも "hot_score" を含むので二重チェック。
+  // ----------------------------------------------------------------
+  let usedHotFallback = false;
+  if (isHot && error) {
+    const code = (error as { code?: string }).code ?? '';
+    const msg = (error as { message?: string }).message ?? '';
+    const isMissingColumn =
+      code === '42703' ||
+      /hot_score/i.test(msg) ||
+      /does not exist/i.test(msg);
+    if (isMissingColumn) {
+      // 旧 query を組み直して再実行 (likes_count desc, created_at desc)
+      let fb = supabase
+        .from('posts')
+        .select(POSTS_SELECT_COLS)
+        .eq('is_anonymous', true)
+        .eq('is_public', true)
+        .limit(effectiveLimit);
+      if (home) fb = fb.in('visibility', ['public', 'community_public']);
+      if (blockedTags.length > 0) {
+        const SERVER_LIMIT = 80;
+        const serverSide = blockedTags.length > SERVER_LIMIT
+          ? blockedTags.slice(0, SERVER_LIMIT)
+          : blockedTags;
+        fb = fb.not('tag_names', 'cs', `{${serverSide.join(',')}}`);
+      }
+      if (filterTags && filterTags.length > 0) {
+        fb = fb.overlaps('tag_names', filterTags);
+      }
+      fb = fb
+        .order('likes_count', { ascending: false })
+        .order('created_at', { ascending: false });
+      if (cursor) {
+        const parsed = parseCompositeCursor(cursor);
+        if (parsed) {
+          fb = fb.or(
+            `likes_count.lt.${parsed.likes},and(likes_count.eq.${parsed.likes},created_at.lt.${parsed.ts})`,
+          );
+        }
+      }
+      const fbResult = await fb;
+      data = fbResult.data;
+      error = fbResult.error;
+      usedHotFallback = true;
+      if (!error) {
+        console.warn('[posts] hot_score column missing — using legacy likes_count fallback');
+      }
+    }
+  }
+
   if (error) throw error;
 
   const posts = (data ?? []) as Post[];
@@ -146,7 +231,15 @@ export async function fetchPosts({
     const last = posts[posts.length - 1];
     if (last) {
       if (effectiveSort === 'new') nextCursor = last.created_at;
-      else nextCursor = `${last.likes_count}|${last.created_at}`;
+      else if (isHot && !usedHotFallback) {
+        // hot 通常経路: hot_score|created_at の合成 cursor
+        const hotVal = (last as { hot_score?: number | null }).hot_score;
+        const hotStr = typeof hotVal === 'number' && Number.isFinite(hotVal) ? String(hotVal) : '0';
+        nextCursor = `${hotStr}|${last.created_at}`;
+      } else {
+        // top / hot fallback: likes_count|created_at
+        nextCursor = `${last.likes_count}|${last.created_at}`;
+      }
     }
   }
   const decorated = await attachOfficialAuthor(posts);
