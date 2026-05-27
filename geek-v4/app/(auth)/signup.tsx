@@ -184,6 +184,8 @@ export default function SignupScreen() {
                 autoFocus
                 keyboardAppearance="dark"
                 selectionColor={C.accent}
+                // RFC 5321 上限 (memory DoS 対策)
+                maxLength={254}
               />
               <Input
                 ref={passwordRef}
@@ -198,6 +200,8 @@ export default function SignupScreen() {
                 onSubmitEditing={goToPhoneStep}
                 keyboardAppearance="dark"
                 selectionColor={C.accent}
+                // bcrypt 上限 72 文字 + 余裕 (memory DoS 対策)
+                maxLength={128}
                 right={
                   <PressableScale
                     onPress={() => setShowPass((v) => !v)}
@@ -242,6 +246,8 @@ export default function SignupScreen() {
               autoFocus
               keyboardAppearance="dark"
               selectionColor={C.accent}
+              // 国際電話 + 記号 + 余裕 (E.164 で max 15 桁 / memory DoS 対策)
+              maxLength={32}
             />
 
             <View style={{ marginTop: SP['8'], gap: SP['3'] }}>

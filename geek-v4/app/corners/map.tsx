@@ -351,6 +351,8 @@ export default function MapScreen() {
               placeholderTextColor={C.text3}
               style={[T.body, { flex: 1, color: C.text, paddingVertical: 0 }]}
               autoCapitalize="none"
+              // memory DoS 対策: 検索クエリは 200 文字 cap
+              maxLength={200}
             />
             {search.length > 0 && (
               <PressableScale onPress={() => setSearch('')} haptic="tap">

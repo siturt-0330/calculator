@@ -409,6 +409,8 @@ function ProfileEditModal({
                 style={fieldStyle}
                 autoCapitalize="none"
                 autoCorrect={false}
+                // memory DoS 対策: 日付 string は 10 文字 (YYYY-MM-DD)
+                maxLength={10}
               />
             </Field>
 

@@ -84,7 +84,11 @@ export function useReactions(postIds: string[]) {
         },
       ),
     );
-  }, [sortedKey, postIds, qc]);
+    // ★ deps を sortedKey + qc に限定 (postIds は配列参照で毎 render 変わるため
+    //   含めると毎 render channel が detach/attach され Supabase pool 枯渇の原因に).
+    //   postIds の中身は sortedKey に含意される.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortedKey, qc]);
 
   return { data: (q.data ?? {}) as ReactionsByPost, isLoading: q.isLoading };
 }

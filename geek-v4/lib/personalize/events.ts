@@ -45,6 +45,65 @@ const DROP_BATCH = 100; // 1000 を超えたら最古 100 を捨てる
 const DEBOUNCE_MS = 500;
 
 // ----------------------------------------------------------------
+// Schema validation (load-time)
+// ----------------------------------------------------------------
+// localStorage / AsyncStorage はクライアント側で任意に編集可能。
+// JSON.parse 後にホワイトリスト型検証を行い、想定外データが
+// recordEvent / scoring パイプラインに流れ込まないようにする。
+//
+// - kind は固定 whitelist 内のみ受理
+// - tags は string[] (要素長 80 以下, 50 件以下)
+// - 任意 string/number フィールドは想定型のみ通す
+// - 全体は最大 LOAD_CAP 件で截断 (DoS / メモリ食いつぶし対策)
+const VALID_KINDS: ReadonlySet<EventKind> = new Set<EventKind>([
+  'post_view',
+  'post_like',
+  'post_save',
+  'post_unlike',
+  'post_concern',
+  'post_hide',
+  'thread_open',
+  'thread_reply',
+  'tag_click',
+  'tag_block',
+  'search_submit',
+]);
+const LOAD_CAP = 5000; // load 時の上限 (最新 N 件のみ保持)
+const MAX_ID_LEN = 256;
+const MAX_TAGS = 50;
+const MAX_TAG_LEN = 80;
+const MAX_STR_LEN = 512;
+
+function isValidEvent(x: unknown): x is FeedEvent {
+  if (!x || typeof x !== 'object') return false;
+  const e = x as Record<string, unknown>;
+  if (typeof e.id !== 'string' || e.id.length === 0 || e.id.length > MAX_ID_LEN) return false;
+  if (typeof e.ts !== 'number' || !Number.isFinite(e.ts) || e.ts < 0) return false;
+  if (typeof e.kind !== 'string' || !VALID_KINDS.has(e.kind as EventKind)) return false;
+  if (!Array.isArray(e.tags)) return false;
+  if (e.tags.length > MAX_TAGS) return false;
+  if (!e.tags.every((t) => typeof t === 'string' && t.length <= MAX_TAG_LEN)) return false;
+  if ('category' in e && e.category !== undefined) {
+    if (typeof e.category !== 'string' || e.category.length > MAX_STR_LEN) return false;
+  }
+  if ('post_id' in e && e.post_id !== undefined) {
+    if (typeof e.post_id !== 'string' || e.post_id.length > MAX_ID_LEN) return false;
+  }
+  if ('thread_id' in e && e.thread_id !== undefined) {
+    if (typeof e.thread_id !== 'string' || e.thread_id.length > MAX_ID_LEN) return false;
+  }
+  if ('query' in e && e.query !== undefined) {
+    if (typeof e.query !== 'string' || e.query.length > MAX_STR_LEN) return false;
+  }
+  if ('dwell_ms' in e && e.dwell_ms !== undefined) {
+    if (typeof e.dwell_ms !== 'number' || !Number.isFinite(e.dwell_ms) || e.dwell_ms < 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// ----------------------------------------------------------------
 // Storage adapter (web / native)
 // ----------------------------------------------------------------
 async function rawGet(key: string): Promise<string | null> {
@@ -115,21 +174,15 @@ async function loadCache(): Promise<void> {
     return;
   }
   try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      // sanity filter: each entry has id, ts, kind, tags
-      cache = parsed.filter(
-        (e: unknown): e is FeedEvent =>
-          !!e &&
-          typeof e === 'object' &&
-          typeof (e as FeedEvent).id === 'string' &&
-          typeof (e as FeedEvent).ts === 'number' &&
-          typeof (e as FeedEvent).kind === 'string' &&
-          Array.isArray((e as FeedEvent).tags),
-      );
-    } else {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
       cache = [];
+      return;
     }
+    // schema validation: whitelist 型のみ受理 (localStorage 改竄対策)
+    const validated = parsed.filter(isValidEvent);
+    // 直近 LOAD_CAP 件にキャップ (DoS / メモリ食いつぶし対策)
+    cache = validated.length > LOAD_CAP ? validated.slice(-LOAD_CAP) : validated;
   } catch (e) {
     console.warn('[personalize/events] parse failed, resetting:', e);
     cache = [];

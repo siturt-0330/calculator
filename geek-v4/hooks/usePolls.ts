@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { attachChannel } from '../lib/realtime';
 import { fetchPolls, vote as voteApi, type Poll } from '../lib/api/polls';
@@ -16,15 +16,22 @@ export function usePolls(postIds: string[]) {
     staleTime: 30_000,
   });
 
+  // q.data から poll_id 集合を文字列キー化 — 中身 (id の集合) が同じ間は
+  // 参照変化 (refetch でも内容不変) で channel を re-attach しない.
+  // これを deps にしないと invalidate→refetch→q.data 新参照→effect 再実行
+  // → 3 channel が detach/attach するループで Supabase pool が枯渇する.
+  const pollIdsKey = useMemo(() => {
+    const polls = (q.data ?? {}) as Record<string, Poll>;
+    return Object.values(polls).map((p) => p.id).sort().join(',');
+  }, [q.data]);
+
   useEffect(() => {
     if (!sortedKey) return;
+    if (!pollIdsKey) return;
     // 現在表示中の poll_id 集合 — payload を見て自分のリスト内のだけ invalidate
-    const polls = (q.data ?? {}) as Record<string, Poll>;
-    const myPollIds = new Set(Object.values(polls).map((p) => p.id));
+    const myPollIds = new Set(pollIdsKey.split(','));
     const myPostIds = new Set(postIds);
     // server-side filter で fanout を抑える
-    // poll_id が空 (まだ poll データを fetch してない初回 render) の時は subscribe しない
-    if (myPollIds.size === 0) return;
     const serverPollIds = [...myPollIds].slice(0, 30);
     const serverPostIds = postIds.slice(0, 30);
 
@@ -61,7 +68,10 @@ export function usePolls(postIds: string[]) {
       }),
     );
     return () => { detachVotes(); detachOptions(); detachPolls(); };
-  }, [sortedKey, qc, q.data, postIds]);
+    // ★ postIds は配列参照で毎 render 変わるため deps から外す (sortedKey に
+    //   中身は含意済). q.data も参照変化を pollIdsKey に置換して churn を防ぐ.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortedKey, pollIdsKey, qc]);
 
   return { polls: (q.data ?? {}) as Record<string, Poll>, isLoading: q.isLoading };
 }

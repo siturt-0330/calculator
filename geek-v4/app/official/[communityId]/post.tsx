@@ -207,6 +207,8 @@ export default function OfficialPostScreen() {
               placeholderTextColor={C.text3}
               autoCapitalize="none"
               autoCorrect={false}
+              // memory DoS 対策: URL は 2048 文字 cap (browser 標準 URL 上限)
+              maxLength={2048}
               style={[
                 T.body,
                 {

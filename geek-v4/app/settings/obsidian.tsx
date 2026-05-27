@@ -136,6 +136,8 @@ export default function ObsidianSettingsScreen() {
             autoCorrect={false}
             keyboardAppearance="dark"
             selectionColor={C.accent}
+            // memory DoS 対策: Obsidian vault 名は通常短い (255 = ファイル名上限)
+            maxLength={80}
           />
           <Text style={[T.caption, { color: C.text3 }]}>
             Obsidian の左下に表示されている Vault の名前を入力してください。

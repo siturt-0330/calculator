@@ -110,6 +110,8 @@ export default function LikedTagsScreen() {
               onSubmitEditing={() => add(input)}
               placeholder="例: ポケモン"
               returnKeyType="done"
+              // memory DoS 対策: tag 名は 40 文字 cap
+              maxLength={40}
             />
           </View>
           <PressableScale

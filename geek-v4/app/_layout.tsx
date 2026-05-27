@@ -54,8 +54,9 @@ const qc = new QueryClient({
       refetchOnWindowFocus: false,
       // 接続復帰時は必ず最新を取りに行く
       refetchOnReconnect: 'always',
-      // mount 時は stale な場合だけ再 fetch (重複 round-trip 削減)
-      refetchOnMount: true,
+      // mount 時の再 fetch を抑制 — cache があれば fresh fetch しない
+      // (画面切り替え時の重複 round-trip を削減し、connection 数も削減)
+      refetchOnMount: false,
       // error 時の retry を 1 回まで (3 回はうるさい / サーバ負荷の元)
       retry: 1,
       retryDelay: (attemptIndex: number) =>

@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { createClient } from '@supabase/supabase-js';
 import { ENV } from './env';
 
@@ -44,7 +45,159 @@ const webStorage = {
   },
 };
 
-const storage = Platform.OS === 'web' ? webStorage : AsyncStorage;
+// ============================================================
+// Native (iOS/Android): SecureStore (Keychain/Keystore) で session token を暗号化保存
+// ============================================================
+//
+// セキュリティ監査 (high finding):
+//   AsyncStorage は平文保存 → 物理盗難時に JWT (access_token / refresh_token) が
+//   そのまま読まれ session hijack 可能。Native では SecureStore (iOS Keychain /
+//   Android Keystore) に移行して OS レベルで暗号化する。
+//
+// SecureStore の制約:
+//   1. key は英数字 + "._-" のみ (ensureValidKey で validation)
+//   2. value は 2048 byte 推奨上限 (超えると console.warn + 将来 throw 予定)
+//   3. SDK 14 系 (現バージョン) では超過でも書き込み自体は成功する場合あり
+//
+// Supabase session JSON のサイズ:
+//   typical: 1-2KB (access_token JWT ~700-900 byte + refresh_token ~150 byte +
+//            user metadata + provider_token 等)
+//   max: 3-4KB 超え得る (user_metadata が大きい場合 / 追加 claim)
+//
+// 対策: 安全側で chunking を実装。
+//   - meta key (__meta) に chunk 数を保存
+//   - chunk_0, chunk_1, ... に分割保存 (各 1800 byte = 余裕めの上限)
+//   - 旧 single-value 形式 (chunk 無し) も後方互換で読める
+//
+// 注意: 既存ユーザーは AsyncStorage に session を持つため初回起動時に
+//   一度 signed out 状態になる (再ログイン必要)。
+//   migration は SDK 内部キー形式の差異が大きく fragile なため省略。
+const SECURE_PREFIX = 'geekv4_';
+const SECURE_CHUNK_SIZE = 1800; // 2048 上限に対する余裕分
+
+function secureKey(k: string): string {
+  // SecureStore は [A-Za-z0-9._-] のみ許容。それ以外を _ に置換。
+  return SECURE_PREFIX + k.replace(/[^A-Za-z0-9_.\-]/g, '_');
+}
+
+function chunkKey(baseKey: string, index: number): string {
+  return `${baseKey}__c${index}`;
+}
+
+function metaKey(baseKey: string): string {
+  return `${baseKey}__meta`;
+}
+
+const nativeSecureStorage = {
+  getItem: async (key: string): Promise<string | null> => {
+    const base = secureKey(key);
+    try {
+      // 新形式 (chunked): meta key を見る
+      const meta = await SecureStore.getItemAsync(metaKey(base));
+      if (meta) {
+        const count = parseInt(meta, 10);
+        if (Number.isFinite(count) && count > 0) {
+          const parts: string[] = [];
+          for (let i = 0; i < count; i++) {
+            const part = await SecureStore.getItemAsync(chunkKey(base, i));
+            if (part === null) return null; // 欠損 → 不整合扱いで null
+            parts.push(part);
+          }
+          return parts.join('');
+        }
+      }
+      // 後方互換: 単一 key 形式 (chunking 導入前の値)
+      return await SecureStore.getItemAsync(base);
+    } catch {
+      return null;
+    }
+  },
+  setItem: async (key: string, value: string): Promise<void> => {
+    const base = secureKey(key);
+    try {
+      // 既存値があれば事前に削除 (chunk 数の整合性確保)
+      try {
+        const oldMeta = await SecureStore.getItemAsync(metaKey(base));
+        if (oldMeta) {
+          const oldCount = parseInt(oldMeta, 10);
+          if (Number.isFinite(oldCount) && oldCount > 0) {
+            for (let i = 0; i < oldCount; i++) {
+              await SecureStore.deleteItemAsync(chunkKey(base, i)).catch(() => {});
+            }
+          }
+        }
+        // 旧単一 key 形式も掃除 (chunked 移行時の cleanup)
+        await SecureStore.deleteItemAsync(base).catch(() => {});
+      } catch {
+        /* ignore */
+      }
+
+      // 小さければ chunking 不要 (single key 形式で書く + meta=1)
+      // ※ それでも meta は付けて新形式に統一 (getItem の経路を 1 本化)
+      const chunks: string[] = [];
+      for (let i = 0; i < value.length; i += SECURE_CHUNK_SIZE) {
+        chunks.push(value.slice(i, i + SECURE_CHUNK_SIZE));
+      }
+      const count = chunks.length || 1;
+      // 空文字列の場合は 1 chunk (空) を書く
+      if (chunks.length === 0) chunks.push('');
+
+      for (let i = 0; i < chunks.length; i++) {
+        const chunkValue = chunks[i] ?? '';
+        await SecureStore.setItemAsync(chunkKey(base, i), chunkValue);
+      }
+      await SecureStore.setItemAsync(metaKey(base), String(count));
+    } catch {
+      // SecureStore 失敗 (Keychain 利用不可・wipe 等) → AsyncStorage への
+      // silent fallback は意図的にしない。権限を下げてしまうため。
+      // 結果: session 保存失敗 = 次回起動で再ログイン要求。
+    }
+  },
+  removeItem: async (key: string): Promise<void> => {
+    const base = secureKey(key);
+    try {
+      const meta = await SecureStore.getItemAsync(metaKey(base));
+      if (meta) {
+        const count = parseInt(meta, 10);
+        if (Number.isFinite(count) && count > 0) {
+          for (let i = 0; i < count; i++) {
+            await SecureStore.deleteItemAsync(chunkKey(base, i)).catch(() => {});
+          }
+        }
+        await SecureStore.deleteItemAsync(metaKey(base)).catch(() => {});
+      }
+      // 旧単一 key 形式も掃除
+      await SecureStore.deleteItemAsync(base).catch(() => {});
+    } catch {
+      /* ignore */
+    }
+  },
+};
+
+// Supabase auth storage interface は async getItem/setItem/removeItem を受け取る。
+// - Web: localStorage (HTTPS + SameSite cookie で守られているため平文で OK)
+// - Native: SecureStore (Keychain/Keystore で暗号化)
+const storage = Platform.OS === 'web' ? webStorage : nativeSecureStorage;
+
+// ============================================================
+// Native 限定: 旧 AsyncStorage に残った session を起動時に破棄
+// ============================================================
+//
+// 既存ユーザーの AsyncStorage に session が平文で残ったままだと、
+// SecureStore 移行のセキュリティ目的 (平文 token を物理盗難から守る) が無効化される。
+// 起動時に fire-and-forget で旧 key を消す (再ログイン後 SecureStore のみ使用される)。
+//
+// 注意: これは migration ではなく cleanup。session 自体は復元せず、
+//       ユーザーは再ログインが必要になる (UX 劣化 < セキュリティ確保)。
+if (Platform.OS !== 'web') {
+  void (async () => {
+    try {
+      await AsyncStorage.removeItem('geek-v4-auth');
+    } catch {
+      /* swallow — 削除失敗しても起動を止めない */
+    }
+  })();
+}
 
 export const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY, {
   auth: {
@@ -56,12 +209,11 @@ export const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY, {
     flowType: 'pkce',
   },
   // 1000+ 並行ユーザー時に Realtime fanout の過剰配信を抑える。
-  // events/sec の上限を 10 にすることで、人気投稿に大量反応が来ても
+  // events/sec の上限を 5 にすることで、人気投稿に大量反応が来ても
   // クライアント側の throttle で過剰な invalidate/re-render を防ぐ。
-  // (デフォルトは 10/sec だが明示する — 将来 supabase-js のデフォルトが
-  //  変わっても性能特性が固定される)
+  // (旧 10 → 5 へ更に conservative に。1000 並行ユーザー時の fanout 過剰を抑制)
   realtime: {
-    params: { eventsPerSecond: 10 },
+    params: { eventsPerSecond: 5 },
   },
   // PostgREST の Accept-Profile を毎回送らない (重複ヘッダで RTT が長くなる小さい最適化)
   // → REST API のリクエストヘッダが軽量化

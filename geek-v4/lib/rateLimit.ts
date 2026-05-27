@@ -30,6 +30,8 @@ const limits: Record<string, { max: number; windowMs: number }> = {
   feedback:       { max: 3,  windowMs: 10 * 60 * 1000 },
   community_post: { max: 5,  windowMs: 60 * 1000 },
   community_create: { max: 3, windowMs: 10 * 60 * 1000 },
+  // 招待コード受諾: brute-force による invite code 総当たり防止
+  friend_invite_accept: { max: 5, windowMs: 60 * 1000 },
 };
 
 const state = new Map<string, Window>();
@@ -72,6 +74,7 @@ export function rateLimitMessage(action: keyof typeof limits, retryAfterMs: numb
     reaction: 'リアクション', like: 'いいね', concern: '気になる',
     tag_add: 'タグ追加', custom_stamp: 'カスタムスタンプ作成',
     bookmark: 'ブックマーク', feedback: 'フィードバック',
+    friend_invite_accept: '招待コードの受諾',
   };
   const name = labels[action] ?? action;
   if (sec > 60) {

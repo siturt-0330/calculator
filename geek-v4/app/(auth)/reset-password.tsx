@@ -329,6 +329,8 @@ export default function ResetPasswordScreen() {
               keyboardAppearance="dark"
               selectionColor={C.accent}
               editable={phase === 'ready'}
+              // bcrypt 上限 72 文字 + 余裕 (memory DoS 対策)
+              maxLength={128}
               right={
                 <PressableScale
                   onPress={() => setShowPass((v) => !v)}
@@ -357,6 +359,8 @@ export default function ResetPasswordScreen() {
               keyboardAppearance="dark"
               selectionColor={C.accent}
               editable={phase === 'ready'}
+              // bcrypt 上限 72 文字 + 余裕 (memory DoS 対策)
+              maxLength={128}
             />
             <Button
               label={phase === 'done' ? '更新完了' : '新しいパスワードを設定'}

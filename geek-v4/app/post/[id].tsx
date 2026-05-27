@@ -31,6 +31,7 @@ import { Icon } from '../../constants/icons';
 import { ObsidianSaveButton } from '../../components/ui/ObsidianSaveButton';
 import { postToObsidianNote, commentToObsidianNote } from '../../hooks/useObsidian';
 import * as Haptics from 'expo-haptics';
+import { isValidUuid } from '../../lib/validation';
 
 function safeHaptic(type: Haptics.NotificationFeedbackType) {
   if (Platform.OS === 'web') return;
@@ -40,7 +41,9 @@ function safeHaptic(type: Haptics.NotificationFeedbackType) {
 const MAX_W = 720;
 
 export default function PostDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id: rawId } = useLocalSearchParams<{ id: string }>();
+  // route param を UUID validation して cache DoS を防ぐ (詳細は lib/validation.ts)
+  const id = isValidUuid(rawId) ? rawId : null;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
@@ -51,7 +54,7 @@ export default function PostDetailScreen() {
 
   const { data: post, isLoading: postLoading, isError: postError } = useQuery({
     queryKey: ['post', id],
-    queryFn: () => fetchPostById(id),
+    queryFn: () => fetchPostById(id!),
     enabled: !!id,
     // 投稿本文は immutable に近い (counter のみ Realtime で invalidate される)
     // 同じ投稿を 30 秒以内に再オープン → 再 fetch しない
@@ -76,7 +79,7 @@ export default function PostDetailScreen() {
 
   const { data: replies = [], isLoading: repliesLoading, refetch, isRefetching } = useQuery({
     queryKey: ['post-comments', id],
-    queryFn: () => fetchComments(id),
+    queryFn: () => fetchComments(id!),
     enabled: !!id,
     // Realtime で INSERT 即時 invalidate される — 通常時の polling は抑える
     staleTime: 30_000,
@@ -84,7 +87,7 @@ export default function PostDetailScreen() {
 
   const { data: addedTags = [] } = useQuery({
     queryKey: ['post-added-tags', id],
-    queryFn: () => fetchPostAddedTags(id),
+    queryFn: () => fetchPostAddedTags(id!),
     enabled: !!id,
     // タグ追加は明示 invalidate される — それ以外は 2 分信用
     staleTime: 2 * 60_000,
@@ -93,7 +96,7 @@ export default function PostDetailScreen() {
   // 似た投稿
   const { data: similarPosts = [] } = useQuery({
     queryKey: ['similar-posts', id, post?.tag_names ?? []],
-    queryFn: () => fetchSimilarPosts(id, post?.tag_names ?? [], 3),
+    queryFn: () => fetchSimilarPosts(id!, post?.tag_names ?? [], 3),
     enabled: !!id && !!post && (post?.tag_names?.length ?? 0) > 0,
     staleTime: 60_000,
   });
@@ -104,16 +107,16 @@ export default function PostDetailScreen() {
   // やシェアから来たユーザーが community に戻れない問題があった。
   const { data: communitiesByPost = {} } = useQuery({
     queryKey: ['post-communities-of', id],
-    queryFn: () => fetchCommunitiesForPosts([id]),
+    queryFn: () => fetchCommunitiesForPosts([id!]),
     enabled: !!id,
     staleTime: 60_000,
   });
-  const postCommunities = communitiesByPost[id] ?? [];
+  const postCommunities = id ? (communitiesByPost[id] ?? []) : [];
 
   const { show } = useToastStore();
 
   const { mutateAsync: submitReply, isPending } = useMutation({
-    mutationFn: (content: string) => createComment(id, content),
+    mutationFn: (content: string) => createComment(id!, content),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['post-comments', id] });
       setText('');
@@ -172,6 +175,7 @@ export default function PostDetailScreen() {
   }, [id, qc]);
 
   const handleAddTag = async (tag: string) => {
+    if (!id) return;
     try {
       await addPostTag(id, tag);
       qc.invalidateQueries({ queryKey: ['post-added-tags', id] });
@@ -191,6 +195,15 @@ export default function PostDetailScreen() {
       console.warn('[post/handleSend] submit failed:', e);
     });
   };
+
+  // route param validation 失敗 → cache 汚染を防ぐため早期 return
+  if (!id) {
+    return (
+      <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: SP['6'] }}>
+        <Text style={[T.body, { color: C.text2 }]}>無効な URL です</Text>
+      </View>
+    );
+  }
 
   if (postLoading) {
     return (

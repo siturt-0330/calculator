@@ -20,12 +20,20 @@ type Props = TextInputProps & {
   right?: React.ReactNode;
 };
 
+// 防御的 default — 個別の TextInput に maxLength を付け忘れても、
+// 攻撃者が 10MB の文字列を貼り付けて state 更新で UI freeze + memory 枯渇を
+// 起こすのを防ぐ safety net。caller が明示的に maxLength を指定したらそちらを尊重する。
+// 200 文字あれば search query / 一般的な単行入力には十分。長文 (本文・コメント等)
+// は TextArea を使うか、各 caller で明示的に大きい maxLength を渡すこと。
+const DEFAULT_INPUT_MAX_LENGTH = 200;
+
 export const Input = forwardRef<TextInput, Props>(function Input(
-  { label, error, containerStyle, style, icon: IconComp, right, ...rest },
+  { label, error, containerStyle, style, icon: IconComp, right, maxLength, ...rest },
   ref,
 ) {
   const [focused, setFocused] = useState(false);
   const multiline = rest.multiline === true;
+  const effectiveMaxLength = maxLength ?? DEFAULT_INPUT_MAX_LENGTH;
   // エラー状態: 視覚的に明確にする (赤枠) — focused より優先
   const showError = Boolean(error);
 
@@ -88,8 +96,11 @@ export const Input = forwardRef<TextInput, Props>(function Input(
           // - cursorColor: Android 13+ のキャレット色 (selectionColor だけだと薄い)
           selectionColor={C.accent}
           cursorColor={C.accent}
-          style={[T.body, { flex: 1, color: C.text }, style]}
           {...rest}
+          // maxLength は rest を展開した *後* に置く — caller が明示的に渡した
+          // value を使い、未指定なら defense-in-depth で 200 文字 cap
+          maxLength={effectiveMaxLength}
+          style={[T.body, { flex: 1, color: C.text }, style]}
         />
         {right}
       </Animated.View>

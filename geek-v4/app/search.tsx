@@ -661,6 +661,8 @@ export default function SearchScreen() {
               selectionColor={C.accent}
               cursorColor={C.accent}
               accessibilityLabel="検索キーワード入力"
+              // memory DoS 対策: 検索クエリは 200 文字 cap
+              maxLength={200}
               style={[T.body, { color: C.text, paddingVertical: 0 }]}
             />
             {/* ゴースト予測補完 */}

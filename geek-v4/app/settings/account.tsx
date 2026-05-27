@@ -251,6 +251,8 @@ export default function AccountScreen() {
               keyboardAppearance="dark"
               selectionColor={C.accent}
               autoFocus
+              // bcrypt 上限 72 文字 + 余裕 (memory DoS 対策)
+              maxLength={128}
             />
             <View style={{ flexDirection: 'row', gap: SP['2'], marginTop: SP['2'] }}>
               <PressableScale

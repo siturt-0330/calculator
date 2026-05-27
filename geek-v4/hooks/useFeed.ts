@@ -400,7 +400,10 @@ export function useFeed() {
       if (updateFlushTimer.current) clearTimeout(updateFlushTimer.current);
       updateBuffer.current.clear();
     };
-  }, [firstPageKey, firstPageIds, qc]);
+    // ★ firstPageIds は useMemo の参照だが firstPageKey が中身を含意するので
+    //   deps から外す (再 render churn を避け Supabase pool 枯渇を予防).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstPageKey, qc]);
 
   return { posts, reasonsMap, communitiesByPost, ads, interestTags, loading: isLoading, refreshing, refresh, loadMore };
 }

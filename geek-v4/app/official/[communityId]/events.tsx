@@ -233,16 +233,19 @@ export default function OfficialEventsScreen() {
                 <TextInput value={title} onChangeText={setTitle} placeholder="例: ファンミーティング" placeholderTextColor={C.text3} style={fieldStyle} maxLength={100} />
               </Field>
               <Field label="開始日時 (YYYY-MM-DDTHH:MM)">
-                <TextInput value={startsAt} onChangeText={setStartsAt} placeholder="2025-06-01T19:30" placeholderTextColor={C.text3} autoCapitalize="none" autoCorrect={false} style={fieldStyle} />
+                {/* memory DoS 対策: 日時 string は 32 文字 cap */}
+                <TextInput value={startsAt} onChangeText={setStartsAt} placeholder="2025-06-01T19:30" placeholderTextColor={C.text3} autoCapitalize="none" autoCorrect={false} style={fieldStyle} maxLength={32} />
               </Field>
               <Field label="終了日時 (任意)">
-                <TextInput value={endsAt} onChangeText={setEndsAt} placeholder="2025-06-01T21:00" placeholderTextColor={C.text3} autoCapitalize="none" autoCorrect={false} style={fieldStyle} />
+                {/* memory DoS 対策: 日時 string は 32 文字 cap */}
+                <TextInput value={endsAt} onChangeText={setEndsAt} placeholder="2025-06-01T21:00" placeholderTextColor={C.text3} autoCapitalize="none" autoCorrect={false} style={fieldStyle} maxLength={32} />
               </Field>
               <Field label="場所 (任意)">
                 <TextInput value={location} onChangeText={setLocation} placeholder="例: 渋谷ホール / オンライン" placeholderTextColor={C.text3} style={fieldStyle} maxLength={200} />
               </Field>
               <Field label="URL (任意)">
-                <TextInput value={url} onChangeText={setUrl} placeholder="https://..." placeholderTextColor={C.text3} autoCapitalize="none" autoCorrect={false} style={fieldStyle} />
+                {/* memory DoS 対策: URL は 2048 文字 cap (browser 標準 URL 上限) */}
+                <TextInput value={url} onChangeText={setUrl} placeholder="https://..." placeholderTextColor={C.text3} autoCapitalize="none" autoCorrect={false} style={fieldStyle} maxLength={2048} />
               </Field>
               <Field label="説明">
                 <TextInput

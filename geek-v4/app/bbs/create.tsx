@@ -205,6 +205,8 @@ export default function BBSCreateScreen() {
             placeholderTextColor={C.text3}
             keyboardAppearance="dark"
             selectionColor={C.accent}
+            // memory DoS 対策: short tag/category 用に 40 文字 cap
+            maxLength={40}
             style={[
               T.body,
               {
@@ -367,6 +369,8 @@ export default function BBSCreateScreen() {
                   selectionColor={C.accent}
                   autoCorrect={false}
                   autoCapitalize="none"
+                  // memory DoS 対策: search query は 200 文字 cap
+                  maxLength={200}
                   style={[T.body, { flex: 1, color: C.text, paddingVertical: 0 }]}
                 />
                 {communityQuery.length > 0 && (

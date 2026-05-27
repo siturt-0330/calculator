@@ -309,6 +309,8 @@ function FeedbackCard({
               placeholder="対応状況をメモ..."
               placeholderTextColor={C.text3}
               multiline
+              // memory DoS 対策: admin メモは 2000 文字 cap (一般的な長文上限)
+              maxLength={2000}
               style={[T.small, { color: C.text, minHeight: 50 }]}
             />
             <View style={{ flexDirection: 'row', gap: SP['2'] }}>

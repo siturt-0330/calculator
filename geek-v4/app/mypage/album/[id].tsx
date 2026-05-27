@@ -47,18 +47,21 @@ import { Icon } from '../../../constants/icons';
 import { C, R, SP, SHADOW } from '../../../design/tokens';
 import { T } from '../../../design/typography';
 import { sanitizeUrl } from '../../../lib/sanitize';
+import { isValidUuid } from '../../../lib/validation';
 
 export default function AlbumDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams<{ id: string }>();
-  const id = typeof params.id === 'string' ? params.id : '';
+  // route param を UUID validation して cache DoS を防ぐ (詳細は lib/validation.ts)
+  const rawId = typeof params.id === 'string' ? params.id : '';
+  const id = isValidUuid(rawId) ? rawId : null;
   const { width } = useWindowDimensions();
   const show = useToastStore((s) => s.show);
   const userId = useAuthStore((s) => s.user?.id);
 
-  const { album, isLoading } = useAlbum(id);
-  const { photos, isLoading: photosLoading } = useAlbumPhotos(id);
+  const { album, isLoading } = useAlbum(id ?? undefined);
+  const { photos, isLoading: photosLoading } = useAlbumPhotos(id ?? undefined);
   const deleteAlbum = useDeleteAlbum();
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -118,6 +121,18 @@ export default function AlbumDetailScreen() {
       },
     });
   };
+
+  // route param validation 失敗 → cache 汚染を防ぐため早期 return
+  if (!id) {
+    return (
+      <View style={{ flex: 1, backgroundColor: C.bg }}>
+        <TopBar title="" left={<BackButton />} />
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: SP['6'] }}>
+          <Text style={[T.body, { color: C.text2 }]}>無効な URL です</Text>
+        </View>
+      </View>
+    );
+  }
 
   // Loading state
   if (isLoading && !album) {

@@ -20,6 +20,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
+import { isValidShortId } from '../../lib/validation';
 
 // pending invite code を localStorage / MMKV に保存する key。
 // 未ログイン → /auth/login → login 成功時にこの key を読んで /invite/<code> に戻す。
@@ -29,7 +30,11 @@ export default function InviteAcceptScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams<{ code?: string }>();
-  const code = params.code;
+  // route param を short ID validation して cache 汚染 + 無駄な API 叩きを防ぐ
+  // (詳細は lib/validation.ts). invite code は friends API 側で 64 文字以下の
+  // ランダム英数字なので、それを超える / 記号混じり / 空 を弾けば十分。
+  const rawCode = params.code;
+  const code = isValidShortId(rawCode) ? rawCode : undefined;
   const user = useAuthStore((s) => s.user);
   const hydrated = useAuthStore((s) => s.hydrated);
   const show = useToastStore((s) => s.show);
