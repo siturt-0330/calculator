@@ -30,6 +30,9 @@ export type Post = {
   content_warning?: string | null;
   cw_category?: CWCategory;
   visibility?: PostVisibility;
+  // Q&A モード (migration 0067) — post author が enable すると、コメント sort で
+  //   author が返信したスレッドが上位に来る (lib/utils/qaSort.ts)。AMA 用途。
+  qa_mode?: boolean;
   created_at: string;
   // posts.author_id — RLS で誰でも読める。公式管理者識別のため fetch する。
   author_id?: string;

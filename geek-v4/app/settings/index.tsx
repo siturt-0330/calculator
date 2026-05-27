@@ -104,6 +104,8 @@ export default function SettingsScreen() {
         />
         <Divider />
         <ListItem icon={Icon.award} label="プラン" onPress={() => router.push('/settings/plan' as never)} />
+        <Divider />
+        <ListItem icon={Icon.help} label="運営にお問い合わせ" onPress={() => router.push('/support' as never)} />
 
         <SectionHeader title="カスタマイズ" />
         <ListItem

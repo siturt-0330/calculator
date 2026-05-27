@@ -11,7 +11,7 @@ export type SortMode = 'for-you' | 'hot' | 'new' | 'top' | 'rising';
 // posts SELECT で取得するカラム一覧 (一箇所でメンテ可能)
 // author_id は公式コミュ管理者投稿を de-anonymize する判定に使う (RLS で誰でも読める)
 const POSTS_SELECT_COLS =
-  'id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, created_at, author_id';
+  'id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, qa_mode, created_at, author_id';
 
 // UUID 形式チェック (壊れた URL や古い ID 対策) — fetchPostById と fetchCommunityPosts で使う
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -632,4 +632,42 @@ export async function fetchCommunitiesForPosts(
     grouped[r.post_id] = arr;
   }
   return grouped;
+}
+
+// ============================================================
+// Q&A モード (migration 0067) — post の author が enable/disable
+// ------------------------------------------------------------
+// - 認証必須 (Not authenticated → throw)
+// - post.author_id === auth.uid() のチェックは server 側 RLS でも掛かるが、
+//   silent failure を避けるため client でも 1 行 fetch して比較する。
+// - 並び替えは server で再計算せず client side (lib/utils/qaSort.ts) に置く
+//   → 既存 comments fetch / publication / cache key を一切いじらない契約。
+// ============================================================
+export async function togglePostQAMode(
+  postId: string,
+  enabled: boolean,
+): Promise<void> {
+  if (!postId || !UUID_RE.test(postId)) throw new Error('Invalid post id');
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  // author check — RLS でも弾かれるが、UI で明示 error を出すために事前 fetch
+  const { data: row, error: readErr } = await supabase
+    .from('posts')
+    .select('author_id')
+    .eq('id', postId)
+    .maybeSingle();
+  if (readErr) throw readErr;
+  if (!row) throw new Error('Post not found');
+  const ownerId = (row as { author_id?: string | null }).author_id;
+  if (!ownerId || ownerId !== user.id) {
+    throw new Error('Q&A モードは投稿者のみが切替可能です');
+  }
+
+  const { error } = await supabase
+    .from('posts')
+    .update({ qa_mode: enabled })
+    .eq('id', postId);
+  if (error) throw error;
 }

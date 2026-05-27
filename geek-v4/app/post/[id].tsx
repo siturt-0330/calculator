@@ -30,7 +30,12 @@ import { Icon } from '../../constants/icons';
 import { ObsidianSaveButton } from '../../components/ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
 import { CommentThreadItem } from '../../components/post/CommentThreadItem';
+import { CollapsedComment } from '../../components/post/CollapsedComment';
 import { buildCommentTree } from '../../lib/utils/commentTree';
+import {
+  shouldCollapseComment,
+  groupConsecutiveCollapsed,
+} from '../../lib/utils/commentCollapse';
 import { getThreadUserId } from '../../lib/utils/threadUserId';
 import * as Haptics from 'expo-haptics';
 import { isValidUuid } from '../../lib/validation';
@@ -651,17 +656,62 @@ export default function PostDetailScreen() {
         ) : (
           <View style={{ alignItems: 'center' }}>
             <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: SP['4'] }}>
-              {commentTree.map((root, idx) => (
-                <CommentThreadItem
-                  key={root.id}
-                  comment={root}
-                  rootIndex={idx + 1}
-                  unread={unreadIds.has(root.id)}
-                  postContent={post.content}
-                  postId={post.id}
-                  onReply={handleReply}
-                />
-              ))}
+              {/* ============================================================
+                  自動 collapse (migration 0063 / Reddit ガイド 5.3 / 5.10)
+                  ------------------------------------------------------------
+                  - root レベルの comment を walk して shouldCollapseComment で
+                    annotate → groupConsecutiveCollapsed で連続 collapse を 1
+                    グループにまとめる。
+                  - 2 件以上連続 collapse → <CollapsedComment> でラップ。
+                  - 単体 (collapse 1 件 or 通常) は今までどおり <CommentThreadItem>。
+                  - 未読 (unread) になっている collapse 対象は誤判定の可能性が
+                    高いので、ここでは展開済の single として扱う (UX 優先)。
+                  ============================================================ */}
+              {(() => {
+                const annotated = commentTree.map((root, idx) => {
+                  const counts = root as typeof root & {
+                    concern_count?: number;
+                    likes_count?: number;
+                    is_hidden_by_author?: boolean;
+                  };
+                  const collapsed =
+                    !unreadIds.has(root.id) && shouldCollapseComment(counts);
+                  return { root, idx, id: root.id, collapsed };
+                });
+                const grouped = groupConsecutiveCollapsed(annotated);
+                return grouped.map((item, gIdx) => {
+                  if (item.kind === 'single') {
+                    const { root, idx } = item.comment;
+                    return (
+                      <CommentThreadItem
+                        key={root.id}
+                        comment={root}
+                        rootIndex={idx + 1}
+                        unread={unreadIds.has(root.id)}
+                        postContent={post.content}
+                        postId={post.id}
+                        onReply={handleReply}
+                      />
+                    );
+                  }
+                  // group: 連続する collapse 対象を 1 chip に集約
+                  return (
+                    <CollapsedComment key={`grp-${gIdx}-${item.comments[0]?.id ?? ''}`} count={item.count}>
+                      {item.comments.map(({ root, idx }) => (
+                        <CommentThreadItem
+                          key={root.id}
+                          comment={root}
+                          rootIndex={idx + 1}
+                          unread={unreadIds.has(root.id)}
+                          postContent={post.content}
+                          postId={post.id}
+                          onReply={handleReply}
+                        />
+                      ))}
+                    </CollapsedComment>
+                  );
+                });
+              })()}
             </View>
           </View>
         )}
