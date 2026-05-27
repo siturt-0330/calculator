@@ -76,6 +76,10 @@ export type BBSReply = {
   color: string;
   created_at: string;
   trust_score?: number | null;  // 著者の現在の信頼スコア
+  // 投稿者 user_id。クライアントは「スレ内 ID」表示用に hash する
+  // (lib/utils/threadUserId.ts)。RLS bbs_replies_read で公開済なので
+  // 露出自体は新規露出ではなく、SELECT 漏れを補う形。
+  author_id?: string;
 };
 
 export type Notification = {

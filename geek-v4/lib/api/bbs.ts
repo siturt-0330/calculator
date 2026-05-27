@@ -186,13 +186,16 @@ export async function fetchReplies(threadId: string): Promise<BBSReply[]> {
     content: string;
     color: string;
     created_at: string;
+    author_id: string;  // スレ内 ID 表示用 (lib/utils/threadUserId で hash)
     author?: { trust_score?: number } | { trust_score?: number }[] | null;
   };
 
-  // 1st try: 著者の trust_score も一緒に取る (FK 明示)
+  // 1st try: 著者の trust_score + author_id も一緒に取る (FK 明示)
+  // author_id は RLS bbs_replies_read for select using(true) で公開済なので
+  // SELECT に含めても新規 disclosure ではない。スレ内 ID hash 表示のため必須。
   const withAuthor = await supabase
     .from('bbs_replies')
-    .select('id, thread_id, content, color, created_at, author:profiles!bbs_replies_author_id_fkey(trust_score)')
+    .select('id, thread_id, content, color, created_at, author_id, author:profiles!bbs_replies_author_id_fkey(trust_score)')
     .eq('thread_id', threadId)
     .order('created_at', { ascending: true })
     .limit(500);  // DoS 防止: 巨大スレッドで OOM/UI フリーズ防止
@@ -207,6 +210,7 @@ export async function fetchReplies(threadId: string): Promise<BBSReply[]> {
         color: r.color,
         created_at: r.created_at,
         trust_score: a?.trust_score ?? null,
+        author_id: r.author_id,
       } as BBSReply;
     });
   }
@@ -215,7 +219,7 @@ export async function fetchReplies(threadId: string): Promise<BBSReply[]> {
   console.warn('[fetchReplies] author join failed, falling back without trust_score:', withAuthor.error.message);
   const fallback = await supabase
     .from('bbs_replies')
-    .select('id, thread_id, content, color, created_at')
+    .select('id, thread_id, content, color, created_at, author_id')
     .eq('thread_id', threadId)
     .order('created_at', { ascending: true })
     .limit(500);  // DoS 防止: 巨大スレッドで OOM/UI フリーズ防止
@@ -227,6 +231,7 @@ export async function fetchReplies(threadId: string): Promise<BBSReply[]> {
     color: r.color,
     created_at: r.created_at,
     trust_score: null,
+    author_id: r.author_id,
   })) as BBSReply[];
 }
 

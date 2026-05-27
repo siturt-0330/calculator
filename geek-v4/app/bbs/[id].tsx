@@ -16,6 +16,7 @@ import { Avatar } from '../../components/ui/Avatar';
 import { Spinner } from '../../components/ui/Spinner';
 import { formatRelative } from '../../lib/utils/date';
 import { randomAvatarColor } from '../../lib/utils/color';
+import { getThreadUserId } from '../../lib/utils/threadUserId';
 import type { BBSReply } from '../../types/models';
 import { ObsidianSaveButton } from '../../components/ui/ObsidianSaveButton';
 import { bbsReplyToObsidianNote, bbsThreadToObsidianNote } from '../../hooks/useObsidian';
@@ -171,6 +172,9 @@ export default function BBSThreadScreen() {
 
   const renderReply = ({ item, index }: { item: BBSReply; index: number }) => {
     const reactions: ReactionAgg[] = reactionsByReply[item.id] ?? [];
+    // スレ内 ID — author_id + thread_id の hash で「同じ人 = 同じ ID」
+    // 別スレでは別 ID。匿名性を保ちつつスレ内でキャラを認識できる仕組み。
+    const threadUserId = item.author_id && id ? getThreadUserId(item.author_id, id) : null;
     return (
       <View style={{ width: '100%', alignItems: 'center' }}>
         <View style={{
@@ -199,6 +203,24 @@ export default function BBSThreadScreen() {
               {/* 右: 内容 */}
               <View style={{ flex: 1, minWidth: 0 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], marginBottom: 4 }}>
+                  {/* スレ内 ID chip (2ch 風 ID:xxxxxx). 同じ投稿者は同じ ID, 別スレでは別 ID */}
+                  {threadUserId && (
+                    <View style={{
+                      paddingHorizontal: 6, paddingVertical: 1,
+                      backgroundColor: C.bg3, borderRadius: R.sm,
+                      borderWidth: 1, borderColor: C.border,
+                    }}>
+                      <Text style={{
+                        fontSize: 10,
+                        color: C.text3,
+                        fontWeight: '700',
+                        letterSpacing: 0.3,
+                        fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
+                      }}>
+                        ID:{threadUserId}
+                      </Text>
+                    </View>
+                  )}
                   <Text style={[T.caption, { color: C.text3 }]}>{formatRelative(item.created_at)}</Text>
                   <View style={{ flex: 1 }} />
                   {/* >>N で返信 */}
