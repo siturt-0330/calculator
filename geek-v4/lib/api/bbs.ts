@@ -298,6 +298,19 @@ export async function fetchComments(postId: string): Promise<Comment[]> {
   })) as Comment[];
 }
 
+// ============================================================
+// Best ソート (post コメント用 — Reddit 風 score)
+// ------------------------------------------------------------
+// 実装は副作用なし pure helper として lib/utils/commentBestScore.ts に隔離
+// (supabase 依存のこの file に書くと Jest の transformIgnore で parse error
+// になるため)。呼出側は bbs.ts から従来通り import できるよう re-export。
+// ============================================================
+export {
+  computeCommentBestScore,
+  sortCommentsByBest,
+} from '../utils/commentBestScore';
+export type { CommentLike } from '../utils/commentBestScore';
+
 export async function createComment(postId: string, content: string): Promise<void> {
   const rl = checkRate('comment');
   if (!rl.ok) throw new Error(rateLimitMessage('comment', rl.retryAfterMs));

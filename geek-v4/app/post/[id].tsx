@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, useWindowDimensions,
 } from 'react-native';
@@ -6,6 +6,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlashList } from '@shopify/flash-list';
+import { getLastViewed, setLastViewed } from '../../lib/utils/lastViewed';
+import { getDisplayCommentLikes } from '../../lib/utils/commentDisplay';
 import { fetchPostById, fetchCommunitiesForPosts } from '../../lib/api/posts';
 import { fetchSimilarPosts } from '../../lib/api/similarPosts';
 import { fetchComments, createComment } from '../../lib/api/bbs';
@@ -51,6 +53,22 @@ export default function PostDetailScreen() {
   const [text, setText] = useState('');
   const SendIcon = Icon.send;
   const BackIcon = Icon.arrowL;
+
+  // ============================================================
+  // 既読/未読ハイライト (issue #18)
+  // ------------------------------------------------------------
+  // - mount 時に保存済の lastViewed を snapshot として state に持つ
+  //   (render 中に setLastViewed → 同 effect で再読み込みすると
+  //    画面表示中に「未読」が次々消える挙動になり UX 上紛らわしいため、
+  //    開いた瞬間の値を画面開放中は固定する)
+  // - 開いた 3 秒後と unmount 時に setLastViewed で更新
+  //   (3 秒は誤タップ・誤遷移で「既読」扱いになるのを防ぐ猶予)
+  // ============================================================
+  const [lastViewedSnapshot, setLastViewedSnapshot] = useState<number | null>(null);
+  // 連続 setLastViewed を避けるためのフラグ
+  const lastViewedSavedRef = useRef(false);
+  // 新着までのスクロール用 FlashList ref
+  const listRef = useRef<FlashList<Comment>>(null);
 
   const { data: post, isLoading: postLoading, isError: postError } = useQuery({
     queryKey: ['post', id],
@@ -129,6 +147,44 @@ export default function PostDetailScreen() {
       show(msg ? `送信に失敗しました: ${msg}` : '送信に失敗しました', 'error');
     },
   });
+
+  // lastViewed: post を開いた瞬間の snapshot を取り、3 秒後 + unmount 時に save。
+  // - mount 時 1 回だけ snapshot を読む (id 変更で reset)
+  // - 3 秒以内に画面を離れた場合は unmount で確実に save される
+  useEffect(() => {
+    if (!id) return undefined;
+    // 開いた瞬間の保存済値を snapshot (render 中はこれを使って未読判定)
+    setLastViewedSnapshot(getLastViewed('post', id));
+    lastViewedSavedRef.current = false;
+    const t = setTimeout(() => {
+      setLastViewed('post', id);
+      lastViewedSavedRef.current = true;
+    }, 3000);
+    return () => {
+      clearTimeout(t);
+      // 3 秒経過前に離脱 → unmount で書き込む (重複でも害は無いが、無駄を避ける)
+      if (!lastViewedSavedRef.current) {
+        setLastViewed('post', id);
+      }
+    };
+  }, [id]);
+
+  // 未読コメント (snapshot 基準 + 自分の post-comments 結果) の id 集合と先頭 index
+  const { unreadIds, firstUnreadIndex } = useMemo(() => {
+    if (lastViewedSnapshot === null) return { unreadIds: new Set<string>(), firstUnreadIndex: -1 };
+    const set = new Set<string>();
+    let firstIdx = -1;
+    for (let i = 0; i < replies.length; i++) {
+      const c = replies[i];
+      if (!c) continue;
+      const created = Date.parse(c.created_at);
+      if (Number.isFinite(created) && created > lastViewedSnapshot) {
+        set.add(c.id);
+        if (firstIdx === -1) firstIdx = i;
+      }
+    }
+    return { unreadIds: set, firstUnreadIndex: firstIdx };
+  }, [replies, lastViewedSnapshot]);
 
   // Realtime: 同じ投稿への新規コメント + 投稿カウンター更新 + リアクション
   //
@@ -238,41 +294,73 @@ export default function PostDetailScreen() {
     );
   }
 
-  const renderReply = ({ item, index }: { item: Comment; index: number }) => (
-    <View style={{ width: '100%', alignItems: 'center' }}>
-      <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: SP['4'], paddingVertical: SP['2'] }}>
-        <View style={{
-          flexDirection: 'row', gap: SP['3'],
-          padding: SP['3'],
-          backgroundColor: C.bg2,
-          borderRadius: R.lg,
-          borderWidth: 1, borderColor: C.border,
-        }}>
-          <View style={{ alignItems: 'center', gap: 2, width: 36 }}>
-            <Avatar size={32} color={item.avatar_color} name={String(index + 1)} />
-            <View style={{
-              paddingHorizontal: 4, paddingVertical: 1,
-              backgroundColor: C.bg3, borderRadius: R.sm,
-              minWidth: 24, alignItems: 'center',
-            }}>
-              <Text style={{ fontSize: 9, color: C.text3, fontWeight: '700' }}>#{index + 1}</Text>
+  const renderReply = ({ item, index }: { item: Comment; index: number }) => {
+    const isUnread = unreadIds.has(item.id);
+    // Comment 型に likes_count は無いが、サーバー側で同名フィールドが
+    // 付与されてくる可能性に備えて optional に拾う (型は narrow に保つ)。
+    const likesRaw = (item as Comment & { likes_count?: number }).likes_count;
+    const likesDisplay = getDisplayCommentLikes(item.created_at, likesRaw);
+
+    return (
+      <View style={{ width: '100%', alignItems: 'center' }}>
+        <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: SP['4'], paddingVertical: SP['2'] }}>
+          <View style={{
+            flexDirection: 'row', gap: SP['3'],
+            padding: SP['3'],
+            // 未読は accent tint + 左 vertical bar で強調
+            backgroundColor: isUnread ? C.accentBg : C.bg2,
+            borderRadius: R.lg,
+            borderWidth: 1, borderColor: isUnread ? C.accent : C.border,
+            // 左の太い縦バー (3px) — 未読インジケータ。borderLeftWidth は
+            // borderColor と一括設定だと右辺まで accent になるので、上下右は
+            // 通常 border のまま borderLeftColor だけ別指定する。
+            borderLeftWidth: isUnread ? 3 : 1,
+            borderLeftColor: isUnread ? C.accent : C.border,
+          }}>
+            <View style={{ alignItems: 'center', gap: 2, width: 36 }}>
+              <Avatar size={32} color={item.avatar_color} name={String(index + 1)} />
+              <View style={{
+                paddingHorizontal: 4, paddingVertical: 1,
+                backgroundColor: C.bg3, borderRadius: R.sm,
+                minWidth: 24, alignItems: 'center',
+              }}>
+                <Text style={{ fontSize: 9, color: C.text3, fontWeight: '700' }}>#{index + 1}</Text>
+              </View>
             </View>
-          </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], marginBottom: 4 }}>
-              <Text style={[T.caption, { color: C.text3 }]}>{formatRelative(item.created_at)}</Text>
-              <View style={{ flex: 1 }} />
-              <ObsidianSaveButton
-                note={commentToObsidianNote(item, post.content, post.id)}
-                size={14}
-              />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], marginBottom: 4 }}>
+                <Text style={[T.caption, { color: C.text3 }]}>{formatRelative(item.created_at)}</Text>
+                {/* スコア表示遅延 (issue #20): 投稿直後 30 分間は数値を出さない */}
+                {likesRaw !== undefined && (
+                  <Text style={[T.caption, { color: C.text3 }]} accessibilityLabel={`いいね ${likesDisplay}`}>
+                    · 💛 {likesDisplay}
+                  </Text>
+                )}
+                {isUnread && (
+                  <View
+                    style={{
+                      paddingHorizontal: 6, paddingVertical: 1,
+                      backgroundColor: C.accent,
+                      borderRadius: R.sm,
+                    }}
+                    accessibilityLabel="未読のコメント"
+                  >
+                    <Text style={{ fontSize: 9, color: '#fff', fontWeight: '800' }}>NEW</Text>
+                  </View>
+                )}
+                <View style={{ flex: 1 }} />
+                <ObsidianSaveButton
+                  note={commentToObsidianNote(item, post.content, post.id)}
+                  size={14}
+                />
+              </View>
+              <Text style={[T.body, { color: C.text, lineHeight: 22 }]}>{item.content}</Text>
             </View>
-            <Text style={[T.body, { color: C.text, lineHeight: 22 }]}>{item.content}</Text>
           </View>
         </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   const ListHeader = () => (
     <View style={{ alignItems: 'center' }}>
@@ -537,6 +625,7 @@ export default function PostDetailScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <FlashList
+        ref={listRef}
         data={replies}
         keyExtractor={(item) => item.id}
         renderItem={renderReply}
@@ -559,6 +648,64 @@ export default function PostDetailScreen() {
           <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={C.accent} />
         }
       />
+
+      {/* 新着 N 件アンカー (issue #18) — 未読が 1 件以上ある時のみ表示。
+          tap で最初の未読までスクロール。Modal ではないので入力欄の上に
+          浮かぶ floating pill として配置 (pointerEvents は box-none で
+          周辺のタップを邪魔しない)。 */}
+      {unreadIds.size > 0 && firstUnreadIndex >= 0 && (
+        <View
+          pointerEvents="box-none"
+          style={{
+            position: 'absolute',
+            // 入力欄の上に配置 (insets.bottom + 入力欄高さ ~60 + 余白)
+            bottom: insets.bottom + 76,
+            left: 0,
+            right: 0,
+            alignItems: 'center',
+          }}
+        >
+          <PressableScale
+            onPress={() => {
+              try {
+                listRef.current?.scrollToIndex({
+                  index: firstUnreadIndex,
+                  animated: true,
+                  // ListHeader 分のオフセット (上にヘッダがあるので少し下に余白)
+                  viewOffset: 80,
+                  viewPosition: 0,
+                });
+              } catch {
+                /* swallow — scroll は best-effort */
+              }
+            }}
+            haptic="tap"
+            hitSlop={8}
+            accessibilityLabel={`新着コメント ${unreadIds.size} 件へスクロール`}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              paddingHorizontal: SP['4'],
+              paddingVertical: SP['2'],
+              backgroundColor: C.accent,
+              borderRadius: R.full,
+              borderWidth: 1.5,
+              borderColor: C.accentLight,
+              shadowColor: C.accent,
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.4,
+              shadowRadius: 10,
+              elevation: 6,
+            }}
+          >
+            <Icon.chevronD size={14} color="#fff" strokeWidth={2.6} />
+            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>
+              新着 {unreadIds.size} 件
+            </Text>
+          </PressableScale>
+        </View>
+      )}
       <View style={{ width: '100%', alignItems: 'center', borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.bg2 }}>
         <View style={{
           width: '100%', maxWidth: MAX_W,

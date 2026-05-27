@@ -14,5 +14,5 @@ export type { FeedEvent, EventKind } from './events';
 export { computeProfile } from './profile';
 export type { UserInterestProfile, AffinityMap } from './profile';
 
-export { scoreCandidate, rankFeed, computePostScore, diversifyFeed } from './score';
+export { scoreCandidate, rankFeed, computePostScore, diversifyFeed, risingVelocity } from './score';
 export type { RankableCandidate, RankReason, ScoredCandidate, ScoreInput } from './score';

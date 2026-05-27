@@ -29,6 +29,8 @@ import { ObsidianSaveButton } from '../ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
 import type { PostCommunityRef } from '../../lib/api/posts';
 import { OfficialBadge } from '../community/OfficialBadge';
+import { MediaWithCWGuard } from '../post/MediaWithCWGuard';
+import { getDisplayLikes } from '../../lib/utils/voteFuzz';
 
 // 画像アスペクト比のモジュールレベルキャッシュ。
 // パフォーマンス監査: 旧版は無制限キャッシュで長時間スクロール後にメモリ蓄積。
@@ -454,6 +456,9 @@ function AnonPostCardInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaUrls.join('|')]);
   const likesCount = post.likes_count ?? 0;
+  // 表示用 likes 数 — Vote Fuzzing (#3) で post_id seed の決定的 noise を加える。
+  // 実 ranking / score / lowTrust 計算は real value (likesCount) のまま使う。
+  const displayLikesCount = getDisplayLikes(post.id, likesCount);
   const commentsCount = post.comments_count ?? 0;
   const concernCount = post.concern_count ?? 0;
   const hasMedia = mediaUrls.length > 0 || videoUrls.length > 0;
@@ -621,8 +626,14 @@ function AnonPostCardInner({
       {/* メディア — 自然なアスペクト比で表示 (square crop しない)
           tall portrait (5:6 等) や wide landscape も切れず全体が見える
           複数枚は縦に積む (各画像が自身のアスペクト比を保持)
-          外側カードの paddingHorizontal に揃え、premium feel の rounded corners */}
-      {hasMedia && !isCwHidden && (
+          外側カードの paddingHorizontal に揃え、premium feel の rounded corners
+
+          NSFW / spoiler / violence は MediaWithCWGuard が per-item で
+          blurhash + 「タップして表示」CTA で gate する。 sensitive は
+          MediaWithCWGuard 側で素通し (ラベルのみ) なのでここでは特別扱い無し。
+          body 側の cwBox とは独立: body は cwBox で、 media は per-item で
+          reveal される。 */}
+      {hasMedia && (
         <DoubleTapHeart onDoubleTap={onLike}>
           <View style={STYLES.mediaWrap}>
             {mediaUrls.map((url, i) => {
@@ -635,14 +646,16 @@ function AnonPostCardInner({
                   key={url}
                   style={[STYLES.mediaItemBase, mediaItemAspect(aspect)]}
                 >
-                  <ProgressiveImage
-                    uri={url}
-                    blurhash={blurhash}
-                    width="100%"
-                    height="100%"
-                    radius={R.md}
-                    lazy
-                  />
+                  <MediaWithCWGuard cwCategory={cwCategory} blurhash={blurhash}>
+                    <ProgressiveImage
+                      uri={url}
+                      blurhash={blurhash}
+                      width="100%"
+                      height="100%"
+                      radius={R.md}
+                      lazy
+                    />
+                  </MediaWithCWGuard>
                 </View>
               );
             })}
@@ -652,7 +665,9 @@ function AnonPostCardInner({
                 key={`v-${vurl}`}
                 style={[STYLES.mediaItemBase, mediaItemAspect(16 / 9)]}
               >
-                <VideoPlayer uri={vurl} poster={videoPosters[i]} />
+                <MediaWithCWGuard cwCategory={cwCategory}>
+                  <VideoPlayer uri={vurl} poster={videoPosters[i]} />
+                </MediaWithCWGuard>
               </View>
             ))}
           </View>
@@ -727,8 +742,8 @@ function AnonPostCardInner({
           style={STYLES.actionPress}
         >
           <Heart size={20} color={liked ? C.pink : C.text2} fill={liked ? C.pink : 'transparent'} strokeWidth={2.2} />
-          {likesCount > 0 && (
-            <Text style={[T.smallM, likeCountTextStyle]}>{likesCount}</Text>
+          {displayLikesCount > 0 && (
+            <Text style={[T.smallM, likeCountTextStyle]}>{displayLikesCount}</Text>
           )}
         </PressableScale>
         <PressableScale

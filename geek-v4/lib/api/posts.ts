@@ -2,7 +2,11 @@ import { supabase } from '../supabase';
 import type { Post, PostVisibility } from '../../types/models';
 
 export type { PostVisibility } from '../../types/models';
-export type SortMode = 'for-you' | 'hot' | 'new' | 'top';
+// 'rising' = Reddit 風 "急上昇" — 直近 3h 内で likes/min が高い post を上位に。
+//   server 側は実質 'new' (created_at desc limit 100) で取得し、
+//   client 側 (hooks/useFeed) で lib/utils/risingScore.ts により再ランクする。
+//   RPC/DB スキーマ変更不要。詳細は risingScore.ts のヘッダコメント参照。
+export type SortMode = 'for-you' | 'hot' | 'new' | 'top' | 'rising';
 
 // posts SELECT で取得するカラム一覧 (一箇所でメンテ可能)
 // author_id は公式コミュ管理者投稿を de-anonymize する判定に使う (RLS で誰でも読める)
@@ -34,9 +38,21 @@ export async function fetchPosts({
 }: FetchPostsOpts): Promise<{ posts: Post[]; nextCursor: string | null }> {
   // 'for-you' は内部的に 'hot' と同じ広い候補プールを取りつつ、クライアント側で
   // パーソナライズ再ランクするので、候補数を 1.5x にしてランカー側に余白を与える。
+  // 'rising' は 'new' の created_at desc を引数 100 件で取得し、client 側で
+  // likes/分 速度で再ランク → 上位 30 を表示。ページングはせず 1 ページのみ。
   const isForYou = sort === 'for-you';
-  const effectiveLimit = isForYou ? Math.ceil(limit * 1.5) : limit;
-  const effectiveSort: 'hot' | 'new' | 'top' = isForYou ? 'hot' : sort;
+  const isRising = sort === 'rising';
+  const RISING_FETCH_LIMIT = 100;
+  const effectiveLimit = isForYou
+    ? Math.ceil(limit * 1.5)
+    : isRising
+      ? RISING_FETCH_LIMIT
+      : limit;
+  const effectiveSort: 'hot' | 'new' | 'top' = isForYou
+    ? 'hot'
+    : isRising
+      ? 'new'
+      : sort;
 
   let query = supabase
     .from('posts')
@@ -123,7 +139,10 @@ export async function fetchPosts({
 
   const posts = (data ?? []) as Post[];
   let nextCursor: string | null = null;
-  if (posts.length === effectiveLimit) {
+  // rising モードは client side 再ランクで上位 30 件しか出さないため、
+  // ページングしても意味がない (= 31 件目以下を server 側で fetch しても
+  // 速度上位は前ページに既に含まれている)。常に nextCursor=null で打ち切る。
+  if (!isRising && posts.length === effectiveLimit) {
     const last = posts[posts.length - 1];
     if (last) {
       if (effectiveSort === 'new') nextCursor = last.created_at;
@@ -376,7 +395,8 @@ export async function fetchCommunityPosts({
       .order('likes_count', { ascending: false })
       .order('created_at', { ascending: false });
   } else {
-    // new または for-you (for-you はクライアント側ランカー前提で時系列を渡す)
+    // new / for-you / rising — いずれもクライアント側で再ランクされる前提で時系列を渡す。
+    // (for-you=パーソナライズ、rising=likes/分 速度。詳細は SortMode コメント参照)
     postsQuery = postsQuery.order('created_at', { ascending: false });
   }
 

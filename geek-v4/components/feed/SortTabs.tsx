@@ -7,9 +7,13 @@ import { useT } from '../../lib/i18n';
 import type { SortMode } from '../../lib/api/posts';
 
 // label は ja 文字列を直接書いて、表示時に useT で翻訳。DICT 側で en/zh/ko/es/fr 対応済。
-const ORDER: ReadonlyArray<{ v: SortMode; label: string }> = [
+// 'rising' は Reddit 風「直近 3h で likes/分 が速い post」— 既存 'hot' (= 累積 like) とは
+// 別軸なので並列で出す。視覚的に区別するため 🚀 icon prefix を付与している。
+// rising の label key は DICT に無いので useT は as-is で返す (= 多言語でも日本語 + 🚀)。
+const ORDER: ReadonlyArray<{ v: SortMode; label: string; icon?: string }> = [
   { v: 'for-you', label: 'あなた向け' },
   { v: 'new', label: '新着' },
+  { v: 'rising', label: '急上昇', icon: '🚀' },
   { v: 'hot', label: '急上昇' },
   { v: 'top', label: '人気' },
 ];
@@ -78,7 +82,7 @@ export function SortTabs({
                 },
               ]}
             >
-              {t(m.label)}
+              {m.icon ? `${m.icon} ` : ''}{t(m.label)}
             </Text>
           </PressableScale>
         );

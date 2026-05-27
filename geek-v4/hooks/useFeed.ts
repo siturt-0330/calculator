@@ -18,6 +18,7 @@ import type { FeedEvent, RankableCandidate, RankReason } from '../lib/personaliz
 import { useAuthStore } from '../stores/authStore';
 import { fetchTargetedAds, type Ad } from '../lib/api/ads';
 import { useAdPreferencesStore } from '../stores/adPreferencesStore';
+import { rankByRising } from '../lib/utils/risingScore';
 
 // React Query の persist cache は JSON 経由なので Set を直接保存できない (空の {} になる)。
 // 配列で返して使い側で Set に包む。
@@ -171,6 +172,24 @@ export function useFeed() {
   }, [userCreatedAt]);
 
   const { posts, reasonsMap }: { posts: Post[]; reasonsMap: Record<string, RankReason> } = useMemo(() => {
+    // ----------------------------------------------------------------
+    // Rising モード: 直近 3 時間以内の post を「likes/分」速度で再ランクして上位 30 件
+    // ----------------------------------------------------------------
+    // - blocked タグはまず除外 (smartSort 等と同じ contract)
+    // - DB schema は触らず client side のみで動く (rankByRising は pure)
+    // - server から fetchPosts は created_at desc limit 100 で 1 ページのみ取得
+    //   している前提 (lib/api/posts.ts の isRising 分岐)
+    if (sort === 'rising') {
+      const blockedSet = new Set(blockedTags);
+      const visiblePosts = rawPosts.filter((p) => {
+        const tags = p.tag_names ?? [];
+        for (const t of tags) if (blockedSet.has(t)) return false;
+        return true;
+      });
+      const ranked = rankByRising(visiblePosts, Date.now());
+      return { posts: ranked, reasonsMap: {} };
+    }
+
     if (sort === 'for-you') {
       // For-You は personalize 基盤で再ランク。blocked タグはクライアント側で先に除去。
       const blockedSet = new Set(blockedTags);

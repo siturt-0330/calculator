@@ -579,6 +579,27 @@ export function computePostScore(input: ScoreInput): number {
 }
 
 // ============================================================
+// risingVelocity — Reddit 風「急上昇」用の純粋な速度スコア
+// ------------------------------------------------------------
+// 計算: post.likes_count / max(minutes_since_post, 1)
+//
+//   - personalize/score モジュールが提供する Post→number の helper として
+//     公開。Rising モードでは個人化シグナル (tagAffinity 等) は使わず、
+//     純粋な「分あたり like 速度」だけで並べる。
+//   - 主実装と test は lib/utils/risingScore.ts に集約してあり、ここは
+//     既存 personalize 系 import の慣性で呼び出せるよう薄く delegate するのみ。
+//   - 投稿時刻が不正/未来の場合は 0 を返す (詳細は computeRisingScore)。
+// ============================================================
+import { computeRisingScore } from '../utils/risingScore';
+
+export function risingVelocity(post: Post, now: Date | number = Date.now()): number {
+  const nowMs = typeof now === 'number' ? now : now.getTime();
+  const createdAtMs = Date.parse(post.created_at);
+  const likes = Math.max(0, post.likes_count ?? 0);
+  return computeRisingScore(likes, createdAtMs, nowMs);
+}
+
+// ============================================================
 // diversifyFeed — post-process: 同じ author / 同じ tag set が連続しないように
 // ------------------------------------------------------------
 // 上位 maxConsecutiveFromSameAuthor 件 (default 2) までは score 順で出すが、

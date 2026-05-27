@@ -24,6 +24,7 @@ import { useToastStore } from '../../stores/toastStore';
 import { useFeedStore } from '../../stores/feedStore';
 import { AnonPostCard } from '../../components/feed/AnonPostCard';
 import { AdCard } from '../../components/feed/AdCard';
+import { SortTabs } from '../../components/feed/SortTabs';
 import type { Ad } from '../../lib/api/ads';
 
 // フィード上の item — 通常 post か広告アイテム (__ad マーカー付き)
@@ -68,15 +69,12 @@ export default function FeedScreen() {
   const likedTags = useTagFilterStore((s) => s.likedTags);
   const scope = useFeedStore((s) => s.scope);
   const setScope = useFeedStore((s) => s.setScope);
-  // 並び替えは廃止 — 常に for-you (パーソナライズ) で配信。
-  // 既存ユーザーが旧 sort='hot' を localStorage に持っていても
-  // mount 時に強制的に for-you へ書き戻して画面と整合させる。
+  // 並び替え: for-you/new/rising/hot/top の 5 軸。default は for-you。
+  // - 'rising' = Reddit 風「直近 3h の likes/分」(client-side 再ランク)
+  // - 既存 (for-you/hot/new/top) の挙動は変更なし
   const sort = useFeedStore((s) => s.sort);
   const setSort = useFeedStore((s) => s.setSort);
   const hydrateFeed = useFeedStore((s) => s.hydrate);
-  useEffect(() => {
-    if (sort !== 'for-you') setSort('for-you');
-  }, [sort, setSort]);
   const hasLikedTags = likedTags.length > 0;
 
   // 好きなタグが無いときに closed scope に居たら open へ強制
@@ -482,8 +480,12 @@ export default function FeedScreen() {
         </View>
       </View>
 
-      {/* SortTabs は非表示 — 常にパーソナライズ (for-you) で配信。
-          ユーザーには「並び替え」という概念を見せず、あなた向けが唯一のホーム体験。 */}
+      {/* SortTabs: for-you / new / rising 🚀 / hot / top の 5 軸 */}
+      <View style={{ alignItems: 'center' }}>
+        <View style={{ width: '100%', maxWidth: 720, paddingHorizontal: SP['4'], paddingBottom: SP['2'] }}>
+          <SortTabs value={sort} onChange={setSort} />
+        </View>
+      </View>
 
       <View style={{ alignItems: 'center' }}>
         <View style={{ width: '100%', maxWidth: 720, paddingHorizontal: SP['4'], paddingBottom: SP['3'] }}>
