@@ -1,19 +1,34 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import Animated, { FadeIn, FadeInDown, Layout } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createThread } from '../../lib/api/bbs';
 import { discoverCommunities, type Community } from '../../lib/api/communities';
 import type { ThreadVisibility } from '../../types/models';
-import { C, SP, R } from '../../design/tokens';
+import { C, SP, R, GRAD, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
-import { Button } from '../../components/ui/Button';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { Icon } from '../../constants/icons';
 import { notify, Haptics } from '../../lib/haptics';
 import { useToastStore } from '../../stores/toastStore';
+
+// カテゴリ chip 用のカラーパレット — (tabs)/bbs.tsx と同じマップを共有することで
+// 一覧画面 ⇄ 作成画面で色のブレを防ぐ。「すべて」はリスト画面側でしか使わないので除外。
+const CATEGORIES = ['雑談', 'アニメ', 'ゲーム', 'マンガ', '音楽', 'アイドル', 'Vtuber', '推し活', 'グルメ', 'コスプレ', 'ニュース'] as const;
+const CATEGORY_COLORS: Record<string, string> = {
+  '雑談': '#22D3A4', 'アニメ': '#FF6B7A', 'ゲーム': '#7CB1FF',
+  'マンガ': '#F472B6', '音楽': '#FCD34D', 'アイドル': '#FF8C30',
+  'Vtuber': '#A78BFA', '推し活': '#EC4899', 'グルメ': '#84CC16',
+  'コスプレ': '#06B6D4', 'ニュース': '#94A3B8',
+};
+
+// タイトル文字数制限 — 残文字数 chip と inline error で同じ閾値を共有
+const TITLE_MIN = 2;
+const TITLE_MAX = 80;
+const TITLE_WARN_AT = 70; // この閾値を超えると amber chip
 
 export default function BBSCreateScreen() {
   const router = useRouter();
@@ -78,7 +93,7 @@ export default function BBSCreateScreen() {
 
   const { mutateAsync, isPending } = useMutation({
     mutationFn: () =>
-      createThread(title.trim(), category.trim() || '雑談', {
+      createThread(title.trim(), category || '雑談', {
         community_id: selectedCommunityId ?? undefined,
         visibility,
       }),
@@ -96,17 +111,35 @@ export default function BBSCreateScreen() {
     },
   });
 
+  // 入力の前後空白を除いた "実質的な" タイトル — validation / preview / submit で共有
+  const trimmedTitle = title.trim();
+  const titleLen = trimmedTitle.length;
+  const titleTooShort = titleLen > 0 && titleLen < TITLE_MIN;
+  const titleTooLong = titleLen > TITLE_MAX;
+  const titleEmpty = titleLen === 0;
+  // 公開設定 × コミュニティ選択の必須要件
+  const needsCommunity = visibility === 'community_only' && !selectedCommunityId;
+
+  const canSubmit = !titleEmpty && !titleTooShort && !titleTooLong && !needsCommunity && !isPending;
+
   const handleSubmit = async () => {
     setError('');
-    if (!title.trim()) {
+    if (titleEmpty) {
       setError('スレッドのタイトルを入力してください。');
+      notify(Haptics.NotificationFeedbackType.Warning);
       return;
     }
-    if (title.trim().length > 50) {
-      setError('タイトルは50文字以内で入力してください。');
+    if (titleTooShort) {
+      setError(`タイトルは${TITLE_MIN}文字以上で入力してください。`);
+      notify(Haptics.NotificationFeedbackType.Warning);
       return;
     }
-    if (visibility === 'community_only' && !selectedCommunityId) {
+    if (titleTooLong) {
+      setError(`タイトルは${TITLE_MAX}文字以内で入力してください。`);
+      notify(Haptics.NotificationFeedbackType.Warning);
+      return;
+    }
+    if (needsCommunity) {
       show('コミュニティを選んでください', 'warn');
       notify(Haptics.NotificationFeedbackType.Warning);
       return;
@@ -139,18 +172,44 @@ export default function BBSCreateScreen() {
           <BackIcon size={24} color={C.text} strokeWidth={2.2} />
         </PressableScale>
         <Text style={[T.h4, { color: C.text, flex: 1, marginLeft: SP['3'] }]}>スレッドを作成</Text>
-        <Button
-          label="投稿"
+        {/* Submit — GRAD.primary (紫→桃→…) で 「ここを押せ」感を強める.
+            disabled (空 / 文字数超過 / community 未選択 / 送信中) は grey 表示で
+            「押せない」ことを 1 秒で伝える. loading 中は spinner inline. */}
+        <PressableScale
           onPress={handleSubmit}
-          loading={isPending}
-          disabled={
-            !title.trim()
-            || title.trim().length > 50
-            || (visibility === 'community_only' && !selectedCommunityId)
-            || isPending
-          }
-          size="sm"
-        />
+          disabled={!canSubmit}
+          haptic="confirm"
+          accessibilityLabel="スレッドを作成"
+          accessibilityState={{ disabled: !canSubmit, busy: isPending }}
+          style={{
+            height: 36,
+            paddingHorizontal: SP['4'],
+            borderRadius: R.full,
+            overflow: 'hidden',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexDirection: 'row',
+            gap: SP['2'],
+            backgroundColor: canSubmit ? 'transparent' : C.bg4,
+            ...(canSubmit ? SHADOW.glow : null),
+          }}
+        >
+          {canSubmit && (
+            <LinearGradient
+              colors={[...GRAD.primary]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+            />
+          )}
+          {isPending ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Text style={[T.buttonSm, { color: canSubmit ? '#fff' : C.text3 }]}>
+              作成
+            </Text>
+          )}
+        </PressableScale>
       </View>
 
       <ScrollView
@@ -161,10 +220,6 @@ export default function BBSCreateScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
             <Text style={[T.smallB, { color: C.text2 }]}>タイトル</Text>
             <Text style={[T.caption, { color: C.red }]}>*</Text>
-            <View style={{ flex: 1 }} />
-            <Text style={[T.caption, { color: title.length > 50 ? C.red : C.text3 }]}>
-              {title.length} / 50
-            </Text>
           </View>
           <Text style={[T.caption, { color: C.text3 }]}>
             何の話か一目で分かる短いタイトルを
@@ -174,7 +229,8 @@ export default function BBSCreateScreen() {
             onChangeText={setTitle}
             placeholder="例: 鬼滅 無限城編 ネタバレ感想"
             placeholderTextColor={C.text3}
-            maxLength={60}
+            // maxLength は hard cap. validation 側 (TITLE_MAX) は trim 後の長さで判定する
+            maxLength={TITLE_MAX + 20}
             autoFocus
             keyboardAppearance="dark"
             selectionColor={C.accent}
@@ -187,56 +243,101 @@ export default function BBSCreateScreen() {
                 paddingHorizontal: SP['4'],
                 paddingVertical: SP['3'],
                 borderWidth: 1.5,
-                borderColor: title.length > 50 ? C.red : C.border,
+                borderColor: titleTooLong ? C.red : titleLen >= TITLE_WARN_AT ? C.amber : C.border,
               },
             ]}
           />
+          {/* 残文字数 chip — 警告色は 70 文字以降 amber, 80 文字超で red */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+            <View
+              style={{
+                paddingHorizontal: SP['2'], paddingVertical: 2,
+                borderRadius: R.full,
+                backgroundColor: titleTooLong ? C.redBg : titleLen >= TITLE_WARN_AT ? C.amberBg : C.bg3,
+                borderWidth: 1,
+                borderColor: titleTooLong ? C.red : titleLen >= TITLE_WARN_AT ? C.amber : C.border,
+              }}
+            >
+              <Text
+                style={[
+                  T.caption,
+                  {
+                    color: titleTooLong ? C.red : titleLen >= TITLE_WARN_AT ? C.amber : C.text3,
+                    fontVariant: ['tabular-nums'],
+                  },
+                ]}
+              >
+                {titleLen} / {TITLE_MAX}
+              </Text>
+            </View>
+            {titleTooShort && (
+              <Text style={[T.caption, { color: C.amber }]}>
+                あと{TITLE_MIN - titleLen}文字以上必要です
+              </Text>
+            )}
+            {titleTooLong && (
+              <Text style={[T.caption, { color: C.red }]}>
+                {titleLen - TITLE_MAX}文字オーバー
+              </Text>
+            )}
+          </View>
         </View>
 
         <View style={{ gap: SP['2'] }}>
-          <Text style={[T.smallB, { color: C.text2 }]}>カテゴリ（任意）</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
+            <Text style={[T.smallB, { color: C.text2 }]}>カテゴリ</Text>
+            <Text style={[T.caption, { color: C.text3 }]}>(任意)</Text>
+            <View style={{ flex: 1 }} />
+            {!!category && (
+              <PressableScale
+                onPress={() => setCategory('')}
+                haptic="tap"
+                hitSlop={6}
+                accessibilityLabel="カテゴリ解除"
+              >
+                <Text style={[T.caption, { color: C.text3 }]}>解除</Text>
+              </PressableScale>
+            )}
+          </View>
           <Text style={[T.caption, { color: C.text3 }]}>
-            プリセットから選ぶ、または自由入力
+            プリセットから 1 つ選んでください。未選択時は「雑談」として投稿されます。
           </Text>
-          <TextInput
-            value={category}
-            onChangeText={setCategory}
-            placeholder="例: アニメ、ゲーム、雑談..."
-            placeholderTextColor={C.text3}
-            keyboardAppearance="dark"
-            selectionColor={C.accent}
-            // memory DoS 対策: short tag/category 用に 40 文字 cap
-            maxLength={40}
-            style={[
-              T.body,
-              {
-                color: C.text,
-                backgroundColor: C.bg3,
-                borderRadius: R.md,
-                paddingHorizontal: SP['4'],
-                paddingVertical: SP['3'],
-                borderWidth: 1.5,
-                borderColor: C.border,
-              },
-            ]}
-          />
-          {/* カテゴリプリセット */}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
-            {['雑談', 'アニメ', 'ゲーム', 'マンガ', '音楽', 'アイドル', 'Vtuber', '推し活', 'グルメ', 'コスプレ', 'ニュース'].map((c) => {
+          {/* カテゴリ chip grid — 選択中はそのカテゴリ色で fill, 未選択は outline.
+              色は (tabs)/bbs.tsx の CATEGORY_COLORS と完全に同じ. */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'], marginTop: 4 }}>
+            {CATEGORIES.map((c) => {
               const active = category === c;
+              const color = CATEGORY_COLORS[c] ?? C.accent;
               return (
                 <PressableScale
                   key={c}
-                  onPress={() => setCategory(c)}
+                  onPress={() => setCategory(active ? '' : c)}
                   haptic="select"
+                  hitSlop={6}
+                  accessibilityLabel={`カテゴリ ${c}${active ? ' (選択中)' : ''}`}
                   style={{
-                    paddingHorizontal: SP['3'], paddingVertical: 6,
-                    backgroundColor: active ? C.accent : C.bg3,
+                    paddingHorizontal: SP['3'],
+                    paddingVertical: 7,
                     borderRadius: R.full,
-                    borderWidth: 1, borderColor: active ? C.accent : C.border,
+                    backgroundColor: active ? color : 'transparent',
+                    borderWidth: 1.5,
+                    borderColor: active ? color : C.border2,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    ...(active ? SHADOW.xs : null),
                   }}
                 >
-                  <Text style={{ fontSize: 12, color: active ? '#fff' : C.text2, fontWeight: '600' }}>
+                  {/* 未選択時は色 dot で「このカテゴリの色」をプレビュー */}
+                  {!active && (
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />
+                  )}
+                  <Text
+                    style={[
+                      T.smallM,
+                      { color: active ? '#fff' : C.text2, fontSize: 12, lineHeight: 16 },
+                    ]}
+                  >
                     {c}
                   </Text>
                 </PressableScale>
@@ -446,6 +547,73 @@ export default function BBSCreateScreen() {
             </Animated.View>
           )}
         </View>
+
+        {/* プレビュー — 入力中の見た目を card で常時 (タイトルが 1 字以上で出現).
+            一覧画面のスレッド行と同じ trim を意識した layout で違和感を減らす. */}
+        {titleLen > 0 && !titleTooLong && (
+          <Animated.View
+            entering={FadeIn.duration(180)}
+            layout={Layout.springify().damping(22)}
+            style={{ gap: SP['2'] }}
+          >
+            <Text style={[T.caption, { color: C.text3 }]}>プレビュー</Text>
+            <View
+              style={{
+                flexDirection: 'row',
+                gap: SP['3'],
+                paddingHorizontal: SP['3'],
+                paddingVertical: SP['3'],
+                borderRadius: R.lg,
+                backgroundColor: 'rgba(255,255,255,0.04)',
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.08)',
+                ...SHADOW.xs,
+              }}
+            >
+              {/* category 色の縦バー — 一覧画面の chip 色と揃える */}
+              <View
+                style={{
+                  width: 3,
+                  borderRadius: 2,
+                  backgroundColor: category ? (CATEGORY_COLORS[category] ?? C.accent) : C.border2,
+                }}
+              />
+              <View style={{ flex: 1, gap: 6 }}>
+                {!!category && (
+                  <View
+                    style={{
+                      alignSelf: 'flex-start',
+                      paddingHorizontal: SP['2'],
+                      paddingVertical: 2,
+                      borderRadius: R.full,
+                      backgroundColor: `${CATEGORY_COLORS[category] ?? C.accent}22`,
+                      borderWidth: 1,
+                      borderColor: CATEGORY_COLORS[category] ?? C.accent,
+                    }}
+                  >
+                    <Text
+                      style={[
+                        T.caption,
+                        { color: CATEGORY_COLORS[category] ?? C.accent, fontSize: 10 },
+                      ]}
+                    >
+                      {category}
+                    </Text>
+                  </View>
+                )}
+                <Text style={[T.bodyB, { color: C.text }]} numberOfLines={2}>
+                  {trimmedTitle}
+                </Text>
+                <Text style={[T.caption, { color: C.text3 }]}>
+                  {visibility === 'community_only' ? '🔒 コミュニティ限定' : '🌐 一般公開'}
+                  {selectedCommunityId && selectedCommunityQ.data
+                    ? ` ・ ${selectedCommunityQ.data.name}`
+                    : ''}
+                </Text>
+              </View>
+            </View>
+          </Animated.View>
+        )}
 
         {error ? (
           <Animated.View entering={FadeIn.duration(150)} style={{ backgroundColor: C.redBg, borderRadius: R.md, padding: SP['3'], flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
