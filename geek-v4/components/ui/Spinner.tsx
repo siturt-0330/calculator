@@ -43,7 +43,7 @@ function FullScreenSpinner() {
       <Animated.Text
         style={[
           {
-            fontFamily: FONT.display,
+            fontFamily: 'Orbitron_900Black',
             fontSize: 36,
             color: C.text,
             letterSpacing: -0.6,

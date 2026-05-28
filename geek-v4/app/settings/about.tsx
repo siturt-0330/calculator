@@ -7,7 +7,7 @@ import { BackButton } from '../../components/nav/BackButton';
 import { ListItem } from '../../components/ui/ListItem';
 import { Divider } from '../../components/ui/Divider';
 import { C, R, SP } from '../../design/tokens';
-import { T, FONT } from '../../design/typography';
+import { T } from '../../design/typography';
 import { Icon } from '../../constants/icons';
 
 export default function AboutScreen() {
@@ -34,7 +34,7 @@ export default function AboutScreen() {
           alignItems: 'center',
           gap: SP['2'],
         }}>
-          <Text style={{ fontFamily: FONT.display, fontSize: 56, color: C.text, letterSpacing: -1 }}>Geek</Text>
+          <Text style={{ fontFamily: 'Orbitron_900Black', fontSize: 56, color: C.text, letterSpacing: -1 }}>Geek</Text>
           <Text style={[T.body, { color: C.text2 }]}>好きを、匿名で、安心して続ける</Text>
           <View style={{
             marginTop: SP['2'],

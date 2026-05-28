@@ -59,8 +59,9 @@ const CFG = {
 
 const LETTERS = ['G', 'e', 'e', 'k'] as const;
 
-// "Geek" の幅推定 (Inter Bold) — 各文字を FONT_SIZE 比で
-const W_RATIO: Record<string, number> = { G: 0.66, e: 0.46, k: 0.55 };
+// "Geek" の幅推定 (Orbitron 900 Black) — 各文字を FONT_SIZE 比で
+// Orbitron は Inter より幅広・正方形的 (大文字寄り) — geometric sans の特徴
+const W_RATIO: Record<string, number> = { G: 0.78, e: 0.70, k: 0.70 };
 
 // G を中央に置く時の word-row の translateX
 // = (e + e + k の合計幅) / 2
@@ -302,9 +303,9 @@ function Letter({
 
 function baseLogoStyle(): ExtendedTextStyle {
   const base: ExtendedTextStyle = {
-    fontFamily: 'Inter_700Bold',
+    fontFamily: 'Orbitron_900Black',
     fontSize: CFG.FONT_SIZE,
-    fontWeight: '700',
+    fontWeight: '900',
     letterSpacing: CFG.LETTER_SPACING,
     color: CFG.LOGO_COLOR,
     includeFontPadding: false,
@@ -314,7 +315,7 @@ function baseLogoStyle(): ExtendedTextStyle {
     // に存在しないが、ExtendedTextStyle で許可 — RN Web が CSS にそのまま流す
     return {
       ...base,
-      fontFamily: 'Inter_700Bold, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      fontFamily: 'Orbitron_900Black, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       WebkitFontSmoothing: 'antialiased',
       MozOsxFontSmoothing: 'grayscale',
       textRendering: 'optimizeLegibility',

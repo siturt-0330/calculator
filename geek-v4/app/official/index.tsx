@@ -64,7 +64,7 @@ export default function OfficialSelectorScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], marginBottom: 4 }}>
             <Text
               style={{
-                fontFamily: FONT.display,
+                fontFamily: 'Orbitron_900Black',
                 fontSize: 32,
                 lineHeight: 38,
                 color: C.text,

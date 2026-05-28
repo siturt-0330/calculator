@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, SP } from '../../design/tokens';
-import { T, FONT } from '../../design/typography';
+import { T } from '../../design/typography';
 import { Button } from '../../components/ui/Button';
 import { Icon } from '../../constants/icons';
 import type { LucideIcon } from 'lucide-react-native';
@@ -60,7 +60,7 @@ export default function OnboardingIndex() {
         <View style={{ alignItems: 'center', gap: SP['2'] }}>
           <Text
             style={{
-              fontFamily: FONT.display,
+              fontFamily: 'Orbitron_900Black',
               fontSize: 56,
               color: C.text,
               letterSpacing: -1,

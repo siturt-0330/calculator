@@ -166,7 +166,7 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={{ marginBottom: SP['6'] }}>
-          <Text style={[T.display, { color: C.text, marginBottom: SP['2'], letterSpacing: -0.6 }]}>Geek</Text>
+          <Text style={[T.display, { fontFamily: 'Orbitron_900Black', color: C.text, marginBottom: SP['2'], letterSpacing: -0.6 }]}>Geek</Text>
           {/* ログイン画面は他のラベル (メールアドレス/パスワード/ログイン等) も
               全てハードコード日本語。auth.tagline だけ DICT 経由だと lang=en で
               「Love what you love — anonymously, safely.」が混ざる事故が出るため、
