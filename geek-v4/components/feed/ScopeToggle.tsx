@@ -1,10 +1,32 @@
-import { View, Text } from 'react-native';
+import { View, LayoutChangeEvent } from 'react-native';
+import { useState, useEffect } from 'react';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { PressableScale } from '../ui/PressableScale';
-import { C, R, SP, GRAD, SHADOW } from '../../design/tokens';
+import { R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
+import { TIMING_NORM } from '../../design/motion';
+import { useColors, useGradients } from '../../hooks/useColors';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { useT } from '../../lib/i18n';
 import type { FeedScope } from '../../stores/feedStore';
+
+const PAD = 3;
+// Apple Segmented Control 風 spring (damping 22, stiffness 240) ※ 指示書準拠
+const SCOPE_SPRING = { damping: 22, stiffness: 240, mass: 0.7 } as const;
+
+// 2 値で固定 (open / closed) — 配列を component 外に持つと再 render 時に
+// useEffect の依存が安定する。
+const OPTIONS = [
+  { v: 'open' as FeedScope, label: 'すべて', sub: '全部' },
+  { v: 'closed' as FeedScope, label: '選択した # のみ', sub: '好きだけ' },
+] as const;
 
 export function ScopeToggle({
   value,
@@ -18,75 +40,211 @@ export function ScopeToggle({
   onClosedWhenEmpty?: () => void; // disabledClosed 時に closed を押したら呼ばれる
 }) {
   const t = useT();
+  const C = useColors();
+  const GRAD = useGradients();
+  const reduceMotion = useReducedMotion();
+
+  const [w, setW] = useState(0);
+  const innerW = Math.max(0, w - PAD * 2);
+  const segW = innerW / OPTIONS.length;
+  const idx = Math.max(0, OPTIONS.findIndex((o) => o.v === value));
+
+  // pill の位置 (translateX)
+  const x = useSharedValue(0);
+  // shake (closed disabled 時の "効かない" フィードバック) — container 全体を揺らす
+  const shakeX = useSharedValue(0);
+
+  useEffect(() => {
+    if (segW <= 0) return;
+    const target = idx * segW;
+    if (reduceMotion) {
+      x.value = target;
+    } else {
+      x.value = withSpring(target, SCOPE_SPRING);
+    }
+  }, [idx, segW, x, reduceMotion]);
+
+  const pillStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: x.value }],
+    width: segW,
+  }));
+
+  const containerShakeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: shakeX.value }],
+  }));
+
+  // closed が disabled の時の shake animation. translateX -4 → +4 → 0 を 250ms で。
+  const triggerShake = () => {
+    if (reduceMotion) return;
+    shakeX.value = withSequence(
+      withTiming(-4, { duration: 60 }),
+      withTiming(4, { duration: 70 }),
+      withTiming(-3, { duration: 60 }),
+      withTiming(0, { duration: 60 }),
+    );
+  };
+
   return (
-    <View
-      style={{
-        flexDirection: 'row',
-        backgroundColor: C.bg3,
-        borderRadius: R.full,
-        padding: 3,
-        borderWidth: 1,
-        borderColor: C.border,
-      }}
+    <Animated.View
+      onLayout={(e: LayoutChangeEvent) => setW(e.nativeEvent.layout.width)}
+      style={[
+        {
+          flexDirection: 'row',
+          backgroundColor: C.bg3,
+          borderRadius: R.full,
+          padding: PAD,
+          borderWidth: 1,
+          borderColor: C.border,
+          position: 'relative',
+          overflow: 'hidden',
+        },
+        containerShakeStyle,
+      ]}
     >
-      {(
-        [
-          { v: 'open', label: 'すべて', sub: '全部' },
-          { v: 'closed', label: '選択した # のみ', sub: '好きだけ' },
-        ] as const
-      ).map((m) => {
+      {/* sliding pill — Apple Segmented Control 風 */}
+      {segW > 0 && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            {
+              position: 'absolute',
+              top: PAD,
+              bottom: PAD,
+              left: PAD,
+              borderRadius: R.full,
+              overflow: 'hidden',
+              // closed が dimmed の時は active pill 自体も控えめにする
+              opacity: disabledClosed && value === 'closed' ? 0.5 : 1,
+              ...SHADOW.glow,
+            },
+            pillStyle,
+          ]}
+        >
+          <LinearGradient
+            colors={GRAD.primary}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+          />
+        </Animated.View>
+      )}
+
+      {OPTIONS.map((m) => {
         const active = value === m.v;
-        const dimmed = disabledClosed && m.v === 'closed';
-        const showGradient = active && !dimmed;
+        const dimmed = !!disabledClosed && m.v === 'closed';
         const handlePress = () => {
-          if (dimmed && onClosedWhenEmpty) onClosedWhenEmpty();
-          else onChange(m.v);
+          if (dimmed) {
+            triggerShake();
+            if (onClosedWhenEmpty) onClosedWhenEmpty();
+            return;
+          }
+          onChange(m.v);
         };
         return (
-          <PressableScale
+          <ScopeItem
             key={m.v}
+            label={m.label}
+            active={active}
+            dimmed={dimmed}
             onPress={handlePress}
-            haptic="select"
-            style={{
-              flex: 1,
-              paddingVertical: SP['2'],
-              paddingHorizontal: SP['3'],
-              borderRadius: R.full,
-              alignItems: 'center',
-              opacity: dimmed ? 0.55 : 1,
-              overflow: 'hidden',
-              ...(showGradient ? SHADOW.glow : null),
-            }}
-          >
-            {showGradient && (
-              <LinearGradient
-                colors={GRAD.primary}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  right: 0,
-                  top: 0,
-                  bottom: 0,
-                }}
-              />
-            )}
-            <Text
-              style={[
-                T.smallM,
-                {
-                  color: showGradient ? '#fff' : C.text2,
-                  fontWeight: showGradient ? '700' : '500',
-                  letterSpacing: showGradient ? 0.3 : 0,
-                },
-              ]}
-            >
-              {t(m.label)}
-            </Text>
-          </PressableScale>
+            translate={t}
+            reduceMotion={reduceMotion}
+            textColor={C.text}
+            textColorInactive={C.text2}
+          />
         );
       })}
-    </View>
+    </Animated.View>
+  );
+}
+
+// ============================================================
+// ScopeItem — active 文字色を withTiming(180ms) でフェード
+// ============================================================
+function ScopeItem({
+  label,
+  active,
+  dimmed,
+  onPress,
+  translate,
+  reduceMotion,
+  textColor,
+  textColorInactive,
+}: {
+  label: string;
+  active: boolean;
+  dimmed: boolean;
+  onPress: () => void;
+  translate: (s: string) => string;
+  reduceMotion: boolean;
+  textColor: string;
+  textColorInactive: string;
+}) {
+  // dimmed の場合は active 表現を抑える (= inactive 寄り)
+  const showActive = active && !dimmed;
+  const progress = useSharedValue(showActive ? 1 : 0);
+
+  useEffect(() => {
+    const target = showActive ? 1 : 0;
+    if (reduceMotion) {
+      progress.value = target;
+    } else {
+      progress.value = withTiming(target, { duration: 180, easing: TIMING_NORM.easing });
+    }
+  }, [showActive, reduceMotion, progress]);
+
+  const activeTextStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
+  const inactiveTextStyle = useAnimatedStyle(() => ({ opacity: 1 - progress.value }));
+
+  return (
+    <PressableScale
+      onPress={onPress}
+      haptic="select"
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active, disabled: dimmed }}
+      style={{
+        flex: 1,
+        paddingVertical: SP['2'],
+        paddingHorizontal: SP['3'],
+        borderRadius: R.full,
+        alignItems: 'center',
+        justifyContent: 'center',
+        // dimmed の時は item 自体も控えめにする (タップ自体は通る)
+        opacity: dimmed ? 0.55 : 1,
+      }}
+    >
+      <View>
+        <Animated.Text
+          style={[
+            T.smallM,
+            {
+              color: textColor,
+              fontWeight: '700',
+              letterSpacing: 0.3,
+            },
+            activeTextStyle,
+          ]}
+        >
+          {translate(label)}
+        </Animated.Text>
+        <Animated.Text
+          style={[
+            T.smallM,
+            {
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              textAlign: 'center',
+              color: textColorInactive,
+              fontWeight: '500',
+              letterSpacing: 0,
+            },
+            inactiveTextStyle,
+          ]}
+        >
+          {translate(label)}
+        </Animated.Text>
+      </View>
+    </PressableScale>
   );
 }

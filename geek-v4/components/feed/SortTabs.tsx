@@ -1,8 +1,18 @@
-import { View, Text } from 'react-native';
+import { View, LayoutChangeEvent } from 'react-native';
+import { useState, useEffect } from 'react';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { PressableScale } from '../ui/PressableScale';
-import { C, R, SP, GRAD, SHADOW } from '../../design/tokens';
+import { R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
+import { TIMING_NORM } from '../../design/motion';
+import { useColors, useGradients } from '../../hooks/useColors';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { useT } from '../../lib/i18n';
 import type { SortMode } from '../../lib/api/posts';
 
@@ -18,6 +28,15 @@ const ORDER: ReadonlyArray<{ v: SortMode; label: string; icon?: string }> = [
   { v: 'top', label: '人気' },
 ];
 
+// container 内側 padding. indicator が container の rounded edge をはみ出さないように
+// segW を inner width で計算する (SegmentedControl と同じ手法)。
+const PAD = 3;
+// active 時の underline 高さ。SortTabs では bottom に 2px の accent line を引く
+// (gradient pill とは別に、より「タブらしい」表現を加える)。
+const UNDERLINE_H = 2;
+// Spring config — タブ系の indicator 用 (damping 22, stiffness 280) ※ 指示書準拠
+const SORT_TABS_SPRING = { damping: 22, stiffness: 280, mass: 0.7 } as const;
+
 export function SortTabs({
   value,
   onChange,
@@ -26,67 +45,193 @@ export function SortTabs({
   onChange: (v: SortMode) => void;
 }) {
   const t = useT();
+  const C = useColors();
+  const GRAD = useGradients();
+  const reduceMotion = useReducedMotion();
+
+  const [w, setW] = useState(0);
+  const innerW = Math.max(0, w - PAD * 2);
+  const segW = innerW / ORDER.length;
+  const idx = Math.max(0, ORDER.findIndex((o) => o.v === value));
+
+  // indicator position (translateX) — segment 切替で spring slide
+  const x = useSharedValue(0);
+
+  useEffect(() => {
+    if (segW <= 0) return;
+    const target = idx * segW;
+    if (reduceMotion) {
+      x.value = target;
+    } else {
+      x.value = withSpring(target, SORT_TABS_SPRING);
+    }
+  }, [idx, segW, x, reduceMotion]);
+
+  // pill (active セグメント背景の gradient) — translateX + 固定 width
+  const pillStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: x.value }],
+    width: segW,
+  }));
+
   return (
     <View
+      onLayout={(e: LayoutChangeEvent) => setW(e.nativeEvent.layout.width)}
       style={{
         flexDirection: 'row',
         // inactive は subtle (灰色背景) — bg3 で柔らかい segmented container 風
         backgroundColor: C.bg3,
         borderRadius: R.full,
-        padding: 3,
+        padding: PAD,
         borderWidth: 1,
         borderColor: C.border,
+        position: 'relative',
+        // safety net — indicator が万一はみ出ても rounded shape で clip する
+        overflow: 'hidden',
       }}
     >
-      {ORDER.map((m) => {
-        const active = value === m.v;
-        // active 時は GRAD.primary のグラデを overlay。inactive は背景透明で
-        // container の bg3 がそのまま見える。
-        return (
-          <PressableScale
-            key={m.v}
-            onPress={() => onChange(m.v)}
-            haptic="select"
-            style={{
-              flex: 1,
-              paddingVertical: SP['2'],
-              paddingHorizontal: SP['2'],
+      {/* スライドする active pill — 全タブ共通で 1 つだけ生成 */}
+      {segW > 0 && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            {
+              position: 'absolute',
+              top: PAD,
+              bottom: PAD,
+              left: PAD,
               borderRadius: R.full,
-              alignItems: 'center',
               overflow: 'hidden',
-              // active の場合だけ subtle glow を付けて「選ばれている」感を出す
-              ...(active ? SHADOW.glow : null),
+              ...SHADOW.glow,
+            },
+            pillStyle,
+          ]}
+        >
+          <LinearGradient
+            colors={GRAD.primary}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+          />
+          {/* 底部 2px accent underline — gradient pill 内に重ねて「タブらしい」表現を加える */}
+          <View
+            style={{
+              position: 'absolute',
+              left: '20%',
+              right: '20%',
+              bottom: 0,
+              height: UNDERLINE_H,
+              borderRadius: UNDERLINE_H,
+              backgroundColor: '#fff',
+              opacity: 0.7,
             }}
-          >
-            {active && (
-              <LinearGradient
-                colors={GRAD.primary}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  right: 0,
-                  top: 0,
-                  bottom: 0,
-                }}
-              />
-            )}
-            <Text
-              style={[
-                T.smallM,
-                {
-                  color: active ? '#fff' : C.text2,
-                  fontWeight: active ? '700' : '500',
-                  letterSpacing: active ? 0.3 : 0,
-                },
-              ]}
-            >
-              {m.icon ? `${m.icon} ` : ''}{t(m.label)}
-            </Text>
-          </PressableScale>
-        );
-      })}
+          />
+        </Animated.View>
+      )}
+
+      {ORDER.map((m) => (
+        <SortTabItem
+          key={m.v}
+          mode={m}
+          active={value === m.v}
+          onPress={() => onChange(m.v)}
+          translate={t}
+          reduceMotion={reduceMotion}
+          textColor={C.text}
+          textColorInactive={C.text2}
+        />
+      ))}
     </View>
+  );
+}
+
+// ============================================================
+// SortTabItem — 個別タブ。active 文字色を withTiming(180ms) でフェード
+// ============================================================
+function SortTabItem({
+  mode,
+  active,
+  onPress,
+  translate,
+  reduceMotion,
+  textColor,
+  textColorInactive,
+}: {
+  mode: { v: SortMode; label: string; icon?: string };
+  active: boolean;
+  onPress: () => void;
+  translate: (s: string) => string;
+  reduceMotion: boolean;
+  textColor: string;
+  textColorInactive: string;
+}) {
+  // 文字色の不透明度を補間: active なら 1 (=textColor 白)、inactive なら 0 (= text2 灰)
+  // 2 つのテキストを重ねて opacity で切り替えると色補間で worklet 上の interpolateColor が
+  // 不要になり実装シンプル + 軽い。
+  const progress = useSharedValue(active ? 1 : 0);
+
+  useEffect(() => {
+    const target = active ? 1 : 0;
+    if (reduceMotion) {
+      progress.value = target;
+    } else {
+      progress.value = withTiming(target, { duration: 180, easing: TIMING_NORM.easing });
+    }
+  }, [active, reduceMotion, progress]);
+
+  const activeTextStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
+  const inactiveTextStyle = useAnimatedStyle(() => ({ opacity: 1 - progress.value }));
+
+  return (
+    <PressableScale
+      onPress={onPress}
+      haptic="select"
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      style={{
+        flex: 1,
+        paddingVertical: SP['2'],
+        paddingHorizontal: SP['2'],
+        borderRadius: R.full,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      {/* 2 つのテキストを重ねる (active = 白 / inactive = グレー)。
+          opacity で fade することで色補間を worklet free にする。 */}
+      <View>
+        <Animated.Text
+          style={[
+            T.smallM,
+            {
+              color: textColor,
+              fontWeight: '700',
+              letterSpacing: 0.3,
+            },
+            activeTextStyle,
+          ]}
+        >
+          {mode.icon ? `${mode.icon} ` : ''}
+          {translate(mode.label)}
+        </Animated.Text>
+        <Animated.Text
+          style={[
+            T.smallM,
+            {
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              textAlign: 'center',
+              color: textColorInactive,
+              fontWeight: '500',
+              letterSpacing: 0,
+            },
+            inactiveTextStyle,
+          ]}
+        >
+          {mode.icon ? `${mode.icon} ` : ''}
+          {translate(mode.label)}
+        </Animated.Text>
+      </View>
+    </PressableScale>
   );
 }
