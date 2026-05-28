@@ -1,90 +1,131 @@
-import { View, Platform } from 'react-native';
+import { View, Platform, Text, StyleSheet } from 'react-native';
 import { memo } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BlurView } from 'expo-blur';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { TabIcon, type TabKey } from './TabIcon';
 import { HapticTab } from './HapticTab';
 import { useNotifications } from '../../hooks/useNotifications';
 import { NotificationBadge } from '../ui/NotificationBadge';
 import { useResolvedTheme } from '../../lib/theme/themeStore';
+import { useColors } from '../../hooks/useColors';
 
+// ============================================================
+// iOS-native bottom tab bar
+// ------------------------------------------------------------
+// 設計 (2026-05-28 refresh):
+//   - expo-blur の BlurView を backdrop に敷き、iOS の system material 風に。
+//     intensity=80, tint='systemUltraThinMaterial' (iOS 13+ native key)。
+//     fallback では `tint` を 'dark'/'light' に切替。
+//   - 高さは iOS 標準の 49pt + safe-area bottom inset。pill 形ではなく
+//     フラットな edge-to-edge bar (HIG 準拠)。上端 hairline border。
+//   - active tab: theme primary (C.accent), inactive: '#8E8E93' (iOS systemGray)。
+//   - icon は 24pt, label は 10pt (active は 11pt + semibold)。
+//   - press 時 haptic は HapticTab 側で発火 (light impact = select)。
+//   - web は CSS backdrop-filter: blur(30px) + rgba 重ね、native は BlurView。
+// ============================================================
 const ROUTE_TO_TAB: Record<string, TabKey> = {
   feed: 'home',
-  bbs: 'bbs',
+  search: 'search',
   community: 'community',
   mypage: 'mypage',
 };
 
-// 各 tab の固定サイズ — 全 tab 等幅で container 全体の幅が変動しないようにする
-const TAB_WIDTH = 48;
-const TAB_HEIGHT = 40;
-const TAB_BR = 20;
+const TAB_TO_LABEL: Record<TabKey, string> = {
+  home: 'ホーム',
+  search: '検索',
+  game: 'ゲーム',
+  community: 'コミュ',
+  mypage: 'マイ',
+};
 
-// ============================================================
-// Slack 風 浮遊型タブバー (dark)
-// - 画面下に余白を持って "浮く" pill
-// - 全 tab は icon-only / 等幅。active は背景 fill + icon 色変化で示す
-// - label テキストは表示しない (active で幅が伸びて container サイズが揺れる事故対策)
-// ============================================================
+// iOS HIG: tab bar 内コンテンツ高さは 49pt 固定。safe-area inset は別途加算。
+const BAR_HEIGHT = 49;
+// iOS systemGray (inactive tab tint)
+const INACTIVE_TINT = '#8E8E93';
+// icon 24pt は iOS HIG default
+const ICON_SIZE = 24;
+
 export function TabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  // pill の下マージン — safeArea 下端 + 余白
-  const bottomMargin = Math.max(insets.bottom, 8) + 8;
   const { unreadCount } = useNotifications();
   const theme = useResolvedTheme();
+  const C = useColors();
   const isDark = theme === 'dark';
-  // テーマ別 pill 配色 — dark は黒 base + 紫 active, light は白 base + 紫 active
-  const pillBg = isDark ? '#141417' : '#ffffff';
-  const pillBgWeb = isDark ? 'rgba(20,20,23,0.94)' : 'rgba(255,255,255,0.92)';
-  const pillBorder = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)';
-  const pillShadowColor = isDark ? '#000' : '#0a0a0a';
-  const pillShadowOpacity = isDark ? 0.5 : 0.12;
+
+  // BlurView の tint: iOS は systemUltraThinMaterial を最優先
+  // (RN expo-blur の TS def によっては string キャストが必要)
+  const blurTint = (
+    isDark ? 'systemUltraThinMaterialDark' : 'systemUltraThinMaterialLight'
+  ) as 'systemUltraThinMaterialDark' | 'systemUltraThinMaterialLight';
+
+  // web 用: CSS backdrop-filter で iOS 風 blur を再現
+  const webBgColor = isDark ? 'rgba(0,0,0,0.70)' : 'rgba(255,255,255,0.70)';
+  // 上端 hairline (iOS 標準 1px の半透明 separator)
+  const hairlineColor = isDark
+    ? 'rgba(255,255,255,0.10)'
+    : 'rgba(0,0,0,0.10)';
+  // BlurView の下に敷くフォールバック背景 (Android / blur 未対応端末で透けないように)
+  const fallbackBg = isDark ? 'rgba(20,20,23,0.92)' : 'rgba(250,250,252,0.88)';
 
   return (
     <View
-      pointerEvents="box-none"
       style={{
         position: 'absolute',
         left: 0,
         right: 0,
         bottom: 0,
-        alignItems: 'center',
-        paddingBottom: bottomMargin,
       }}
     >
-      {/* pill 本体 — 浮遊型の dark/light capsule
-           全 tab が等幅 (TAB_WIDTH) で active 切替時も container 全幅が変わらない.
-           pill の BR は container BR より小さく取り, paddingH で角差を吸収. */}
+      {/* Blur backdrop — iOS は expo-blur, web は CSS backdrop-filter */}
+      {Platform.OS === 'web' ? (
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              backgroundColor: webBgColor,
+            },
+            // backdrop-filter は RN web 側で型に乗ってないため as object でキャスト
+            {
+              backdropFilter: 'blur(30px) saturate(180%)',
+              WebkitBackdropFilter: 'blur(30px) saturate(180%)',
+            } as object,
+          ]}
+        />
+      ) : (
+        <>
+          {/* fallback bg — blur が効かない / 描画される前に透けないようにする */}
+          <View
+            style={[StyleSheet.absoluteFill, { backgroundColor: fallbackBg }]}
+          />
+          <BlurView
+            intensity={80}
+            tint={blurTint}
+            style={StyleSheet.absoluteFill}
+          />
+        </>
+      )}
+
+      {/* 上端 hairline */}
       <View
-        style={[
-          {
-            flexDirection: 'row',
-            backgroundColor: pillBg,
-            borderRadius: 28,
-            paddingHorizontal: 8,
-            paddingVertical: 6,
-            gap: 2,
-            borderWidth: 1,
-            borderColor: pillBorder,
-            overflow: 'hidden',
-            // shadow — light テーマでは控えめに
-            shadowColor: pillShadowColor,
-            shadowOpacity: pillShadowOpacity,
-            shadowOffset: { width: 0, height: 8 },
-            shadowRadius: 24,
-            elevation: 12,
-          },
-          // web 用に backdrop-blur をオーバーレイ
-          // パフォーマンス監査: 20px → 14px に削減 (Safari の scroll 時 re-composite cost -25%)
-          Platform.OS === 'web'
-            ? ({
-                backgroundColor: pillBgWeb,
-                backdropFilter: 'blur(14px)',
-                WebkitBackdropFilter: 'blur(14px)',
-                willChange: 'transform',
-              } as object)
-            : null,
-        ]}
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: 0,
+          height: StyleSheet.hairlineWidth,
+          backgroundColor: hairlineColor,
+        }}
+      />
+
+      <View
+        style={{
+          flexDirection: 'row',
+          height: BAR_HEIGHT,
+          paddingBottom: 0,
+          paddingTop: 4,
+          paddingHorizontal: 4,
+        }}
       >
         {state.routes.map((route, index) => {
           const focused = state.index === index;
@@ -104,51 +145,74 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
 
           return (
             <HapticTab key={route.key} focused={focused} onPress={onPress}>
-              <TabPill
+              <TabItem
                 tab={tab}
                 focused={focused}
+                accent={C.accent}
                 badgeCount={tab === 'mypage' ? unreadCount : 0}
               />
             </HapticTab>
           );
         })}
       </View>
+
+      {/* safe-area bottom inset を別 view で確保 (背景の blur は全領域に伸ばす) */}
+      <View style={{ height: insets.bottom }} />
     </View>
   );
 }
 
-// 個別の「ピル」型タブ — memo 化して unreadCount 変更時に
-// mypage 以外の pill が再 render しないようにする
-// 全 tab 同一サイズ (TAB_WIDTH x TAB_HEIGHT). active state は背景色のみで表現.
-const TabPill = memo(function TabPill({
+// ============================================================
+// TabItem — 個別タブ (icon + label)
+// ------------------------------------------------------------
+// iOS-native 配色:
+//   - active: accent (theme primary)
+//   - inactive: '#8E8E93' (iOS systemGray)
+//   - label: 10pt regular, active は 11pt semibold で「重み」を出す
+//   - icon は 24pt
+// memo 化して unreadCount 変化時に対象 tab 以外を re-render しない
+// ============================================================
+const TabItem = memo(function TabItem({
   tab,
   focused,
+  accent,
   badgeCount = 0,
 }: {
   tab: TabKey;
   focused: boolean;
+  accent: string;
   badgeCount?: number;
 }) {
+  const label = TAB_TO_LABEL[tab];
+  const color = focused ? accent : INACTIVE_TINT;
   return (
     <View
       style={{
-        width: TAB_WIDTH,
-        height: TAB_HEIGHT,
+        flex: 1,
         alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: TAB_BR,
-        backgroundColor: focused ? 'rgba(124,106,247,0.18)' : 'transparent',
-        // active 時は subtle border + glow
-        borderWidth: focused ? 1 : 0,
-        borderColor: focused ? 'rgba(124,106,247,0.45)' : 'transparent',
+        justifyContent: 'flex-start',
+        paddingTop: 2,
       }}
     >
-      <View style={{ overflow: 'visible' }}>
-        <TabIcon tab={tab} focused={focused} size={22} />
+      <View style={{ width: ICON_SIZE, height: ICON_SIZE, overflow: 'visible' }}>
+        <TabIcon tab={tab} focused={focused} size={ICON_SIZE} />
         {badgeCount > 0 && (
           <NotificationBadge count={badgeCount} top={-4} right={-6} />
         )}
       </View>
+      <Text
+        numberOfLines={1}
+        style={{
+          marginTop: 2,
+          fontSize: focused ? 11 : 10,
+          lineHeight: 13,
+          fontWeight: focused ? '600' : '500',
+          color,
+          letterSpacing: 0.1,
+        }}
+      >
+        {label}
+      </Text>
     </View>
   );
 });

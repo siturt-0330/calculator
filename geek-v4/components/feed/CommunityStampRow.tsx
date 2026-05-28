@@ -9,12 +9,19 @@
 //   - 未押下のスタンプはグレーで、タップすると ON
 //   - スタンプ一覧が空なら「+ コミュスタンプを作る」リンクのみ表示
 //   - スタンプ管理画面へのリンクが常時末尾
+//
+// iOS-native ポリッシュ:
+//   - useColors() でテーマトークン経由に切り替え (旧 import { C } from tokens は dark 固定だった)
+//   - chip の角は full pill のまま、border を divider に揃えて hairline 化
+//   - mine の active chip は accent 単色だと派手なので accentBg + accent text + accent border に
+//   - letterSpacing -0.08 で SF Pro Text の自然な tracking
 // ============================================================
 import { memo } from 'react';
 import { View, Text } from 'react-native';
 import { useRouter } from 'expo-router';
-import { C, R, SP } from '../../design/tokens';
+import { R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
+import { useColors } from '../../hooks/useColors';
 import { PressableScale } from '../ui/PressableScale';
 import { Icon } from '../../constants/icons';
 import type { CommunityStamp, CommunityStampAgg } from '../../hooks/useCommunityStamps';
@@ -50,6 +57,7 @@ function CommunityStampRowInner({
   pendingStampIds,
 }: Props) {
   const router = useRouter();
+  const C = useColors();
 
   // 表示順:
   //   1. 既に反応がついているスタンプ (count desc)
@@ -59,7 +67,7 @@ function CommunityStampRowInner({
   if (stamps.length === 0) {
     // スタンプがまだ無い時はコンパクトに「作ろう」CTA だけ
     return (
-      <View style={{ paddingHorizontal: SP['4'], paddingTop: 4, paddingBottom: SP['2'] }}>
+      <View style={{ paddingHorizontal: 18, paddingTop: 4, paddingBottom: SP['2'] }}>
         <PressableScale
           onPress={() => router.push(`/community/${communityId}/stamps` as never)}
           haptic="tap"
@@ -70,17 +78,22 @@ function CommunityStampRowInner({
             alignItems: 'center',
             gap: 5,
             alignSelf: 'flex-start',
-            paddingHorizontal: SP['3'],
+            paddingHorizontal: 10,
             paddingVertical: 6,
             backgroundColor: C.bg3,
             borderRadius: R.full,
             borderWidth: 1,
-            borderColor: C.border,
+            borderColor: C.divider,
             borderStyle: 'dashed',
           }}
         >
           <Icon.sparkles size={13} color={C.text3} strokeWidth={2.2} />
-          <Text style={[T.caption, { color: C.text3, fontWeight: '600', fontSize: 12 }]}>
+          <Text
+            style={[
+              T.caption,
+              { color: C.text3, fontWeight: '600', fontSize: 12, letterSpacing: -0.08 },
+            ]}
+          >
             コミュスタンプを作る
           </Text>
         </PressableScale>
@@ -91,7 +104,7 @@ function CommunityStampRowInner({
   return (
     <View
       style={{
-        paddingHorizontal: SP['4'],
+        paddingHorizontal: 18,
         paddingTop: 4,
         paddingBottom: SP['2'],
         gap: 6,
@@ -101,7 +114,10 @@ function CommunityStampRowInner({
         {/* 反応済みを最初に
             UX 修正: chip の touch target が小さすぎる (旧版 h=23px) と
             ユーザーが「押しても反応しない」と感じる。padding を vertical:6 horizontal:10
-            に拡大 + hitSlop:10 で実効タップ領域を ~44px に押し上げる。 */}
+            に拡大 + hitSlop:10 で実効タップ領域を ~44px に押し上げる。
+
+            iOS-native: mine の active 状態は accent 単色ではなく、accentBg +
+            accent text + accent border で「上品な強調」に。 */}
         {reactedFirst.map((r) => {
           const pending = pendingStampIds?.has(r.stamp.id);
           return (
@@ -116,19 +132,24 @@ function CommunityStampRowInner({
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 5,
-                paddingHorizontal: SP['3'],
+                paddingHorizontal: 10,
                 paddingVertical: 6,
-                backgroundColor: r.mine ? C.accent : C.bg3,
+                backgroundColor: r.mine ? C.accentBg : C.bg3,
                 borderRadius: R.full,
                 borderWidth: 1,
-                borderColor: r.mine ? C.accent : C.border,
+                borderColor: r.mine ? C.accent : C.divider,
                 opacity: pending ? 0.6 : 1,
               }}
             >
               <Text
                 style={[
                   T.caption,
-                  { color: r.mine ? '#fff' : C.text, fontWeight: '700', fontSize: 12 },
+                  {
+                    color: r.mine ? C.accent : C.text,
+                    fontWeight: '700',
+                    fontSize: 12,
+                    letterSpacing: -0.08,
+                  },
                 ]}
               >
                 {r.stamp.label}
@@ -137,9 +158,10 @@ function CommunityStampRowInner({
                 style={[
                   T.caption,
                   {
-                    color: r.mine ? '#fff' : C.text3,
+                    color: r.mine ? C.accent : C.text3,
                     fontWeight: '700',
                     fontSize: 11,
+                    letterSpacing: -0.06,
                   },
                 ]}
               >
@@ -165,7 +187,12 @@ function CommunityStampRowInner({
           }}
         >
           <Icon.plus size={13} color={C.text3} strokeWidth={2.4} />
-          <Text style={[T.caption, { color: C.text3, fontWeight: '600', fontSize: 11 }]}>
+          <Text
+            style={[
+              T.caption,
+              { color: C.text3, fontWeight: '600', fontSize: 11, letterSpacing: -0.06 },
+            ]}
+          >
             管理
           </Text>
         </PressableScale>

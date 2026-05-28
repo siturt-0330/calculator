@@ -1,8 +1,7 @@
-import { Pressable, PressableProps } from 'react-native';
+import { Pressable, PressableProps, Platform } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { hap } from '../../design/haptics';
-import { SPRING_SNAPPY, FAB_SCALE } from '../../design/motion';
-import { TABBAR } from '../../design/tabbar';
+import { SPRING_SNAPPY } from '../../design/motion';
 
 const APressable = Animated.createAnimatedComponent(Pressable);
 
@@ -14,20 +13,19 @@ type Props = Omit<PressableProps, 'onPress'> & {
   children: React.ReactNode;
 };
 
+// iOS-native bottom tab は press 時に大きく scale しない (HIG 準拠)。
+// 「押した感」は haptic + icon 色 + label weight 変化で表現する。
+// 0.96 はごく僅かに沈む程度で、物理ボタンのような体感を残す。
+const TAB_PRESS_SCALE = 0.96;
+
 // ============================================================
-// HapticTab — bottom tab の press feedback + 「ぐっと響く」haptic
+// HapticTab — bottom tab の press feedback + haptic
 // ------------------------------------------------------------
-// UI fix (2026-05-26): 旧版は active タブの上に「accent 色の小さな dash」を
-// absolute 配置していたが、container pill の上端付近にかかって「枠からはみ出てる」
-// 印象を与えていた。active TabPill (rgba accent bg + accent border + label)
-// 自体で十分に「選択中」が伝わるため、redundant な dash は削除。
-//
-// Polish (2026-05-28): haptic を「ぐっと響く」感じに refine.
-//   - 別 tab に切替: hap.select() — selection (light tap) で軽快に
-//   - 同 tab 再タップ: hap.confirm() — medium impact で重みを出し、
-//     onPressAgain を呼んで TabBar 側で上スクロール + wiggle トリガに使う
-//   - press scale: FAB_SCALE (0.92) で旧 PRESS_SCALE (0.96) より深め
-//     → tab という頻用 UI 要素にしては「押した実感」を強める
+// 設計 (2026-05-28 iOS-native refresh):
+//   - 別 tab に切替: hap.tap() — light impact (iOS HIG の selection-ish)
+//   - 同 tab 再タップ: hap.select() — selection async (subtle click)
+//   - press scale は 0.96 (iOS tab bar は scale でなく色/重みで状態を示すのが流儀)
+//   - web では cursor: pointer + tap-highlight 抑止
 // ============================================================
 export function HapticTab({ focused, onPress, onPressAgain, children, ...rest }: Props) {
   const scale = useSharedValue(1);
@@ -36,18 +34,28 @@ export function HapticTab({ focused, onPress, onPressAgain, children, ...rest }:
   // delayPressIn は AnimatedPressable の型に乗ってないのでキャストして渡す
   const extra = { delayPressIn: 0 } as Record<string, unknown>;
 
+  const webStyle =
+    Platform.OS === 'web'
+      ? ({
+          cursor: 'pointer',
+          WebkitTapHighlightColor: 'transparent',
+          userSelect: 'none',
+        } as Record<string, unknown>)
+      : null;
+
   return (
     <APressable
       {...rest}
       {...extra}
       onPressIn={() => {
-        scale.value = withSpring(FAB_SCALE, SPRING_SNAPPY);
+        scale.value = withSpring(TAB_PRESS_SCALE, SPRING_SNAPPY);
         // press-in で即 haptic → 体感反応速度向上
-        // 同 tab 再タップは medium (top scroll feedback)、別 tab は selection (light tap)
+        // - 別 tab: light impact (新しい場所に行く合図)
+        // - 同 tab 再タップ: selection (subtle click)
         if (focused) {
-          hap.confirm();
-        } else {
           hap.select();
+        } else {
+          hap.tap();
         }
       }}
       onPressOut={() => {
@@ -62,9 +70,12 @@ export function HapticTab({ focused, onPress, onPressAgain, children, ...rest }:
       }}
       accessibilityRole="tab"
       accessibilityState={{ selected: focused }}
+      // iOS HIG: tab の tappable area は最小 44pt。flex: 1 で水平に伸ばし、
+      // 高さは親 (TabBar) が決める bar 高 + label を含めて十分確保される。
       style={[
-        { flex: 1, alignItems: 'center', justifyContent: 'center', height: TABBAR.height },
+        { flex: 1, alignItems: 'center', justifyContent: 'center' },
         aScale,
+        webStyle as object,
       ]}
     >
       {children}

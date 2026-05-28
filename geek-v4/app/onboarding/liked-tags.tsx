@@ -259,7 +259,7 @@ export default function LikedTagsScreen() {
         )}
         <Button
           label={likedTags.length > 0 ? `${likedTags.length}個選択して次へ` : 'スキップして次へ'}
-          onPress={() => router.push('/onboarding/blocked-tags')}
+          onPress={() => router.push('/onboarding/notifications')}
         />
       </View>
     </View>

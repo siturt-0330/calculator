@@ -63,8 +63,14 @@ export function ProgressiveImage({
   style,
   lazy = false,
   // ロード時のサムネサイズ (Supabase render endpoint 経由)。
-  // フィード用なら 720 が綺麗 + 軽い、フルスクリーンなら 1280 等。
-  thumbWidth = 720,
+  // フィード用なら 480 が帯域と画質のスイート、フルスクリーンなら 1280 等。
+  // 監査 (2026-05): 旧 default 720 はフィードの 1 列 ~360-500px には過剰で、
+  // 平均 1 枚あたり ~120KB 余分。480 に落として WebP 化と組み合わせ ~50% 削減。
+  thumbWidth = 480,
+  // expo-image の優先度ヒント。 above-the-fold (最初のカード) は 'high' で
+  // ネットワーク slot を先取りすると初回 paint が体感速い。
+  // (best-effort なので保証は無いが、queue 数が増えるほど効く)
+  priority = 'normal',
 }: {
   uri: string;
   blurhash?: string;
@@ -77,6 +83,8 @@ export function ProgressiveImage({
   // モバイルでは無視 (FlatList が virtualization で代替)
   lazy?: boolean;
   thumbWidth?: number;
+  /** expo-image 内部 fetch queue の priority ヒント */
+  priority?: 'low' | 'normal' | 'high';
 }) {
   const C = useColors();
   const reduceMotion = useReducedMotion();
@@ -216,6 +224,8 @@ export function ProgressiveImage({
             // expo-image 内蔵 transition は使わない (二重 fade 回避)
             transition={0}
             cachePolicy="memory-disk"
+            // 並行 download の優先順位ヒント。above-the-fold は 'high'。
+            priority={priority}
             recyclingKey={resolvedUri}
             onLoadEnd={handleLoadEnd}
             onError={handleError}

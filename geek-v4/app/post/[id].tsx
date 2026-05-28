@@ -5,6 +5,15 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
+import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { getLastViewed, setLastViewed } from '../../lib/utils/lastViewed';
 import { fetchPostById, fetchCommunitiesForPosts } from '../../lib/api/posts';
 import { fetchSimilarPosts } from '../../lib/api/similarPosts';
@@ -61,6 +70,43 @@ export default function PostDetailScreen() {
   const BackIcon = Icon.arrowL;
   // テーマ購読 — light/dark 切替で post 詳細が自動再 render
   const C = useColors();
+
+  // ============================================================
+  // Entering animation — Reddit iOS 風 "lift up & expand" 演出
+  // ------------------------------------------------------------
+  // タップしたカードが画面下から「持ち上がってきて広がる」錯視を演出。
+  //   - modal slide-up (Stack.Screen options: slide_from_bottom 380ms) で
+  //     画面全体が下から上にスライドしてくる
+  //   - 同時に screen root をこの spring で 0.94 → 1.0 + opacity 0 → 1
+  //     で展開させると、スライドと scale-up が重なり「カードが lift up」
+  //   - ReducedMotion ON: 150ms timing で fade のみ (scale 無し / spring 無し)
+  // shared value で worklet 駆動 — React state を使わないので大量 mount でも軽い。
+  //
+  // mount 直後に発火させると Stack の modal slide と同時に進んでしまい、
+  // 場合によっては開始 frame で scale 0.94 が見える前に詳細画面まで遷移が
+  // 完了してしまう (= 効果が消える)。よって `useEffect([])` の即時起動で
+  // 良いが、ReducedMotion 切替時にも再評価が必要なので依存に reduceMotion。
+  // ============================================================
+  const reduceMotion = useReducedMotion();
+  const enterProgress = useSharedValue(0);
+  useEffect(() => {
+    if (reduceMotion) {
+      enterProgress.value = withTiming(1, { duration: 150, easing: Easing.out(Easing.cubic) });
+    } else {
+      enterProgress.value = withSpring(1, { damping: 22, stiffness: 240, mass: 0.7 });
+    }
+  }, [reduceMotion, enterProgress]);
+  const enterStyle = useAnimatedStyle(() => {
+    if (reduceMotion) {
+      // ReducedMotion: 拡大演出は外し fade のみ (scale 1 固定)
+      return { opacity: enterProgress.value };
+    }
+    return {
+      opacity: enterProgress.value,
+      // 0.94 → 1.0 (= 0.94 + progress * 0.06)
+      transform: [{ scale: 0.94 + enterProgress.value * 0.06 }],
+    };
+  });
 
   // ============================================================
   // 既読/未読ハイライト (issue #18)
@@ -151,6 +197,11 @@ export default function PostDetailScreen() {
 
   const { show } = useToastStore();
 
+  // Smart skeleton timing — Spinner only after 200ms of continuous loading.
+  // <200ms loads (cache hits via TanStack staleTime) skip flash entirely.
+  const showPostSpinner = useDelayedLoading(postLoading, 200);
+  const showRepliesSpinner = useDelayedLoading(repliesLoading, 200);
+
   const { mutateAsync: submitReply, isPending } = useMutation({
     // 返信モード時は parent_comment_id / reply_to_comment_id をセット
     mutationFn: (args: { content: string; parentId?: string; replyToId?: string }) =>
@@ -240,50 +291,46 @@ export default function PostDetailScreen() {
 
   // Realtime: 同じ投稿への新規コメント + 投稿カウンター更新 + リアクション
   //
-  // ★ 1 channel / 1 table パターン (旧版は 1 channel に 3 table を chain して
-  //   いたが、publication 未登録 table が混ざると CHANNEL_ERROR で全死する
-  //   既知不具合があるため分離する。詳細は hooks/useFeedRealtime.ts のコメント)。
+  // ★ Audit E#5 (2026-05-28):
+  //   旧版は 3 channel (comments / posts / post_reactions) に分離していたが、
+  //   3 テーブルとも publication 登録済 (0008) なので 1 channel + 3 `.on()` に統合。
+  //   CLAUDE.md § 5.3 「publication 未登録 table を chain しない」の cascade リスクが
+  //   無いケース。post 詳細画面の同時 channel 数を 3 → 1 に削減。
   //
   // 注: 旧 reactions invalidate は ['reactions'] (legacy cache key) を叩いて
   //     いたが、投稿詳細では useFeedPage 経由で [FEED_PAGE_KEY] cache を使う。
   //     正しい target は invalidateFeedPage(qc) (= [FEED_PAGE_KEY] 全 cache)。
   useEffect(() => {
     if (!id) return;
-    const detachers: Array<() => void> = [];
-    detachers.push(
-      attachChannel(`post-detail-comments:${id}`, (ch) =>
-        ch.on(
+    const detach = attachChannel(`post-detail-bundle:${id}`, (ch) =>
+      ch
+        .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'comments', filter: `post_id=eq.${id}` },
           () => qc.invalidateQueries({ queryKey: ['post-comments', id] }),
-        ),
-      ),
-    );
-    detachers.push(
-      attachChannel(`post-detail-post:${id}`, (ch) =>
-        ch.on(
+        )
+        .on(
           'postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'posts', filter: `id=eq.${id}` },
           () => qc.invalidateQueries({ queryKey: ['post', id] }),
-        ),
-      ),
-    );
-    detachers.push(
-      attachChannel(`post-detail-reactions:${id}`, (ch) =>
-        ch.on(
+        )
+        .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'post_reactions', filter: `post_id=eq.${id}` },
           () => invalidateFeedPage(qc),
         ),
-      ),
     );
     return () => {
-      for (const d of detachers) d();
+      try { detach(); } catch { /* ignore */ }
     };
   }, [id, qc]);
 
+  // 再エントリ防止: 投稿後 invalidate が走るまでに 2 連打されると同 tag が
+  // 2 INSERT されて duplicate error トーストが先に user に見える事例があった。
+  const [addingTag, setAddingTag] = useState(false);
   const handleAddTag = async (tag: string) => {
-    if (!id) return;
+    if (!id || addingTag) return;
+    setAddingTag(true);
     try {
       await addPostTag(id, tag);
       qc.invalidateQueries({ queryKey: ['post-added-tags', id] });
@@ -292,6 +339,8 @@ export default function PostDetailScreen() {
       const msg = (e instanceof Error ? e.message : '') || '';
       if (msg.includes('duplicate')) show('そのタグは既に追加されています', 'warn');
       else show('追加に失敗しました', 'error');
+    } finally {
+      setAddingTag(false);
     }
   };
 
@@ -323,25 +372,27 @@ export default function PostDetailScreen() {
   };
 
   // route param validation 失敗 → cache 汚染を防ぐため早期 return
+  // 早期 return も entering animation の対象にする (modal slide-up と組み合わさり
+  // 「エラー画面が下から ぬっ と出る」一貫した体感)。
   if (!id) {
     return (
-      <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: SP['6'] }}>
+      <Animated.View style={[{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: SP['6'] }, enterStyle]}>
         <Text style={[T.body, { color: C.text2 }]}>無効な URL です</Text>
-      </View>
+      </Animated.View>
     );
   }
 
   if (postLoading) {
     return (
-      <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' }}>
-        <Spinner />
-      </View>
+      <Animated.View style={[{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' }, enterStyle]}>
+        {showPostSpinner ? <Spinner /> : null}
+      </Animated.View>
     );
   }
 
   if (postError || !post) {
     return (
-      <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: SP['6'], gap: SP['3'] }}>
+      <Animated.View style={[{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: SP['6'], gap: SP['3'] }, enterStyle]}>
         {/* 装飾絵文字 (📭) を撤去 — テキストだけで十分意味は通る */}
         <Text style={[T.h3, { color: C.text, textAlign: 'center' }]}>投稿を取得できませんでした</Text>
         <Text style={[T.small, { color: C.text3, textAlign: 'center' }]}>
@@ -360,7 +411,7 @@ export default function PostDetailScreen() {
         >
           <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>戻る</Text>
         </PressableScale>
-      </View>
+      </Animated.View>
     );
   }
 
@@ -397,6 +448,11 @@ export default function PostDetailScreen() {
               <Text style={[T.caption, { color: C.text3, flex: 1 }]}>{formatRelative(post.created_at)}</Text>
               <ObsidianSaveButton note={postToObsidianNote(post)} size={18} />
             </View>
+            {post.title && (
+              <Text style={[T.h2, { color: C.text, fontWeight: '800', marginBottom: SP['2'] }]} numberOfLines={4}>
+                {post.title}
+              </Text>
+            )}
             <Text style={[T.body, { color: C.text, lineHeight: 24 }]}>{post.content}</Text>
             {/* コミュニティピル (cross-post / community_*) — タップで該当コミュへ */}
             {postCommunities.length > 0 && (
@@ -587,6 +643,9 @@ export default function PostDetailScreen() {
                           width={64}
                           height={64}
                           radius={R.sm}
+                          // 64px 表示 × 2x DPR = 128。 retina 余裕で 160。
+                          // 旧版 (default 720) は 11 倍過剰で帯域を浪費していた。
+                          thumbWidth={160}
                         />
                       </View>
                     )}
@@ -628,6 +687,7 @@ export default function PostDetailScreen() {
   );
 
   return (
+    <Animated.View style={[{ flex: 1, backgroundColor: C.bg }, enterStyle]}>
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: C.bg }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -652,9 +712,11 @@ export default function PostDetailScreen() {
       >
         <ListHeader />
         {repliesLoading ? (
-          <View style={{ padding: SP['6'], alignItems: 'center' }}>
-            <ActivityIndicator color={C.accent} />
-          </View>
+          showRepliesSpinner ? (
+            <View style={{ padding: SP['6'], alignItems: 'center' }}>
+              <ActivityIndicator color={C.accent} />
+            </View>
+          ) : null
         ) : commentTree.length === 0 ? (
           <View style={{ padding: SP['6'], alignItems: 'center' }}>
             <Text style={[T.small, { color: C.text3 }]}>コメントはまだありません</Text>
@@ -881,5 +943,6 @@ export default function PostDetailScreen() {
         picked={myMemes}
       />
     </KeyboardAvoidingView>
+    </Animated.View>
   );
 }

@@ -1,34 +1,22 @@
-import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { attachChannel } from '../lib/realtime';
-import { useAuthStore } from '../stores/authStore';
 import {
   fetchSavedSearches, createSavedSearch, updateSavedSearch, deleteSavedSearch, type SavedSearch,
 } from '../lib/api/savedSearches';
 
 const KEY = ['saved-searches'];
 
+// ============================================================
+// useSavedSearches
+// ============================================================
+// 旧構成: 個別 channel `saved-searches-watch:userId` を attach。
+// 新構成 (Audit E#5): hooks/useUserChannel.ts の 1 channel に集約 (filter=user_id)。
+// ============================================================
 export function useSavedSearches() {
-  const qc = useQueryClient();
-  const userId = useAuthStore((s) => s.user?.id);
   const q = useQuery({
     queryKey: KEY,
     queryFn: fetchSavedSearches,
     staleTime: 60_000,
   });
-  useEffect(() => {
-    // 自分の saved_searches だけ realtime。他人の保存検索を受け取る必要は一切なし。
-    if (!userId) return;
-    return attachChannel(`saved-searches-watch:${userId}`, (ch) =>
-      ch.on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'saved_searches',
-        filter: `user_id=eq.${userId}`,
-      },
-        () => qc.invalidateQueries({ queryKey: KEY })),
-    );
-  }, [qc, userId]);
   return { searches: (q.data ?? []) as SavedSearch[], isLoading: q.isLoading };
 }
 

@@ -15,7 +15,7 @@ export default function TabsLayout() {
       } as object}
     >
       <Tabs.Screen name="feed" />
-      <Tabs.Screen name="bbs" />
+      <Tabs.Screen name="search" />
       <Tabs.Screen name="community" />
       <Tabs.Screen name="mypage" />
     </Tabs>

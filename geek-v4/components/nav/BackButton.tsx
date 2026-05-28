@@ -1,18 +1,32 @@
 import { useRouter, useSegments } from 'expo-router';
 import { useCallback, useRef } from 'react';
+import { View } from 'react-native';
 import { Icon } from '../../constants/icons';
 import { PressableScale } from '../ui/PressableScale';
-import { C, SP } from '../../design/tokens';
+import { SP } from '../../design/tokens';
+import { useColors } from '../../hooks/useColors';
 
-// 戻るボタンの取りこぼし対策:
-// 1. canGoBack() が false でも (= ディープリンクで直接開いた等) 文脈に合った tab に戻れる
-//    fallback (community 詳細 → コミュニティ一覧、bbs 詳細 → 掲示板 etc.)
-// 2. 短時間の連打を吸収して、navigation が処理中に追加 push されるのを防ぐ
-// 3. hitSlop を広げてタップしやすく
-// 4. アイコン自体に opacity フェードは付けず即時応答
+// ============================================================
+// iOS-native BackButton
+// ------------------------------------------------------------
+// 設計 (2026-05-28 polish):
+//   - chevron-left (< 形) — iOS HIG の navigation back glyph
+//   - tappable area は 44pt 固定 (Apple HIG 最小タッチ領域)
+//   - hitSlop で更に周辺 12pt まで誤タップを救う
+//   - 即時応答 (delayPressIn=0, PressableScale が処理)
+//   - dark/light は useColors() で自動切替 (C.text)
+//
+// 戻るボタンの取りこぼし対策 (既存ロジック維持):
+// 1. canGoBack() が false でも tab home へ fallback
+// 2. 80ms in-flight ロックで連打吸収
+// 3. hitSlop で周辺タップを救う
+// ============================================================
+const TAPPABLE_SIZE = 44;
+
 export function BackButton({ onPress }: { onPress?: () => void }) {
   const router = useRouter();
   const segments = useSegments();
+  const C = useColors();
   const ChevronL = Icon.chevronL;
   const inFlight = useRef(false);
 
@@ -51,10 +65,27 @@ export function BackButton({ onPress }: { onPress?: () => void }) {
       onPress={handlePress}
       haptic="tap"
       hitSlop={12}
-      style={{ padding: SP['2'], marginLeft: -SP['2'] }}
+      // 44pt 固定の tappable container + leading 余白マイナスで視覚的に詰める
+      style={{
+        width: TAPPABLE_SIZE,
+        height: TAPPABLE_SIZE,
+        alignItems: 'flex-start',
+        justifyContent: 'center',
+        marginLeft: -SP['2'],
+      }}
       accessibilityLabel="戻る"
+      accessibilityRole="button"
     >
-      <ChevronL size={26} color={C.text} strokeWidth={2.2} />
+      <View
+        style={{
+          width: TAPPABLE_SIZE,
+          height: TAPPABLE_SIZE,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <ChevronL size={28} color={C.text} strokeWidth={2.4} />
+      </View>
     </PressableScale>
   );
 }

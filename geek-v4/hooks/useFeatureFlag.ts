@@ -1,29 +1,25 @@
-import { useEffect } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { attachChannel } from '../lib/realtime';
+import { useQuery } from '@tanstack/react-query';
 import { fetchFeatureFlags, userInRollout, type FeatureFlag } from '../lib/api/featureFlags';
 import { useAuthStore } from '../stores/authStore';
 
 const KEY = ['feature-flags'];
 
-export function useFeatureFlags() {
-  const qc = useQueryClient();
+// ============================================================
+// useFeatureFlags — feature flag 取得 + 判定
+// ============================================================
+// 旧構成: このファイルが個別 channel `feature-flags-watch` を attach。
+// 新構成 (Audit E#5):
+//   hooks/useUserChannel.ts の 1 user-wide channel に
+//   `.on(feature_flags, ...)` で集約済み。
+//   このファイルは React Query のみ管理し、cache invalidate は user channel が走らせる。
+// ============================================================
 
+export function useFeatureFlags() {
   const q = useQuery({
     queryKey: KEY,
     queryFn: fetchFeatureFlags,
     staleTime: 5 * 60 * 1000,  // 5分
   });
-
-  useEffect(() => {
-    return attachChannel('feature-flags-watch', (ch) =>
-      ch.on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'feature_flags' },
-        () => qc.invalidateQueries({ queryKey: KEY }),
-      ),
-    );
-  }, [qc]);
 
   return q.data ?? [];
 }

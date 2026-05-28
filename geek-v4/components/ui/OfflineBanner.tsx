@@ -25,7 +25,6 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   Easing,
-  runOnJS,
 } from 'react-native-reanimated';
 import { WifiOff, AlertTriangle, CheckCircle2 } from 'lucide-react-native';
 import { C, SP, R, SHADOW } from '../../design/tokens';
@@ -92,8 +91,6 @@ export function OfflineBanner() {
     transform: [{ translateY: translateY.value }],
     opacity: opacity.value,
   }));
-  // runOnJS は使わないが (re-render は state ベース)、import 抑制
-  void runOnJS;
 
   if (!mounted) return null;
 

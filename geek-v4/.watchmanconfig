@@ -1,0 +1,11 @@
+{
+  "ignore_dirs": [
+    "node_modules",
+    "dist",
+    ".expo",
+    ".git",
+    "android/build",
+    "ios/build",
+    "supabase/.temp"
+  ]
+}

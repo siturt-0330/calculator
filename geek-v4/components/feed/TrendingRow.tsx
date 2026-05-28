@@ -1,10 +1,9 @@
-import { memo, useEffect } from 'react';
+import { memo } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { fetchTrendingTags } from '../../lib/api/trending';
-import { attachChannel } from '../../lib/realtime';
 import { useTagCooccurStore } from '../../stores/tagCooccurStore';
 import { PressableScale } from '../ui/PressableScale';
 import { C, R, SP } from '../../design/tokens';
@@ -12,7 +11,6 @@ import { T } from '../../design/typography';
 
 function TrendingRowInner() {
   const router = useRouter();
-  const qc = useQueryClient();
 
   // Phase 3: cluster diversity を有効にするため cooccur を取得 (hydrate 済みなら)
   // cooccur が無くても fetch 自体は動く (diversify はスキップ)
@@ -21,6 +19,10 @@ function TrendingRowInner() {
   const cooccurHasData = cooccurHydrated && Object.keys(cooccur).length > 0;
   const cooccurKey = cooccurHasData ? 'div' : 'plain';
 
+  // Audit E#5 (2026-05-28): 旧版は `trending-tags-refresh` channel で
+  // `posts INSERT` (filter 不可) を購読していたが、トレンドは 5 分粒度の集計で
+  // 十分鮮度を保てる + INSERT 全件 fanout は全クライアントに刺さって痛い。
+  // staleTime 5 分 + pull-to-refresh / feed refetch で十分なので realtime 撤去。
   const { data: trending = [] } = useQuery({
     queryKey: ['trending-tags', cooccurKey],
     queryFn: () => fetchTrendingTags({
@@ -31,27 +33,6 @@ function TrendingRowInner() {
     staleTime: 5 * 60 * 1000,  // 5分
     refetchOnMount: false,
   });
-
-  // Realtime: 新規投稿があったらトレンドを refresh (debounce)
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const detach = attachChannel('trending-tags-refresh', (ch) =>
-      ch.on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'posts' },
-        () => {
-          if (timer) clearTimeout(timer);
-          timer = setTimeout(() => {
-            qc.invalidateQueries({ queryKey: ['trending-tags'] });
-          }, 8000);
-        },
-      ),
-    );
-    return () => {
-      detach();
-      if (timer) clearTimeout(timer);
-    };
-  }, [qc]);
 
   if (trending.length === 0) return null;
 

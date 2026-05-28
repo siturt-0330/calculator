@@ -72,16 +72,24 @@ export default function SavedPosts() {
     }
     if (bulkProgress) return;
     setBulkProgress({ current: 0, total: items.length });
-    const notes = items.map((p) => postToObsidianNote(p as never));
-    const result = await saveBatchToObsidian(notes, {
-      delayMs: 400,
-      onProgress: (current, total) => setBulkProgress({ current, total }),
-    });
-    setBulkProgress(null);
-    if (result.failed === 0) {
-      show(`${result.success} 件すべて Obsidian に送信しました`, 'success');
-    } else {
-      show(`成功 ${result.success} / 失敗 ${result.failed}`, 'warn');
+    try {
+      const notes = items.map((p) => postToObsidianNote(p as never));
+      const result = await saveBatchToObsidian(notes, {
+        delayMs: 400,
+        onProgress: (current, total) => setBulkProgress({ current, total }),
+      });
+      if (result.failed === 0) {
+        show(`${result.success} 件すべて Obsidian に送信しました`, 'success');
+      } else {
+        show(`成功 ${result.success} / 失敗 ${result.failed}`, 'warn');
+      }
+    } catch (e) {
+      // 旧版は例外で setBulkProgress(null) が呼ばれず、UI が永久に
+      // 「送信中…」のままロックされる事例があった。finally で必ず解除。
+      console.warn('[mypage/saved] bulk export failed:', e);
+      show('Obsidian への送信に失敗しました', 'error');
+    } finally {
+      setBulkProgress(null);
     }
   };
 

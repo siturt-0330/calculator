@@ -8,7 +8,6 @@ export default function OnboardingLayout() {
       <Stack.Screen name="language" />
       <Stack.Screen name="nickname" />
       <Stack.Screen name="liked-tags" />
-      <Stack.Screen name="blocked-tags" />
       <Stack.Screen name="notifications" />
     </Stack>
   );

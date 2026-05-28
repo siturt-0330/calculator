@@ -27,7 +27,12 @@ export function useMyFriends(): {
   const q = useQuery({
     queryKey: ['friends', 'mine', userId ?? 'anon'],
     queryFn: fetchMyFriends,
-    staleTime: 30_000,
+    // ★ パフォーマンス改善 (2026-05-28):
+    //   友達一覧は static-ish (頻繁に追加/削除されない)。30s → 5min に延長して
+    //   mypage / friends / invite 画面間の遷移で毎回 refetch を抑制。
+    //   accept / decline / unfriend の mutation で invalidate されるので
+    //   操作直後は即座に反映される。
+    staleTime: 5 * 60_000,
     enabled: !!userId,
   });
   return {

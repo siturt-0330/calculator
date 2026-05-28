@@ -11,17 +11,17 @@
 //     - 自分の click は optimistic で反映されるが、別端末を開いていると
 //       そっちには届かない (タブ切替で初めて refetch される)
 //
-// ★ 重要な設計判断 (2026-05-24 再修正):
-//   旧版は 1 channel に post_reactions / likes / concerns / saves の 4 つを
-//   .on() で chain bind していた。しかし concerns/saves は supabase_realtime
-//   publication に未登録のため、その binding が CHANNEL_ERROR を起こすと
-//   **channel 全体が死ぬ** (post_reactions の event も配信されない)。
+// ★ 設計判断の変遷:
+//   2026-05-24: 1 channel に post_reactions / likes / concerns / saves を chain
+//   していたが、concerns/saves が publication 未登録で CHANNEL_ERROR cascade →
+//   1 テーブル/1 channel に分離。
 //
-//   今回の対策:
-//     1. **1 テーブル / 1 channel** に分離 (失敗を孤立させる)
-//     2. publication 登録済みの table (post_reactions / likes) だけ subscribe
-//     3. 各 channel に status callback を付けて SUBSCRIBED / ERROR を console に出す
-//        (本番でも debug 容易、性能影響無し)
+//   2026-05-28 (Audit E#5): post_reactions と likes は **両方とも** publication
+//   登録済 (migration 0008) で確認済のため、1 channel + 2 `.on()` に再統合。
+//   CLAUDE.md § 5.3 の cascade リスクは「publication 未登録 table が混ざる」場合
+//   だけで、両方登録済なら 1 channel に集約しても安全。feed 描画時の同時 channel
+//   数を絞るための統合 (2 → 1)。
+//   将来未登録 table を増やすなら、その table だけ別 channel に分離する。
 //
 //   debounce (300ms) で「短時間に大量のイベントが来た時の連続 refetch」を抑制。
 // ============================================================
@@ -40,8 +40,8 @@ const MAX_FILTER_IDS = 30;
 const DEBOUNCE_MS = 300;
 
 // 購読対象テーブル。
-// publication 0008/0013 で supabase_realtime に登録済みのものだけ。
-// (concerns / saves は publication 未登録なので除外。優先度が上がったら別 PR で追加migration を出す)
+// publication 0008 で supabase_realtime に登録済みのものだけ。
+// (concerns / saves は publication 未登録なので除外。優先度が上がったら別 PR で追加 migration)
 const TABLES = ['post_reactions', 'likes'] as const;
 
 export function useFeedRealtime(postIds: string[]): void {
@@ -86,35 +86,35 @@ export function useFeedRealtime(postIds: string[]): void {
       triggerInvalidate(table);
     };
 
-    // 各 table を別 channel で subscribe。失敗が孤立して post_reactions が
-    // 確実に届くようにする (旧版は 1 channel 内の chain で死ぬと全部死んだ)。
-    const detachers: Array<() => void> = [];
-    for (const table of TABLES) {
-      const channelName = `feed-rt:${table}:${baseName}`;
-      const detach = attachChannel(
-        channelName,
-        (ch) =>
-          ch.on(
+    // ★ 1 channel + N `.on()` bundle (両 table とも publication 登録済 = 安全)
+    const channelName = `feed-rt:${baseName}`;
+    const detach = attachChannel(
+      channelName,
+      (ch) => {
+        let chain = ch;
+        for (const table of TABLES) {
+          chain = chain.on(
             'postgres_changes',
             { event: '*', schema: 'public', table, filter },
             handlePayload(table),
-          ),
-        (status, err) => {
-          // 本番でも debug 容易 — "realtime 効いてない" の即時切り分けに必須。
-          // console.warn / .error は babel の transform-remove-console から除外設定済み。
-          if (status === 'SUBSCRIBED') {
-            console.log(`[feed-realtime] ${table} SUBSCRIBED (${serverIds.length} ids)`);
-          } else if (status === 'CHANNEL_ERROR') {
-            console.warn(`[feed-realtime] ${table} CHANNEL_ERROR`, err?.message);
-          } else if (status === 'TIMED_OUT') {
-            console.warn(`[feed-realtime] ${table} TIMED_OUT`);
-          } else if (status === 'CLOSED') {
-            console.log(`[feed-realtime] ${table} CLOSED`);
-          }
-        },
-      );
-      detachers.push(detach);
-    }
+          );
+        }
+        return chain;
+      },
+      (status, err) => {
+        // 本番でも debug 容易 — "realtime 効いてない" の即時切り分けに必須。
+        // console.warn / .error は babel の transform-remove-console から除外設定済み。
+        if (status === 'SUBSCRIBED') {
+          console.log(`[feed-realtime] bundle SUBSCRIBED (${TABLES.length} tables, ${serverIds.length} ids)`);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.warn(`[feed-realtime] bundle CHANNEL_ERROR`, err?.message);
+        } else if (status === 'TIMED_OUT') {
+          console.warn(`[feed-realtime] bundle TIMED_OUT`);
+        } else if (status === 'CLOSED') {
+          console.log(`[feed-realtime] bundle CLOSED`);
+        }
+      },
+    );
 
     return () => {
       // ★ timer を必ず clear + null 化 (unmount 後の fire 防止)
@@ -122,12 +122,10 @@ export function useFeedRealtime(postIds: string[]): void {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
-      for (const detach of detachers) {
-        try {
-          detach();
-        } catch {
-          // detach の失敗は cleanup 続行を妨げない
-        }
+      try {
+        detach();
+      } catch {
+        // detach の失敗は cleanup 続行を妨げない
       }
     };
     // postIds は中身が変わると sortedKey が変わるので、それだけを依存に

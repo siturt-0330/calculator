@@ -136,9 +136,26 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
-  // Webhook 認証: Database Webhook 経由でのみ呼ばれることを保証
-  // (任意 origin から偽の notifications payload を POST されないよう防御)
-  if (PUSH_WEBHOOK_SECRET) {
+  // ============================================================
+  // Webhook 認証 — fail-closed (Audit B#9, J#5 — 2026-05-28)
+  // ============================================================
+  // 旧実装は `if (PUSH_WEBHOOK_SECRET) { check }` で、env が空のときに
+  // 認証チェックを丸ごとスキップしていた。Edge Function の URL が露見した
+  // 瞬間に誰でも任意 user に push を撃てる状態 (= URL 知った攻撃者が
+  // notifications テーブル形式の JSON を POST するだけで通る)。
+  //
+  // 対策: secret が未設定なら 503 を返し、設定済みなら必ず比較する。
+  // production deploy 前に必ず `supabase secrets set PUSH_WEBHOOK_SECRET=...`
+  // しておくこと。Database Webhook 側の Authorization ヘッダにも同値を入れる。
+  // ============================================================
+  if (!PUSH_WEBHOOK_SECRET) {
+    console.error('[send-push] PUSH_WEBHOOK_SECRET not configured — refusing to process');
+    return new Response(
+      JSON.stringify({ ok: false, error: 'push webhook not configured' }),
+      { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    );
+  }
+  {
     const auth = req.headers.get('authorization') ?? '';
     const expected = `Bearer ${PUSH_WEBHOOK_SECRET}`;
     // 定数時間比較で timing attack を防ぐ (§ timingSafeEqual)
@@ -149,8 +166,6 @@ serve(async (req) => {
       );
     }
   }
-  // PUSH_WEBHOOK_SECRET 未設定の環境は警告を出して当面通す
-  // (production では必ず設定すること)
 
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
     return new Response(

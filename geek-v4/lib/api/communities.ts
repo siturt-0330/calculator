@@ -219,6 +219,10 @@ export async function fetchMyUpcomingEvents(opts: {
 
 // 自分の所属コミュニティを取得 (TopBar 用)
 // ============================================================
+// DoS 防止: 1 ユーザーが所属できるコミュ数の現実上限は数十程度なので、
+// 100 件で打ち切る。それを超える場合は将来 cursor を追加する。
+const FETCH_MY_COMMUNITIES_LIMIT = 100;
+
 export async function fetchMyCommunities(): Promise<Community[]> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
@@ -228,7 +232,8 @@ export async function fetchMyCommunities(): Promise<Community[]> {
     .from('community_members')
     .select('community_id, communities!inner(*)')
     .eq('user_id', user.id)
-    .order('joined_at', { ascending: false });
+    .order('joined_at', { ascending: false })
+    .limit(FETCH_MY_COMMUNITIES_LIMIT);
 
   if (error) {
     console.warn('[communities] fetchMyCommunities failed:', error.message);
@@ -910,22 +915,28 @@ export async function searchCommunities(opts: {
 // ============================================================
 // realtime: 自分の community_members 変更を購読
 // ============================================================
-// 自分が join / leave した時に listener が呼ばれる。React Query 等の cache 無効化に使う。
+// ★ Audit E#5 (2026-05-28):
+//   旧版は `my-communities:userId` channel で community_members を subscribe して
+//   いたが、community_members は **supabase_realtime publication に未登録**
+//   (migrations 確認: 0008/0009/0010/0013/0039/0040/0050/0051/0052 いずれにも無い)。
+//   CLAUDE.md § 5.3「publication 未登録 table を subscribe しない」に違反する
+//   ghost 購読で、CHANNEL_ERROR を立てるだけで実際は何も配信されていなかった。
+//
+//   → realtime を撤去 (no-op deprecated)。caller (app/(tabs)/community/index.tsx)
+//     は `useFocusEffect` での invalidate で鮮度を保つ:
+//     - 自分の join/leave は joinCommunity / leaveCommunity の onSuccess で
+//       invalidate される
+//     - 別端末や別画面での参加変動は focus 復帰時に refetch される
+//
+//   API signature は維持して call site の修正を最小化。
+// ============================================================
 export function subscribeToMyCommunityChanges(
-  userId: string,
-  onChange: () => void,
+  _userId: string,
+  _onChange: () => void,
 ): { unsubscribe: () => void } {
-  const channel = supabase
-    .channel(`my-communities:${userId}`)
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'community_members', filter: `user_id=eq.${userId}` },
-      () => onChange(),
-    )
-    .subscribe();
   return {
     unsubscribe: () => {
-      try { supabase.removeChannel(channel); } catch { /* ignore */ }
+      /* no-op (deprecated — see comment above) */
     },
   };
 }

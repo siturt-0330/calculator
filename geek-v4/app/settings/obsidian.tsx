@@ -25,6 +25,12 @@ export default function ObsidianSettingsScreen() {
   const [vault, setVault] = useState('');
   const [enabled, setEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
+  // 各 async action ごとに別 flag を持つ。同 flag を使い回すと、
+  // 「保存中はテストも押せない」という意図しない UI lock になる。
+  const [savingVault, setSavingVault] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -37,54 +43,90 @@ export default function ObsidianSettingsScreen() {
   }, []);
 
   const handleSaveVault = async () => {
+    if (savingVault) return;
     const t = vault.trim();
     if (!t) {
       show('Vault 名を入力してください', 'warn');
       return;
     }
-    await setObsidianVault(t);
-    show('Vault 名を保存しました', 'success');
+    setSavingVault(true);
+    try {
+      await setObsidianVault(t);
+      show('Vault 名を保存しました', 'success');
+    } catch (e) {
+      console.warn('[settings/obsidian] save vault failed:', e);
+      show('Vault 名の保存に失敗しました', 'error');
+    } finally {
+      setSavingVault(false);
+    }
   };
 
   const handleToggle = async (next: boolean) => {
+    if (toggling) return;
     if (next && !vault.trim()) {
       show('先に Vault 名を入力してください', 'warn');
       return;
     }
-    if (next && vault.trim() !== (await getObsidianVault())) {
-      await setObsidianVault(vault.trim());
+    setToggling(true);
+    try {
+      if (next && vault.trim() !== (await getObsidianVault())) {
+        await setObsidianVault(vault.trim());
+      }
+      await setObsidianEnabled(next);
+      setEnabled(next);
+      show(next ? '連携を有効にしました' : '連携を無効にしました', 'success');
+    } catch (e) {
+      console.warn('[settings/obsidian] toggle failed:', e);
+      show('連携の切替に失敗しました', 'error');
+    } finally {
+      setToggling(false);
     }
-    await setObsidianEnabled(next);
-    setEnabled(next);
-    show(next ? '連携を有効にしました' : '連携を無効にしました', 'success');
   };
 
   const handleTest = async () => {
-    const ok = await openObsidianVault();
-    if (!ok) {
-      show('Obsidian を起動できませんでした。インストール済か確認してください。', 'error');
+    if (opening) return;
+    setOpening(true);
+    try {
+      const ok = await openObsidianVault();
+      if (!ok) {
+        show('Obsidian を起動できませんでした。インストール済か確認してください。', 'error');
+      }
+    } catch (e) {
+      console.warn('[settings/obsidian] open vault failed:', e);
+      show('Obsidian を起動できませんでした', 'error');
+    } finally {
+      setOpening(false);
     }
   };
 
   const handleTestSave = async () => {
+    if (testing) return;
     if (!enabled) {
       show('まず連携を ON にしてください', 'warn');
       return;
     }
-    const result = await saveToObsidian({
-      id: 'test',
-      content: '# Geek 連携テスト\n\nこれは Geek アプリから送られたテストノートです。',
-      tagNames: ['geek', 'test'],
-      createdAt: new Date().toISOString(),
-    });
-    if (result.ok) {
-      show('Obsidian にテストノートを送信しました', 'success');
-    } else if (result.reason === 'vault_not_set') {
-      show('Vault 名を保存してください', 'warn');
-    } else if (result.reason === 'obsidian_not_installed') {
-      show('Obsidian がインストールされていません', 'error');
-    } else {
+    setTesting(true);
+    try {
+      const result = await saveToObsidian({
+        id: 'test',
+        content: '# Geek 連携テスト\n\nこれは Geek アプリから送られたテストノートです。',
+        tagNames: ['geek', 'test'],
+        createdAt: new Date().toISOString(),
+      });
+      if (result.ok) {
+        show('Obsidian にテストノートを送信しました', 'success');
+      } else if (result.reason === 'vault_not_set') {
+        show('Vault 名を保存してください', 'warn');
+      } else if (result.reason === 'obsidian_not_installed') {
+        show('Obsidian がインストールされていません', 'error');
+      } else {
+        show('送信に失敗しました', 'error');
+      }
+    } catch (e) {
+      console.warn('[settings/obsidian] test save failed:', e);
       show('送信に失敗しました', 'error');
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -142,7 +184,13 @@ export default function ObsidianSettingsScreen() {
           <Text style={[T.caption, { color: C.text3 }]}>
             Obsidian の左下に表示されている Vault の名前を入力してください。
           </Text>
-          <Button label="Vault 名を保存" onPress={handleSaveVault} size="sm" disabled={loading} />
+          <Button
+            label="Vault 名を保存"
+            onPress={handleSaveVault}
+            size="sm"
+            loading={savingVault}
+            disabled={loading || savingVault}
+          />
         </View>
 
         {/* 連携 toggle */}
@@ -168,6 +216,7 @@ export default function ObsidianSettingsScreen() {
             onPress={() => handleToggle(!enabled)}
             haptic="select"
             hitSlop={8}
+            disabled={toggling}
             style={{
               width: 52,
               height: 30,
@@ -175,6 +224,7 @@ export default function ObsidianSettingsScreen() {
               backgroundColor: enabled ? C.accent : C.bg4,
               justifyContent: 'center',
               padding: 3,
+              opacity: toggling ? 0.6 : 1,
             }}
           >
             <View
@@ -195,6 +245,7 @@ export default function ObsidianSettingsScreen() {
           <PressableScale
             onPress={handleTest}
             haptic="tap"
+            disabled={opening}
             style={{
               padding: SP['3'],
               backgroundColor: C.bg3,
@@ -204,15 +255,18 @@ export default function ObsidianSettingsScreen() {
               flexDirection: 'row',
               alignItems: 'center',
               gap: SP['2'],
+              opacity: opening ? 0.6 : 1,
             }}
           >
             <Icon.globe size={18} color={C.text2} strokeWidth={2.2} />
-            <Text style={[T.bodyMd, { color: C.text }]}>Vault を Obsidian で開く</Text>
+            <Text style={[T.bodyMd, { color: C.text }]}>
+              {opening ? '起動中…' : 'Vault を Obsidian で開く'}
+            </Text>
           </PressableScale>
           <PressableScale
             onPress={handleTestSave}
             haptic="tap"
-            disabled={!enabled}
+            disabled={!enabled || testing}
             style={{
               padding: SP['3'],
               backgroundColor: enabled ? C.accentBg : C.bg3,
@@ -222,12 +276,12 @@ export default function ObsidianSettingsScreen() {
               flexDirection: 'row',
               alignItems: 'center',
               gap: SP['2'],
-              opacity: enabled ? 1 : 0.5,
+              opacity: !enabled || testing ? 0.5 : 1,
             }}
           >
             <Icon.send size={18} color={enabled ? C.accent : C.text3} strokeWidth={2.2} />
             <Text style={[T.bodyMd, { color: enabled ? C.accent : C.text3, fontWeight: '600' }]}>
-              テストノートを送信
+              {testing ? '送信中…' : 'テストノートを送信'}
             </Text>
           </PressableScale>
         </View>

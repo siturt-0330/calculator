@@ -1,74 +1,25 @@
-import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { attachChannel } from '../lib/realtime';
 import { useAuthStore } from '../stores/authStore';
 import { useToastStore } from '../stores/toastStore';
 import { createUserStamp, deleteUserStamp, fetchUserStamps, type UserStamp } from '../lib/api/userStamps';
 
 const KEY = ['user-stamps'];
 
+// ============================================================
+// useUserStamps
+// ============================================================
+// 旧構成: 個別 channel `user-stamps-feed` で creator_id=userId と
+//         INSERT (no filter, heavy-throttle) を 2 binding で attach。
+// 新構成 (Audit E#5): hooks/useUserChannel.ts の 1 channel に
+//   `creator_id=eq.userId` フィルタの 1 binding に集約。
+//   他人の公開 stamp INSERT は staleTime 60s + pull-to-refresh で取得 (realtime 不要)。
+// ============================================================
 export function useUserStamps() {
-  const qc = useQueryClient();
-  const userId = useAuthStore((s) => s.user?.id);
-
   const q = useQuery({
     queryKey: KEY,
     queryFn: fetchUserStamps,
     staleTime: 60_000,
   });
-
-  // Realtime: user_stamps の INSERT/DELETE で一覧を更新。
-  // - 自分のスタンプ追加/削除はすぐ反映 (INSERT/DELETE)
-  // - 他人の use_count 増加 (UPDATE) は user 体験への影響が低いので heavy-throttle
-  // - INSERT は他人が公開スタンプを作った時に出すので表示候補に出すために必要
-  //   ただし全 fanout は痛いので 10s window で集約。
-  //
-  // 旧版は debounce で「最後の event 後 N 秒経過してから invalidate」だったが、
-  // 高頻度 INSERT が続く間 invalidate が永遠に走らない starvation が起きていた。
-  // throttle (leading invoke + 末尾 trailing) に切り替えて確実に最新化される
-  // ようにする。
-  const lastInvalidate = useRef<number>(0);
-  const trailing = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const throttledInvalidate = (windowMs: number) => {
-    const now = Date.now();
-    const elapsed = now - lastInvalidate.current;
-    if (elapsed >= windowMs) {
-      lastInvalidate.current = now;
-      qc.invalidateQueries({ queryKey: KEY });
-      return;
-    }
-    if (trailing.current) return; // 既に末尾 trailing 予約済
-    trailing.current = setTimeout(() => {
-      trailing.current = null;
-      lastInvalidate.current = Date.now();
-      qc.invalidateQueries({ queryKey: KEY });
-    }, windowMs - elapsed);
-  };
-  useEffect(() => {
-    if (!userId) return;
-    const detach = attachChannel('user-stamps-feed', (ch) =>
-      // 自分のスタンプ変更は即時 (filter 経由でフルにスコープ)
-      ch.on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'user_stamps',
-        filter: `creator_id=eq.${userId}`,
-      }, () => throttledInvalidate(800))
-       // 他人の新規公開スタンプは heavy-throttle (10s) で集約
-       // (use_count UPDATE はサーバー filter できないが、これも 10s window)
-       .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'user_stamps',
-       }, () => throttledInvalidate(10_000)),
-    );
-    return () => {
-      detach();
-      if (trailing.current) clearTimeout(trailing.current);
-    };
-    // qc 参照は安定。throttledInvalidate は closure-stable な ref 経由なので deps 不要。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
 
   return { stamps: (q.data ?? []) as UserStamp[], isLoading: q.isLoading };
 }

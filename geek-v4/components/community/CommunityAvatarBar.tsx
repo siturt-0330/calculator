@@ -45,8 +45,11 @@ type CommunityForAvatar = {
 // ------------------------------------------------------------
 const AVATAR_SIZE = 56;
 const INNER_SIZE = 50;        // ring (2px x2) 内側
-const ITEM_WIDTH = 72;        // chip 1 つ分の幅 (avatar + label)
+const ITEM_WIDTH = 68;        // chip 1 つ分の幅 — 72 → 68 で隣との距離を縮め "繋がり" 感
 const LABEL_MAX_CHARS = 8;
+// 選択中 chip の下に出す "tab 指示棒" — 共有 dock line と一体化して "現在地" を示す
+const SELECTED_INDICATOR_WIDTH = 28;
+const SELECTED_INDICATOR_HEIGHT = 2.5;
 
 // ------------------------------------------------------------
 // props
@@ -77,21 +80,33 @@ export function CommunityAvatarBar({
   const isAllSelected = selectedId === null;
   const { C } = useTheme();
 
+  // ───────── 共有 "dock" コンテナ ─────────
+  // 1) 上品な縦 gradient (bg2 → bg) で 1 本の "棚" を表現
+  // 2) 下端に hairline divider を 1 本通して全 avatar が同じ shelf に立っている感を出す
+  //    (absolute gradient で borderBottomWidth が隠れないよう、divider は absolute で重ねる)
+  // 3) ScrollView の contentContainer は gap を 12→10 に詰めて "繋がり" を強化
   return (
-    <View
-      style={{
-        backgroundColor: C.bg2,
-        borderBottomWidth: 1,
-        borderBottomColor: C.divider,
-      }}
-    >
+    <View style={{ position: 'relative' }}>
+      <LinearGradient
+        colors={[C.bg2, C.bg]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: 0,
+          bottom: 0,
+        }}
+      />
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{
           paddingHorizontal: SP['4'],
-          paddingVertical: SP['3'],
-          gap: SP['3'],
+          paddingTop: SP['3'],
+          paddingBottom: SP['2'],
+          gap: 10, // SP['3'] (12) → 10: 隣り合う avatar の距離を詰めて bar 全体を一体化
           alignItems: 'flex-start',
         }}
       >
@@ -136,6 +151,19 @@ export function CommunityAvatarBar({
           </View>
         )}
       </ScrollView>
+
+      {/* ───────── 共有 dock line — 全 avatar が立つ "棚" ───────── */}
+      <View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: 1,
+          backgroundColor: C.divider,
+        }}
+      />
     </View>
   );
 }
@@ -180,7 +208,9 @@ function AvatarItem({
       style={{ alignItems: 'center', width: ITEM_WIDTH }}
     >
       <View style={{ position: 'relative' }}>
-        {/* ───────── ring (selected = gradient, unselected = border) ───────── */}
+        {/* ───────── ring (selected = gradient, unselected = border) ─────────
+           全 avatar に同じ SHADOW.sm を入れて "同じ棚に立っている" 統一感を出す。
+           選択中は SHADOW.glow に上書き (紫 glow) — selected 状態は据置。 */}
         <View
           style={{
             width: AVATAR_SIZE,
@@ -189,7 +219,7 @@ function AvatarItem({
             alignItems: 'center',
             justifyContent: 'center',
             overflow: 'hidden',
-            ...(isSelected ? SHADOW.glow : SHADOW.xs),
+            ...(isSelected ? SHADOW.glow : SHADOW.sm),
           }}
         >
           {isSelected ? (
@@ -243,9 +273,15 @@ function AvatarItem({
               />
             ) : iconUrl ? (
               <ExpoImage
+                // 50px 内枠 @3x ≒ 150 → 160 で retina 余裕。
                 source={{ uri: thumbedUrl(iconUrl, 160) }}
                 style={{ width: '100%', height: '100%' }}
                 contentFit="cover"
+                // 監査 (2026-05): memory-disk 未指定だと横スクロールで戻った際に
+                // 再 download が走り、ネット slot を食い潰す。memory-disk + recyclingKey
+                // で 2 回目以降は instant.
+                cachePolicy="memory-disk"
+                recyclingKey={iconUrl}
                 transition={120}
               />
             ) : (
@@ -271,7 +307,8 @@ function AvatarItem({
         )}
       </View>
 
-      {/* ───────── label (max 8 char + …) ───────── */}
+      {/* ───────── label (max 8 char + …) ─────────
+         全 chip 共通の letterSpacing で "横並びリズム" を整える。 */}
       <Text
         numberOfLines={1}
         style={[
@@ -281,11 +318,25 @@ function AvatarItem({
             textAlign: 'center',
             color: isSelected ? C.accentLight : C.text2,
             fontWeight: isSelected ? '700' : '600',
+            letterSpacing: 0.2,
           },
         ]}
       >
         {truncated}
       </Text>
+
+      {/* ───────── selected indicator (連続 tab バー) ─────────
+         選択中だけ、共有 dock line の上に短い accent バーを出して "現在地" を示す。
+         未選択時はスペースだけ確保 (=同 height) して chip 高さを揃える。 */}
+      <View
+        style={{
+          marginTop: 4,
+          height: SELECTED_INDICATOR_HEIGHT,
+          width: SELECTED_INDICATOR_WIDTH,
+          borderRadius: SELECTED_INDICATOR_HEIGHT / 2,
+          backgroundColor: isSelected ? C.accent : 'transparent',
+        }}
+      />
     </PressableScale>
   );
 }

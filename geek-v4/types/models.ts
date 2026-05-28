@@ -36,6 +36,12 @@ export type Post = {
   created_at: string;
   // posts.author_id — RLS で誰でも読める。公式管理者識別のため fetch する。
   author_id?: string;
+  // ★ BBS 統合 (migration 0075) — title is not null なら「スレ形式」の post。
+  //   通常の写真投稿は title=null。フィード描画では title あれば content の上に大きく表示。
+  title?: string | null;
+  // ★ BBS 統合 (migration 0075) — 最終アクティビティ時刻 (最新コメント or 作成時)。
+  //   sort 'hot' や discovery で「直近で動いているスレ」を引き出すのに使う。
+  last_activity_at?: string | null;
   // 公式コミュニティの管理者が投稿した時に、posts API 側でクライアントが
   // 算出する派生フィールド。is_official=true なコミュニティに紐付き、かつ
   // post.author_id === community.official_admin_user_id の時のみセットされる。

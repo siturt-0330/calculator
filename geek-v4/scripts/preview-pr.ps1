@@ -11,7 +11,12 @@
 #   .\scripts\preview-pr.ps1 -PR all       # 6 PR 全部 merge した preview
 #
 # 切替後は Metro を再起動してください:
-#   npx expo start --web --port 8081 --clear
+#   npx expo start --web --port 8081                 ← 通常はこちら (FileStore キャッシュを使う = 高速)
+#   npx expo start --web --port 8081 --clear         ← キャッシュ汚染が疑われるときだけ (再 transform で遅い)
+#
+# metro.config.js に FileStore を設定済みなので、2 回目以降の起動は
+# .metro-cache/ に残った transform 結果を再利用して大幅に高速化される。
+# --clear を毎回付けるとこのキャッシュを毎回捨てることになり遅くなる。
 # ============================================================
 param(
   [Parameter(Mandatory=$true)]
@@ -79,7 +84,8 @@ Write-Host "[OK] $branch に切り替えました" -ForegroundColor Green
 Write-Host ""
 Write-Host "次のステップ:" -ForegroundColor Cyan
 Write-Host "  1. Metro が起動中の場合は Ctrl+C で停止" -ForegroundColor White
-Write-Host "  2. npx expo start --web --port 8081 --clear" -ForegroundColor White
+Write-Host "  2. npx expo start --web --port 8081" -ForegroundColor White
+Write-Host "     (キャッシュ汚染が疑われるときだけ --clear を追加)" -ForegroundColor DarkGray
 Write-Host "  3. http://localhost:8081 をブラウザで開く" -ForegroundColor White
 Write-Host ""
 Write-Host "[!] このスクリプトは絶対に git push しません。" -ForegroundColor Yellow

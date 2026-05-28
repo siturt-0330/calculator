@@ -48,7 +48,7 @@ const VISIBILITY_OPTIONS: VisibilityOption[] = [
 
 export default function CreatePost() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ community_id?: string; prefill_tag?: string }>();
+  const params = useLocalSearchParams<{ community_id?: string; prefill_tag?: string; title?: string }>();
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
   const { show } = useToastStore();
@@ -60,6 +60,10 @@ export default function CreatePost() {
   const [video, setVideo] = useState<PickedVideo | null>(null);
   // uploading は post 中の進捗ラベル表示用 (大きい動画では数秒〜分単位かかる)
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  // BBS 由来の「スレ形式」投稿 (?title=1) のときだけタイトル入力欄を出す。
+  // 通常の写真投稿 (タイトルなし) と区別したいため明示パラメータで gate。
+  const showTitleInput = params.title === '1';
+  const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
@@ -228,7 +232,12 @@ export default function CreatePost() {
     return () => clearTimeout(t);
   }, [content, tags, sourceUrl, anonymous, visibility]);
 
+  // picker は OS のシステム dialog を呼ぶため、ボタン連打で 2 重起動すると
+  // 一方の callback が cancel 扱いになる事例があった。busy で再エントリ防止。
+  const [pickingImage, setPickingImage] = useState(false);
   const pickImage = async () => {
+    if (pickingImage) return;
+    setPickingImage(true);
     try {
       const r = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: 'images',
@@ -243,10 +252,15 @@ export default function CreatePost() {
     } catch (e) {
       console.warn('[post/create] pick image failed:', e);
       show('画像の取得に失敗しました', 'error');
+    } finally {
+      setPickingImage(false);
     }
   };
 
+  const [pickingVideo, setPickingVideo] = useState(false);
   const pickVideo = async () => {
+    if (pickingVideo) return;
+    setPickingVideo(true);
     try {
       const r = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: 'videos',
@@ -273,6 +287,8 @@ export default function CreatePost() {
     } catch (e) {
       console.warn('[post/create] pick video failed:', e);
       show('動画の取得に失敗しました', 'error');
+    } finally {
+      setPickingVideo(false);
     }
   };
 
@@ -318,6 +334,8 @@ export default function CreatePost() {
   };
 
   const onPost = async () => {
+    // ボタン disabled でも race で 2 連発するケースを防御 (loading との 1 frame ズレ対策)
+    if (posting) return;
     if (images.length === 0 && !video && !content.trim()) {
       show('画像・動画・テキストのいずれかを入力してください。', 'warn');
       return;
@@ -404,6 +422,8 @@ export default function CreatePost() {
       const isPublic = visibility !== 'private';
       await createPost({
         content,
+        // BBS 由来「スレ形式」のときだけ title を投げる (通常投稿は null)
+        title: showTitleInput ? (title.trim() || null) : null,
         mediaUris: uploadedImageUrls,
         videoUris: uploadedVideoUrls,
         videoDurations: [], // duration は client で取得困難 (expo-video の getStatus が必要) — 後続改善
@@ -517,6 +537,27 @@ export default function CreatePost() {
           }}
           keyboardShouldPersistTaps="handled"
         >
+          {/* ===== タイトル (BBS 由来の「スレ形式」投稿のときだけ表示) ===== */}
+          {showTitleInput && (
+            <View style={{ gap: SP['2'] }}>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
+                <Text style={[T.smallB, { color: C.text2 }]}>タイトル</Text>
+                <View style={{ flex: 1 }} />
+                {title.length > 0 && (
+                  <Text style={[T.caption, { color: title.length >= 50 ? C.amber : C.text3 }]}>
+                    {title.length} / 80
+                  </Text>
+                )}
+              </View>
+              <Input
+                placeholder="タイトル (50 文字まで)"
+                value={title}
+                onChangeText={setTitle}
+                maxLength={80}
+              />
+            </View>
+          )}
+
           {/* ===== 本文 + 画像 ===== */}
           <View style={{ gap: SP['2'] }}>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
@@ -579,6 +620,7 @@ export default function CreatePost() {
                 <PressableScale
                   onPress={pickImage}
                   haptic="tap"
+                  disabled={pickingImage}
                   accessibilityLabel="画像を追加"
                   style={{
                     width: 80, height: 80, borderRadius: 12,
@@ -586,11 +628,12 @@ export default function CreatePost() {
                     alignItems: 'center', justifyContent: 'center',
                     borderWidth: 1, borderStyle: 'dashed', borderColor: C.border2,
                     gap: 2,
+                    opacity: pickingImage ? 0.5 : 1,
                   }}
                 >
                   <Cam size={22} color={C.text3} strokeWidth={2.2} />
                   <Text style={[T.caption, { color: C.text3, fontSize: 9 }]}>
-                    {images.length === 0 ? '画像 / 4' : `+${4 - images.length}`}
+                    {pickingImage ? '...' : images.length === 0 ? '画像 / 4' : `+${4 - images.length}`}
                   </Text>
                 </PressableScale>
               )}
@@ -643,6 +686,7 @@ export default function CreatePost() {
                 <PressableScale
                   onPress={pickVideo}
                   haptic="tap"
+                  disabled={pickingVideo}
                   accessibilityLabel="動画を追加 (1 本まで、最大 100MB)"
                   style={{
                     width: 80, height: 80, borderRadius: 12,
@@ -650,11 +694,12 @@ export default function CreatePost() {
                     alignItems: 'center', justifyContent: 'center',
                     borderWidth: 1, borderStyle: 'dashed', borderColor: C.border2,
                     gap: 2,
+                    opacity: pickingVideo ? 0.5 : 1,
                   }}
                 >
                   <Text style={{ fontSize: 22, color: C.text3 }}>🎬</Text>
                   <Text style={[T.caption, { color: C.text3, fontSize: 9 }]}>
-                    動画 / 1
+                    {pickingVideo ? '...' : '動画 / 1'}
                   </Text>
                 </PressableScale>
               )}

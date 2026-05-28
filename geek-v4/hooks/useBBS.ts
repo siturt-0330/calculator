@@ -1,3 +1,10 @@
+/**
+ * @deprecated since migration 0075 (2026-05-28). BBS threads are unified into posts.
+ *   Use `useFeed` + filter `post.title !== null` for thread-style posts.
+ *   This hook remains importable but its callers (app/(tabs)/bbs.tsx, community/[id]/bbs.tsx)
+ *   were converted to redirects in U5. New code should not reference this file.
+ *   To be removed in migration 0080 (1-2 weeks after stability).
+ */
 import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchThreads, createThread, fetchMyJoinedCommunityThreads, fetchReplies } from '../lib/api/bbs';
@@ -56,10 +63,10 @@ export function useBBS() {
     },
   });
 
-  // Realtime: スレッド新規/更新 + 返信があったら一覧を更新 (replies_count, last_reply_at)
-  // - visibility='public' のスレッドだけが一覧に出るので server-side で絞る
-  // - bbs_replies の INSERT は filter できない (どの thread の reply かは payload を
-  //   見ないと分からない) ので、3s debounce で fanout を集約する
+  // Realtime: 一覧変動 (新規スレ / 削除 / metadata) は bbs_threads channel に集約。
+  // bbs_replies INSERT は filter 不可で全 BBS 返信が fanout される (Audit E#5) ため撤去。
+  // last_reply_at / replies_count の更新は bbs_threads 側 trigger で UPDATE が来るので
+  // それで replies の到来も間接検知できる + 詳細画面 (useBBSThread) では即時 realtime あり。
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const invalidate = (delay = 1500) => {
@@ -68,24 +75,14 @@ export function useBBS() {
         qc.invalidateQueries({ queryKey: ['bbs-threads'] });
       }, delay);
     };
-    // ★ CLAUDE.md § 5.3 / § 11: 1 channel に複数 table を chain しない。
-    //   publication 未登録 table が 1 つでも binding に含まれると channel
-    //   全体が CHANNEL_ERROR で死ぬ。bbs_threads / bbs_replies を別 channel に分離。
     const detachThreads = attachChannel('bbs-threads-list-threads', (ch) =>
       ch.on('postgres_changes', {
         event: '*', schema: 'public', table: 'bbs_threads',
         filter: 'visibility=eq.public',
       }, () => invalidate(1500)),
     );
-    // 返信は filter できないが、3s debounce で集約 (返信量が多いコミュニティでも
-    // 重い fanout を吸収)
-    const detachReplies = attachChannel('bbs-threads-list-replies', (ch) =>
-      ch.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bbs_replies' },
-        () => invalidate(3000)),
-    );
     return () => {
       detachThreads();
-      detachReplies();
       if (debounce.current) clearTimeout(debounce.current);
     };
   }, [qc]);
@@ -140,9 +137,9 @@ export function useMyCommunityBBS() {
     }
   }, [data, qc]);
 
-  // useBBS と同じ realtime: bbs_threads / bbs_replies 変更で debounce invalidate
-  // ('my-communities' クエリだけ無効化 — useBBS の 'bbs-threads' base key も
-  //  下位 key として hit するので両方再 fetch される)
+  // useBBS と同じ realtime: bbs_threads 変更で debounce invalidate
+  // bbs_replies INSERT は filter 不可で fanout が痛いので撤去 (Audit E#5)。
+  // 返信到来は bbs_threads UPDATE (last_reply_at / replies_count) trigger で間接検知。
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!userId) return;
@@ -152,18 +149,12 @@ export function useMyCommunityBBS() {
         qc.invalidateQueries({ queryKey: ['bbs-threads', 'my-communities', userId] });
       }, delay);
     };
-    // ★ § 5.3: 1 channel / 1 table。bbs_threads と bbs_replies を別 channel に分離。
     const detachThreads = attachChannel('bbs-threads-my-communities-threads', (ch) =>
       ch.on('postgres_changes', { event: '*', schema: 'public', table: 'bbs_threads' },
         () => invalidate(1500)),
     );
-    const detachReplies = attachChannel('bbs-threads-my-communities-replies', (ch) =>
-      ch.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bbs_replies' },
-        () => invalidate(3000)),
-    );
     return () => {
       detachThreads();
-      detachReplies();
       if (debounce.current) clearTimeout(debounce.current);
     };
   }, [qc, userId]);

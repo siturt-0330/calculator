@@ -71,6 +71,20 @@ supabase functions deploy <name>
 
 CI (`.github/workflows/ci.yml`) は `type-check + test` を毎 PR で実行、master push のみ `build:web` smoke test。
 
+### Metro キャッシュ運用 (2026-05-28 〜)
+
+`metro.config.js` で **`FileStore` 永続キャッシュ** を `.metro-cache/` に設定済。
+`expo start` の挙動は以下を区別する:
+
+| コマンド | キャッシュ | 速度 | 使う場面 |
+|---|---|---|---|
+| `npx expo start --web --port 8081` | 利用 (`.metro-cache/` を再利用) | **速い (2nd start 30〜60s)** | **通常の dev** はこちら |
+| `npx expo start --web --port 8081 --clear` | 破棄して 1 から | 遅い (cold start 185s) | キャッシュ汚染が疑われるとき (transform バグ / 依存更新後 / 謎の bundle エラー) |
+
+- `.metro-cache/` は `.gitignore` 済。サイズが膨らんだら手動で削除して OK (= 次回が `--clear` と同等)。
+- `scripts/preview-pr.ps1` も `--clear` なし版を推奨表示するように更新済。
+- `resetCache: false` (default) を維持。`true` にすると 2 回目以降も毎回 cold。
+
 ---
 
 ## 3. リポジトリレイアウト (geek-v4/)

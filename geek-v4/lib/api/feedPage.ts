@@ -14,6 +14,7 @@
 // で旧 hook 群へフォールバックする ENV flag を使う設計。
 // ============================================================
 import { supabase } from '../supabase';
+import { withApiTimeout } from '../withApiTimeout';
 import type { Post } from '../../types/models';
 import type { PostCommunityRef } from './posts';
 import type { ReactionAgg } from './reactions';
@@ -21,6 +22,17 @@ import type { Poll, PollOption } from './polls';
 
 // UUID 形式チェック (壊れた URL や古い ID 対策)
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// RPC は 11 CTE で動くため、入力が異常に多いと plan 時間が膨らむ。
+// クライアント側で先に cap (= サーバー側 raise より前に弾く) ことで:
+//   - 1 RPC 呼出のコストを bounded に
+//   - 「無限スクロールで postIds が 500 件溜まった」みたいなケースで hang しない
+//   - 0071 migration の array_length チェックと整合 (cap = 100)
+const MAX_POST_IDS_PER_CALL = 100;
+
+// RPC が応答しない (or 重い) 時に UI を hang させない timeout。
+// 通常 200-600ms で完了する想定なので 8s で十分。
+const FEED_PAGE_RPC_TIMEOUT_MS = 8000;
 
 // RPC 1 件の戻り値型
 export type FeedPagePost = Post & {
@@ -89,6 +101,7 @@ export async function fetchFeedPage(
     if (seen.has(id)) continue;
     seen.add(id);
     validIds.push(id);
+    if (validIds.length >= MAX_POST_IDS_PER_CALL) break;
   }
   if (validIds.length === 0) return [];
 
@@ -97,10 +110,18 @@ export async function fetchFeedPage(
     typeof userId === 'string' && UUID_RE.test(userId) ? userId : null;
 
   try {
-    const { data, error } = await supabase.rpc('get_feed_page', {
-      p_post_ids: validIds,
-      p_user_id: safeUserId,
-    });
+    // withApiTimeout: Supabase RPC は AbortController が無いので race で打ち切る。
+    // 8s 経過時に reject されると React Query 側で retry: 1 が走り、それでも失敗なら
+    // 上位の useFeedPage が空 Map を返し、feed.tsx は post 本体だけ表示する
+    // (= 完全 hang は絶対しない設計)。
+    const { data, error } = await withApiTimeout(
+      supabase.rpc('get_feed_page', {
+        p_post_ids: validIds,
+        p_user_id: safeUserId,
+      }),
+      'feedPage.get_feed_page',
+      FEED_PAGE_RPC_TIMEOUT_MS,
+    );
     if (error) {
       console.warn('[fetchFeedPage] rpc error:', error.message);
       return [];

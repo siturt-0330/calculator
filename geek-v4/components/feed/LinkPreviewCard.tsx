@@ -60,7 +60,17 @@ export function LinkPreviewCard({ url }: { url: string }) {
       overflow: 'hidden',
     }}>
       {data.image_url && (
-        <ProgressiveImage uri={data.image_url} width={'100%' as unknown as number} height={140} radius={0} lazy />
+        // LinkPreviewCard は外部 CDN URL を扱うことが多いので thumbedUrl は no-op になる
+        // ことが多いが、Supabase 起源の場合に備えて 480 指定。OG image は元から最大幅
+        // 1200 程度なので 480 で表示 (140px 高 × ~720 幅) には十分。
+        <ProgressiveImage
+          uri={data.image_url}
+          width={'100%' as unknown as number}
+          height={140}
+          radius={0}
+          lazy
+          thumbWidth={480}
+        />
       )}
       <View style={{ padding: SP['3'], gap: 2 }}>
         {data.site_name && (

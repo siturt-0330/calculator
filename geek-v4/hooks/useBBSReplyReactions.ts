@@ -1,3 +1,8 @@
+/**
+ * @deprecated since migration 0075 (2026-05-28). BBS replies are unified into comments,
+ *   and reactions migrated to comment_reactions table. Use `hooks/useCommentReactions.ts`
+ *   (created in U3) for any new code. To be removed in 0080.
+ */
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { attachChannel } from '../lib/realtime';

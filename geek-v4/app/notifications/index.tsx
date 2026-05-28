@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNotifications } from '../../hooks/useNotifications';
+import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { TopBar } from '../../components/nav/TopBar';
 import { BackButton } from '../../components/nav/BackButton';
 import { PressableScale } from '../../components/ui/PressableScale';
@@ -82,6 +83,9 @@ export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { notifications, loading: isLoading, markAllRead } = useNotifications();
+  // Smart skeleton timing — skeleton only after 200ms of continuous loading.
+  // <200ms loads (cache hits) skip skeleton entirely to avoid flash.
+  const showSkeleton = useDelayedLoading(isLoading && notifications.length === 0, 200);
 
   // 通知画面を開いたタイミングで既読化
   useEffect(() => {
@@ -109,11 +113,13 @@ export default function NotificationsScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: C.bg }}>
         <TopBar title="通知" left={<BackButton />} />
-        <View>
-          {Array.from({ length: 6 }).map((_, i) => (
-            <NotificationSkeleton key={`skel-notif-${i}`} />
-          ))}
-        </View>
+        {showSkeleton && (
+          <View>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <NotificationSkeleton key={`skel-notif-${i}`} />
+            ))}
+          </View>
+        )}
       </View>
     );
   }

@@ -1,39 +1,37 @@
 import { useMemo } from 'react';
 import { View, Text, ScrollView } from 'react-native';
-import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { BackButton } from '../../components/nav/BackButton';
-import { PressableScale } from '../../components/ui/PressableScale';
 import { Spinner } from '../../components/ui/Spinner';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../stores/authStore';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
-import { Icon } from '../../constants/icons';
 import {
-  TIERS,
   computeTrustBreakdown,
   type ProfileLike,
   type TrustComponent,
-  type TrustTier,
 } from '../../lib/trust/score';
+
+// ============================================================
+// /settings/trust-score
+// ------------------------------------------------------------
+// 2026-05 改修: ティアの肩書 (新参者/常連/...) は UI から非表示。
+// 代わりに「内部スコア (0-100)」を numeric で表示し、
+// 何のために存在するかを説明する画面に簡素化。
+//
+// サーバ側 (anti-spam: コメント投稿の min trust score 等) は
+// lib/trust/score.ts の computeTrustBreakdown を引き続き利用する。
+// ============================================================
 
 type TrustProfileRow = ProfileLike & {
   id: string;
   trust_score: number | null;
 };
 
-const ACTIONS: { emoji: string; label: string; hint: string; route: string }[] = [
-  { emoji: '📝', label: '投稿する', hint: '+0.5pt／件', route: '/post/create' },
-  { emoji: '💬', label: 'スレッドに返信する', hint: '+0.4pt／件', route: '/bbs' },
-  { emoji: '🏠', label: 'コミュニティに参加', hint: '新しい人と出会う', route: '/community/discover' },
-  { emoji: '👋', label: 'プロフィール完成', hint: 'あなたを伝えよう', route: '/settings/profile-edit' },
-];
-
 export default function TrustScoreScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const user = useAuthStore((s) => s.user);
 
   const {
@@ -99,11 +97,9 @@ export default function TrustScoreScreen() {
           }}
           showsVerticalScrollIndicator={false}
         >
-          <Hero breakdown={breakdown} />
-          <NextTier breakdown={breakdown} />
+          <Hero score={breakdown.score} />
+          <About />
           <Breakdown components={breakdown.components} />
-          <ActionList router={router} />
-          <TierLadder currentKey={breakdown.tier.key} />
           <Disclaimer />
         </ScrollView>
       )}
@@ -111,9 +107,8 @@ export default function TrustScoreScreen() {
   );
 }
 
-// ── Hero gauge ───────────────────────────────────────────────────
-function Hero({ breakdown }: { breakdown: ReturnType<typeof computeTrustBreakdown> }) {
-  const { score, tier } = breakdown;
+// ── Hero (numeric score のみ) ────────────────────────────────────
+function Hero({ score }: { score: number }) {
   const pct = Math.min(Math.max(score, 0), 100);
   return (
     <View
@@ -128,20 +123,19 @@ function Hero({ breakdown }: { breakdown: ReturnType<typeof computeTrustBreakdow
         gap: SP['4'],
       }}
     >
-      <Text
-        style={{
-          fontSize: 64,
-          fontWeight: '900',
-          color: tier.color,
-          lineHeight: 70,
-          letterSpacing: -2,
-        }}
-      >
-        {score}
-      </Text>
-      <View style={{ alignItems: 'center', gap: 2 }}>
-        <Text style={{ fontSize: 28 }}>{tier.emoji}</Text>
-        <Text style={[T.h3, { color: tier.color }]}>{tier.name}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+        <Text
+          style={{
+            fontSize: 64,
+            fontWeight: '900',
+            color: C.text,
+            lineHeight: 70,
+            letterSpacing: -2,
+          }}
+        >
+          {score}
+        </Text>
+        <Text style={[T.body, { color: C.text3 }]}>/ 100</Text>
       </View>
       <View
         style={{
@@ -159,72 +153,36 @@ function Hero({ breakdown }: { breakdown: ReturnType<typeof computeTrustBreakdow
             top: 0,
             bottom: 0,
             width: `${pct}%`,
-            backgroundColor: tier.color,
+            backgroundColor: C.accent,
             borderRadius: R.full,
           }}
         />
-      </View>
-      <View style={{ width: '100%', gap: SP['1'], marginTop: SP['2'] }}>
-        {tier.perks.map((p) => (
-          <View key={p} style={{ flexDirection: 'row', gap: SP['2'], alignItems: 'flex-start' }}>
-            <Text style={[T.small, { color: tier.color, lineHeight: 18 }]}>・</Text>
-            <Text style={[T.small, { color: C.text2, flex: 1 }]}>{p}</Text>
-          </View>
-        ))}
       </View>
     </View>
   );
 }
 
-// ── Next tier progress ───────────────────────────────────────────
-function NextTier({ breakdown }: { breakdown: ReturnType<typeof computeTrustBreakdown> }) {
-  const { score, tier, nextTier, pointsToNext } = breakdown;
-  if (!nextTier) {
-    return (
-      <View
-        style={{
-          paddingVertical: SP['3'],
-          paddingHorizontal: SP['4'],
-          backgroundColor: tier.color + '1a',
-          borderRadius: R.lg,
-          borderWidth: 1,
-          borderColor: tier.color + '4d',
-          alignItems: 'center',
-        }}
-      >
-        <Text style={[T.bodyB, { color: tier.color }]}>最高ティアに到達しました 🎉</Text>
-      </View>
-    );
-  }
-  // 現在のティア下限 → 次のティア下限 の進捗
-  const lower = tier.min;
-  const upper = nextTier.min;
-  const progress = Math.min(Math.max((score - lower) / (upper - lower), 0), 1);
+// ── About (何のためのスコアか) ───────────────────────────────────
+function About() {
   return (
-    <View style={{ gap: SP['2'] }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <Text style={[T.smallM, { color: C.text2 }]}>
-          次のティアまで あと <Text style={[T.bodyB, { color: nextTier.color }]}>{pointsToNext}</Text> pt
-        </Text>
-        <Text style={[T.small, { color: C.text3 }]}>
-          {nextTier.emoji} {nextTier.name}
-        </Text>
-      </View>
-      <View
-        style={{ height: 6, borderRadius: R.full, backgroundColor: C.bg3, overflow: 'hidden' }}
-      >
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: `${Math.round(progress * 100)}%`,
-            backgroundColor: nextTier.color,
-            borderRadius: R.full,
-          }}
-        />
-      </View>
+    <View
+      style={{
+        padding: SP['4'],
+        backgroundColor: C.bg2,
+        borderRadius: R.lg,
+        borderWidth: 1,
+        borderColor: C.border,
+        gap: SP['2'],
+      }}
+    >
+      <Text style={[T.h4, { color: C.text }]}>このスコアについて</Text>
+      <Text style={[T.body, { color: C.text2, lineHeight: 22 }]}>
+        Geek の安全性を保つため、内部スコアでユーザーの活動傾向を判定しています。
+        スコアは自分以外には公開されません。
+      </Text>
+      <Text style={[T.small, { color: C.text3, lineHeight: 18 }]}>
+        投稿・いいね・コメント・利用日数で加算され、報告を受けると減算されます。
+      </Text>
     </View>
   );
 }
@@ -300,106 +258,6 @@ function ComponentRow({ comp }: { comp: TrustComponent }) {
         />
       </View>
       <Text style={[T.caption, { color: C.text3 }]}>{comp.hint}</Text>
-    </View>
-  );
-}
-
-// ── Action list ──────────────────────────────────────────────────
-function ActionList({ router }: { router: ReturnType<typeof useRouter> }) {
-  const ChevronR = Icon.chevronR;
-  return (
-    <View style={{ gap: SP['3'] }}>
-      <Text style={[T.h4, { color: C.text }]}>今すぐスコアを上げる</Text>
-      <View
-        style={{
-          backgroundColor: C.bg2,
-          borderRadius: R.lg,
-          borderWidth: 1,
-          borderColor: C.border,
-          overflow: 'hidden',
-        }}
-      >
-        {ACTIONS.map((a, i) => (
-          <View key={a.route}>
-            <PressableScale
-              onPress={() => router.push(a.route as never)}
-              haptic="tap"
-              scaleValue={0.99}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                paddingHorizontal: SP['4'],
-                paddingVertical: SP['3'],
-                gap: SP['3'],
-              }}
-            >
-              <Text style={{ fontSize: 22 }}>{a.emoji}</Text>
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={[T.bodyM, { color: C.text }]}>{a.label}</Text>
-                <Text style={[T.caption, { color: C.text3 }]}>{a.hint}</Text>
-              </View>
-              <ChevronR size={16} color={C.text4} strokeWidth={2.2} />
-            </PressableScale>
-            {i < ACTIONS.length - 1 && (
-              <View style={{ height: 1, backgroundColor: C.divider, marginLeft: SP['4'] + 22 + SP['3'] }} />
-            )}
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-// ── Tier ladder ──────────────────────────────────────────────────
-function TierLadder({ currentKey }: { currentKey: TrustTier['key'] }) {
-  return (
-    <View style={{ gap: SP['3'] }}>
-      <Text style={[T.h4, { color: C.text }]}>ティア一覧</Text>
-      <View style={{ gap: SP['2'] }}>
-        {TIERS.map((tier) => {
-          const isCurrent = tier.key === currentKey;
-          return (
-            <View
-              key={tier.key}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                padding: SP['3'],
-                backgroundColor: C.bg2,
-                borderRadius: R.lg,
-                borderWidth: isCurrent ? 1.5 : 1,
-                borderColor: isCurrent ? tier.color : C.border,
-                gap: SP['3'],
-              }}
-            >
-              <Text style={{ fontSize: 24 }}>{tier.emoji}</Text>
-              <View style={{ flex: 1, gap: 2 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-                  <Text style={[T.bodyB, { color: tier.color }]}>{tier.name}</Text>
-                  <Text style={[T.caption, { color: C.text3 }]}>
-                    {tier.min}–{tier.max}
-                  </Text>
-                  {isCurrent && (
-                    <View
-                      style={{
-                        paddingHorizontal: 6,
-                        paddingVertical: 1,
-                        borderRadius: R.full,
-                        backgroundColor: tier.color,
-                      }}
-                    >
-                      <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>現在</Text>
-                    </View>
-                  )}
-                </View>
-                <Text style={[T.small, { color: C.text2 }]} numberOfLines={1}>
-                  {tier.perks[0]}
-                </Text>
-              </View>
-            </View>
-          );
-        })}
-      </View>
     </View>
   );
 }

@@ -102,9 +102,9 @@ export default function NotificationsOnboarding() {
       }}
     >
       <View style={{ flex: 1, gap: SP['4'] }}>
-        {/* 最後のステップ — 進捗 5/5 を表示して達成感を演出 */}
+        {/* 最後のステップ — 進捗 4/4 を表示して達成感を演出 */}
         <View style={{ alignItems: 'flex-end' }}>
-          <StepProgress step={5} />
+          <StepProgress step={4} />
         </View>
         <View style={{ gap: SP['2'] }}>
           <Text style={[T.h1, { color: C.text }]}>もうすぐ完了！通知を受け取ろう</Text>
@@ -134,7 +134,7 @@ export default function NotificationsOnboarding() {
       </View>
 
       <View style={{ gap: SP['3'] }}>
-        <Button label="通知を許可する" onPress={() => finish(true)} loading={saving} haptic="success" />
+        <Button label="通知を許可する" onPress={() => finish(true)} loading={saving} disabled={saving} haptic="success" />
         <Button label="あとで設定する" onPress={() => finish(false)} variant="ghost" disabled={saving} />
       </View>
     </View>

@@ -24,8 +24,9 @@ type Props = {
 
 export function AlbumCard({ album, onPress }: Props) {
   const safeCover = album.cover_url ? sanitizeUrl(album.cover_url) : null;
-  // 240px 程度に thumb 化 (card は 大きくないが retina 用に余裕)
-  const cover = safeCover ? thumbedUrl(safeCover, 480) : null;
+  // cover thumb は 64×64 表示。retina @3x で 192 あれば十分鮮明、160 でも実害ゼロ。
+  // 旧 480 は 7.5 倍過剰で 1 件 ~60KB 余分 (album 一覧 20 件で 1.2MB の差)。
+  const cover = safeCover ? thumbedUrl(safeCover, 160) : null;
   const sharedCount = album.shared_with_user_ids.length;
 
   return (

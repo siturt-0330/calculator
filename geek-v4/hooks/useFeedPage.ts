@@ -18,10 +18,11 @@
 //   - fullPosts が空のときは feed.tsx 側で旧 hook 群を fallback する設計が可能
 //   - ENV flag (EXPO_PUBLIC_FEED_PAGE_RPC=0) で強制的に旧経路へ戻せる
 // ============================================================
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { fetchFeedPage, type FeedPagePost } from '../lib/api/feedPage';
+import { stableKeyFor } from '../lib/utils/queryKey';
 
 // ENV flag: '0' を立てると useFeedPage は disable (空 Map を返す)。
 // feed.tsx 側でこの値を見て旧 hook 群へ切り替えるためのキルスイッチ。
@@ -45,8 +46,11 @@ export function useFeedPage(postIds: string[]): UseFeedPageResult {
   const userId = useAuthStore((s) => s.user?.id ?? null);
 
   // postIds の中身に依存して安定化する key。中身が同じなら参照不変。
+  // パフォーマンス最適化 (2026-05-28): 50 件超のとき djb2 hash に畳む。
+  // 旧版は raw join のため、無限スクロールで postIds が 100-200 件になると
+  // queryKey 比較に毎 render コストがかかり、devtools も重くなっていた。
   const sortedKey = useMemo(
-    () => postIds.slice().sort().join(','),
+    () => stableKeyFor(postIds.slice().sort()),
     [postIds],
   );
 
@@ -66,6 +70,12 @@ export function useFeedPage(postIds: string[]): UseFeedPageResult {
     staleTime: 30_000,
     // RPC が落ちても旧 hook 群へフォールバックできるよう、retry は控えめに
     retry: 1,
+    // ★ パフォーマンス改善 (2026-05-28):
+    //   無限スクロール中は postIds が追加されるたびに sortedKey が変わるため
+    //   cache miss → 一瞬 fullPosts=空 になり like / save / reaction の状態が
+    //   全 post で「false」表示に flicker していた。keepPreviousData で前回
+    //   結果を表示しながら裏 fetch する。データが揃った瞬間に切替わる。
+    placeholderData: keepPreviousData,
   });
 
   const fullPosts = useMemo(() => {

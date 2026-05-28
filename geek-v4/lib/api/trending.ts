@@ -54,9 +54,51 @@ export async function fetchTrendingTags(
   const spec = WINDOW_SPEC[window];
 
   const now = Date.now();
-  const since = new Date(now - spec.totalMs).toISOString();
   const splitAt = now - spec.splitMs;
 
+  // ----------------------------------------------------------------
+  // Audit G#7 (2026-05): 24h window は mv_trending_tags 経由に切替。
+  // 0071_trending_cron.sql で 5 分毎 refresh を schedule 済み。
+  // MV columns: tag, recent_count, last_seen
+  //   - recent_count = 24h 以内に投稿された全件 (recent + prev に該当)
+  //   - last_seen   = タグが最後に投稿に出現した時刻
+  // MV は時間 split (前半/後半) を保持しないので、spike 判定は
+  // recent_count を「全体」、prev=0 として近似する (acceleration = recent_count,
+  // 比率は recent_count / 1 で大きく出るが MIN_RECENT_FOR_SPIKE['24h']=5 で
+  // false positive は抑えられる)。oldest は (now - 24h) を入れて span を補完。
+  //
+  // 1h / 6h は MV では精度が出ない (MV 自体が 24h 集計) ので、posts table
+  // の per-window 集計を継続。trending dashboard で 3 window 並列フェッチする
+  // ケースだけは posts を読む。
+  // ----------------------------------------------------------------
+  if (window === '24h') {
+    const { data, error } = await supabase
+      .from('mv_trending_tags')
+      .select('tag, recent_count, last_seen')
+      .order('recent_count', { ascending: false })
+      .limit(limit * 4); // candidate を多めに取って下流の diversity / sort で再ランクできるように
+    if (error) return [];
+
+    const counts: Record<string, TagCounts> = {};
+    const fallbackOldest = now - spec.totalMs;
+    for (const row of (data ?? []) as Array<{ tag: string | null; recent_count: number | null; last_seen: string | null }>) {
+      if (!row.tag) continue;
+      if (isGossipBlocked(row.tag)) continue;
+      const recent = row.recent_count ?? 0;
+      const lastSeenTs = row.last_seen ? new Date(row.last_seen).getTime() : now;
+      counts[row.tag] = {
+        recent,
+        prev: 0,             // MV は time-split を保持しない (現状の制約)
+        oldest: fallbackOldest, // span ≈ window 全体で固定
+        newest: Number.isFinite(lastSeenTs) ? lastSeenTs : now,
+      };
+    }
+
+    return computeAndFinalize(counts, opts, limit, window);
+  }
+
+  // ----- 1h / 6h: 従来通り posts table を集計 -----
+  const since = new Date(now - spec.totalMs).toISOString();
   const { data, error } = await supabase
     .from('posts')
     .select('tag_names, created_at')
@@ -80,13 +122,26 @@ export async function fetchTrendingTags(
     }
   }
 
+  return computeAndFinalize(counts, opts, limit, window);
+}
+
+// ============================================================
+// internal: candidate 絞り込み + tags.post_count fetch + pure logic 委譲 + diversity
+// ============================================================
+// 24h (MV 経路) と 1h/6h (posts 経路) の両方で共通の後段処理。
+async function computeAndFinalize(
+  counts: Record<string, TagCounts>,
+  opts: FetchTrendingOptions,
+  limit: number,
+  window: TimeWindow,
+): Promise<TrendingTag[]> {
   // 候補を絞る (上位 limit*4 まで)
   const candidateTags = Object.keys(counts)
     .sort((a, b) => (counts[b]!.recent + counts[b]!.prev) - (counts[a]!.recent + counts[a]!.prev))
     .slice(0, limit * 4);
 
   // tags table から全期間 post_count を引いてくる (UI で「累計人気」を見せる用)
-  let totalsMap: Record<string, number> = {};
+  const totalsMap: Record<string, number> = {};
   if (candidateTags.length > 0) {
     const { data: tagRows } = await supabase
       .from('tags')

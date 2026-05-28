@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
+  useAnimatedScrollHandler,
   withTiming,
   withSpring,
   withSequence,
@@ -15,6 +16,7 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { useBBS, useMyCommunityBBS } from '../../hooks/useBBS';
+import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import type { BBSThread } from '../../types/models';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { HighlightedText } from '../../components/ui/HighlightedText';
@@ -73,6 +75,9 @@ export default function BBSScreen() {
   const loading = scopedSource.loading;
   const refreshing = scopedSource.refreshing;
   const refresh = scopedSource.refresh;
+  // Smart skeleton timing — skeleton only after 200ms of continuous loading.
+  // <200ms loads (cache hits) skip skeleton entirely to avoid flash.
+  const showSkeleton = useDelayedLoading(loading, 200);
 
   // 既存 file 内に local 変数 `t` (setTimeout / loop param) があるので tr に rename
   const tr = useT();
@@ -229,8 +234,9 @@ export default function BBSScreen() {
 
   // ===== 「上に戻る」ボタン用: scroll 位置に応じて表示を fade in/out =====
   // FlashList の ref を保持して scrollToOffset で先頭に戻す。
-  // reanimated の useSharedValue + withTiming で fade in/out (native driver でない
-  // が opacity / transform は worklet-free でも十分軽い)。
+  // useAnimatedScrollHandler で scroll event を UI thread 直結に。
+  // 旧版は JS handler 経由でフレーム毎に shared value にアクセスしており、
+  // 長スレで JS bridge を往復していた。worklet 化で scroll jank を排除。
   const listRef = useRef<FlashList<{ item: BBSThread; score: number }>>(null);
   const backToTopOpacity = useSharedValue(0);
   const backToTopStyle = useAnimatedStyle(() => ({
@@ -240,17 +246,20 @@ export default function BBSScreen() {
     ],
   }));
   // 400px 超で表示。pull-to-refresh の負値域では出さない。
-  const handleScroll = (e: { nativeEvent: { contentOffset: { y: number } } }) => {
-    const y = e.nativeEvent.contentOffset.y;
-    const shouldShow = y > 400;
-    const target = shouldShow ? 1 : 0;
-    if (backToTopOpacity.value !== target) {
-      backToTopOpacity.value = withTiming(target, {
-        duration: 180,
-        easing: Easing.out(Easing.quad),
-      });
-    }
-  };
+  // worklet 内で前回値と比較し、変化したときだけ withTiming を発火する。
+  const handleScroll = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      'worklet';
+      const y = e.contentOffset.y;
+      const target = y > 400 ? 1 : 0;
+      if (backToTopOpacity.value !== target) {
+        backToTopOpacity.value = withTiming(target, {
+          duration: 180,
+          easing: Easing.out(Easing.quad),
+        });
+      }
+    },
+  });
   const scrollToTop = () => {
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
   };
@@ -514,9 +523,11 @@ export default function BBSScreen() {
         )) as ListRenderItem<{ item: BBSThread; score: number }>}
         ListEmptyComponent={
           loading ? (
-            <View>
-              {Array.from({ length: 6 }).map((_, i) => <ThreadCardSkeleton key={`skel-thread-${i}`} />)}
-            </View>
+            showSkeleton ? (
+              <View>
+                {Array.from({ length: 6 }).map((_, i) => <ThreadCardSkeleton key={`skel-thread-${i}`} />)}
+              </View>
+            ) : null
           ) : (
             <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'], paddingTop: SP['4'] }}>
               {showResults ? (

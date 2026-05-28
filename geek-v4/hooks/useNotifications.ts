@@ -1,68 +1,26 @@
-import { useEffect } from 'react';
-import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { supabase } from '../lib/supabase';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchNotifications, markAllRead } from '../lib/api/notifications';
 import { useAuthStore } from '../stores/authStore';
+import { useToastStore } from '../stores/toastStore';
 import type { Notification } from '../types/models';
 
 const NOTIF_KEY = ['notifications'];
 
 // ============================================================
-// Realtime subscription manager (singleton)
+// useNotifications — 通知 cache + 既読 mutation
 // ============================================================
-// useNotifications() は TabBar / Feed / Mypage / Notifications 画面など
-// 複数の場所から呼ばれる。各呼び出しごとに channel(`notifications:${userId}`)
-// を作っていたが、Supabase Client は同名 channel を再利用するため、
-// 2 回目以降の .on() 呼び出しが「subscribe 後の追加は不可」で全て失敗していた
-// (コンソールに大量エラー → CPU 食い潰しでブラウザがハング)。
+// 旧構成 (Audit E#3 = parallel singleton):
+//   このファイルが `supabase.channel('notifications:${userId}').on(...).subscribe()`
+//   を module-scope で持ち、複数呼び出しから refCount で共有していた。
+//   attachChannel singleton と完全に独立した「2 つ目の channel manager」が存在し、
+//   MAX_CONCURRENT_CHANNELS の集計から漏れる ghost channel になっていた。
 //
-// 修正: subscribe はモジュールスコープで一度だけ実行する。複数の hook が同時に
-//       useEffect を走らせても、すでに subscribe 済みなら no-op で返す。
+// 新構成 (Audit E#3 + E#5 対策, 2026-05-28):
+//   notifications の realtime は `hooks/useUserChannel.ts` の 1 user-wide channel
+//   (`user:${userId}`) の `.on(notifications, ...)` で受信し、cache を直接更新する。
+//   このファイルは React Query のみ管理。
+//   useUserChannel() は app/_layout.tsx の RealtimeRoot で 1 度だけ mount される。
 // ============================================================
-
-let activeChannel: ReturnType<typeof supabase.channel> | null = null;
-let activeUserId: string | null = null;
-let refCount = 0;
-
-function attachRealtime(userId: string, qc: QueryClient) {
-  if (activeUserId === userId && activeChannel) {
-    refCount++;
-    return;
-  }
-  // 別ユーザーへ切り替わった場合は前のチャンネルを破棄
-  if (activeChannel) {
-    void supabase.removeChannel(activeChannel);
-    activeChannel = null;
-    activeUserId = null;
-  }
-  activeUserId = userId;
-  refCount = 1;
-  activeChannel = supabase
-    .channel(`notifications:${userId}`)
-    .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
-      (payload) => {
-        const newRow = payload.new as Notification;
-        qc.setQueryData<Notification[]>(NOTIF_KEY, (old) => [newRow, ...(old ?? [])]);
-      },
-    )
-    .on(
-      'postgres_changes',
-      { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
-      () => qc.invalidateQueries({ queryKey: NOTIF_KEY }),
-    )
-    .subscribe();
-}
-
-function detachRealtime() {
-  refCount = Math.max(0, refCount - 1);
-  if (refCount === 0 && activeChannel) {
-    void supabase.removeChannel(activeChannel);
-    activeChannel = null;
-    activeUserId = null;
-  }
-}
 
 export function useNotifications() {
   const qc = useQueryClient();
@@ -71,15 +29,11 @@ export function useNotifications() {
   const q = useQuery({
     queryKey: NOTIF_KEY,
     queryFn: fetchNotifications,
-    staleTime: 30_000,
+    // realtime INSERT/UPDATE で随時 cache が更新されるため background poll は最低限。
+    // 60s = 取りこぼし時の safety-net (tab 非 focus 等で realtime が落ちた場合)。
+    staleTime: 60_000,
     enabled: !!userId,
   });
-
-  useEffect(() => {
-    if (!userId) return;
-    attachRealtime(userId, qc);
-    return () => detachRealtime();
-  }, [userId, qc]);
 
   const notifications = (q.data ?? []) as Notification[];
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -88,11 +42,37 @@ export function useNotifications() {
     notifications,
     unreadCount,
     loading: q.isLoading,
+    // ============================================================
+    // markAllRead — 楽観 update + snapshot/revert
+    // ============================================================
+    // 改訂理由 (2026-05-28):
+    //   旧版は server RTT 完了 (await markAllRead()) 後に setQueryData → UI 反映に
+    //   数百 ms〜数秒のラグがあった。さらに失敗時の revert がないため、ネットワーク
+    //   エラーで「既読化したつもりが未読のまま」という状態の食い違いが残っていた。
+    //   pattern を useReactionToggle 等に合わせる:
+    //     1) 即時 optimistic update (UI 反映 0ms)
+    //     2) snapshot を保持
+    //     3) server 失敗時は snapshot で revert + toast
+    //     4) realtime UPDATE で server-truth 確定
+    // ============================================================
     markAllRead: async () => {
-      await markAllRead();
+      const prev = qc.getQueryData<Notification[]>(NOTIF_KEY);
+      // 1) optimistic: 即時に全件 read=true 化
       qc.setQueryData<Notification[]>(NOTIF_KEY, (old) =>
         (old ?? []).map((n) => ({ ...n, read: true })),
       );
+      try {
+        await markAllRead();
+      } catch (e) {
+        // 2) revert
+        if (prev !== undefined) qc.setQueryData<Notification[]>(NOTIF_KEY, prev);
+        const msg = e instanceof Error ? e.message : '';
+        useToastStore.getState().show(
+          msg ? `既読化に失敗しました: ${msg}` : '既読化に失敗しました',
+          'error',
+        );
+        throw e;
+      }
     },
   };
 }
