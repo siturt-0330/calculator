@@ -12,10 +12,13 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   withSequence,
+  withSpring,
   interpolateColor,
+  Easing,
 } from 'react-native-reanimated';
 import { useQueryClient } from '@tanstack/react-query';
 import { useBBSThread } from '../../hooks/useBBSThread';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { useBBSReplyReactions, useBBSReplyReactionToggle } from '../../hooks/useBBSReplyReactions';
 import { useIsCommunityMod } from '../../hooks/useIsCommunityMod';
 import { MemeReactionPicker } from '../../components/feed/MemeReactionPicker';
@@ -346,6 +349,31 @@ export default function BBSThreadScreen() {
   const SendIcon = Icon.send;
   const BackIcon = Icon.arrowL;
 
+  // ============================================================
+  // Entering animation — Reddit iOS 風 "lift up & expand" 演出
+  // ------------------------------------------------------------
+  // post/[id] と同じパラメータ (damping 22 / stiffness 240 / mass 0.7) で統一。
+  // BBS スレッドも modal slide-up (380ms) + scale 0.94 → 1.0 + fade で
+  // 「タップしたスレッドカードが lift up」する錯視を作る。
+  // ReducedMotion: 150ms timing で fade のみ。
+  // ============================================================
+  const reduceMotion = useReducedMotion();
+  const enterProgress = useSharedValue(0);
+  useEffect(() => {
+    if (reduceMotion) {
+      enterProgress.value = withTiming(1, { duration: 150, easing: Easing.out(Easing.cubic) });
+    } else {
+      enterProgress.value = withSpring(1, { damping: 22, stiffness: 240, mass: 0.7 });
+    }
+  }, [reduceMotion, enterProgress]);
+  const enterStyle = useAnimatedStyle(() => {
+    if (reduceMotion) return { opacity: enterProgress.value };
+    return {
+      opacity: enterProgress.value,
+      transform: [{ scale: 0.94 + enterProgress.value * 0.06 }],
+    };
+  });
+
   const { thread, replies, loading, refreshing, refresh, reply, error } = useBBSThread(id ?? '');
   const { show: showToast } = useToastStore();
 
@@ -490,25 +518,26 @@ export default function BBSThreadScreen() {
   };
 
   // route param validation 失敗 → cache 汚染を防ぐため早期 return
+  // 早期 return も entering animation の対象にする (一貫した lift-up 体感)。
   if (!id) {
     return (
-      <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <Animated.View style={[{ flex: 1, backgroundColor: C.bg }, enterStyle]}>
         <Header insets={insets} router={router} BackIcon={BackIcon} />
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: SP['6'] }}>
           <Text style={[T.body, { color: C.text2 }]}>無効な URL です</Text>
         </View>
-      </View>
+      </Animated.View>
     );
   }
 
   if (loading) {
     return (
-      <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <Animated.View style={[{ flex: 1, backgroundColor: C.bg }, enterStyle]}>
         <Header insets={insets} router={router} BackIcon={BackIcon} />
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <Spinner />
         </View>
-      </View>
+      </Animated.View>
     );
   }
 
@@ -516,7 +545,7 @@ export default function BBSThreadScreen() {
     const isNotFound = !error && !thread;
     const errMsg = error instanceof Error ? error.message : String(error ?? '');
     return (
-      <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <Animated.View style={[{ flex: 1, backgroundColor: C.bg }, enterStyle]}>
         <Header insets={insets} router={router} BackIcon={BackIcon} />
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: SP['6'], gap: SP['4'] }}>
           <Text style={{ fontSize: 56 }}>{isNotFound ? '🔍' : '📭'}</Text>
@@ -550,7 +579,7 @@ export default function BBSThreadScreen() {
             </PressableScale>
           </View>
         </View>
-      </View>
+      </Animated.View>
     );
   }
 
@@ -581,6 +610,7 @@ export default function BBSThreadScreen() {
   };
 
   return (
+    <Animated.View style={[{ flex: 1, backgroundColor: C.bg }, enterStyle]}>
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: C.bg }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -905,6 +935,7 @@ export default function BBSThreadScreen() {
         picked={pickerMine}
       />
     </KeyboardAvoidingView>
+    </Animated.View>
   );
 }
 

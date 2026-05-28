@@ -5,6 +5,14 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { getLastViewed, setLastViewed } from '../../lib/utils/lastViewed';
 import { fetchPostById, fetchCommunitiesForPosts } from '../../lib/api/posts';
 import { fetchSimilarPosts } from '../../lib/api/similarPosts';
@@ -61,6 +69,43 @@ export default function PostDetailScreen() {
   const BackIcon = Icon.arrowL;
   // テーマ購読 — light/dark 切替で post 詳細が自動再 render
   const C = useColors();
+
+  // ============================================================
+  // Entering animation — Reddit iOS 風 "lift up & expand" 演出
+  // ------------------------------------------------------------
+  // タップしたカードが画面下から「持ち上がってきて広がる」錯視を演出。
+  //   - modal slide-up (Stack.Screen options: slide_from_bottom 380ms) で
+  //     画面全体が下から上にスライドしてくる
+  //   - 同時に screen root をこの spring で 0.94 → 1.0 + opacity 0 → 1
+  //     で展開させると、スライドと scale-up が重なり「カードが lift up」
+  //   - ReducedMotion ON: 150ms timing で fade のみ (scale 無し / spring 無し)
+  // shared value で worklet 駆動 — React state を使わないので大量 mount でも軽い。
+  //
+  // mount 直後に発火させると Stack の modal slide と同時に進んでしまい、
+  // 場合によっては開始 frame で scale 0.94 が見える前に詳細画面まで遷移が
+  // 完了してしまう (= 効果が消える)。よって `useEffect([])` の即時起動で
+  // 良いが、ReducedMotion 切替時にも再評価が必要なので依存に reduceMotion。
+  // ============================================================
+  const reduceMotion = useReducedMotion();
+  const enterProgress = useSharedValue(0);
+  useEffect(() => {
+    if (reduceMotion) {
+      enterProgress.value = withTiming(1, { duration: 150, easing: Easing.out(Easing.cubic) });
+    } else {
+      enterProgress.value = withSpring(1, { damping: 22, stiffness: 240, mass: 0.7 });
+    }
+  }, [reduceMotion, enterProgress]);
+  const enterStyle = useAnimatedStyle(() => {
+    if (reduceMotion) {
+      // ReducedMotion: 拡大演出は外し fade のみ (scale 1 固定)
+      return { opacity: enterProgress.value };
+    }
+    return {
+      opacity: enterProgress.value,
+      // 0.94 → 1.0 (= 0.94 + progress * 0.06)
+      transform: [{ scale: 0.94 + enterProgress.value * 0.06 }],
+    };
+  });
 
   // ============================================================
   // 既読/未読ハイライト (issue #18)
@@ -315,25 +360,27 @@ export default function PostDetailScreen() {
   };
 
   // route param validation 失敗 → cache 汚染を防ぐため早期 return
+  // 早期 return も entering animation の対象にする (modal slide-up と組み合わさり
+  // 「エラー画面が下から ぬっ と出る」一貫した体感)。
   if (!id) {
     return (
-      <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: SP['6'] }}>
+      <Animated.View style={[{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: SP['6'] }, enterStyle]}>
         <Text style={[T.body, { color: C.text2 }]}>無効な URL です</Text>
-      </View>
+      </Animated.View>
     );
   }
 
   if (postLoading) {
     return (
-      <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' }}>
+      <Animated.View style={[{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' }, enterStyle]}>
         <Spinner />
-      </View>
+      </Animated.View>
     );
   }
 
   if (postError || !post) {
     return (
-      <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: SP['6'], gap: SP['3'] }}>
+      <Animated.View style={[{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: SP['6'], gap: SP['3'] }, enterStyle]}>
         {/* 装飾絵文字 (📭) を撤去 — テキストだけで十分意味は通る */}
         <Text style={[T.h3, { color: C.text, textAlign: 'center' }]}>投稿を取得できませんでした</Text>
         <Text style={[T.small, { color: C.text3, textAlign: 'center' }]}>
@@ -352,7 +399,7 @@ export default function PostDetailScreen() {
         >
           <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>戻る</Text>
         </PressableScale>
-      </View>
+      </Animated.View>
     );
   }
 
@@ -623,6 +670,7 @@ export default function PostDetailScreen() {
   );
 
   return (
+    <Animated.View style={[{ flex: 1, backgroundColor: C.bg }, enterStyle]}>
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: C.bg }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -876,5 +924,6 @@ export default function PostDetailScreen() {
         picked={myMemes}
       />
     </KeyboardAvoidingView>
+    </Animated.View>
   );
 }

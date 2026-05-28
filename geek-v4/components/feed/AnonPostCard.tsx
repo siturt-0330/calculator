@@ -40,7 +40,6 @@ import { useIsCommunityMod } from '../../hooks/useIsCommunityMod';
 import type { Poll } from '../../lib/api/polls';
 import { Avatar } from '../ui/Avatar';
 import { formatRelative } from '../../lib/utils/date';
-import { SHADOW } from '../../design/shadows';
 import { sanitizeUrl } from '../../lib/sanitize';
 import { ObsidianSaveButton } from '../ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
@@ -858,7 +857,7 @@ function AnonPostCardInner({
   //   - 背景: bg2 (elevated)
   //   - 角: R.xl
   //   - 細い 1px border (lowTrust 時は amber 強調)
-  //   - subtle shadow (SHADOW.sm)
+  //   - subtle shadow (SHADOW.sm) — press-in で SHADOW.md 相当まで拡張 (Reddit iOS 風)
   //   - 横 padding は feed.tsx 側 (FlashList contentContainer) で吸収するため
   //     card 自体には marginHorizontal を持たせない。
   //   - card 間 gap は marginBottom で確保。
@@ -875,10 +874,41 @@ function AnonPostCardInner({
       maxWidth: 720,
       alignSelf: 'center' as const,
       width: '100%' as const,
-      ...SHADOW.sm,
+      // shadowColor / shadowOffset / shadowRadius は静的 (worklet で扱う必要なし)。
+      // shadowOpacity / elevation だけを worklet 経由で動的に変える (下記参照)。
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 } as const,
+      shadowRadius: 6,
     }),
     [lowTrust],
   );
+
+  // ============================================================
+  // Press feedback — Reddit iOS 風 "lift up"
+  // ------------------------------------------------------------
+  // 押下中: 全カードを scale 0.96 + shadow expand (opacity 0.08→0.18 / elevation 2→5)。
+  //   - 内側 PressableScale の scale 0.94 は本文 Text のみに作用するので、
+  //     カード全体を「凹ませる」には container 側でも scale が必要。
+  //   - 0.96 と 0.94 のネストで本文だけが少し深く凹む subtle な階層感が出る。
+  // 離す: spring で滑らかに戻す (粘らない / 弾みすぎない)。
+  // ReducedMotion: scale / shadow 変化を止め、静的固定。
+  // shared value 駆動なので 100 件 mount でも cheap (React state ではない)。
+  // ============================================================
+  const reduceMotionForCard = useReducedMotion();
+  const pressLift = useSharedValue(0);
+  const animatedShadowStyle = useAnimatedStyle(() => {
+    if (reduceMotionForCard) {
+      // ReducedMotion: 固定 shadow / scale 1 (worklet からは触らない)
+      return { shadowOpacity: 0.08, elevation: 2, transform: [{ scale: 1 }] };
+    }
+    // 0 → 1 で scale 1 → 0.96 / shadowOpacity 0.08 → 0.18 / elevation 2 → 5
+    const liftScale = 1 - pressLift.value * 0.04;
+    return {
+      shadowOpacity: 0.08 + pressLift.value * 0.1,
+      elevation: 2 + pressLift.value * 3,
+      transform: [{ scale: liftScale }],
+    };
+  });
 
   // 本文 Text/Markdown 用 — T.body と body color を結合
   const bodyTextStyle = useMemo(() => [T.body, STYLES.bodyText], []);
@@ -903,7 +933,7 @@ function AnonPostCardInner({
   // hairline divider between posts. Looks more "premium feed" than a
   // floating-card grid on tall screens.
   return (
-    <View style={containerStyle}>
+    <Animated.View style={[containerStyle, animatedShadowStyle]}>
       {/* 低信頼バナー */}
       {lowTrust && (
         <View style={STYLES.lowTrustBanner}>
@@ -1087,13 +1117,27 @@ function AnonPostCardInner({
         </DoubleTapHeart>
       )}
 
-      {/* 本文 — 外側カードの paddingHorizontal を流用 (double-padding 回避) */}
+      {/* 本文 — 外側カードの paddingHorizontal を流用 (double-padding 回避)
+          ★ Reddit iOS 風 press feedback:
+            - scaleValue=0.94 (default 0.96 より dramatic に「凹む」)
+            - onPressIn で pressLift 0 → 1 (Animated.View の shadow が拡張)
+            - onPressOut で spring で戻す
+          tap → 即詳細遷移なので、scale + shadow expand の 1 瞬で「カードが lift up」体感。 */}
       {post.content && !isCwHidden ? (
         <View>
           <PressableScale
             onPress={onComment}
             onLongPress={useQuickReaction ? () => setMemePickerOpen(true) : undefined}
             haptic="tap"
+            scaleValue={0.94}
+            onPressIn={() => {
+              if (reduceMotionForCard) return;
+              pressLift.value = withTiming(1, { duration: 120, easing: Easing.out(Easing.cubic) });
+            }}
+            onPressOut={() => {
+              if (reduceMotionForCard) return;
+              pressLift.value = withSpring(0, SPRING_SNAPPY);
+            }}
           >
             <View style={STYLES.bodyInner}>
               {useMarkdown ? (
@@ -1268,7 +1312,7 @@ function AnonPostCardInner({
         uri={lightboxUri}
         onClose={closeLightbox}
       />
-    </View>
+    </Animated.View>
   );
 }
 

@@ -409,12 +409,21 @@ export default function RootLayout() {
                   />
                   {/* post 詳細は iOS-native の modal slide-up で表示 (別ページ感を解消)。
                       タップした投稿カードが画面下から「上に来る」演出 + 戻ると feed そのまま。
-                      gestureDirection: 'vertical' で下スワイプ close 有効。 */}
+                      gestureDirection: 'vertical' で下スワイプ close 有効。
+                      ★ Reddit iOS 風 "ぬるぬる" 化:
+                        - animationDuration: 380ms — 220ms より少し長くすることで slide が
+                          柔らかく粘る (カードが画面下から上に上がるような体感)。
+                        - animationTypeForReplace: 'push' — 戻り (router.back) 時のリプレース
+                          挙動を push と揃え、不自然な「ピョコ」と消える挙動を抑制。
+                        - 詳細画面ルート側で entering scale 0.94→1.0 + fade を当てており、
+                          modal slide-up と組み合わさって "カードが lift up して展開する" 錯視。 */}
                   <Stack.Screen
                     name="post/[id]"
                     options={{
                       presentation: 'modal',
                       animation: 'slide_from_bottom',
+                      animationDuration: 380,
+                      animationTypeForReplace: 'push',
                       gestureDirection: 'vertical',
                     }}
                   />
@@ -443,12 +452,15 @@ export default function RootLayout() {
                   <Stack.Screen name="corners/map" />
                   <Stack.Screen name="corners/goods" />
                   <Stack.Screen name="corners/friends" />
-                  {/* BBS スレ詳細も同じく modal slide-up (投稿詳細と挙動を統一) */}
+                  {/* BBS スレ詳細も同じく modal slide-up (投稿詳細と挙動を統一) +
+                      Reddit iOS 風 "ぬるぬる" 化 (post/[id] と同パラメータ) */}
                   <Stack.Screen
                     name="bbs/[id]"
                     options={{
                       presentation: 'modal',
                       animation: 'slide_from_bottom',
+                      animationDuration: 380,
+                      animationTypeForReplace: 'push',
                       gestureDirection: 'vertical',
                     }}
                   />
