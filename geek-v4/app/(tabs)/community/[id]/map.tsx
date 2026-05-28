@@ -9,8 +9,8 @@
 import { View, Text, ScrollView, Modal, TextInput, ActivityIndicator, Platform } from 'react-native';
 import { safeOpenUrl } from '../../../../lib/openUrl';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { useState } from 'react';
-import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { C, R, SP, SHADOW } from '../../../../design/tokens';
@@ -22,6 +22,7 @@ import { Spinner } from '../../../../components/ui/Spinner';
 import { ConfirmDialog } from '../../../../components/ui/ConfirmDialog';
 import { Icon } from '../../../../constants/icons';
 import { OfficialBadge } from '../../../../components/community/OfficialBadge';
+import { CommunitySubTabs } from '../../../../components/community/CommunitySubTabs';
 import { useToastStore } from '../../../../stores/toastStore';
 import { useAuthStore } from '../../../../stores/authStore';
 import { fetchCommunity } from '../../../../lib/api/communities';
@@ -63,6 +64,7 @@ function openInMaps(lat: number, lng: number, label: string) {
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const params = useLocalSearchParams();
   const id = typeof params.id === 'string' ? params.id : '';
   const userId = useAuthStore((s) => s.user?.id);
@@ -71,6 +73,20 @@ export default function MapScreen() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<MapLocation | null>(null);
+
+  // サブタブ navigation — 他 sub-tab に飛ぶときは expo-router push
+  const goSubTab = useCallback(
+    (key: 'home' | 'bbs' | 'map' | 'calendar' | 'admin') => {
+      if (key === 'map') return;
+      const dest =
+        key === 'home' ? `/community/${id}`
+        : key === 'bbs' ? `/community/${id}/bbs`
+        : key === 'calendar' ? `/community/${id}/calendar`
+        : `/community/${id}/admin`;
+      router.push(dest as never);
+    },
+    [router, id],
+  );
 
   // form
   const [name, setName] = useState('');
@@ -88,6 +104,9 @@ export default function MapScreen() {
     staleTime: 60_000,
   });
   const isAdmin = !!community && !!userId && community.official_admin_user_id === userId;
+  // サブタブ admin chip 表示判定: owner / admin のいずれか
+  const showAdminChip =
+    !!community && (community.role === 'owner' || community.role === 'admin');
 
   const { data: locs = [], isLoading } = useQuery({
     queryKey: ['community', id, 'official-map'],
@@ -161,6 +180,9 @@ export default function MapScreen() {
           {community?.is_official && <OfficialBadge size="sm" />}
         </View>
       </View>
+
+      {/* サブタブナビ — current=map */}
+      <CommunitySubTabs value="map" onChange={goSubTab} showAdmin={showAdminChip} />
 
       <ScrollView
         contentContainerStyle={{

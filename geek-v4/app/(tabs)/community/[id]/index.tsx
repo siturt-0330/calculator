@@ -51,6 +51,10 @@ import { OfficialBadge } from '../../../../components/community/OfficialBadge';
 import { EventRow } from '../../../../components/community/EventRow';
 import { OfficialFeatureNav } from '../../../../components/community/OfficialFeatureNav';
 import { CommunityMyProfileTab } from '../../../../components/community/CommunityMyProfileTab';
+import {
+  CommunitySubTabs,
+  type CommunitySubTabKey,
+} from '../../../../components/community/CommunitySubTabs';
 import { useAuthStore } from '../../../../stores/authStore';
 import {
   fetchCommunity,
@@ -632,7 +636,30 @@ export default function CommunityDetailScreen() {
             タブ自体に統合されたので、上部のチップ navigation は表示しない */}
 
         {/* ============================================================
-            Tab bar — bottom border 区切り + sliding active underline
+            新サブタブ navigation — ホーム / 掲示板 / マップ / カレンダー / (管理人)
+            ------------------------------------------------------------
+            UI 統一の一環で 4 サブタブに「正規化」した chip 行。
+            home = この index.tsx 画面 (= 現在ページ), それ以外は
+            standalone route に push する。
+            admin chip は mod (owner / admin) のみ表示。
+            ============================================================ */}
+        <CommunitySubTabs
+          value="home"
+          showAdmin={community.role === 'owner' || community.role === 'admin'}
+          onChange={(k: CommunitySubTabKey) => {
+            if (k === 'home') return;
+            const dest =
+              k === 'bbs' ? `/community/${id}/bbs`
+              : k === 'map' ? `/community/${id}/map`
+              : k === 'calendar' ? `/community/${id}/calendar`
+              : `/community/${id}/admin`;
+            router.push(dest as never);
+          }}
+        />
+
+        {/* ============================================================
+            Tab bar — 旧 inner tab (feed/threads/spots/events など)。
+            genre 別の細かい切替はここで吸収する。
             公式コミュニティでは「掲示板→Q&A」「投稿→コメント」にラベル差し替え
             ============================================================ */}
         <CommunityTabBar
