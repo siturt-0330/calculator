@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react-native';
 import { View, Text, Platform, Image as RNImage, StyleSheet, Pressable, type TextStyle } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -183,25 +184,55 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   anonRelative: { color: C.text3, fontSize: 12, lineHeight: 15 },
   morePress: { padding: 4 },
 
-  // コミュニティピル
-  communityWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: SP['2'],
-  },
-  communityChipBase: {
+  // ヘッダー 2 行目に inline 配置する community 表示。
+  // 旧: header の下に独立した chip row。
+  // 新: 「時刻 · [○] コミュ名」と 1 行に統合し、投稿者ブロックと視覚的に group。
+  //     CommunityAvatarBar の avatar (56px) を 20px に縮めた版。
+  anonMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 2,
-    height: 20,
-    borderRadius: R.full,
-    backgroundColor: C.bg3,
-    borderWidth: 1,
+    gap: 6,
+    flexShrink: 1,
+    maxWidth: '100%',
   },
-  communityChipText: { fontSize: 11, color: C.text2, fontWeight: '600' },
+  anonMetaDot: { color: C.text3, fontSize: 12, lineHeight: 15 },
+  communityInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    flexShrink: 1,
+    minWidth: 0,
+    // tap target 確保: 視覚は 20px だが上下 padding で 28px 以上
+    paddingVertical: 2,
+  },
+  // 20px 円 ring (avatar 外枠). border 1px で BG から少し浮かせる
+  communityInlineRingBase: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.bg3,
+  },
+  communityInlineImage: { width: '100%', height: '100%' },
+  // icon_url が無い時の emoji fallback (CommunityAvatarBar と同じ思想)
+  communityInlineEmoji: { fontSize: 12, lineHeight: 14 },
+  communityInlineName: {
+    fontSize: 12,
+    lineHeight: 15,
+    color: C.text2,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+  communityInlineExtra: {
+    fontSize: 11,
+    lineHeight: 14,
+    color: C.text3,
+    fontWeight: '600',
+  },
 
   // CW
   cwBox: {
@@ -314,15 +345,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 //   - スタイル合成は配列 [base, diff] で行うので diff のキーだけが reconcile される
 //   - base 側 (StyleSheet ID) は安定なので reconciliation コストは差分分のみ
 // ────────────────────────────────────────────────────────────────────
-
-// 旧 module-level helper は C を直接参照していたので、テーマ切替で色が変わらない。
-// 第 1 引数で C を受ける形に変え、呼び出し側 (component) で `const C = useColors()`
-// 結果を渡す。境界は薄いが、styles.communityChipBorder のような差分 style 生成は
-// `[STYLES.base, communityChipBorder(C, isOfficial)]` の合成で済む (StyleSheet ID
-// が安定なので reconciliation コストは差分プロパティ分のみ)。
-function communityChipBorder(C: ColorPalette, isOfficial: boolean): { borderColor: string } {
-  return { borderColor: isOfficial ? C.accent + '66' : C.border };
-}
 
 function mediaItemAspect(aspect: number): { aspectRatio: number } {
   return { aspectRatio: aspect };
@@ -662,6 +684,66 @@ function ReactionButtonInner({
 
 const ReactionButton = memo(ReactionButtonInner);
 
+// ============================================================
+// CommunityInlineIndicator — header 内に 1 行で表示する小型 community 表示
+// ------------------------------------------------------------
+// CommunityAvatarBar の 56px avatar を 20px に縮めた版。
+//   - icon_url があれば ExpoImage で表示 (thumbedUrl 80px @4x)
+//   - 無ければ emoji + bg3 背景 (PostCommunityRef は icon_color を持たない
+//     ため backgroundColor は単色 bg3 で代用 — CommunityAvatarBar の color
+//     fallback とは少しだけ違うが、20px 円なので視認影響は最小)
+//   - tap で onPress (親 → router.push('/community/:id'))
+//   - 複数 community のとき末尾に「+N」を出す
+// ============================================================
+type CommunityInlineIndicatorProps = {
+  community: PostCommunityRef;
+  extraCount: number;
+  onPress: () => void;
+  STYLES: ReturnType<typeof makeStyles>;
+};
+
+function CommunityInlineIndicator({
+  community: c,
+  extraCount,
+  onPress,
+  STYLES,
+}: CommunityInlineIndicatorProps) {
+  // 80 = 20px @4x retina (CommunityAvatarBar が 56px → 160px と同比率)
+  const thumb = c.icon_url ? thumbedUrl(c.icon_url, 80) : null;
+  return (
+    <PressableScale
+      onPress={onPress}
+      haptic="tap"
+      hitSlop={6}
+      style={STYLES.communityInline}
+      accessibilityRole="link"
+      accessibilityLabel={`コミュニティ ${c.name} を開く`}
+    >
+      <View style={STYLES.communityInlineRingBase}>
+        {thumb ? (
+          <ExpoImage
+            source={{ uri: thumb }}
+            style={STYLES.communityInlineImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            recyclingKey={c.icon_url ?? c.community_id}
+            transition={120}
+          />
+        ) : (
+          <Text style={STYLES.communityInlineEmoji}>{c.icon_emoji || '🌐'}</Text>
+        )}
+      </View>
+      <Text style={STYLES.communityInlineName} numberOfLines={1}>
+        {c.name}
+      </Text>
+      {c.is_official && <OfficialBadge size="sm" iconOnly />}
+      {extraCount > 0 && (
+        <Text style={STYLES.communityInlineExtra}>{`+${extraCount}`}</Text>
+      )}
+    </PressableScale>
+  );
+}
+
 type AnonPostCardProps = {
   post: Post;
   liked?: boolean;
@@ -723,7 +805,8 @@ function AnonPostCardInner({
   // post.community_id は型に無いが post_communities junction で 1 件以上紐付く。
   // 先頭の community を「主担当 community」と見做し、その mod 権限で判定。
   // (共通的に 1 post = 1 primary community なので衝突は実質起きない)
-  const primaryCommunityId = communities[0]?.community_id;
+  const primaryCommunity = communities[0];
+  const primaryCommunityId = primaryCommunity?.community_id;
   const isMod = useIsCommunityMod(primaryCommunityId);
   const currentUserId = useAuthStore((s) => s.user?.id);
   const isOwnPost = !!post.author_id && post.author_id === currentUserId;
@@ -965,21 +1048,47 @@ function AnonPostCardInner({
                 {post.official_author.name || t('公式管理者')}
               </Text>
             </View>
-            <Text style={[T.caption, STYLES.officialSub]} numberOfLines={1}>
-              {post.official_author.organization
-                ? `${post.official_author.organization} · ${formatRelative(post.created_at)}`
-                : formatRelative(post.created_at)}
-            </Text>
+            <View style={STYLES.anonMetaRow}>
+              <Text style={[T.caption, STYLES.officialSub]} numberOfLines={1}>
+                {post.official_author.organization
+                  ? `${post.official_author.organization} · ${formatRelative(post.created_at)}`
+                  : formatRelative(post.created_at)}
+              </Text>
+              {primaryCommunity && (
+                <>
+                  <Text style={STYLES.anonMetaDot}>·</Text>
+                  <CommunityInlineIndicator
+                    community={primaryCommunity}
+                    extraCount={communities.length - 1}
+                    onPress={() => onCommunityPress?.(primaryCommunity.community_id)}
+                    STYLES={STYLES}
+                  />
+                </>
+              )}
+            </View>
           </View>
         ) : (
-          // anon: 「匿」を 1 行目、relative time を 2 行目に分けて typography 階層を作る
+          // anon: 「匿」を 1 行目、relative time + community を 2 行目に分けて typography 階層を作る
           <View style={STYLES.anonRow}>
             <Text style={[T.smallM, STYLES.anonLabel]} numberOfLines={1}>
               {t('匿')}
             </Text>
-            <Text style={STYLES.anonRelative} numberOfLines={1}>
-              {formatRelative(post.created_at)}
-            </Text>
+            <View style={STYLES.anonMetaRow}>
+              <Text style={STYLES.anonRelative} numberOfLines={1}>
+                {formatRelative(post.created_at)}
+              </Text>
+              {primaryCommunity && (
+                <>
+                  <Text style={STYLES.anonMetaDot}>·</Text>
+                  <CommunityInlineIndicator
+                    community={primaryCommunity}
+                    extraCount={communities.length - 1}
+                    onPress={() => onCommunityPress?.(primaryCommunity.community_id)}
+                    STYLES={STYLES}
+                  />
+                </>
+              )}
+            </View>
           </View>
         )}
         <PressableScale onPress={onMore} hitSlop={10} style={STYLES.morePress}>
@@ -1006,27 +1115,8 @@ function AnonPostCardInner({
         )}
       </View>
 
-      {/* コミュニティピル — レコメンド理由 chip は UI 雑味の元なので非表示
-          (ランキングロジックは裏で動き続ける、表示するのが分かりづらいだけ) */}
-      {communities.length > 0 && (
-        <View style={STYLES.communityWrap}>
-          {communities.map((c) => (
-            <PressableScale
-              key={c.community_id}
-              onPress={() => onCommunityPress?.(c.community_id)}
-              haptic="tap"
-              style={[STYLES.communityChipBase, communityChipBorder(C, !!c.is_official)]}
-            >
-              <Text style={STYLES.communityChipText}>
-                {`\u{1F3E0} ${c.icon_emoji} ${c.name}`}
-              </Text>
-              {c.is_official && <OfficialBadge size="sm" iconOnly />}
-            </PressableScale>
-          ))}
-        </View>
-      )}
-
-      {/* CW (content warning) ベール */}
+      {/* CW (content warning) ベール
+          ※ コミュニティ表示は header 内 (anonMetaRow / officialMeta) に inline 化済み — 旧 chip row は削除 */}
       {isCwHidden && (
         <PressableScale
           onPress={() => setCwRevealed(true)}

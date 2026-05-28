@@ -2,13 +2,15 @@
 // Expo Router は `_` プレフィクス付きのファイルをルーティング対象から除外するため、
 // 安全に同階層に置けるユーティリティとして配置している。
 //
-// 全ステップ: 1=language, 2=nickname, 3=liked-tags, 4=blocked-tags, 5=notifications
+// 全ステップ: 1=language, 2=nickname, 3=liked-tags, 4=notifications
 // (index は welcome なので "0" 扱い、進捗バーは表示しない)
+// 注: 初回設定での「嫌いなタグ選択」ステップは廃止 (2026-05 ユーザー要望)。
+//     ブロック機能自体は settings/blocked-tags から引き続き利用可能。
 import { View, Text } from 'react-native';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 
-export const TOTAL_STEPS = 5;
+export const TOTAL_STEPS = 4;
 
 export function StepProgress({ step }: { step: number }) {
   // step は 1..TOTAL_STEPS の範囲を想定。範囲外なら描画しない。
