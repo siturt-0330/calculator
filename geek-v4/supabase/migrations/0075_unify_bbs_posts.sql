@@ -47,6 +47,23 @@ create index if not exists posts_title_trgm_idx on public.posts using gin (title
 create index if not exists posts_last_activity_idx on public.posts(last_activity_at desc nulls last);
 
 -- ============================================================
+-- Step 1.5: posts_content_check を緩和 — スレ形式 (title あり) は content 空 OK
+-- ============================================================
+-- 旧制約 (0001): check (length(content) between 1 and 2000)
+-- → BBS thread 移行で content='' を insert すると 23514 エラー。
+--
+-- 新ルール:
+--   - 通常の post: title=null + content 1〜2000 char (従来)
+--   - スレ形式 post: title あり + content 任意 (空 OK)
+-- ============================================================
+alter table public.posts drop constraint if exists posts_content_check;
+alter table public.posts add constraint posts_content_check
+  check (
+    title is not null                          -- スレ形式: title があれば content 空 OK
+    or (length(content) between 1 and 2000)   -- 通常 post: 1〜2000 char
+  );
+
+-- ============================================================
 -- Step 2: comments の content cap を 500 → 1000 に bump
 -- ============================================================
 -- BBS reply は 1000 char まで許可していた (bbs_replies の check 参照)。
