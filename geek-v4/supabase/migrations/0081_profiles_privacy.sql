@@ -72,7 +72,11 @@ create policy profiles_read_self on public.profiles
 --   なお postgres 14 以降の default は security_invoker=off だが、
 --   明示する。
 -- ============================================================
-create or replace view public.profiles_public
+-- 既存 0020 の profiles_public view と column 順序が違う可能性があるため
+-- (create or replace は column rename / 並び替え不可)、 先に drop してから create。
+drop view if exists public.profiles_public cascade;
+
+create view public.profiles_public
 with (security_invoker = off) as
 select
   id,
