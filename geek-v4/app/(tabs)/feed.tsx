@@ -1,7 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { View, Text, RefreshControl, Platform } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Image as ExpoImage } from 'expo-image';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
+import { EASE_OUT_QUART } from '../../design/motion';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -46,6 +54,52 @@ const EMPTY_LEGACY_IDS: string[] = [];
 // legacy hook 群が disabled (postIds=[]) のときの空マップ — 参照安定化
 const EMPTY_BOOL_MAP: Record<string, boolean> = {};
 const VIEWABILITY_CONFIG = { viewAreaCoveragePercentThreshold: 30 } as const;
+
+// ============================================================
+// FeedRowEnter — per-row 入場アニメ (opacity 0→1 + translateY 12→0)
+// ------------------------------------------------------------
+// 220ms ease-out-quart, stagger index*40ms (上限 6 cell = 240ms 上限) で、
+// 50+ items でも 2 秒待ちにならないよう cap している。
+// 初回 mount だけ走り、scroll で再 mount されたときは即表示 (replay しない)
+// — FlashList は cell を recycle するが React 視点では別 component なので、
+//   ここでは「マウント時の time が初回 render 期間内 (1.5s) なら再生する」
+//   というシンプル戦略を取らない。代わりに row 自身が「私は初回」フラグを
+//   useRef で持ち、再 render では shared value 触らず無動作。
+// reduceMotion=true は初期値を 1/0 で固定して即表示。
+// ============================================================
+const ROW_ENTER_DURATION = 220;
+const ROW_ENTER_STAGGER_MS = 40;
+const ROW_ENTER_STAGGER_CAP = 6; // index*40 を最大 240ms に
+const FeedRowEnter = memo(function FeedRowEnter({
+  index,
+  children,
+}: {
+  index: number;
+  children: ReactNode;
+}) {
+  const reduceMotion = useReducedMotion();
+  const opacity = useSharedValue(reduceMotion ? 1 : 0);
+  const translateY = useSharedValue(reduceMotion ? 0 : 12);
+  const firstRender = useRef(true);
+
+  if (firstRender.current) {
+    firstRender.current = false;
+    if (!reduceMotion) {
+      const delay = Math.min(index, ROW_ENTER_STAGGER_CAP) * ROW_ENTER_STAGGER_MS;
+      const cfg = { duration: ROW_ENTER_DURATION, easing: EASE_OUT_QUART };
+      opacity.value = withDelay(delay, withTiming(1, cfg));
+      translateY.value = withDelay(delay, withTiming(0, cfg));
+    }
+  }
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  return <Animated.View style={animatedStyle}>{children}</Animated.View>;
+});
+
 import { ScopeToggle } from '../../components/feed/ScopeToggle';
 import { BlockedTagBanner } from '../../components/feed/BlockedTagBanner';
 import { logEvent } from '../../lib/personalize';
@@ -266,9 +320,13 @@ export default function FeedScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item }: { item: FeedItem }) => {
+    ({ item, index }: { item: FeedItem; index: number }) => {
       if (isAdItem(item)) {
-        return <AdCard ad={item.ad} position={item.position} matchedTags={item.matchedTags} />;
+        return (
+          <FeedRowEnter index={index}>
+            <AdCard ad={item.ad} position={item.position} matchedTags={item.matchedTags} />
+          </FeedRowEnter>
+        );
       }
       const post = item;
       const h = handlersByPostId[post.id];
@@ -294,27 +352,29 @@ export default function FeedScreen() {
           ? { ...post, official_author: full.official_author }
           : post;
       return (
-        <AnonPostCard
-          post={enrichedPost}
-          liked={liked}
-          concerned={concerned}
-          saved={saved}
-          reactions={reactions}
-          addedTags={addedTags}
-          poll={poll}
-          reason={reasonsMap[post.id]}
-          communities={communities}
-          onLike={h.onLike}
-          onConcern={h.onConcern}
-          onComment={h.onComment}
-          onSave={h.onSave}
-          onShare={h.onShare}
-          onTagPress={h.onTagPress}
-          onMore={h.onMore}
-          onReact={h.onReact}
-          onAddTag={h.onAddTag}
-          onCommunityPress={h.onCommunityPress}
-        />
+        <FeedRowEnter index={index}>
+          <AnonPostCard
+            post={enrichedPost}
+            liked={liked}
+            concerned={concerned}
+            saved={saved}
+            reactions={reactions}
+            addedTags={addedTags}
+            poll={poll}
+            reason={reasonsMap[post.id]}
+            communities={communities}
+            onLike={h.onLike}
+            onConcern={h.onConcern}
+            onComment={h.onComment}
+            onSave={h.onSave}
+            onShare={h.onShare}
+            onTagPress={h.onTagPress}
+            onMore={h.onMore}
+            onReact={h.onReact}
+            onAddTag={h.onAddTag}
+            onCommunityPress={h.onCommunityPress}
+          />
+        </FeedRowEnter>
       );
     },
     [

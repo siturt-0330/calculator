@@ -1,5 +1,14 @@
-import { memo, useEffect, useMemo, useState } from 'react';
-import { View, Text, Platform, Image as RNImage, StyleSheet } from 'react-native';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import type { LucideIcon } from 'lucide-react-native';
+import { View, Text, Platform, Image as RNImage, StyleSheet, Pressable, type TextStyle } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSequence,
+  withTiming,
+  withSpring,
+  Easing,
+} from 'react-native-reanimated';
 import { useQueryClient } from '@tanstack/react-query';
 import { safeOpenUrl } from '../../lib/openUrl';
 import { Icon } from '../../constants/icons';
@@ -14,6 +23,9 @@ import { useColors } from '../../hooks/useColors';
 import type { ColorPalette } from '../../lib/theme/palettes';
 import { T } from '../../design/typography';
 import { PressableScale } from '../ui/PressableScale';
+import { SPRING_BOUNCY, SPRING_SNAPPY, EASE_OUT, PRESS_SCALE } from '../../design/motion';
+import { hap } from '../../design/haptics';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { ProgressiveImage } from '../ui/ProgressiveImage';
 import { VideoPlayer } from '../ui/VideoPlayer';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
@@ -330,6 +342,325 @@ function reactionPillLabel(C: ColorPalette, mine: boolean): { fontSize: number; 
 function reactionPillCount(C: ColorPalette, mine: boolean): { fontSize: number; color: string; fontWeight: '700' } {
   return { fontSize: 10, color: mine ? C.accentLight : C.text3, fontWeight: '700' };
 }
+
+// ============================================================
+// ReactionButton — like / concern / save 系の polished button
+// ------------------------------------------------------------
+// 設計:
+//   - 押下時の "burst" は icon scale 1.0 → 1.35 → 1.0 + 6 個の粒子放射
+//   - active/inactive 切替時に icon の色を crossfade (絶対配置の 2 layer)
+//   - count 値変化時に上方向 slide + fade で旧 → 新を入れ替え
+//   - debounce 200ms で連打を防ぐ (親側ガードと二重で安全)
+//   - ReduceMotion: burst/particle 省略、 color crossfade のみ
+//   - shared value で全アニメ → list 内の多数 mount でも cheap
+//
+// 注意: PressableScale は press-in で haptic を撃つが、ここでは activate /
+//       deactivate を分けたいので Pressable + 自前 scale で実装する。
+//       (PressableScale を被せると double-haptic / double-scale になる)
+// ============================================================
+// lucide-react-native の LucideIcon を直接受ける (propTypes は無視される)。
+type ReactionIcon = LucideIcon;
+
+type ReactionButtonProps = {
+  IconCmp: ReactionIcon;
+  active: boolean;
+  count?: number;
+  onPress: () => void;
+  inactiveColor: string;
+  activeColor: string;
+  activeFill?: string;
+  iconSize?: number;
+  countTextStyle?: TextStyle;
+  accessibilityLabel?: string;
+  hitSlop?: number;
+};
+
+// 粒子の最終角度 (60deg ごと) — 一度だけ計算するため定数化
+const PARTICLE_ANGLES = [0, 60, 120, 180, 240, 300] as const;
+const PARTICLE_DIST = 24; // px
+const PARTICLE_DURATION = 320; // ms
+const COUNT_FADE_MS = 180;
+
+function ReactionParticle({
+  angleDeg,
+  progress,
+  color,
+}: {
+  angleDeg: number;
+  progress: Animated.SharedValue<number>;
+  color: string;
+}) {
+  // progress 0 → 1 で原点から PARTICLE_DIST 離れた位置へ。
+  // opacity 1 → 0 にフェード。
+  // 型注釈: transform 配列 element は各要素に 1 key のみ。as const で union を確定。
+  const a = useAnimatedStyle(() => {
+    const rad = (angleDeg * Math.PI) / 180;
+    const t = progress.value;
+    const x = Math.cos(rad) * PARTICLE_DIST * t;
+    const y = Math.sin(rad) * PARTICLE_DIST * t;
+    const s = 1 - t * 0.4;
+    return {
+      opacity: 1 - t,
+      transform: [
+        { translateX: x } as const,
+        { translateY: y } as const,
+        { scale: s } as const,
+      ],
+    };
+  });
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        {
+          position: 'absolute',
+          width: 4,
+          height: 4,
+          borderRadius: 2,
+          backgroundColor: color,
+        },
+        a,
+      ]}
+    />
+  );
+}
+
+function ReactionCount({
+  value,
+  textStyle,
+  reduceMotion,
+}: {
+  value: number;
+  textStyle?: TextStyle;
+  reduceMotion: boolean;
+}) {
+  // 旧値を ref で保持。値が変わると enter/exit shared value を駆動して
+  // 上方向 slide + fade で 1 回だけ crossfade させる。
+  const prevRef = useRef<number>(value);
+  const enterT = useSharedValue(1); // 新値: 1=表示位置
+  const exitT = useSharedValue(0); // 旧値: 0=表示位置, 進むと上へ消える
+
+  const [displayPrev, setDisplayPrev] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (prevRef.current === value) return;
+    const old = prevRef.current;
+    prevRef.current = value;
+    if (reduceMotion) {
+      setDisplayPrev(null);
+      enterT.value = 1;
+      exitT.value = 0;
+      return;
+    }
+    setDisplayPrev(old);
+    // 新値: 下から (translateY 8 → 0, opacity 0 → 1)
+    enterT.value = 0;
+    enterT.value = withTiming(1, { duration: COUNT_FADE_MS, easing: Easing.out(Easing.cubic) });
+    // 旧値: 上へ (translateY 0 → -8, opacity 1 → 0)
+    exitT.value = 0;
+    exitT.value = withTiming(1, { duration: COUNT_FADE_MS, easing: Easing.out(Easing.cubic) });
+    // animation 終了後に displayPrev を null にする (timer で十分。runOnJS 不要)
+    const t = setTimeout(() => setDisplayPrev(null), COUNT_FADE_MS + 30);
+    return () => clearTimeout(t);
+  }, [value, reduceMotion, enterT, exitT]);
+
+  const enterStyle = useAnimatedStyle(() => ({
+    opacity: enterT.value,
+    transform: [{ translateY: 8 * (1 - enterT.value) }],
+  }));
+  const exitStyle = useAnimatedStyle(() => ({
+    opacity: 1 - exitT.value,
+    transform: [{ translateY: -8 * exitT.value }],
+  }));
+
+  // 高さ確保のため min-width をプレースホルダで担保 (layout shift 防止)
+  return (
+    <View style={{ position: 'relative', minWidth: 8, justifyContent: 'center' }}>
+      {/* 不可視 sizer — 新値の高さで親 View の高さを安定させる */}
+      <Text style={[textStyle, { opacity: 0 }]} numberOfLines={1}>
+        {value}
+      </Text>
+      <Animated.Text
+        style={[
+          textStyle,
+          { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, textAlign: 'left' },
+          enterStyle,
+        ]}
+        numberOfLines={1}
+      >
+        {value}
+      </Animated.Text>
+      {displayPrev != null && (
+        <Animated.Text
+          // 旧値は装飾だけなので touch を吸わない
+          style={[
+            textStyle,
+            { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, textAlign: 'left' },
+            exitStyle,
+          ]}
+          numberOfLines={1}
+        >
+          {displayPrev}
+        </Animated.Text>
+      )}
+    </View>
+  );
+}
+
+function ReactionButtonInner({
+  IconCmp,
+  active,
+  count,
+  onPress,
+  inactiveColor,
+  activeColor,
+  activeFill,
+  iconSize = 20,
+  countTextStyle,
+  accessibilityLabel,
+  hitSlop = 10,
+}: ReactionButtonProps) {
+  const reduceMotion = useReducedMotion();
+  // press scale (PressableScale 相当)
+  const pressScale = useSharedValue(1);
+  // burst scale (icon の弾むアニメ)
+  const burstScale = useSharedValue(1);
+  // 色 crossfade: active 値で 0 → 1 へ
+  const colorMix = useSharedValue(active ? 1 : 0);
+  // particles 共通の progress 0 → 1
+  const particleProgress = useSharedValue(0);
+  // particle 表示フラグ (mount 時に 6 個展開しないため)
+  const [particleNonce, setParticleNonce] = useState(0);
+
+  // active 変化時のアニメ。前回値を ref で持ち、true→false / false→true
+  // どちらの遷移かを判定 (haptic と burst の有無を分ける)。
+  const prevActive = useRef<boolean>(active);
+  useEffect(() => {
+    if (prevActive.current === active) return;
+    const becameActive = !prevActive.current && active;
+    prevActive.current = active;
+
+    // 色 crossfade は常に走らせる (ReduceMotion でも色は変える)
+    colorMix.value = withTiming(active ? 1 : 0, {
+      duration: 200,
+      easing: Easing.out(Easing.cubic),
+    });
+
+    if (becameActive && !reduceMotion) {
+      // burst: 1.0 → 1.35 (140ms ease-out) → 1.0 (spring bouncy)
+      burstScale.value = withSequence(
+        withTiming(1.35, { duration: 140, easing: EASE_OUT }),
+        withSpring(1.0, SPRING_BOUNCY),
+      );
+      // particles: 0 → 1 over 320ms
+      particleProgress.value = 0;
+      setParticleNonce((n) => n + 1);
+      particleProgress.value = withTiming(1, {
+        duration: PARTICLE_DURATION,
+        easing: Easing.out(Easing.cubic),
+      });
+    }
+  }, [active, reduceMotion, colorMix, burstScale, particleProgress]);
+
+  const iconScaleStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pressScale.value * burstScale.value }],
+  }));
+
+  // 2 layer icon の opacity crossfade
+  const activeIconStyle = useAnimatedStyle(() => ({ opacity: colorMix.value }));
+  const inactiveIconStyle = useAnimatedStyle(() => ({ opacity: 1 - colorMix.value }));
+
+  // debounce: 200ms。連打を防ぐが、親の更新で active が変わる前でも
+  // 押下感は press scale + haptic で即時返す。
+  const lastPressRef = useRef<number>(0);
+  const handlePress = () => {
+    const now = Date.now();
+    if (now - lastPressRef.current < 200) return;
+    lastPressRef.current = now;
+    // 即時 haptic: activate なら confirm (medium)、deactivate なら select (light)
+    if (active) hap.select();
+    else hap.confirm();
+    onPress();
+  };
+
+  return (
+    <Pressable
+      onPress={handlePress}
+      onPressIn={() => {
+        pressScale.value = withSpring(PRESS_SCALE, SPRING_SNAPPY);
+      }}
+      onPressOut={() => {
+        pressScale.value = withSpring(1, SPRING_SNAPPY);
+      }}
+      hitSlop={hitSlop}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ selected: active }}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 28 }}
+    >
+      {/* icon container — 粒子はここを中心に放射。overflow: visible で粒子が外へ出る。 */}
+      <View
+        style={{
+          width: iconSize,
+          height: iconSize,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+        pointerEvents="none"
+      >
+        {/* 粒子 (active 化のたびに key を変えて remount) */}
+        {!reduceMotion && (
+          <View
+            key={`particles-${particleNonce}`}
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              width: 0,
+              height: 0,
+              left: iconSize / 2,
+              top: iconSize / 2,
+            }}
+          >
+            {particleNonce > 0 &&
+              PARTICLE_ANGLES.map((deg) => (
+                <ReactionParticle
+                  key={deg}
+                  angleDeg={deg}
+                  progress={particleProgress}
+                  color={activeColor}
+                />
+              ))}
+          </View>
+        )}
+        <Animated.View style={[StyleSheet.absoluteFillObject, iconScaleStyle]}>
+          {/* inactive icon (常に描画、colorMix=0 で見える) */}
+          <Animated.View style={[StyleSheet.absoluteFillObject, inactiveIconStyle]}>
+            <IconCmp
+              size={iconSize}
+              color={inactiveColor}
+              strokeWidth={2.2}
+              fill="transparent"
+            />
+          </Animated.View>
+          {/* active icon (colorMix=1 で見える) */}
+          <Animated.View style={[StyleSheet.absoluteFillObject, activeIconStyle]}>
+            <IconCmp
+              size={iconSize}
+              color={activeColor}
+              strokeWidth={2.2}
+              fill={activeFill ?? activeColor}
+            />
+          </Animated.View>
+        </Animated.View>
+      </View>
+      {count != null && count > 0 && (
+        <ReactionCount value={count} textStyle={countTextStyle} reduceMotion={reduceMotion} />
+      )}
+    </Pressable>
+  );
+}
+
+const ReactionButton = memo(ReactionButtonInner);
 
 type AnonPostCardProps = {
   post: Post;
@@ -783,18 +1114,16 @@ function AnonPostCardInner({
           gap は SP['5'] で各アクションを規則的に配置 — 「♥ 15 / 💬 9 / ⚠ / 🪶 15」 が
           視覚的にリズミカルに並ぶ。 */}
       <View style={STYLES.actionsRow}>
-        <PressableScale
+        <ReactionButton
+          IconCmp={Heart}
+          active={liked}
+          count={displayLikesCount}
           onPress={onLike}
-          haptic="pop"
-          hitSlop={10}
+          inactiveColor={C.text2}
+          activeColor={C.pink}
           accessibilityLabel={liked ? 'いいね済み' : 'いいね'}
-          style={STYLES.actionPress}
-        >
-          <Heart size={20} color={liked ? C.pink : C.text2} fill={liked ? C.pink : 'transparent'} strokeWidth={2.2} />
-          {displayLikesCount > 0 && (
-            <Text style={[T.smallM, likeCountTextStyle]}>{displayLikesCount}</Text>
-          )}
-        </PressableScale>
+          countTextStyle={{ ...T.smallM, ...likeCountTextStyle }}
+        />
         <PressableScale
           onPress={onComment}
           haptic="tap"
@@ -807,18 +1136,17 @@ function AnonPostCardInner({
             <Text style={[T.smallM, STYLES.commentCount]}>{commentsCount}</Text>
           )}
         </PressableScale>
-        <PressableScale
+        <ReactionButton
+          IconCmp={Warn}
+          active={concerned}
+          count={concernCount}
           onPress={onConcern}
-          haptic="warn"
-          hitSlop={10}
+          inactiveColor={C.text3}
+          activeColor={C.amber}
+          activeFill={C.amber + '44'}
           accessibilityLabel={concerned ? '気になる済み' : '気になる'}
-          style={STYLES.actionPress}
-        >
-          <Warn size={20} color={concerned ? C.amber : C.text3} fill={concerned ? C.amber + '44' : 'transparent'} strokeWidth={2.2} />
-          {concernCount > 0 && (
-            <Text style={[T.smallM, concernCountTextStyle]}>{concernCount}</Text>
-          )}
-        </PressableScale>
+          countTextStyle={{ ...T.smallM, ...concernCountTextStyle }}
+        />
         <PressableScale
           onPress={() => setMemePickerOpen(true)}
           haptic="tap"
@@ -844,15 +1172,15 @@ function AnonPostCardInner({
         >
           <Share size={18} color={C.text2} strokeWidth={2.2} />
         </PressableScale>
-        <PressableScale
+        <ReactionButton
+          IconCmp={Save}
+          active={saved}
           onPress={onSave}
-          haptic="tap"
-          hitSlop={10}
+          inactiveColor={C.text2}
+          activeColor={C.amber}
+          iconSize={18}
           accessibilityLabel={saved ? '保存済み' : '保存'}
-          style={STYLES.iconBtn}
-        >
-          <Save size={18} color={saved ? C.amber : C.text2} fill={saved ? C.amber : 'transparent'} strokeWidth={2.2} />
-        </PressableScale>
+        />
       </View>
 
       {/* リアクション表示行 */}
