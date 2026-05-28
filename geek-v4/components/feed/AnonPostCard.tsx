@@ -133,11 +133,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   lowTrustText: { color: C.amber, flex: 1 },
 
-  // ヘッダー — gap を増やして nickname と avatar を分離、 type も明確に
+  // ヘッダー — Apple News / Threads 寄りに密度を上げ、 avatar/name 距離を 10px に詰める
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SP['3'],
+    gap: 10,
   },
   officialAvatar: {
     width: 40,
@@ -168,7 +168,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   // 「匿」をやや強めに、relative time は subtle に — Twitter/Threads と同じ階層感
   anonLabel: { color: C.text, fontWeight: '700', letterSpacing: 0.2 },
-  anonRelative: { color: C.text3, fontSize: 11, lineHeight: 14 },
+  anonRelative: { color: C.text3, fontSize: 12, lineHeight: 15 },
   morePress: { padding: 4 },
 
   // コミュニティピル
@@ -182,9 +182,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    height: 22,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    height: 20,
     borderRadius: R.full,
     backgroundColor: C.bg3,
     borderWidth: 1,
@@ -217,9 +217,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     overflow: 'hidden',
   },
 
-  // 本文 — 行間/サイズを引き上げて読みやすさを優先 (15→16 / 22→24)
+  // 本文 — Apple News 寄り: fontSize 15.5 / lineHeight 23 で密度を上げて scan しやすく
   bodyInner: { paddingTop: SP['3'], paddingBottom: SP['1'] },
-  bodyText: { color: C.text, fontSize: 15, lineHeight: 24 },
+  bodyText: { color: C.text, fontSize: 15.5, lineHeight: 23 },
   // 出典
   sourceBtn: {
     marginTop: SP['2'],
@@ -236,20 +236,20 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   sourceEmoji: { fontSize: 14 },
   sourceText: { color: C.text2, flex: 1 },
 
-  // タグ群 — 上 padding を SP['3'] に上げて本文との視覚分離を強める
+  // タグ群 — 本文との距離を 8px に詰めて Threads/Apple News 風の密度に
   tagsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingTop: SP['3'],
+    paddingTop: SP['2'],
     gap: SP['2'],
     alignItems: 'center',
   },
 
-  // アクション行 — gap を揃え、左 4 アクション + spacer + 右 3 アクション の整列に
+  // アクション行 — 上 padding を 10px に詰めて action 強調を低く、 scan しやすく
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: SP['3'],
+    paddingTop: 10,
     paddingBottom: 0,
     gap: SP['5'],
   },
@@ -260,7 +260,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     gap: 6,
     minHeight: 28,
   },
-  commentCount: { color: C.text2, fontSize: 13, fontWeight: '600' },
+  commentCount: { color: C.text3, fontSize: 13, fontWeight: '600' },
   reactionEmoji: { fontSize: 20 },
   spacer: { flex: 1 },
   iconBtn: { padding: 4 },
