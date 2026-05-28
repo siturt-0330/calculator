@@ -8,7 +8,7 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { C, SP } from '../../design/tokens';
-import { FONT } from '../../design/typography';
+import { FONT, LOGO_FONT, LOGO_FONT_WEIGHT } from '../../design/typography';
 
 export function Spinner({ size = 'small', full }: { size?: 'small' | 'large'; full?: boolean }) {
   if (full) {
@@ -43,10 +43,11 @@ function FullScreenSpinner() {
       <Animated.Text
         style={[
           {
-            fontFamily: 'Orbitron_900Black',
+            fontFamily: LOGO_FONT,
+            fontWeight: LOGO_FONT_WEIGHT,
             fontSize: 36,
+            letterSpacing: -1,
             color: C.text,
-            letterSpacing: -0.6,
           },
           aPulse,
         ]}

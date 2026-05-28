@@ -15,7 +15,7 @@ import { PressableScale } from '../../components/ui/PressableScale';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Icon } from '../../constants/icons';
 import { C, R, SP, SHADOW } from '../../design/tokens';
-import { T, FONT } from '../../design/typography';
+import { T, FONT, LOGO_FONT, LOGO_FONT_WEIGHT } from '../../design/typography';
 import { fetchMyOfficialCommunities } from '../../lib/api/officialCommunities';
 import { sanitizeUrl } from '../../lib/sanitize';
 import { formatRelative } from '../../lib/utils/date';
@@ -64,11 +64,12 @@ export default function OfficialSelectorScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], marginBottom: 4 }}>
             <Text
               style={{
-                fontFamily: 'Orbitron_900Black',
+                fontFamily: LOGO_FONT,
+                fontWeight: LOGO_FONT_WEIGHT,
                 fontSize: 32,
                 lineHeight: 38,
+                letterSpacing: -0.8,
                 color: C.text,
-                letterSpacing: -0.6,
               }}
             >
               Geek Official

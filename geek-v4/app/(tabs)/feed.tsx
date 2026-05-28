@@ -111,7 +111,7 @@ import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Icon } from '../../constants/icons';
 import { SP } from '../../design/tokens';
 import { useTheme } from '../../hooks/useColors';
-import { FONT } from '../../design/typography';
+import { FONT, LOGO_FONT, LOGO_FONT_WEIGHT } from '../../design/typography';
 import { TABBAR } from '../../design/tabbar';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { Post } from '../../types/models';
@@ -468,10 +468,11 @@ export default function FeedScreen() {
             style={[
               {
                 flex: 1,
-                fontFamily: 'Orbitron_900Black',
+                fontFamily: LOGO_FONT,
+                fontWeight: LOGO_FONT_WEIGHT,
                 fontSize: 30,
                 lineHeight: 34,
-                letterSpacing: 2,
+                letterSpacing: -0.7,
                 color: C.text,
               },
               Platform.OS === 'web'

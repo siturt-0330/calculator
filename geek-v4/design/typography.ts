@@ -1,5 +1,25 @@
-import { TextStyle } from 'react-native';
+import { Platform, TextStyle } from 'react-native';
 import { C } from './tokens';
+
+// ============================================================
+// LOGO_FONT — Apple SF Pro Display 風の "Geek" ブランドテキスト用
+// ============================================================
+// 過去の Orbitron_900Black (sci-fi/futuristic) は user 体感が
+// 「太すぎ・古さ」だったため、Apple system font (SF Pro Display) に切替。
+// - iOS: System (= SF Pro / SF Compact 自動)
+// - Web: -apple-system stack で Apple device は SF Pro、 他は近似 (Inter)
+// - Android: Inter (Google fonts、 SF Pro と humanist 系で類似)
+// fontWeight は '700' (Apple Display 推奨の見出し weight) を default に。
+// letterSpacing は size に応じて -0.5 〜 -1.2 (Apple Display は negative tracking)。
+// ============================================================
+export const LOGO_FONT = Platform.select({
+  ios: 'System',
+  android: 'Inter_700Bold',
+  web: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Inter, sans-serif',
+  default: 'Inter_700Bold',
+}) as string;
+
+export const LOGO_FONT_WEIGHT = '700' as const;
 
 // パフォーマンス: font weight を削減 — Syne 600 / NotoSansJP 500 / Inter 500
 // を排除し、代わりに近い weight (700 / 700 / 600) を使い回す。

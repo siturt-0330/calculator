@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { StyleSheet, Dimensions, Platform, View, type TextStyle } from 'react-native';
+import { LOGO_FONT, LOGO_FONT_WEIGHT } from '../../design/typography';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -37,7 +38,7 @@ const SHORTER = Math.min(SCREEN_W, SCREEN_H);
 const CFG = {
   // 文字
   FONT_SIZE:       Math.round(Math.min(SHORTER * 0.26, 150)),
-  LETTER_SPACING:  0,
+  LETTER_SPACING:  -1.5,  // Apple SF Pro Display 風の negative tracking
   BG_COLOR:        '#000000',
   LOGO_COLOR:      '#FFFFFF',
   GLOW_COLOR:      '#7C6AF7',
@@ -59,9 +60,9 @@ const CFG = {
 
 const LETTERS = ['G', 'e', 'e', 'k'] as const;
 
-// "Geek" の幅推定 (Orbitron 900 Black) — 各文字を FONT_SIZE 比で
-// Orbitron は Inter より幅広・正方形的 (大文字寄り) — geometric sans の特徴
-const W_RATIO: Record<string, number> = { G: 0.78, e: 0.70, k: 0.70 };
+// "Geek" の幅推定 (Apple SF Pro Display / Inter Bold) — humanist sans
+// は Orbitron より narrow / proportional。実測値で G:0.66 / e:0.50 / k:0.52
+const W_RATIO: Record<string, number> = { G: 0.66, e: 0.50, k: 0.52 };
 
 // G を中央に置く時の word-row の translateX
 // = (e + e + k の合計幅) / 2
@@ -302,20 +303,19 @@ function Letter({
 }
 
 function baseLogoStyle(): ExtendedTextStyle {
+  // Apple SF Pro Display 風: iOS=System / Web=-apple-system stack / Android=Inter
+  // design/typography.ts の LOGO_FONT に集約 (LOGO_FONT_WEIGHT='700')
   const base: ExtendedTextStyle = {
-    fontFamily: 'Orbitron_900Black',
+    fontFamily: LOGO_FONT,
     fontSize: CFG.FONT_SIZE,
-    fontWeight: '900',
+    fontWeight: LOGO_FONT_WEIGHT,
     letterSpacing: CFG.LETTER_SPACING,
     color: CFG.LOGO_COLOR,
     includeFontPadding: false,
   };
   if (Platform.OS === 'web') {
-    // Web: 拡張 CSS プロパティ (WebkitFontSmoothing 等) は React Native の TextStyle
-    // に存在しないが、ExtendedTextStyle で許可 — RN Web が CSS にそのまま流す
     return {
       ...base,
-      fontFamily: 'Orbitron_900Black, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       WebkitFontSmoothing: 'antialiased',
       MozOsxFontSmoothing: 'grayscale',
       textRendering: 'optimizeLegibility',
