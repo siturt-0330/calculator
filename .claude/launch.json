@@ -16,8 +16,9 @@
     {
       "name": "geek-web-dev",
       "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "cd", "/d", "geek-v4", "&&", "npx", "expo", "start", "--web", "--port", "8081"],
-      "port": 8081
+      "runtimeArgs": ["/c", "cd", "/d", "geek-v4", "&&", "npx", "expo", "start", "--web", "--port", "8082"],
+      "port": 8082,
+      "autoPort": false
     }
   ]
 }
