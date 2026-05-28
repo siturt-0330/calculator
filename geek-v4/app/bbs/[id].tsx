@@ -1,7 +1,6 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl,
-  type NativeSyntheticEvent, type NativeScrollEvent,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,10 +9,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
+  useAnimatedScrollHandler,
   withTiming,
   withSequence,
   withSpring,
   interpolateColor,
+  runOnJS,
   Easing,
 } from 'react-native-reanimated';
 import { useQueryClient } from '@tanstack/react-query';
@@ -394,14 +395,22 @@ export default function BBSThreadScreen() {
   const listRef = useRef<FlashList<BBSReply>>(null);
 
   // --- スクロール位置追跡 (新着 pill / 戻る pill 用) ---
-  // - scrollY: 上端からの px (戻る pill 閾値判定に使う)
+  // - scrollAboveThreshold: 上端から TOP_PILL_THRESHOLD 超え (戻る pill 用)
   // - atBottom: 末尾 BOTTOM_PROXIMITY 内にいるか (新着 pill を出すかの判定)
   // - newReplyCount: 自分が下に居ない間に増えた件数
   // - prevRepliesLen: 直前 render での件数 (差分検出用)
-  const [scrollY, setScrollY] = useState(0);
+  //
+  // ★ パフォーマンス: 旧版は onScroll で setScrollY を毎フレーム呼んでいたため、
+  //   スクロール中ずっと parent re-render が連鎖していた。worklet 上で
+  //   閾値超過の boolean を計算し、変化したときだけ runOnJS で React state を
+  //   更新する形に変更 (scroll event 1000 回 → setState は閾値またぎ時のみ)。
+  const [scrollAboveThreshold, setScrollAboveThreshold] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const [newReplyCount, setNewReplyCount] = useState(0);
   const prevRepliesLen = useRef(replies.length);
+  // worklet 側で前回値を保持して「閾値またぎ時だけ React 更新を発火」する
+  const lastAboveSv = useSharedValue(false);
+  const lastAtBottomSv = useSharedValue(true);
 
   // --- ジャンプ targeting ---
   // highlightIndex は「現在 highlight したい reply の index」、
@@ -475,15 +484,28 @@ export default function BBSThreadScreen() {
     prevRepliesLen.current = curr;
   }, [replies.length, atBottom, newReplyCount]);
 
-  // スクロールイベント. FlashList の onScroll は ScrollView と同じ shape を返す.
-  // ここで scrollY と atBottom を更新する.
-  const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-    const y = contentOffset.y;
-    setScrollY(y);
-    const distToBottom = contentSize.height - (y + layoutMeasurement.height);
-    setAtBottom(distToBottom <= BOTTOM_PROXIMITY);
-  }, []);
+  // スクロールイベント (UI スレッド実行 worklet).
+  // 旧版は React state setter を毎フレーム呼んでおり、長スレで scroll jank の
+  // 主因になっていた。worklet 内で閾値判定し、変化した瞬間だけ runOnJS で
+  // 親 setState を発火する。「常に running な計算は UI thread」「state 反映は跨ぐ」
+  // の使い分け。
+  const handleScroll = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      'worklet';
+      const y = e.contentOffset.y;
+      const distToBottom = e.contentSize.height - (y + e.layoutMeasurement.height);
+      const above = y > TOP_PILL_THRESHOLD;
+      const bottom = distToBottom <= BOTTOM_PROXIMITY;
+      if (above !== lastAboveSv.value) {
+        lastAboveSv.value = above;
+        runOnJS(setScrollAboveThreshold)(above);
+      }
+      if (bottom !== lastAtBottomSv.value) {
+        lastAtBottomSv.value = bottom;
+        runOnJS(setAtBottom)(bottom);
+      }
+    },
+  });
 
   // @メンション候補 (#1, #2, ...)
   const mentionTargets = useMemo<MentionTarget[]>(
@@ -757,7 +779,7 @@ export default function BBSThreadScreen() {
           )}
 
           {/* 「↑ 先頭に戻る」 pill — 600px 超えで出す. 控えめな gradient. */}
-          {scrollY > TOP_PILL_THRESHOLD && (
+          {scrollAboveThreshold && (
             <PressableScale
               onPress={jumpToTop}
               haptic="tap"

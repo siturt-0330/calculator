@@ -13,6 +13,7 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
+import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { getLastViewed, setLastViewed } from '../../lib/utils/lastViewed';
 import { fetchPostById, fetchCommunitiesForPosts } from '../../lib/api/posts';
 import { fetchSimilarPosts } from '../../lib/api/similarPosts';
@@ -196,6 +197,11 @@ export default function PostDetailScreen() {
 
   const { show } = useToastStore();
 
+  // Smart skeleton timing — Spinner only after 200ms of continuous loading.
+  // <200ms loads (cache hits via TanStack staleTime) skip flash entirely.
+  const showPostSpinner = useDelayedLoading(postLoading, 200);
+  const showRepliesSpinner = useDelayedLoading(repliesLoading, 200);
+
   const { mutateAsync: submitReply, isPending } = useMutation({
     // 返信モード時は parent_comment_id / reply_to_comment_id をセット
     mutationFn: (args: { content: string; parentId?: string; replyToId?: string }) =>
@@ -373,7 +379,7 @@ export default function PostDetailScreen() {
   if (postLoading) {
     return (
       <Animated.View style={[{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' }, enterStyle]}>
-        <Spinner />
+        {showPostSpinner ? <Spinner /> : null}
       </Animated.View>
     );
   }
@@ -695,9 +701,11 @@ export default function PostDetailScreen() {
       >
         <ListHeader />
         {repliesLoading ? (
-          <View style={{ padding: SP['6'], alignItems: 'center' }}>
-            <ActivityIndicator color={C.accent} />
-          </View>
+          showRepliesSpinner ? (
+            <View style={{ padding: SP['6'], alignItems: 'center' }}>
+              <ActivityIndicator color={C.accent} />
+            </View>
+          ) : null
         ) : commentTree.length === 0 ? (
           <View style={{ padding: SP['6'], alignItems: 'center' }}>
             <Text style={[T.small, { color: C.text3 }]}>コメントはまだありません</Text>

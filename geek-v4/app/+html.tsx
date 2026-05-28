@@ -1,5 +1,6 @@
 import { ScrollViewStyleReset } from 'expo-router/html';
 import { type PropsWithChildren } from 'react';
+import { Asset } from 'expo-asset';
 
 // ============================================================
 // app/+html.tsx
@@ -12,6 +13,7 @@ import { type PropsWithChildren } from 'react';
 //   - PWA manifest link (/manifest.json)
 //   - favicon / apple-touch-icon
 //   - OpenGraph / Twitter card meta
+//   - Critical font preload + system-font fallback CSS (FOIT/FOUC 対策)
 //
 // アイコン / manifest は public/ 配下に置く (Expo が dist root にコピー)。
 // ============================================================
@@ -22,6 +24,53 @@ const SITE_URL = 'https://geek.app';
 const OG_IMAGE = '/og-image.png'; // public/og-image.png に配置 (未配置でもクロール時 noindex にはならない)
 const THEME    = '#0a0a0a';       // splash と合わせる
 const ACCENT   = '#7C6AF7';       // ブランド色
+
+// ============================================================
+// Critical font preload
+// ============================================================
+// Web の first paint で最初に必要になる 3 つの font weight を <link rel="preload">
+// で先行ダウンロードさせ、useAppFonts() の loadAsync より早くネットワーク要求を
+// キックする。これで font の到着が typical 100-200ms 早まり、100ms timeout fallback
+// に切り替わる前に "本来の" font で描画できる確率が上がる。
+//   - Inter_700Bold:        UI の太字 (button / heading の英文)
+//   - NotoSansJP_400Regular: 日本語の本文
+//   - NotoSansJP_700Bold:    日本語の見出し / 太字
+// require() は Metro web target で hashed asset URL に inline 解決される。
+// Asset.fromModule(require(...)).uri は SSR / runtime どちらでも安全に動く。
+// 解決に失敗した build (Asset registry 未初期化等) は uri=null を返し、
+// preload を skip して旧挙動 (useAppFonts 経由) にフォールバックする。
+// ============================================================
+function resolveFontUri(mod: unknown): string | null {
+  try {
+    const asset = Asset.fromModule(mod as number);
+    return asset?.uri ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const PRELOAD_FONTS: { uri: string | null; family: string }[] = [
+  {
+    uri: resolveFontUri(require('@expo-google-fonts/inter/Inter_700Bold.ttf')),
+    family: 'Inter_700Bold',
+  },
+  {
+    uri: resolveFontUri(require('@expo-google-fonts/noto-sans-jp/NotoSansJP_400Regular.ttf')),
+    family: 'NotoSansJP_400Regular',
+  },
+  {
+    uri: resolveFontUri(require('@expo-google-fonts/noto-sans-jp/NotoSansJP_700Bold.ttf')),
+    family: 'NotoSansJP_700Bold',
+  },
+];
+
+// font が届くまでの fallback cascade — Apple system → 日本語 fallback の順。
+// LOGO_FONT の cascade (-apple-system, BlinkMacSystemFont, ...) を body まで拡張し、
+// FOIT (Flash Of Invisible Text) ではなく FOUT (Flash Of Unstyled Text) に倒す。
+// expo-font の loadAsync は内部で FontFace API で font-display: swap 相当だが、
+// custom fontFamily 名が解決されるまでは system font に fallback したい。
+const FONT_FALLBACK_CSS =
+  `html,body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue","Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",Inter,system-ui,sans-serif;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}`;
 
 export default function Root({ children }: PropsWithChildren) {
   return (
@@ -71,6 +120,41 @@ export default function Root({ children }: PropsWithChildren) {
         <meta name="msapplication-TileColor" content={ACCENT} />
         <meta name="format-detection" content="telephone=no" />
         <meta name="referrer" content="strict-origin-when-cross-origin" />
+
+        {/*
+          ★ パフォーマンス: critical font を <link rel="preload"> でブラウザに
+          先行ダウンロードさせる。useAppFonts() の loadAsync() より早くキック
+          できるので、100ms timeout fallback が発火する前に本来の font が届く
+          確率が上がる (FOIT/FOUC 低減)。
+          uri が null の build (SSR で Asset registry が解決できないケース) は
+          安全に preload を skip — 旧挙動 (useAppFonts 経由) にフォールバックする。
+        */}
+        {PRELOAD_FONTS.map((f) =>
+          f.uri ? (
+            <link
+              key={f.family}
+              rel="preload"
+              as="font"
+              type="font/ttf"
+              href={f.uri}
+              crossOrigin="anonymous"
+            />
+          ) : null,
+        )}
+
+        {/*
+          ★ パフォーマンス: font が届くまでの fallback cascade を <head> 内で
+          inline 注入。Apple system → Hiragino → Yu Gothic → Inter → sans-serif
+          の順で、custom font が読み込まれるまで完全に "読める" 状態を維持する。
+          FOIT (Flash Of Invisible Text) ではなく FOUT (Flash Of Unstyled Text)
+          に倒すための要。useAppFonts() が完了 or 100ms timeout fallback した
+          後は fontFamily が token から上書きされる。
+        */}
+        <style
+          dangerouslySetInnerHTML={{
+            __html: FONT_FALLBACK_CSS,
+          }}
+        />
 
         {/*
           react-native-web の推奨スタイルリセット — body を full-height にして

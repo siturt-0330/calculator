@@ -1,7 +1,18 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { View, Text, RefreshControl, Platform } from 'react-native';
+import {
+  View,
+  Text,
+  RefreshControl,
+  Platform,
+  type NativeSyntheticEvent,
+  type NativeScrollEvent,
+} from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Image as ExpoImage } from 'expo-image';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAuthStore } from '../../stores/authStore';
+import { supabase } from '../../lib/supabase';
+import { fetchNotifications } from '../../lib/api/notifications';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -14,6 +25,7 @@ import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFeed } from '../../hooks/useFeed';
+import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { useTagFilter } from '../../hooks/useTagFilter';
 import { useTagFilterStore } from '../../stores/tagFilterStore';
 import { useLike, useLikes } from '../../hooks/useLike';
@@ -121,6 +133,9 @@ export default function FeedScreen() {
   // テーマ購読 — light/dark 切替で feed 画面が自動再 render される
   const { C, GRAD, SHADOW } = useTheme();
   const { posts, reasonsMap, communitiesByPost, ads, interestTags, loading, refreshing, refresh, loadMore } = useFeed();
+  // Smart skeleton timing — skeleton only after 200ms of continuous loading.
+  // <200ms loads (cache hits / fast network) skip skeleton entirely to avoid flash.
+  const showSkeleton = useDelayedLoading(loading, 200);
   const { blockedCount } = useTagFilter();
   const likedTags = useTagFilterStore((s) => s.likedTags);
   const scope = useFeedStore((s) => s.scope);
@@ -132,6 +147,11 @@ export default function FeedScreen() {
   const setSort = useFeedStore((s) => s.setSort);
   const hydrateFeed = useFeedStore((s) => s.hydrate);
   const hasLikedTags = likedTags.length > 0;
+  // ★ Background prefetch — feed first paint 後に隣接タブのデータを idle 時間で先読み。
+  //   React Query の cache に乗るので、ユーザーが /notifications や /mypage を tap した
+  //   瞬間に「白画面 → spinner → データ」ではなく即表示できる。
+  const qc = useQueryClient();
+  const userId = useAuthStore((s) => s.user?.id);
 
   // 好きなタグが無いときに closed scope に居たら open へ強制
   useEffect(() => {
@@ -150,6 +170,50 @@ export default function FeedScreen() {
   useEffect(() => {
     void hydrateFeed();
   }, [hydrateFeed]);
+
+  // ★ Idle prefetch — feed が settle (loading=false) してから 1.5s 後に
+  //   隣接タブ用 query を裏で温めておく。tap した瞬間にデータが既に cache にある状態を作る。
+  //
+  //   pre-warm 対象:
+  //     1. ['notifications']                — 通知タブ tap で即表示 (fetchNotifications 内部で limit 50)
+  //     2. ['mypage-stats', userId]         — マイページ Hero (post_count / nickname / avatar)
+  //
+  //   既に _layout.tsx で 'my-communities' / 'my-community-feed-rich' は prewarm 済なので
+  //   ここでは重複させない (二重 fetch 防止 + staleTime 30s と整合)。
+  //
+  //   ガード:
+  //     - loading 中はスキップ (feed 自体のクリティカルパスを邪魔しない)
+  //     - userId が無ければ全 skip (auth-gated query)
+  //     - cleanup で setTimeout 解除 — fast unmount 時に余計な network を出さない
+  useEffect(() => {
+    if (loading) return;
+    if (!userId) return;
+    const id = setTimeout(() => {
+      // 通知 top N — fetchNotifications は内部で .limit(50) しているため
+      // 「最新通知バッジ + 一覧の最初の chunk」をまとめて温められる。
+      void qc.prefetchQuery({
+        queryKey: ['notifications'],
+        queryFn: fetchNotifications,
+        staleTime: 60_000,
+      });
+      // マイページ Hero — profiles 1 行だけなので軽量。
+      // queryKey / queryFn / staleTime は app/(tabs)/mypage.tsx の useQuery と完全一致させる
+      // (mount 時に refetchOnMount=false で cache hit させるため key の形が合っていないと無意味)。
+      void qc.prefetchQuery({
+        queryKey: ['mypage-stats', userId],
+        queryFn: async () => {
+          const { data } = await supabase
+            .from('profiles')
+            .select('post_count, like_received_count, comment_count, concern_received_count, created_at, nickname, avatar_emoji, avatar_url')
+            .eq('id', userId)
+            .single();
+          return data;
+        },
+        staleTime: 60_000,
+      });
+    }, 1500);
+    return () => clearTimeout(id);
+  }, [loading, userId, qc]);
 
   // posts は毎 render で新しい配列参照になる (data?.pages.flatMap 経由)。
   // ID リストの中身が変わらない限り再計算したくないので、id を join したハッシュで
@@ -298,25 +362,100 @@ export default function FeedScreen() {
     return result;
   }, [posts, ads, interestTags]);
 
-  // ★ Viewport ベースの画像 prewarm — 次の 5 セル分を先読みして scroll jank ゼロに
+  // ============================================================
+  // ★ Viewport + Scroll velocity ベースの画像 prewarm
+  // ------------------------------------------------------------
+  // 設計:
+  //   1) **基本 lookahead = 3 セル** — 半分以上見えてる viewableItem の
+  //      最後の index から 3 つ先まで prefetch (静止 / 緩やか scroll 用)。
+  //   2) **velocity-aware**: scroll px/s に応じて lookahead を 3 → 最大 10 に拡張。
+  //      閾値: |v| > 800 px/s で 6、|v| > 1600 px/s で 10。
+  //   3) **concurrency cap = 4**: 同時 prefetch を 4 まで。browser は host あたり
+  //      6 で詰まるので 4 に絞ると CPU / JS スレッドを食わない。
+  //   4) **dedup**: 既に prefetch 試行した URL は Set でスキップ。
+  //
+  //   思想: 「次に見える 1-3 枚は絶対欲しい (UX 直結) / 速く scroll してる時だけ
+  //          先読み深くする (帯域とトレードオフ)」
+  // ============================================================
+  const PREFETCH_BASE_LOOKAHEAD = 3;       // 静止〜緩や scroll: 3 セル先
+  const PREFETCH_FAST_LOOKAHEAD = 6;       // |v| > 800: 6 セル先
+  const PREFETCH_FLING_LOOKAHEAD = 10;     // |v| > 1600: 10 セル先 (フリック)
+  const PREFETCH_VELOCITY_FAST = 800;      // px/s
+  const PREFETCH_VELOCITY_FLING = 1600;    // px/s
+  const PREFETCH_CONCURRENCY_CAP = 4;      // 同時 prefetch 最大数
+
+  // 速度トラッキング — render に影響を与えたくないので ref で管理 (state にすると
+  // 毎 scroll で feed 全体が re-render してしまう)
+  const lastScrollYRef = useRef(0);
+  const lastScrollTRef = useRef(0);
+  const scrollVelocityRef = useRef(0);
+
+  // dedup + concurrency 制御 — 試行済 URL を Set、in-flight 数を number で管理
+  const prefetchedUrlsRef = useRef<Set<string>>(new Set());
+  const inFlightCountRef = useRef(0);
+
+  const enqueuePrefetch = useCallback((url: string) => {
+    if (!url) return;
+    if (prefetchedUrlsRef.current.has(url)) return;
+    if (inFlightCountRef.current >= PREFETCH_CONCURRENCY_CAP) return;
+    prefetchedUrlsRef.current.add(url);
+    inFlightCountRef.current += 1;
+    // expo-image の prefetch は Promise を返す — settle で counter を戻して
+    // 次の prefetch を許可する。失敗 URL も dedup されてるので無限再試行はしない。
+    Promise.resolve()
+      .then(() => ExpoImage.prefetch(url, 'memory-disk'))
+      .catch(() => { /* ignore — viewer 側で再 fetch される */ })
+      .finally(() => {
+        inFlightCountRef.current = Math.max(0, inFlightCountRef.current - 1);
+      });
+  }, []);
+
   // feedItems の宣言後に定義する必要がある (依存している)
   const handleViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
       if (viewableItems.length === 0) return;
       const lastIdx = Math.max(...viewableItems.map((v) => v.index ?? 0));
-      const lookahead = feedItems.slice(lastIdx + 1, lastIdx + 6);
-      for (const item of lookahead) {
+      const absV = Math.abs(scrollVelocityRef.current);
+      const lookahead =
+        absV > PREFETCH_VELOCITY_FLING
+          ? PREFETCH_FLING_LOOKAHEAD
+          : absV > PREFETCH_VELOCITY_FAST
+            ? PREFETCH_FAST_LOOKAHEAD
+            : PREFETCH_BASE_LOOKAHEAD;
+      const slice = feedItems.slice(lastIdx + 1, lastIdx + 1 + lookahead);
+      for (const item of slice) {
         if (isAdItem(item)) continue;
         const urls = item.media_urls ?? [];
         for (const u of urls) {
           // 480 で AnonPostCard 側の ProgressiveImage thumbWidth と揃える
           // (URL が完全一致しないと cache hit しない — 揃えれば prefetch が活きる)
-          try { ExpoImage.prefetch(thumbedUrl(u, 480)); } catch { /* ignore */ }
+          enqueuePrefetch(thumbedUrl(u, 480));
         }
       }
     },
-    [feedItems],
+    [feedItems, enqueuePrefetch],
   );
+
+  // スクロール速度トラッキング — onScroll は 16ms throttle 想定 (60fps)。
+  // dt が 0 の最初のサンプルは無視。state に書かないので余計な re-render なし。
+  const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y;
+    const now = Date.now();
+    const prevT = lastScrollTRef.current;
+    if (prevT > 0) {
+      const dt = now - prevT;
+      if (dt > 0) {
+        const dy = y - lastScrollYRef.current;
+        // px/s — 16ms 単位だと 1px の dy でも 62.5 px/s なので、スパイク抑制に
+        // simple low-pass (0.7 既存 + 0.3 新規) を当てる
+        const instant = (dy / dt) * 1000;
+        scrollVelocityRef.current =
+          scrollVelocityRef.current * 0.7 + instant * 0.3;
+      }
+    }
+    lastScrollYRef.current = y;
+    lastScrollTRef.current = now;
+  }, []);
 
   const renderItem = useCallback(
     ({ item, index }: { item: FeedItem; index: number }) => {
@@ -569,6 +708,11 @@ export default function FeedScreen() {
         //   Instagram 風に「下に出てくる画像が常に既にメモリにある」状態を作る。
         viewabilityConfig={VIEWABILITY_CONFIG}
         onViewableItemsChanged={handleViewableItemsChanged}
+        // ★ scroll velocity tracking: 16ms (60fps) で sample → handleScroll で
+        //   ref に書き込み (state ではない → re-render なし)。viewability コールバック
+        //   が velocity を読んで lookahead 量を 3/6/10 に切替える。
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
         renderItem={renderItem}
         // ★ extraData: FlashList は data の参照が変わらないと再 render しない。
         //   テキストスタンプ toggle (useReactionToggle) は feed-page cache のみ
@@ -598,7 +742,7 @@ export default function FeedScreen() {
         }}
         ListEmptyComponent={
           loading ? (
-            <FeedSkeleton />
+            showSkeleton ? <FeedSkeleton /> : null
           ) : (
             <EmptyState
               icon={Icon.sparkles}

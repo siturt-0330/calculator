@@ -56,6 +56,7 @@ import {
   type CommunitySubTabKey,
 } from '../../../../components/community/CommunitySubTabs';
 import { useAuthStore } from '../../../../stores/authStore';
+import { useDelayedLoading } from '../../../../hooks/useDelayedLoading';
 import {
   fetchCommunity,
   joinCommunity,
@@ -212,6 +213,9 @@ export default function CommunityDetailScreen() {
     // コミュニティ metadata (name / icon / desc) はめったに変わらない — 2 分は信用する
     staleTime: 2 * 60_000,
   });
+  // Smart skeleton timing — Spinner only after 200ms of continuous loading.
+  // <200ms loads (cache hits via staleTime) skip flash entirely.
+  const showCommunitySpinner = useDelayedLoading(communityLoading, 200);
 
   // -----------------------------------------------------------
   // Tab "compose" → route to post create + reset
@@ -310,7 +314,7 @@ export default function CommunityDetailScreen() {
   if (communityLoading) {
     return (
       <View style={{ flex: 1, backgroundColor: C.bg, justifyContent: 'center', alignItems: 'center' }}>
-        <Spinner size="large" />
+        {showCommunitySpinner ? <Spinner size="large" /> : null}
       </View>
     );
   }

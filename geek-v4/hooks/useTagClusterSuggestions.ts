@@ -15,11 +15,12 @@
 //   - 結果は useMemo で安定化 (likedTags/nodes/cooccur が変わるまで再計算しない)
 //   - クライアントオンリー: 追加の DB クエリは無い
 // ============================================================
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTagFilterStore } from '../stores/tagFilterStore';
 import { useTagGraphStore } from '../stores/tagGraphStore';
 import { useTagCooccurStore } from '../stores/tagCooccurStore';
 import { suggestClusters, type SuggestedCluster } from '../lib/tagClustering/suggest';
+import { runWhenIdle } from '../lib/scheduler';
 
 export function useTagClusterSuggestions(opts?: { maxClusters?: number }): {
   clusters: SuggestedCluster[];
@@ -64,16 +65,49 @@ export function useTagClusterSuggestions(opts?: { maxClusters?: number }): {
     return arr;
   }, [likedTags, nodes]);
 
-  const clusters = useMemo(() => {
-    if (!cooccurHydrated) return [];
-    if (interestTags.length < 3) return [];
-    return suggestClusters({
-      interestTags,
-      cooccur,
-      inGraphTags,
-      maxClusters: opts?.maxClusters ?? 5,
-    });
-  }, [cooccurHydrated, interestTags, cooccur, inGraphTags, opts?.maxClusters]);
+  // suggestClusters は O(N²) (N = interest タグ数, 最大 50 → 2500 ペア比較)。
+  // 入力が変わらなければ再計算しないが、初回 hydrate 直後は重い (~10-30ms).
+  // useEffect + runWhenIdle で 1tick 遅延させ、UI スレッドを開ける。
+  //
+  // 入力 hash を 1 string に圧縮して deep deps を安定化。
+  const inputKey = useMemo(() => {
+    if (!cooccurHydrated) return '';
+    if (interestTags.length < 3) return '';
+    return [
+      interestTags.length,
+      interestTags.slice(0, 20).join('|'),
+      inGraphTags.size,
+      Object.keys(cooccur).length,
+      opts?.maxClusters ?? 5,
+    ].join(';');
+  }, [cooccurHydrated, interestTags, inGraphTags, cooccur, opts?.maxClusters]);
 
-  return { clusters, hydrated: cooccurHydrated };
+  const [clustersState, setClustersState] = useState<{ key: string; clusters: SuggestedCluster[] }>({
+    key: '',
+    clusters: [],
+  });
+
+  useEffect(() => {
+    if (!inputKey) {
+      // 入力が無いなら state も空に
+      if (clustersState.key !== '') setClustersState({ key: '', clusters: [] });
+      return;
+    }
+    if (clustersState.key === inputKey) return; // 同じ入力で計算済み
+
+    const handle = runWhenIdle(() => {
+      const result = suggestClusters({
+        interestTags,
+        cooccur,
+        inGraphTags,
+        maxClusters: opts?.maxClusters ?? 5,
+      });
+      setClustersState({ key: inputKey, clusters: result });
+    }, { timeoutMs: 1000 });
+
+    return () => handle.cancel();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputKey, interestTags, cooccur, inGraphTags, opts?.maxClusters]);
+
+  return { clusters: clustersState.clusters, hydrated: cooccurHydrated };
 }

@@ -13,7 +13,7 @@ import Animated, {
 import { useQueryClient } from '@tanstack/react-query';
 import { safeOpenUrl } from '../../lib/openUrl';
 import { Icon } from '../../constants/icons';
-import type { Post } from '../../types/models';
+import type { Post, CWCategory } from '../../types/models';
 import { useLanguageStore } from '../../stores/languageStore';
 import { useAuthStore } from '../../stores/authStore';
 import { translateDynamic, useT } from '../../lib/i18n';
@@ -118,6 +118,42 @@ function shortHost(url: string): string {
     return url;
   }
 }
+
+// ────────────────────────────────────────────────────────────────────
+// Module-scope constants — JSX で inline literal `{ top: 8, ... }` を書くと
+// その object/array は毎 render 新規になり、子 Pressable の reconciliation で
+// shallow-equal が外れて余分な diff が走る。長 list の card では塵が積もるので
+// 定数化して参照を固定する (React DevTools profile で render 数が減るのを確認済)。
+// ────────────────────────────────────────────────────────────────────
+const HIT_SLOP_6 = 6;
+const HIT_SLOP_10 = 10;
+const PRESSABLE_FLEX1 = { flex: 1 } as const;
+const SIZER_TEXT_OPACITY: TextStyle = { opacity: 0 };
+const REACTION_COUNT_TEXT_ABSOLUTE: TextStyle = {
+  position: 'absolute',
+  left: 0,
+  right: 0,
+  top: 0,
+  bottom: 0,
+  textAlign: 'left',
+};
+const REACTION_COUNT_WRAP_STYLE = {
+  position: 'relative' as const,
+  minWidth: 8,
+  justifyContent: 'center' as const,
+};
+const REACTION_BUTTON_PRESSABLE_STYLE = {
+  flexDirection: 'row' as const,
+  alignItems: 'center' as const,
+  gap: 6,
+  minHeight: 28,
+};
+const PARTICLE_DOT_STYLE = {
+  position: 'absolute' as const,
+  width: 4,
+  height: 4,
+  borderRadius: 2,
+};
 
 // ────────────────────────────────────────────────────────────────────
 // Module-level StyleSheet — 静的な inline style を一度だけ作って共有する。
@@ -403,7 +439,7 @@ const PARTICLE_DIST = 24; // px
 const PARTICLE_DURATION = 320; // ms
 const COUNT_FADE_MS = 180;
 
-function ReactionParticle({
+function ReactionParticleInner({
   angleDeg,
   progress,
   color,
@@ -430,24 +466,18 @@ function ReactionParticle({
       ],
     };
   });
+  // 色 prop だけは別 object で重ねる (PARTICLE_DOT_STYLE は static 共有)
+  const colorStyle = useMemo(() => ({ backgroundColor: color }), [color]);
   return (
     <Animated.View
       pointerEvents="none"
-      style={[
-        {
-          position: 'absolute',
-          width: 4,
-          height: 4,
-          borderRadius: 2,
-          backgroundColor: color,
-        },
-        a,
-      ]}
+      style={[PARTICLE_DOT_STYLE, colorStyle, a]}
     />
   );
 }
+const ReactionParticle = memo(ReactionParticleInner);
 
-function ReactionCount({
+function ReactionCountInner({
   value,
   textStyle,
   reduceMotion,
@@ -497,17 +527,13 @@ function ReactionCount({
 
   // 高さ確保のため min-width をプレースホルダで担保 (layout shift 防止)
   return (
-    <View style={{ position: 'relative', minWidth: 8, justifyContent: 'center' }}>
+    <View style={REACTION_COUNT_WRAP_STYLE}>
       {/* 不可視 sizer — 新値の高さで親 View の高さを安定させる */}
-      <Text style={[textStyle, { opacity: 0 }]} numberOfLines={1}>
+      <Text style={[textStyle, SIZER_TEXT_OPACITY]} numberOfLines={1}>
         {value}
       </Text>
       <Animated.Text
-        style={[
-          textStyle,
-          { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, textAlign: 'left' },
-          enterStyle,
-        ]}
+        style={[textStyle, REACTION_COUNT_TEXT_ABSOLUTE, enterStyle]}
         numberOfLines={1}
       >
         {value}
@@ -515,11 +541,7 @@ function ReactionCount({
       {displayPrev != null && (
         <Animated.Text
           // 旧値は装飾だけなので touch を吸わない
-          style={[
-            textStyle,
-            { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, textAlign: 'left' },
-            exitStyle,
-          ]}
+          style={[textStyle, REACTION_COUNT_TEXT_ABSOLUTE, exitStyle]}
           numberOfLines={1}
         >
           {displayPrev}
@@ -528,6 +550,7 @@ function ReactionCount({
     </View>
   );
 }
+const ReactionCount = memo(ReactionCountInner);
 
 function ReactionButtonInner({
   IconCmp,
@@ -595,7 +618,7 @@ function ReactionButtonInner({
   // debounce: 200ms。連打を防ぐが、親の更新で active が変わる前でも
   // 押下感は press scale + haptic で即時返す。
   const lastPressRef = useRef<number>(0);
-  const handlePress = () => {
+  const handlePress = useCallback(() => {
     const now = Date.now();
     if (now - lastPressRef.current < 200) return;
     lastPressRef.current = now;
@@ -603,45 +626,56 @@ function ReactionButtonInner({
     if (active) hap.select();
     else hap.confirm();
     onPress();
-  };
+  }, [active, onPress]);
+  const handlePressIn = useCallback(() => {
+    pressScale.value = withSpring(PRESS_SCALE, SPRING_SNAPPY);
+  }, [pressScale]);
+  const handlePressOut = useCallback(() => {
+    pressScale.value = withSpring(1, SPRING_SNAPPY);
+  }, [pressScale]);
+  // accessibilityState は active 変化時のみ object 新規化
+  const a11yState = useMemo(() => ({ selected: active }), [active]);
+  // icon container style は iconSize prop に依存 (= ほぼ static)
+  const iconContainerStyle = useMemo(
+    () => ({
+      width: iconSize,
+      height: iconSize,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+    }),
+    [iconSize],
+  );
+  // particle origin (icon 中央) も iconSize に依存
+  const particleOriginStyle = useMemo(
+    () => ({
+      position: 'absolute' as const,
+      width: 0,
+      height: 0,
+      left: iconSize / 2,
+      top: iconSize / 2,
+    }),
+    [iconSize],
+  );
 
   return (
     <Pressable
       onPress={handlePress}
-      onPressIn={() => {
-        pressScale.value = withSpring(PRESS_SCALE, SPRING_SNAPPY);
-      }}
-      onPressOut={() => {
-        pressScale.value = withSpring(1, SPRING_SNAPPY);
-      }}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
       hitSlop={hitSlop}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ selected: active }}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 28 }}
+      accessibilityState={a11yState}
+      style={REACTION_BUTTON_PRESSABLE_STYLE}
     >
       {/* icon container — 粒子はここを中心に放射。overflow: visible で粒子が外へ出る。 */}
-      <View
-        style={{
-          width: iconSize,
-          height: iconSize,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-        pointerEvents="none"
-      >
+      <View style={iconContainerStyle} pointerEvents="none">
         {/* 粒子 (active 化のたびに key を変えて remount) */}
         {!reduceMotion && (
           <View
             key={`particles-${particleNonce}`}
             pointerEvents="none"
-            style={{
-              position: 'absolute',
-              width: 0,
-              height: 0,
-              left: iconSize / 2,
-              top: iconSize / 2,
-            }}
+            style={particleOriginStyle}
           >
             {particleNonce > 0 &&
               PARTICLE_ANGLES.map((deg) => (
@@ -702,27 +736,32 @@ type CommunityInlineIndicatorProps = {
   STYLES: ReturnType<typeof makeStyles>;
 };
 
-function CommunityInlineIndicator({
+function CommunityInlineIndicatorInner({
   community: c,
   extraCount,
   onPress,
   STYLES,
 }: CommunityInlineIndicatorProps) {
   // 80 = 20px @4x retina (CommunityAvatarBar が 56px → 160px と同比率)
-  const thumb = c.icon_url ? thumbedUrl(c.icon_url, 80) : null;
+  // thumb URL は icon_url 変化時のみ再計算
+  const thumb = useMemo(() => (c.icon_url ? thumbedUrl(c.icon_url, 80) : null), [c.icon_url]);
+  // ExpoImage 用 source object — icon_url 変化時のみ更新
+  const thumbSource = useMemo(() => (thumb ? { uri: thumb } : null), [thumb]);
+  // a11y label は name 変化時のみ
+  const a11yLabel = useMemo(() => `コミュニティ ${c.name} を開く`, [c.name]);
   return (
     <PressableScale
       onPress={onPress}
       haptic="tap"
-      hitSlop={6}
+      hitSlop={HIT_SLOP_6}
       style={STYLES.communityInline}
       accessibilityRole="link"
-      accessibilityLabel={`コミュニティ ${c.name} を開く`}
+      accessibilityLabel={a11yLabel}
     >
       <View style={STYLES.communityInlineRingBase}>
-        {thumb ? (
+        {thumbSource ? (
           <ExpoImage
-            source={{ uri: thumb }}
+            source={thumbSource}
             style={STYLES.communityInlineImage}
             contentFit="cover"
             cachePolicy="memory-disk"
@@ -743,6 +782,117 @@ function CommunityInlineIndicator({
     </PressableScale>
   );
 }
+// memo: 親 card 再 render 時に community/extraCount/onPress/STYLES が
+//   ref-equal なら skip。 onCommunityPress / STYLES は親で memoize 済みなので
+//   現実には community 同一 + extraCount 同一でほぼ常に skip される。
+const CommunityInlineIndicator = memo(CommunityInlineIndicatorInner);
+
+// ============================================================
+// MediaItem / ReactionPill / TagPillRow — list 内 mapped 要素は専用 sub-component に
+// 切り出して memo 化する。これで親 card 再 render 時も各 item は (prop ref が
+// 同じなら) skip される。インライン arrow `() => onTagPress(tag)` を回避する
+// ためにも有効。
+// ============================================================
+
+type MemoTagPillProps = {
+  name: string;
+  state: 'normal' | 'added';
+  onTagPress: (name: string) => void;
+};
+function MemoTagPillInner({ name, state, onTagPress }: MemoTagPillProps) {
+  const handlePress = useCallback(() => onTagPress(name), [onTagPress, name]);
+  return <TagPill name={name} state={state} onPress={handlePress} />;
+}
+const MemoTagPill = memo(MemoTagPillInner);
+
+type MemoImagePressableProps = {
+  url: string;
+  blurhash: string | undefined;
+  cwCategory: CWCategory;
+  aspect: number;
+  mediaItemBaseStyle: ReturnType<typeof makeStyles>['mediaItemBase'];
+  onPressItem: (url: string) => void;
+};
+function MemoImagePressableInner({
+  url,
+  blurhash,
+  cwCategory,
+  aspect,
+  mediaItemBaseStyle,
+  onPressItem,
+}: MemoImagePressableProps) {
+  const handlePress = useCallback(() => onPressItem(url), [onPressItem, url]);
+  const wrapperStyle = useMemo(
+    () => [mediaItemBaseStyle, { aspectRatio: aspect }],
+    [mediaItemBaseStyle, aspect],
+  );
+  return (
+    <View style={wrapperStyle}>
+      <MediaWithCWGuard cwCategory={cwCategory} blurhash={blurhash}>
+        <Pressable
+          onPress={handlePress}
+          style={PRESSABLE_FLEX1}
+          accessibilityRole="imagebutton"
+          accessibilityLabel="画像を拡大表示"
+        >
+          <ProgressiveImage
+            uri={url}
+            blurhash={blurhash}
+            width="100%"
+            height="100%"
+            radius={R.md}
+            lazy
+            thumbWidth={480}
+            priority="high"
+          />
+        </Pressable>
+      </MediaWithCWGuard>
+    </View>
+  );
+}
+const MemoImagePressable = memo(MemoImagePressableInner);
+
+type MemoReactionPillProps = {
+  meme: string;
+  count: number;
+  mine: boolean;
+  C: ColorPalette;
+  STYLES: ReturnType<typeof makeStyles>;
+  onReact: (meme: string) => void;
+};
+function MemoReactionPillInner({
+  meme,
+  count,
+  mine,
+  C,
+  STYLES,
+  onReact,
+}: MemoReactionPillProps) {
+  const handlePress = useCallback(() => onReact(meme), [onReact, meme]);
+  const pillStyle = useMemo(
+    () => [STYLES.reactionPillBase, reactionPillColors(C, mine)],
+    [STYLES.reactionPillBase, C, mine],
+  );
+  const labelStyle = useMemo(() => reactionPillLabel(C, mine), [C, mine]);
+  const countStyle = useMemo(() => reactionPillCount(C, mine), [C, mine]);
+  const a11yLabel = useMemo(
+    () => `${meme} ${count} 件 ${mine ? '(押下済み)' : ''}`,
+    [meme, count, mine],
+  );
+  return (
+    <PressableScale
+      onPress={handlePress}
+      haptic="tap"
+      hitSlop={HIT_SLOP_10}
+      accessibilityLabel={a11yLabel}
+      style={pillStyle}
+    >
+      <Text style={labelStyle}>{meme}</Text>
+      <Text style={countStyle}>{count}</Text>
+    </PressableScale>
+  );
+}
+const MemoReactionPill = memo(MemoReactionPillInner);
 
 type AnonPostCardProps = {
   post: Post;
@@ -814,7 +964,19 @@ function AnonPostCardInner({
   // ミームリアクション (props 経由で DB から取得済み)
   const [memePickerOpen, setMemePickerOpen] = useState(false);
   const reactionsList = reactions;
-  const myReactionsForPost = reactions.filter((r) => r.mine).map((r) => r.meme);
+  // myReactionsForPost は MemeReactionPicker の `picked` に渡る — 毎 render 新 array
+  // を作ると Picker 側 effect が無駄発火する。 reactions ref が変わらない限り stable。
+  const myReactionsForPost = useMemo(
+    () => reactions.filter((r) => r.mine).map((r) => r.meme),
+    [reactions],
+  );
+  // 表示用 8 件スライス — reactions ref が変わらなければ stable
+  const visibleReactions = useMemo(() => reactionsList.slice(0, 8), [reactionsList]);
+  // 合計 count — reactions ref 変化時のみ再計算
+  const reactionTotal = useMemo(
+    () => reactionsList.reduce((a, r) => a + r.count, 0),
+    [reactionsList],
+  );
 
   // CW (content warning) 開示状態
   const cwCategory = post.cw_category ?? null;
@@ -862,13 +1024,24 @@ function AnonPostCardInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoTranslate, canTranslate, translated, translating]);
   const displayContent = (autoTranslate && translated) ? translated : post.content;
-  // データ欠落でクラッシュしないよう全フィールドを安全化
-  const mediaUrls = post.media_urls ?? [];
-  const mediaBlurhashes = post.media_blurhashes ?? [];
+  // データ欠落でクラッシュしないよう全フィールドを安全化。
+  // post ref は memo の arePropsEqual で stable なので、これらは
+  // post 変化時のみ新規 array になる (= ほぼ常に同 ref)。
+  const mediaUrls = useMemo(() => post.media_urls ?? [], [post.media_urls]);
+  const mediaBlurhashes = useMemo(() => post.media_blurhashes ?? [], [post.media_blurhashes]);
   // 動画 (migration 0043 後の投稿のみ存在)。古い投稿は undefined → 空配列で安全
-  const videoUrls = post.video_urls ?? [];
-  const videoPosters = post.video_posters ?? [];
-  const tagNames = Array.from(new Set(post.tag_names ?? []));
+  const videoUrls = useMemo(() => post.video_urls ?? [], [post.video_urls]);
+  const videoPosters = useMemo(() => post.video_posters ?? [], [post.video_posters]);
+  const tagNames = useMemo(() => Array.from(new Set(post.tag_names ?? [])), [post.tag_names]);
+  // tag 行: 1 件目以降をリスト表示する。slice の結果も memoize して
+  // TagPill の re-mount を抑制する。
+  const restTagNames = useMemo(() => tagNames.slice(1), [tagNames]);
+  // 「追加されたタグで、本タグに含まれていないもの」 — addedTags か tagNames の
+  // どちらかが変化したときだけ計算する。
+  const filteredAddedTags = useMemo(
+    () => addedTags.filter((tg) => !tagNames.includes(tg)),
+    [addedTags, tagNames],
+  );
 
   // 画像の自然なアスペクト比を解決 — Image.getSize は web/native 両対応
   // tall portrait や wide landscape を square に潰さないよう、各 URI ごとに記録
@@ -922,7 +1095,7 @@ function AnonPostCardInner({
   const hasMedia = mediaUrls.length > 0 || videoUrls.length > 0;
   const lowTrust = likesCount > 0 && concernCount > likesCount;
 
-  const openSource = () => {
+  const openSource = useCallback(() => {
     if (!post.source_url) return;
     // sanitizeUrl は http/https 以外を null にする — javascript:/data:/vbscript: XSS 防止
     const safe = sanitizeUrl(post.source_url);
@@ -933,7 +1106,36 @@ function AnonPostCardInner({
       // 旧: silent fail。新: safeOpenUrl で失敗時 toast を表示
       void safeOpenUrl(safe);
     }
-  };
+  }, [post.source_url]);
+
+  // CW 開示 — `() => setCwRevealed(true)` を JSX inline で書くと毎 render 新 ref
+  const revealCw = useCallback(() => setCwRevealed(true), []);
+  // ピッカー開閉 — 同様に inline arrow を避ける
+  const openMemePicker = useCallback(() => setMemePickerOpen(true), []);
+  const closeMemePicker = useCallback(() => setMemePickerOpen(false), []);
+  // 本文 long-press でピッカー (quick reaction flag が ON のときだけ渡す)
+  const onLongPressBody = useQuickReaction ? openMemePicker : undefined;
+  // primary community を tap したときのハンドラ — onCommunityPress / primaryCommunityId
+  // が変わったときだけ新 ref。
+  const onPrimaryCommunityPress = useCallback(() => {
+    if (primaryCommunityId) onCommunityPress?.(primaryCommunityId);
+  }, [onCommunityPress, primaryCommunityId]);
+  // ModActionMenu 完了時の invalidate ハンドラ — qc は安定 ref。
+  const onModActionComplete = useCallback(() => {
+    qc.invalidateQueries({ queryKey: ['feed-page'] });
+    qc.invalidateQueries({ queryKey: ['feed'] });
+    qc.invalidateQueries({ queryKey: ['community-feed'] });
+  }, [qc]);
+  // ObsidianSaveButton 用の note — postToObsidianNote は pure function なので
+  // post 変化時のみ再計算で十分。
+  const obsidianNote = useMemo(() => postToObsidianNote(post), [post]);
+  // MemeReactionPicker の onPick — onReact prop の wrapper
+  const onMemePick = useCallback((meme: string) => onReact(meme), [onReact]);
+  // ModActionMenu の target は post 変化時のみ
+  const modActionTarget = useMemo(
+    () => ({ kind: 'post' as const, postId: post.id, authorId: post.author_id ?? '' }),
+    [post.id, post.author_id],
+  );
 
   // ── 動的 style: props/state に依存するもののみ useMemo 化 ──
   // ルート Container — modern glass card 風. 1 投稿 = 1 浮遊カード として扱う。
@@ -963,7 +1165,8 @@ function AnonPostCardInner({
       shadowOffset: { width: 0, height: 2 } as const,
       shadowRadius: 6,
     }),
-    [lowTrust],
+    // C 全体ではなく実際使う 2 値のみ依存 — テーマ切替時のみ再計算
+    [C.bg2, C.amber, lowTrust],
   );
 
   // ============================================================
@@ -979,6 +1182,16 @@ function AnonPostCardInner({
   // ============================================================
   const reduceMotionForCard = useReducedMotion();
   const pressLift = useSharedValue(0);
+  // 本文 PressIn/PressOut — pressLift を駆動する。 ReducedMotion 時は no-op。
+  // useCallback で stable 化して PressableScale の reconciliation を抑える。
+  const onBodyPressIn = useCallback(() => {
+    if (reduceMotionForCard) return;
+    pressLift.value = withTiming(1, { duration: 120, easing: Easing.out(Easing.cubic) });
+  }, [reduceMotionForCard, pressLift]);
+  const onBodyPressOut = useCallback(() => {
+    if (reduceMotionForCard) return;
+    pressLift.value = withSpring(0, SPRING_SNAPPY);
+  }, [reduceMotionForCard, pressLift]);
   const animatedShadowStyle = useAnimatedStyle(() => {
     if (reduceMotionForCard) {
       // ReducedMotion: 固定 shadow / scale 1 (worklet からは触らない)
@@ -994,34 +1207,92 @@ function AnonPostCardInner({
   });
 
   // 本文 Text/Markdown 用 — T.body と body color を結合
-  const bodyTextStyle = useMemo(() => [T.body, STYLES.bodyText], []);
+  // 旧コード: deps が `[]` で STYLES.bodyText (テーマ変化で別 ref) を捉えていなかった
+  // → light/dark 切替で本文色だけ残るバグの恐れ。STYLES を deps に追加。
+  const bodyTextStyle = useMemo(() => [T.body, STYLES.bodyText], [STYLES.bodyText]);
 
-  // Like ラベル/カウント色
-  const likeCountTextStyle = useMemo(() => ({ color: liked ? C.pink : C.text2 }), [liked]);
+  // Like ラベル/カウント色 — テーマ切替も拾えるよう C.pink/C.text2 も deps へ
+  const likeCountTextStyle = useMemo(
+    () => ({ color: liked ? C.pink : C.text2 }),
+    [liked, C.pink, C.text2],
+  );
 
   // Concern ラベル/カウント色
   const concernCountTextStyle = useMemo(
     () => ({ color: concerned ? C.amber : C.text3 }),
-    [concerned],
+    [concerned, C.amber, C.text3],
   );
 
   // Reaction カウント色 — 自分のリアクション有無で変わる
   const hasMyReaction = myReactionsForPost.length > 0;
   const reactionCountTextStyle = useMemo(
     () => ({ color: hasMyReaction ? C.accent : C.text3 }),
-    [hasMyReaction],
+    [hasMyReaction, C.accent, C.text3],
+  );
+  // T.smallM とのマージ済み版を 1 度だけ作る — JSX で毎 render spread すると
+  // 新 object になるので memoize。 ReactionButton の shallow compare で skip。
+  const likeCountMergedStyle = useMemo(
+    () => ({ ...T.smallM, ...likeCountTextStyle }),
+    [likeCountTextStyle],
+  );
+  const concernCountMergedStyle = useMemo(
+    () => ({ ...T.smallM, ...concernCountTextStyle }),
+    [concernCountTextStyle],
+  );
+  // T.smallM とリアクション数 row の色を結合 — JSX で毎 render 新 array を作って
+  // いたのを memoize。
+  const reactionCountRowStyle = useMemo(
+    () => [T.smallM, reactionCountTextStyle],
+    [reactionCountTextStyle],
+  );
+  // 公式管理者の name 行 / anon の sub 行で再利用される style 配列も memoize。
+  // [T.smallM, ...] のように毎 render 新 array にすると Text 再 render の
+  // reconciliation で diff コストが出る。
+  const officialNameStyle = useMemo(
+    () => [T.smallM, STYLES.officialName],
+    [STYLES.officialName],
+  );
+  const officialSubStyle = useMemo(
+    () => [T.caption, STYLES.officialSub],
+    [STYLES.officialSub],
+  );
+  const anonLabelStyle = useMemo(
+    () => [T.smallM, STYLES.anonLabel],
+    [STYLES.anonLabel],
+  );
+  const lowTrustTextStyle = useMemo(
+    () => [T.caption, STYLES.lowTrustText],
+    [STYLES.lowTrustText],
+  );
+  const cwLabelStyle = useMemo(() => [T.smallM, STYLES.cwLabel], [STYLES.cwLabel]);
+  const cwWarningStyle = useMemo(
+    () => [T.caption, STYLES.cwWarning],
+    [STYLES.cwWarning],
+  );
+  const cwTapStyle = useMemo(() => [T.caption, STYLES.cwTap], [STYLES.cwTap]);
+  const commentCountStyle = useMemo(
+    () => [T.smallM, STYLES.commentCount],
+    [STYLES.commentCount],
+  );
+  const sourceTextStyle = useMemo(
+    () => [T.caption, STYLES.sourceText],
+    [STYLES.sourceText],
+  );
+  const containerStyleCombined = useMemo(
+    () => [containerStyle, animatedShadowStyle],
+    [containerStyle, animatedShadowStyle],
   );
 
   // Twitter/Threads-style full-width row: no outer rounded card, just a
   // hairline divider between posts. Looks more "premium feed" than a
   // floating-card grid on tall screens.
   return (
-    <Animated.View style={[containerStyle, animatedShadowStyle]}>
+    <Animated.View style={containerStyleCombined}>
       {/* 低信頼バナー */}
       {lowTrust && (
         <View style={STYLES.lowTrustBanner}>
           <Warn size={14} color={C.amber} strokeWidth={2.2} />
-          <Text style={[T.caption, STYLES.lowTrustText]}>
+          <Text style={lowTrustTextStyle}>
             この投稿に「気になる」が多く付いています ({concernCount})
           </Text>
         </View>
@@ -1044,12 +1315,12 @@ function AnonPostCardInner({
         {post.official_author ? (
           <View style={STYLES.officialMeta}>
             <View style={STYLES.officialNameRow}>
-              <Text style={[T.smallM, STYLES.officialName]} numberOfLines={1}>
+              <Text style={officialNameStyle} numberOfLines={1}>
                 {post.official_author.name || t('公式管理者')}
               </Text>
             </View>
             <View style={STYLES.anonMetaRow}>
-              <Text style={[T.caption, STYLES.officialSub]} numberOfLines={1}>
+              <Text style={officialSubStyle} numberOfLines={1}>
                 {post.official_author.organization
                   ? `${post.official_author.organization} · ${formatRelative(post.created_at)}`
                   : formatRelative(post.created_at)}
@@ -1060,7 +1331,7 @@ function AnonPostCardInner({
                   <CommunityInlineIndicator
                     community={primaryCommunity}
                     extraCount={communities.length - 1}
-                    onPress={() => onCommunityPress?.(primaryCommunity.community_id)}
+                    onPress={onPrimaryCommunityPress}
                     STYLES={STYLES}
                   />
                 </>
@@ -1070,7 +1341,7 @@ function AnonPostCardInner({
         ) : (
           // anon: 「匿」を 1 行目、relative time + community を 2 行目に分けて typography 階層を作る
           <View style={STYLES.anonRow}>
-            <Text style={[T.smallM, STYLES.anonLabel]} numberOfLines={1}>
+            <Text style={anonLabelStyle} numberOfLines={1}>
               {t('匿')}
             </Text>
             <View style={STYLES.anonMetaRow}>
@@ -1083,7 +1354,7 @@ function AnonPostCardInner({
                   <CommunityInlineIndicator
                     community={primaryCommunity}
                     extraCount={communities.length - 1}
-                    onPress={() => onCommunityPress?.(primaryCommunity.community_id)}
+                    onPress={onPrimaryCommunityPress}
                     STYLES={STYLES}
                   />
                 </>
@@ -1091,26 +1362,17 @@ function AnonPostCardInner({
             </View>
           </View>
         )}
-        <PressableScale onPress={onMore} hitSlop={10} style={STYLES.morePress}>
+        <PressableScale onPress={onMore} hitSlop={HIT_SLOP_10} style={STYLES.morePress}>
           <More size={20} color={C.text3} strokeWidth={2.2} />
         </PressableScale>
         {/* mod 専用 3-dot menu — mod でない / 自分の投稿のときは null render */}
         {primaryCommunityId && post.author_id && (
           <ModActionMenu
-            target={{
-              kind: 'post',
-              postId: post.id,
-              authorId: post.author_id,
-            }}
+            target={modActionTarget}
             communityId={primaryCommunityId}
             isMod={isMod}
             isOwn={isOwnPost}
-            onActionComplete={() => {
-              // 削除 / kick / ban のいずれも feed を再 fetch (RPC 経路) させる
-              qc.invalidateQueries({ queryKey: ['feed-page'] });
-              qc.invalidateQueries({ queryKey: ['feed'] });
-              qc.invalidateQueries({ queryKey: ['community-feed'] });
-            }}
+            onActionComplete={onModActionComplete}
           />
         )}
       </View>
@@ -1119,22 +1381,22 @@ function AnonPostCardInner({
           ※ コミュニティ表示は header 内 (anonMetaRow / officialMeta) に inline 化済み — 旧 chip row は削除 */}
       {isCwHidden && (
         <PressableScale
-          onPress={() => setCwRevealed(true)}
+          onPress={revealCw}
           haptic="tap"
           style={STYLES.cwBox}
         >
           <Text style={STYLES.cwEmoji}>
             {cwCategory === 'spoiler' ? '🤐' : cwCategory === 'nsfw' ? '🔞' : cwCategory === 'violence' ? '⚠️' : '🛡️'}
           </Text>
-          <Text style={[T.smallM, STYLES.cwLabel]}>
+          <Text style={cwLabelStyle}>
             {cwCategory === 'spoiler' ? t('ネタバレ') : cwCategory === 'nsfw' ? t('センシティブな内容') : cwCategory === 'violence' ? t('暴力的描写') : t('注意')}
           </Text>
           {post.content_warning && (
-            <Text style={[T.caption, STYLES.cwWarning]}>
+            <Text style={cwWarningStyle}>
               {post.content_warning}
             </Text>
           )}
-          <Text style={[T.caption, STYLES.cwTap]}>{t('タップして表示')}</Text>
+          <Text style={cwTapStyle}>{t('タップして表示')}</Text>
         </PressableScale>
       )}
 
