@@ -1,23 +1,21 @@
-import { useEffect, useState } from 'react';
-import { View, DimensionValue, ViewStyle, LayoutChangeEvent } from 'react-native';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withTiming,
-  Easing,
-  interpolate,
-} from 'react-native-reanimated';
-import { C, R, SP } from '../../design/tokens';
+import { View, DimensionValue, ViewStyle } from 'react-native';
+import { useColors } from '../../hooks/useColors';
+import { R, SP } from '../../design/tokens';
+import { SkeletonBox } from './SkeletonBox';
 
-// Smooth left-to-right shimmer skeleton.
-// - Uses a sliding highlight band over a dim base
-// - Reanimated based; cheap on the UI thread
-// - API kept backward-compatible with the previous Skeleton primitive so
-//   existing call-sites (ThreadCardSkeleton, MypageSkeleton, NotificationSkeleton,
-//   PostCardSkeleton) keep working with zero changes.
-const SHIMMER_BAND_WIDTH = 96;
-const SHIMMER_DURATION_MS = 1400;
+// ============================================================
+// Skeleton — shimmer 付きの dimming プレースホルダ
+// ------------------------------------------------------------
+// 実装は SkeletonBox primitive (LinearGradient + Reanimated translateX) に
+// 委譲。本ファイルは backward-compatible な薄い wrapper + 用途別テンプレ群。
+//
+// API 互換:
+//   - 既存呼び出し (ThreadCardSkeleton / MypageSkeleton / NotificationSkeleton /
+//     PostCardSkeleton / SkeletonCircle / app/admin/* / app/(tabs)/community/discover)
+//     は変更ゼロで動く
+//   - props: width / height / radius (legacy) / borderRadius (新) / style
+//   - radius と borderRadius の両方が指定された場合は borderRadius を優先
+// ============================================================
 
 export function Skeleton({
   width = '100%',
@@ -36,65 +34,23 @@ export function Skeleton({
 }) {
   // borderRadius が指定されればそれ、無ければ radius、どちらも無ければ R.md (legacy default)
   const effectiveRadius = borderRadius ?? radius ?? R.md;
-  // Track measured width so the shimmer band sweeps fully across.
-  const [measuredW, setMeasuredW] = useState<number>(0);
-  const progress = useSharedValue(0);
-
-  useEffect(() => {
-    progress.value = withRepeat(
-      withTiming(1, { duration: SHIMMER_DURATION_MS, easing: Easing.bezier(0.4, 0, 0.6, 1) }),
-      -1,
-      false,
-    );
-  }, [progress]);
-
-  const bandStyle = useAnimatedStyle(() => {
-    const w = measuredW || 200;
-    const tx = interpolate(progress.value, [0, 1], [-SHIMMER_BAND_WIDTH, w + SHIMMER_BAND_WIDTH]);
-    return { transform: [{ translateX: tx }] };
-  });
-
-  const onLayout = (e: LayoutChangeEvent) => {
-    const w = e.nativeEvent.layout.width;
-    if (w && w !== measuredW) setMeasuredW(w);
-  };
-
   return (
-    <View
-      onLayout={onLayout}
-      style={[
-        {
-          width,
-          height,
-          borderRadius: effectiveRadius,
-          backgroundColor: C.bg3,
-          overflow: 'hidden',
-        },
-        style,
-      ]}
-    >
-      <Animated.View
-        style={[
-          {
-            position: 'absolute',
-            top: 0,
-            bottom: 0,
-            width: SHIMMER_BAND_WIDTH,
-            backgroundColor: 'rgba(255,255,255,0.06)',
-          },
-          bandStyle,
-        ]}
-      />
-    </View>
+    <SkeletonBox
+      width={width}
+      height={height}
+      borderRadius={effectiveRadius}
+      style={style}
+    />
   );
 }
 
 export function SkeletonCircle({ size = 36 }: { size?: number }) {
-  return <Skeleton width={size} height={size} radius={9999} />;
+  return <SkeletonBox width={size} height={size} borderRadius={9999} />;
 }
 
 // BBS スレッドカード のスケルトン
 export function ThreadCardSkeleton() {
+  const C = useColors();
   return (
     <View style={{
       paddingHorizontal: SP['4'], paddingBottom: SP['3'],
@@ -124,6 +80,7 @@ export function ThreadCardSkeleton() {
 
 // 通知アイテム のスケルトン
 export function NotificationSkeleton() {
+  const C = useColors();
   return (
     <View style={{
       flexDirection: 'row',
@@ -143,6 +100,7 @@ export function NotificationSkeleton() {
 
 // マイページのスケルトン
 export function MypageSkeleton() {
+  const C = useColors();
   return (
     <View style={{ padding: SP['4'], gap: SP['4'] }}>
       <View style={{ alignItems: 'center', gap: SP['2'] }}>

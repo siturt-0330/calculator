@@ -6,6 +6,7 @@ import { TabIcon, type TabKey } from './TabIcon';
 import { HapticTab } from './HapticTab';
 import { useNotifications } from '../../hooks/useNotifications';
 import { NotificationBadge } from '../ui/NotificationBadge';
+import { useResolvedTheme } from '../../lib/theme/themeStore';
 
 const ROUTE_TO_TAB: Record<string, TabKey> = {
   feed: 'home',
@@ -30,6 +31,14 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   // pill の下マージン — safeArea 下端 + 余白
   const bottomMargin = Math.max(insets.bottom, 8) + 8;
   const { unreadCount } = useNotifications();
+  const theme = useResolvedTheme();
+  const isDark = theme === 'dark';
+  // テーマ別 pill 配色 — dark は黒 base + 紫 active, light は白 base + 紫 active
+  const pillBg = isDark ? '#141417' : '#ffffff';
+  const pillBgWeb = isDark ? 'rgba(20,20,23,0.94)' : 'rgba(255,255,255,0.92)';
+  const pillBorder = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)';
+  const pillShadowColor = isDark ? '#000' : '#0a0a0a';
+  const pillShadowOpacity = isDark ? 0.5 : 0.12;
 
   return (
     <View
@@ -43,24 +52,24 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
         paddingBottom: bottomMargin,
       }}
     >
-      {/* pill 本体 — 浮遊型の dark capsule
+      {/* pill 本体 — 浮遊型の dark/light capsule
            全 tab が等幅 (TAB_WIDTH) で active 切替時も container 全幅が変わらない.
            pill の BR は container BR より小さく取り, paddingH で角差を吸収. */}
       <View
         style={[
           {
             flexDirection: 'row',
-            backgroundColor: '#141417',
+            backgroundColor: pillBg,
             borderRadius: 28,
             paddingHorizontal: 8,
             paddingVertical: 6,
             gap: 2,
             borderWidth: 1,
-            borderColor: 'rgba(255,255,255,0.06)',
+            borderColor: pillBorder,
             overflow: 'hidden',
-            // shadow
-            shadowColor: '#000',
-            shadowOpacity: 0.5,
+            // shadow — light テーマでは控えめに
+            shadowColor: pillShadowColor,
+            shadowOpacity: pillShadowOpacity,
             shadowOffset: { width: 0, height: 8 },
             shadowRadius: 24,
             elevation: 12,
@@ -69,7 +78,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
           // パフォーマンス監査: 20px → 14px に削減 (Safari の scroll 時 re-composite cost -25%)
           Platform.OS === 'web'
             ? ({
-                backgroundColor: 'rgba(20,20,23,0.94)',
+                backgroundColor: pillBgWeb,
                 backdropFilter: 'blur(14px)',
                 WebkitBackdropFilter: 'blur(14px)',
                 willChange: 'transform',

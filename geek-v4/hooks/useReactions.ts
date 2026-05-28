@@ -194,9 +194,16 @@ export function useReactionToggle() {
     const k = `${vars.postId}:${vars.meme}`;
     pending.current.set(k, 1);
     mutation.mutate(vars, {
-      onSettled: () => {
+      onSettled: (_data, error) => {
         const total = pending.current.get(k) ?? 1;
         pending.current.delete(k);
+        // ★ Audit D#8: error 時は再 fire しない。
+        //   mutation の onError が既に snapshot revert + toast 表示済みで、
+        //   ここで fire(vars) を再呼出すると revert 後の state に対して
+        //   ユーザー意図を二重計上し、追加の失敗 → 重複トースト("いいねに失敗
+        //   しました" ×2) を生む。失敗時はサーバが intent を消化していない
+        //   ので parity を追いつかせる必要もない (localFlips も revert される).
+        if (error) return;
         const extra = total - 1;
         if (extra % 2 === 1) fire(vars); // 余剰が奇数 → もう一度 toggle
       },

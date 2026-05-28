@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -165,17 +165,31 @@ export default function ProfileEditScreen() {
         <View style={{ alignItems: 'center', gap: SP['3'] }}>
           <Avatar size={120} name={nickname} emoji={emoji ?? undefined} uri={avatarUrl ?? undefined} />
           <View style={{ flexDirection: 'row', gap: SP['2'] }}>
+            {/* クリック応答監査:
+                旧版は disabled={uploading} でタップを止めるだけで、視覚フィードバックが
+                テキスト変化 ("写真を選ぶ" → "アップロード中…") しかなかった。
+                PressableScale の disabled 時は scale animation も haptic も走らないため、
+                「何も起きていない」ようにユーザーに見える bug があった。
+                fix:
+                  - opacity 0.6 で disabled の状態を明示
+                  - ActivityIndicator を camera icon の代わりに表示し進捗を可視化 */}
             <PressableScale
               onPress={pickPhoto}
               haptic="tap"
               disabled={uploading}
+              accessibilityState={{ busy: uploading, disabled: uploading }}
               style={{
                 flexDirection: 'row', alignItems: 'center', gap: SP['1'],
                 paddingHorizontal: SP['3'], paddingVertical: SP['2'],
                 backgroundColor: C.accent, borderRadius: R.full,
+                opacity: uploading ? 0.6 : 1,
               }}
             >
-              <Icon.camera size={16} color="#fff" strokeWidth={2.2} />
+              {uploading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Icon.camera size={16} color="#fff" strokeWidth={2.2} />
+              )}
               <Text style={[T.smallM, { color: '#fff' }]}>
                 {uploading ? 'アップロード中…' : '写真を選ぶ'}
               </Text>

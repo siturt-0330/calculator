@@ -1,5 +1,13 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { View, Text, ScrollView, Platform } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  withRepeat,
+  withSequence,
+  Easing,
+} from 'react-native-reanimated';
 import { FlashList } from '@shopify/flash-list';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -17,6 +25,8 @@ import { TABBAR } from '../../design/tabbar';
 import { NotificationSkeleton } from '../../components/ui/Skeleton';
 import { supabase } from '../../lib/supabase';
 import type { Notification } from '../../types/models';
+import { useColors } from '../../hooks/useColors';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
 
 // 通知を 4 つの時間バケットへグルーピング
 type Bucket = '今日' | '昨日' | '1週間以内' | 'それ以前';
@@ -286,10 +296,12 @@ export default function NotificationsScreen() {
 // ============================================================
 // NotificationRow — glass-card 風の通知行
 // ------------------------------------------------------------
-// - 未読: accent subtle bg + accent ドット + bold text + soft glow
-// - 既読: bg2 + 普通 text + 透明感少なめ
+// - 未読: accent subtle bg + accent ドット (pulse) + bold text + soft glow
+// - 既読: bg2 + 普通 text + 透明感少なめ (250ms で smooth transition)
 // - type ごとに icon の色 (like=pink / comment=blue / system=grey 等)
 // - 公式投稿は左に accent bar + gradient icon
+// - mount 時の entrance: opacity 0→1 + translateX -8→0 (220ms ease-out)
+// - reduceMotion 時は即時表示 (pulse / entrance とも skip)
 // ============================================================
 function NotificationRow({
   n,
@@ -298,106 +310,221 @@ function NotificationRow({
   n: Notification;
   onPress: () => void;
 }) {
+  const C = useColors();
+  const reduceMotion = useReducedMotion();
   const visual = visualFor(n.type);
   const isOfficial = n.type === 'official_post';
   const unread = !n.read;
 
-  return (
-    <PressableScale
-      onPress={onPress}
-      haptic="tap"
-      scaleValue={0.98}
-      accessibilityRole="button"
-      accessibilityLabel={n.message}
-      style={[
-        {
-          marginVertical: 4,
-          paddingVertical: SP['3'],
-          paddingHorizontal: SP['3'],
-          backgroundColor: unread ? C.accentBg : C.bg2,
-          flexDirection: 'row',
-          alignItems: 'flex-start',
-          gap: SP['3'],
-          borderRadius: R.lg,
-          borderWidth: 1,
-          // 未読は accent border, 既読は subtle border
-          borderColor: unread ? C.accent + '40' : C.border,
-          // 公式投稿は左に強いアクセントバーを出して可視性を上げる
-          borderLeftWidth: isOfficial ? 3 : 1,
-          borderLeftColor: isOfficial ? C.accent : (unread ? C.accent + '40' : C.border),
-        },
-        // Web では subtle hover effect (transition は PressableScale 側が担保)
-        Platform.OS === 'web' ? ({ cursor: 'pointer' } as object) : null,
-      ]}
-    >
-      {/* type ごとの icon — 公式は gradient, それ以外は color coded soft bg */}
-      {isOfficial ? (
-        <View style={[{ borderRadius: 20 }, SHADOW.sm]}>
-          <LinearGradient
-            colors={GRAD.primary}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={{
-              width: 40, height: 40, borderRadius: 20,
-              alignItems: 'center', justifyContent: 'center',
-            }}
-          >
-            <Text style={{ fontSize: 18 }}>{visual.icon}</Text>
-          </LinearGradient>
-        </View>
-      ) : (
-        <View style={{
-          width: 40, height: 40, borderRadius: 20,
-          backgroundColor: visual.bgSoft,
-          alignItems: 'center', justifyContent: 'center',
-          borderWidth: 1, borderColor: visual.borderSoft,
-        }}>
-          <Text style={{ fontSize: 18 }}>{visual.icon}</Text>
-        </View>
-      )}
+  // ============================================================
+  // Entrance animation — mount 時のみ実行。
+  // FlashList の recycler が同じ component instance を別行に流用しても、
+  // 「最初の 1 回だけ」になるよう ref で gate する。
+  // ============================================================
+  const enterOpacity = useSharedValue(reduceMotion ? 1 : 0);
+  const enterTx = useSharedValue(reduceMotion ? 0 : -8);
+  const didEnterRef = useRef(false);
+  useEffect(() => {
+    if (didEnterRef.current) return;
+    didEnterRef.current = true;
+    if (reduceMotion) {
+      enterOpacity.value = 1;
+      enterTx.value = 0;
+      return;
+    }
+    enterOpacity.value = withTiming(1, {
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+    });
+    enterTx.value = withTiming(0, {
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [reduceMotion, enterOpacity, enterTx]);
+  const enterStyle = useAnimatedStyle(() => ({
+    opacity: enterOpacity.value,
+    transform: [{ translateX: enterTx.value }],
+  }));
 
-      {/* メッセージ + タグ + 時間 */}
-      <View style={{ flex: 1, gap: 3 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: SP['2'] }}>
+  // ============================================================
+  // Read-state crossfade — 既読化された瞬間に bg を 250ms で遷移、
+  // dot は 250ms で fade out。reduceMotion 時は即時切替。
+  // ============================================================
+  const readProgress = useSharedValue(unread ? 0 : 1);
+  const dotPulse = useSharedValue(1);
+  useEffect(() => {
+    if (reduceMotion) {
+      readProgress.value = unread ? 0 : 1;
+      return;
+    }
+    readProgress.value = withTiming(unread ? 0 : 1, {
+      duration: 250,
+      easing: Easing.out(Easing.quad),
+    });
+  }, [unread, reduceMotion, readProgress]);
+
+  // 未読ドットの pulse animation — 1 → 1.15 → 1 を 1600ms loop
+  useEffect(() => {
+    if (reduceMotion) {
+      dotPulse.value = 1;
+      return;
+    }
+    if (unread) {
+      dotPulse.value = withRepeat(
+        withSequence(
+          withTiming(1.15, { duration: 800, easing: Easing.inOut(Easing.quad) }),
+          withTiming(1, { duration: 800, easing: Easing.inOut(Easing.quad) }),
+        ),
+        -1,
+      );
+    } else {
+      dotPulse.value = withTiming(1, { duration: 200 });
+    }
+  }, [unread, reduceMotion, dotPulse]);
+
+  // bg / border は read 状態によって異なる。Animated で表現するため、
+  // 2 層 (unread layer + read layer) を重ねて opacity で crossfade する。
+  const unreadLayerStyle = useAnimatedStyle(() => ({
+    opacity: 1 - readProgress.value,
+  }));
+  const readLayerStyle = useAnimatedStyle(() => ({
+    opacity: readProgress.value,
+  }));
+  const dotStyle = useAnimatedStyle(() => ({
+    // dot は未読中だけ可視 (= readProgress 0)。read に切り替わると fade out。
+    opacity: 1 - readProgress.value,
+    transform: [{ scale: dotPulse.value }],
+  }));
+
+  return (
+    <Animated.View style={enterStyle}>
+      <PressableScale
+        onPress={onPress}
+        haptic="tap"
+        scaleValue={0.97}
+        accessibilityRole="button"
+        accessibilityLabel={n.message}
+        accessibilityState={{ selected: unread }}
+        style={[
+          {
+            marginVertical: 4,
+            paddingVertical: SP['3'],
+            paddingHorizontal: SP['3'],
+            backgroundColor: C.bg2,
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+            gap: SP['3'],
+            borderRadius: R.lg,
+            borderWidth: 1,
+            borderColor: C.border,
+            // 公式投稿は左に強いアクセントバーを出して可視性を上げる
+            borderLeftWidth: isOfficial ? 3 : 1,
+            borderLeftColor: isOfficial ? C.accent : C.border,
+            overflow: 'hidden',
+            position: 'relative',
+          },
+          // Web では subtle hover effect (transition は PressableScale 側が担保)
+          Platform.OS === 'web' ? ({ cursor: 'pointer' } as object) : null,
+        ]}
+      >
+        {/* 未読 overlay layer — accent bg + accent border を fade で重ねる */}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            {
+              position: 'absolute',
+              top: 0, left: 0, right: 0, bottom: 0,
+              backgroundColor: C.accentBg,
+              borderRadius: R.lg,
+              borderWidth: 1,
+              borderColor: C.accent + '40',
+              borderLeftWidth: isOfficial ? 3 : 1,
+              borderLeftColor: isOfficial ? C.accent : C.accent + '40',
+            },
+            unreadLayerStyle,
+          ]}
+        />
+        {/* read 状態用の subtle border を維持するための placeholder
+            (実際の bg は親 View が担っているので opacity 制御だけで十分) */}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+            readLayerStyle,
+          ]}
+        />
+
+        {/* type ごとの icon — 公式は gradient, それ以外は themed soft bg */}
+        {isOfficial ? (
+          <View style={[{ borderRadius: 10 }, SHADOW.sm]}>
+            <LinearGradient
+              colors={GRAD.primary}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={{
+                width: 40, height: 40, borderRadius: 10,
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <Text style={{ fontSize: 18 }}>{visual.icon}</Text>
+            </LinearGradient>
+          </View>
+        ) : (
+          <View style={{
+            width: 40, height: 40, borderRadius: 10,
+            backgroundColor: C.bg3,
+            alignItems: 'center', justifyContent: 'center',
+            borderWidth: 1, borderColor: C.border,
+          }}>
+            <Text style={{ fontSize: 18 }}>{visual.icon}</Text>
+          </View>
+        )}
+
+        {/* メッセージ + タグ */}
+        <View style={{ flex: 1, gap: 3 }}>
           <Text
             style={[
-              T.bodyM,
+              T.body,
               {
                 color: C.text,
                 lineHeight: 20,
                 fontWeight: unread ? '700' : '500',
-                flex: 1,
               },
             ]}
           >
             {n.message}
           </Text>
-          {/* 未読ドット — 右上に小さく */}
-          {unread && (
-            <View style={{
-              width: 8, height: 8, borderRadius: 4,
-              backgroundColor: C.accent,
-              marginTop: 6,
-            }} />
+          {n.tag_name && (
+            <Text
+              style={[
+                T.small,
+                {
+                  color: visual.color,
+                  fontWeight: '600',
+                },
+              ]}
+            >
+              {isOfficial ? n.tag_name : `#${n.tag_name}`}
+            </Text>
           )}
         </View>
-        {n.tag_name && (
-          <Text
+
+        {/* 右側カラム: ドット + 時刻 (右揃え) */}
+        <View style={{ alignItems: 'flex-end', gap: 4, minWidth: 48 }}>
+          <Animated.View
             style={[
-              T.small,
               {
-                color: visual.color,
-                fontWeight: '600',
+                width: 8, height: 8, borderRadius: 4,
+                backgroundColor: C.accent,
               },
+              dotStyle,
             ]}
-          >
-            {isOfficial ? n.tag_name : `#${n.tag_name}`}
+          />
+          <Text style={[T.caption, { color: C.text3, textAlign: 'right' }]}>
+            {formatRelative(n.created_at)}
           </Text>
-        )}
-        <Text style={[T.caption, { color: C.text3 }]}>
-          {formatRelative(n.created_at)}
-        </Text>
-      </View>
-    </PressableScale>
+        </View>
+      </PressableScale>
+    </Animated.View>
   );
 }

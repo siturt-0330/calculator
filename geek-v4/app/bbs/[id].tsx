@@ -14,10 +14,13 @@ import Animated, {
   withSequence,
   interpolateColor,
 } from 'react-native-reanimated';
+import { useQueryClient } from '@tanstack/react-query';
 import { useBBSThread } from '../../hooks/useBBSThread';
 import { useBBSReplyReactions, useBBSReplyReactionToggle } from '../../hooks/useBBSReplyReactions';
+import { useIsCommunityMod } from '../../hooks/useIsCommunityMod';
 import { MemeReactionPicker } from '../../components/feed/MemeReactionPicker';
 import { MentionAutocomplete, type MentionTarget } from '../../components/bbs/MentionAutocomplete';
+import { ModActionMenu } from '../../components/community/ModActionMenu';
 import { C, SP, R, GRAD, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { PressableScale } from '../../components/ui/PressableScale';
@@ -33,6 +36,7 @@ import type { ReactionAgg } from '../../lib/api/bbsReplyReactions';
 import { Icon } from '../../constants/icons';
 import { notify, impact, Haptics } from '../../lib/haptics';
 import { useToastStore } from '../../stores/toastStore';
+import { useAuthStore } from '../../stores/authStore';
 import { isValidUuid } from '../../lib/validation';
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -120,6 +124,10 @@ function ReplyRow({
   onToggleReaction,
   highlightIndex,
   highlightSeq,
+  communityId,
+  isMod,
+  currentUserId,
+  onModActionComplete,
 }: {
   item: BBSReply;
   index: number;
@@ -132,6 +140,11 @@ function ReplyRow({
   onToggleReaction: (replyId: string, meme: string) => void;
   highlightIndex: number | null;
   highlightSeq: number;
+  // community 紐付き thread のみ ModActionMenu を render する
+  communityId?: string | null;
+  isMod: boolean;
+  currentUserId?: string;
+  onModActionComplete: () => void;
 }) {
   // スレ内 ID — author_id + thread_id の hash で「同じ人 = 同じ ID」
   // 別スレでは別 ID。匿名性を保ちつつスレ内でキャラを認識できる仕組み。
@@ -246,6 +259,22 @@ function ReplyRow({
                   note={bbsReplyToObsidianNote(item, threadTitle, threadId)}
                   size={16}
                 />
+                {/* mod 専用 3-dot — community 紐付き thread のみ. ModActionMenu 側で
+                    isMod=false / isOwn=true は null render なので user 視点は透明 */}
+                {communityId && item.author_id && (
+                  <ModActionMenu
+                    target={{
+                      kind: 'bbs_reply',
+                      replyId: item.id,
+                      authorId: item.author_id,
+                      threadId,
+                    }}
+                    communityId={communityId}
+                    isMod={isMod}
+                    isOwn={!!currentUserId && item.author_id === currentUserId}
+                    onActionComplete={onModActionComplete}
+                  />
+                )}
               </View>
               {/* 本文 — >>N を tappable span 化 (ジャンプ機能) */}
               <Text style={[T.body, { color: C.text, lineHeight: 22 }]}>
@@ -319,6 +348,17 @@ export default function BBSThreadScreen() {
 
   const { thread, replies, loading, refreshing, refresh, reply, error } = useBBSThread(id ?? '');
   const { show: showToast } = useToastStore();
+
+  // mod 判定 (thread.community_id が null なら useIsCommunityMod は false を返す)
+  const threadCommunityId = thread?.community_id ?? null;
+  const isMod = useIsCommunityMod(threadCommunityId);
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const qc = useQueryClient();
+  const handleModActionComplete = useCallback(() => {
+    if (!id) return;
+    qc.invalidateQueries({ queryKey: ['bbs-replies', id] });
+    qc.invalidateQueries({ queryKey: ['bbs-thread', id] });
+  }, [qc, id]);
 
   // 入力欄への ref。クォート返信時に focus する。
   const inputRef = useRef<TextInput>(null);
@@ -532,6 +572,10 @@ export default function BBSThreadScreen() {
         onToggleReaction={toggleReaction}
         highlightIndex={highlightIndex}
         highlightSeq={highlightSeq}
+        communityId={threadCommunityId}
+        isMod={isMod}
+        currentUserId={currentUserId}
+        onModActionComplete={handleModActionComplete}
       />
     );
   };

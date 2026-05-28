@@ -5,8 +5,8 @@
 // ============================================================
 import { View, Text, ScrollView, Modal, TextInput, ActivityIndicator, Pressable } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { useMemo, useState } from 'react';
-import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { C, R, SP, SHADOW } from '../../../../design/tokens';
@@ -18,6 +18,7 @@ import { Spinner } from '../../../../components/ui/Spinner';
 import { ConfirmDialog } from '../../../../components/ui/ConfirmDialog';
 import { Icon } from '../../../../constants/icons';
 import { OfficialBadge } from '../../../../components/community/OfficialBadge';
+import { CommunitySubTabs } from '../../../../components/community/CommunitySubTabs';
 import { useToastStore } from '../../../../stores/toastStore';
 import { useAuthStore } from '../../../../stores/authStore';
 import { fetchCommunity } from '../../../../lib/api/communities';
@@ -48,6 +49,7 @@ function parseLocalDateTime(s: string): Date | null {
 
 export default function CalendarScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const params = useLocalSearchParams();
   const id = typeof params.id === 'string' ? params.id : '';
   const userId = useAuthStore((s) => s.user?.id);
@@ -57,6 +59,20 @@ export default function CalendarScreen() {
   const [modalOpen, setModalOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<CalendarEvent | null>(null);
+
+  // サブタブ navigation
+  const goSubTab = useCallback(
+    (key: 'home' | 'bbs' | 'map' | 'calendar' | 'admin') => {
+      if (key === 'calendar') return;
+      const dest =
+        key === 'home' ? `/community/${id}`
+        : key === 'bbs' ? `/community/${id}/bbs`
+        : key === 'map' ? `/community/${id}/map`
+        : `/community/${id}/admin`;
+      router.push(dest as never);
+    },
+    [router, id],
+  );
 
   // form state
   const [title, setTitle] = useState('');
@@ -73,6 +89,8 @@ export default function CalendarScreen() {
     staleTime: 60_000,
   });
   const isAdmin = !!community && !!userId && community.official_admin_user_id === userId;
+  const showAdminChip =
+    !!community && (community.role === 'owner' || community.role === 'admin');
 
   const { data: events = [], isLoading } = useQuery({
     queryKey: ['community', id, 'official-calendar'],
@@ -154,6 +172,9 @@ export default function CalendarScreen() {
           {community?.is_official && <OfficialBadge size="sm" />}
         </View>
       </View>
+
+      {/* サブタブナビ — current=calendar */}
+      <CommunitySubTabs value="calendar" onChange={goSubTab} showAdmin={showAdminChip} />
 
       <ScrollView
         contentContainerStyle={{

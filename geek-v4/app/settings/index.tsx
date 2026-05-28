@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
 import { useIntroStore } from '../../stores/introStore';
 import { useLanguageStore, LANG_OPTIONS } from '../../stores/languageStore';
+import { useThemeStore, useResolvedTheme } from '../../lib/theme/themeStore';
 import { useIsAdmin } from '../../hooks/useAdmin';
 import { supabase } from '../../lib/supabase';
 import { fetchMyOfficialCommunities } from '../../lib/api/officialCommunities';
@@ -109,6 +110,13 @@ export default function SettingsScreen() {
 
         <SectionHeader title="カスタマイズ" />
         <ListItem
+          icon={Icon.palette}
+          label="外観 (ライト / ダーク)"
+          onPress={() => router.push('/settings/appearance' as never)}
+          right={<AppearanceChip />}
+        />
+        <Divider />
+        <ListItem
           icon={Icon.globe}
           label="言語"
           onPress={() => router.push('/settings/language' as never)}
@@ -162,6 +170,25 @@ export default function SettingsScreen() {
           void signOut();
         }}
       />
+    </View>
+  );
+}
+
+// 外観行の右側 chip — 現在のテーマと システム連動かを 1 行で。
+// useThemeStore + useResolvedTheme を購読しているので、別画面で切り替えると即更新。
+function AppearanceChip() {
+  const mode = useThemeStore((s) => s.mode);
+  const resolved = useResolvedTheme();
+  const label =
+    mode === 'system' ? (resolved === 'light' ? 'システム / ライト' : 'システム / ダーク')
+    : mode === 'light' ? 'ライト'
+    : 'ダーク';
+  const Icn = resolved === 'light' ? Icon.sun : Icon.moon;
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+      <Icn size={14} color={C.text2} strokeWidth={2.2} />
+      <Text style={[T.small, { color: C.text2 }]} numberOfLines={1}>{label}</Text>
+      <Icon.chevronR size={18} color={C.text3} strokeWidth={2.2} />
     </View>
   );
 }

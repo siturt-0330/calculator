@@ -1,25 +1,26 @@
-import { View, Text, ScrollView, RefreshControl, Image } from 'react-native';
-import { useEffect, useCallback, useMemo } from 'react';
+import { View, Text, RefreshControl, Image } from 'react-native';
+import { useEffect, useCallback, useMemo, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { C, R, SP, SHADOW, GRAD } from '../../../design/tokens';
+import { R, SP } from '../../../design/tokens';
+import { useTheme } from '../../../hooks/useColors';
 import { T } from '../../../design/typography';
 import { TABBAR } from '../../../design/tabbar';
 import { Icon } from '../../../constants/icons';
 import { PressableScale } from '../../../components/ui/PressableScale';
-import { OfficialBadge } from '../../../components/community/OfficialBadge';
+import { CommunityAvatarBar } from '../../../components/community/CommunityAvatarBar';
 import { AnonPostCard } from '../../../components/feed/AnonPostCard';
 import { thumbedUrl } from '../../../lib/utils/imageUrl';
+import { filterPostsByCommunity } from '../../../lib/utils/communityFilter';
 import {
   fetchMyCommunities,
   fetchMyCommunityPostsRich,
   subscribeToMyCommunityChanges,
   type CommunityMetaLite,
-  type Community,
 } from '../../../lib/api/communities';
 import { useAuthStore } from '../../../stores/authStore';
 import { useLike, useLikes } from '../../../hooks/useLike';
@@ -53,6 +54,13 @@ export default function CommunityScreen() {
   const user = useAuthStore((s) => s.user);
   const qc = useQueryClient();
   const { show: showToast } = useToastStore();
+  // テーマ購読 — light/dark 切替で community 画面が自動再 render
+  const { C, GRAD, SHADOW } = useTheme();
+
+  // YouTube 登録チャンネル風 UX — avatar 行で community を tap すると
+  // 詳細ページ遷移ではなく **画面内で post を絞り込む**。
+  // null = 「すべて」 (filter 無し), 文字列 = 特定 community のみ表示。
+  const [selectedCommunityId, setSelectedCommunityId] = useState<string | null>(null);
 
   // 参加コミュ一覧 (横スクロール用) — React Query
   const myCommunitiesQuery = useQuery({
@@ -78,14 +86,50 @@ export default function CommunityScreen() {
     gcTime: 5 * 60_000,
   });
 
-  const myCommunities = myCommunitiesQuery.data ?? [];
-  const posts: Post[] = feedQuery.data?.posts ?? [];
-  const communityByPost: Record<string, CommunityMetaLite> =
-    feedQuery.data?.communityByPost ?? {};
+  // ★ `data ?? []` を毎 render で評価すると新参照 → 下流の useEffect / useMemo の
+  //    deps が毎回変わって lint warning + 余計な再 render を呼ぶ。
+  //    useMemo で query.data に紐付ける形で参照安定化する。
+  const myCommunities = useMemo(
+    () => myCommunitiesQuery.data ?? [],
+    [myCommunitiesQuery.data],
+  );
+  const posts: Post[] = useMemo(
+    () => feedQuery.data?.posts ?? [],
+    [feedQuery.data?.posts],
+  );
+  const communityByPost: Record<string, CommunityMetaLite> = useMemo(
+    () => feedQuery.data?.communityByPost ?? {},
+    [feedQuery.data?.communityByPost],
+  );
   const loading = myCommunitiesQuery.isLoading || feedQuery.isLoading;
   const refreshing =
     (myCommunitiesQuery.isFetching && !myCommunitiesQuery.isLoading) ||
     (feedQuery.isFetching && !feedQuery.isLoading);
+
+  // 参加コミュ一覧が変わって、選択中 community が脱退済になっていたら null に戻す。
+  // (avatar 行から消えた community を選択し続けると filter が空のままになる事故防止)
+  useEffect(() => {
+    if (!selectedCommunityId) return;
+    if (myCommunitiesQuery.isLoading) return;
+    const stillMember = myCommunities.some((c) => c.id === selectedCommunityId);
+    if (!stillMember) setSelectedCommunityId(null);
+  }, [selectedCommunityId, myCommunities, myCommunitiesQuery.isLoading]);
+
+  // 表示用 post 配列 — 選択中 community があれば絞り込む。
+  // 純関数は lib/utils/communityFilter.ts に切り出して unit test 可能に。
+  const filteredPosts = useMemo(
+    () => filterPostsByCommunity(posts, communityByPost, selectedCommunityId),
+    [posts, communityByPost, selectedCommunityId],
+  );
+
+  // 選択中 community の meta (「コミュニティに移動」 chip 表示判定用)
+  const selectedCommunity = useMemo(
+    () =>
+      selectedCommunityId
+        ? myCommunities.find((c) => c.id === selectedCommunityId)
+        : undefined,
+    [selectedCommunityId, myCommunities],
+  );
 
   // realtime: 別画面で join/leave 時に即時反映
   useEffect(() => {
@@ -200,7 +244,7 @@ export default function CommunityScreen() {
   // FlashList の data — Post + community を同梱した安定 key 付きアイテム
   // -------------------------------------------------------------------
   const feedItems = useMemo<CommunityFeedItem[]>(() => {
-    return posts.map((p) => {
+    return filteredPosts.map((p) => {
       const community = communityByPost[p.id];
       return {
         post: p,
@@ -208,7 +252,7 @@ export default function CommunityScreen() {
         key: `${community?.id ?? 'no-community'}:${p.id}`,
       };
     });
-  }, [posts, communityByPost]);
+  }, [filteredPosts, communityByPost]);
 
   // ★ Viewport prewarm: 次の 5 セル分の画像を ExpoImage.prefetch で先読み
   // feed.tsx と同じパターン — スクロール中の image jank を消す
@@ -313,78 +357,129 @@ export default function CommunityScreen() {
   const keyExtractor = useCallback((item: CommunityFeedItem) => item.key, []);
 
   // -------------------------------------------------------------------
-  // ListHeaderComponent — 横スクロール「参加中」 + 区切り線
+  // ListHeaderComponent — YouTube 登録チャンネル風 avatar 行
+  // + 選択中 community があれば「コミュニティに移動」 chip
   // -------------------------------------------------------------------
-  // 横スクロール部は ScrollView (内部スクロール) のままで OK。FlashList の
-  // ListHeaderComponent 内に置く分にはパフォーマンス影響なし。
+  // 横スクロール部 (CommunityAvatarBar) は内部 ScrollView なので、FlashList の
+  // ListHeaderComponent に置いてもパフォーマンス影響なし。
+  // tap は router.push ではなく setSelectedCommunityId に紐付く (画面内 filter)。
   const ListHeader = useMemo(() => (
-    <CommunityListHeader
-      myCommunities={myCommunities}
-      loading={loading}
-      router={router}
-    />
-  ), [myCommunities, loading, router]);
-
-  // -------------------------------------------------------------------
-  // ListEmptyComponent — 参加無し or 投稿なし
-  // polish: 96x96 gradient circle + emoji + CTA gradient button
-  // -------------------------------------------------------------------
-  const ListEmpty = useMemo(() => (
-    <View style={{ paddingTop: SP['8'], paddingHorizontal: SP['4'] }}>
-      <CommunityPolishedEmpty
-        emoji={myCommunities.length === 0 ? '🌐' : '📭'}
-        title={myCommunities.length === 0 ? 'コミュニティに参加しよう' : 'まだ投稿がありません'}
-        message={
-          myCommunities.length === 0
-            ? '好きなテーマで集まれる場所。検索して参加するか、自分で作ろう。'
-            : '所属コミュニティの新着投稿がここに表示されます。'
-        }
+    <View>
+      <CommunityAvatarBar
+        communities={myCommunities}
+        selectedId={selectedCommunityId}
+        onSelect={setSelectedCommunityId}
+        showJoinHint={!loading}
       />
-      {myCommunities.length === 0 && (
-        <View style={{ gap: SP['2'], marginTop: SP['5'], paddingHorizontal: SP['2'] }}>
-          {/* primary CTA: gradient pill */}
-          <PressableScale
-            onPress={() => router.push('/community/discover' as never)}
-            haptic="confirm"
-            style={{
-              paddingVertical: SP['3'],
-              borderRadius: R.full,
-              alignItems: 'center',
-              overflow: 'hidden',
-              ...SHADOW.glow,
-            }}
-          >
-            <LinearGradient
-              colors={GRAD.primary}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
-            />
-            <Text style={[T.bodyMd, { color: '#fff', fontWeight: '700', letterSpacing: 0.2 }]}>
-              コミュニティを探す
-            </Text>
-          </PressableScale>
-          {/* secondary CTA: glass outline */}
-          <PressableScale
-            onPress={() => router.push('/community/create' as never)}
-            haptic="tap"
-            style={{
-              paddingVertical: SP['3'],
-              backgroundColor: 'rgba(255,255,255,0.04)',
-              borderRadius: R.full,
-              alignItems: 'center',
-              borderWidth: 1,
-              borderColor: 'rgba(255,255,255,0.10)',
-            }}
-          >
-            <Text style={[T.bodyMd, { color: C.text, fontWeight: '600' }]}>
-              新しく作る
-            </Text>
-          </PressableScale>
-        </View>
+      {/* 選択中の community があれば「コミュニティに移動」 chip を表示。
+          詳細ページへの導線は ここから提供 (avatar tap では遷移しないため) */}
+      {selectedCommunity && (
+        <GoToCommunityChip
+          community={selectedCommunity}
+          onPress={() =>
+            router.push(`/community/${selectedCommunity.id}` as never)
+          }
+        />
       )}
     </View>
-  ), [myCommunities.length, router]);
+  ), [myCommunities, selectedCommunityId, selectedCommunity, loading, router]);
+
+  // -------------------------------------------------------------------
+  // ListEmptyComponent — 状態別 3 パターン
+  //   1. 参加コミュ無し          → 参加促進 CTA (discover / create)
+  //   2. 「すべて」選択 + 投稿 0  → 「まだ投稿がありません」
+  //   3. 特定コミュ選択 + 0 件   → 「このコミュには投稿がまだありません」
+  // -------------------------------------------------------------------
+  const ListEmpty = useMemo(() => {
+    const hasNoCommunities = myCommunities.length === 0;
+    const isFilteringSpecificCommunity = !!selectedCommunityId;
+
+    const emoji = hasNoCommunities
+      ? '🌐'
+      : isFilteringSpecificCommunity
+        ? '🔍'
+        : '📭';
+    const title = hasNoCommunities
+      ? 'コミュニティに参加しよう'
+      : isFilteringSpecificCommunity
+        ? 'このコミュには投稿がまだありません'
+        : 'まだ投稿がありません';
+    const message = hasNoCommunities
+      ? '好きなテーマで集まれる場所。検索して参加するか、自分で作ろう。'
+      : isFilteringSpecificCommunity
+        ? '別のコミュを選んで投稿を眺めるか、自分で投稿してみよう。'
+        : '所属コミュニティの新着投稿がここに表示されます。';
+
+    return (
+      <View style={{ paddingTop: SP['8'], paddingHorizontal: SP['4'] }}>
+        <CommunityPolishedEmpty emoji={emoji} title={title} message={message} />
+        {hasNoCommunities && (
+          <View style={{ gap: SP['2'], marginTop: SP['5'], paddingHorizontal: SP['2'] }}>
+            {/* primary CTA: gradient pill */}
+            <PressableScale
+              onPress={() => router.push('/community/discover' as never)}
+              haptic="confirm"
+              style={{
+                paddingVertical: SP['3'],
+                borderRadius: R.full,
+                alignItems: 'center',
+                overflow: 'hidden',
+                ...SHADOW.glow,
+              }}
+            >
+              <LinearGradient
+                colors={GRAD.primary}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+              />
+              <Text style={[T.bodyMd, { color: '#fff', fontWeight: '700', letterSpacing: 0.2 }]}>
+                コミュニティを探す
+              </Text>
+            </PressableScale>
+            {/* secondary CTA: glass outline */}
+            <PressableScale
+              onPress={() => router.push('/community/create' as never)}
+              haptic="tap"
+              style={{
+                paddingVertical: SP['3'],
+                backgroundColor: 'rgba(255,255,255,0.04)',
+                borderRadius: R.full,
+                alignItems: 'center',
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.10)',
+              }}
+            >
+              <Text style={[T.bodyMd, { color: C.text, fontWeight: '600' }]}>
+                新しく作る
+              </Text>
+            </PressableScale>
+          </View>
+        )}
+        {/* 特定コミュ filter で空のときは「すべて」に戻すボタンを出す */}
+        {isFilteringSpecificCommunity && (
+          <View style={{ marginTop: SP['5'], paddingHorizontal: SP['2'] }}>
+            <PressableScale
+              onPress={() => setSelectedCommunityId(null)}
+              haptic="tap"
+              style={{
+                paddingVertical: SP['3'],
+                backgroundColor: 'rgba(255,255,255,0.04)',
+                borderRadius: R.full,
+                alignItems: 'center',
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.10)',
+              }}
+            >
+              <Text style={[T.bodyMd, { color: C.text, fontWeight: '600' }]}>
+                すべての投稿を見る
+              </Text>
+            </PressableScale>
+          </View>
+        )}
+      </View>
+    );
+  }, [myCommunities.length, selectedCommunityId, router]);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -479,187 +574,69 @@ export default function CommunityScreen() {
 }
 
 // ============================================================
-// ListHeaderComponent: 横スクロール「参加中」コミュ + 区切り線
+// GoToCommunityChip — 「コミュニティに移動」 chip
 // ============================================================
-// 別コンポーネントに切り出して memoization の境界を明確にする。
-// myCommunities が変わらない限り再 render しない。
-type ListHeaderProps = {
-  myCommunities: Community[];
-  loading: boolean;
-  router: ReturnType<typeof useRouter>;
+// avatar 行で特定コミュを選択中の時に、avatar 行と feed の間に表示する。
+// 元の「avatar tap = 詳細ページ遷移」の導線を、ここに集約して残す。
+// GRAD.primary の gradient pill + 矢印 (chevronR)。
+// ============================================================
+type GoToCommunityChipProps = {
+  // CommunityMetaLite と Community の共通最小フィールドのみ要求
+  community: {
+    id: string;
+    name: string;
+    icon_emoji: string;
+    icon_url: string | null;
+  };
+  onPress: () => void;
 };
 
-function CommunityListHeader({ myCommunities, loading, router }: ListHeaderProps) {
+function GoToCommunityChip({ community, onPress }: GoToCommunityChipProps) {
+  const { GRAD, SHADOW } = useTheme();
   return (
-    <View>
-      <View style={{ paddingTop: SP['4'], paddingBottom: SP['3'] }}>
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            paddingHorizontal: SP['4'],
-            marginBottom: SP['3'],
-          }}
+    <View style={{ paddingHorizontal: SP['4'], paddingVertical: SP['2'] }}>
+      <PressableScale
+        onPress={onPress}
+        haptic="tap"
+        accessibilityLabel={`${community.name} のページに移動`}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: SP['2'],
+          paddingHorizontal: SP['4'],
+          paddingVertical: SP['2'],
+          borderRadius: R.full,
+          overflow: 'hidden',
+          alignSelf: 'flex-start',
+          ...SHADOW.glow,
+        }}
+      >
+        <LinearGradient
+          colors={GRAD.primary}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+        />
+        {community.icon_url ? (
+          <Image
+            source={{ uri: community.icon_url }}
+            style={{ width: 18, height: 18, borderRadius: 9 }}
+            resizeMode="cover"
+          />
+        ) : (
+          <Text style={{ fontSize: 14 }}>{community.icon_emoji}</Text>
+        )}
+        <Text
+          numberOfLines={1}
+          style={[
+            T.smallM,
+            { color: '#fff', fontWeight: '700', maxWidth: 180 },
+          ]}
         >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-            <Text
-              style={[
-                T.smallB,
-                { color: C.text, letterSpacing: 0.3, fontWeight: '800', fontSize: 13 },
-              ]}
-            >
-              参加中
-            </Text>
-            {myCommunities.length > 0 && (
-              <View
-                style={{
-                  minWidth: 22,
-                  paddingHorizontal: 7,
-                  paddingVertical: 1,
-                  borderRadius: R.full,
-                  backgroundColor: C.accentBg,
-                  borderWidth: 1,
-                  borderColor: C.accentSoft,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Text style={{ color: C.accentLight, fontSize: 11, fontWeight: '800' }}>
-                  {myCommunities.length}
-                </Text>
-              </View>
-            )}
-          </View>
-          {myCommunities.length > 4 && (
-            <Text style={[T.caption, { color: C.text3 }]}>← スワイプで全部見る</Text>
-          )}
-        </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: SP['4'], gap: SP['4'] }}
-        >
-          {myCommunities.length === 0 && !loading ? (
-            <View
-              style={{
-                paddingVertical: SP['3'],
-                paddingHorizontal: SP['4'],
-                backgroundColor: 'rgba(255,255,255,0.04)',
-                borderRadius: R.md,
-                borderWidth: 1,
-                borderColor: 'rgba(255,255,255,0.10)',
-                borderStyle: 'dashed',
-              }}
-            >
-              <Text style={[T.small, { color: C.text3 }]}>
-                まだコミュニティに参加していません
-              </Text>
-            </View>
-          ) : (
-            myCommunities.map((c) => (
-              <PressableScale
-                key={c.id}
-                onPress={() => router.push(`/community/${c.id}` as never)}
-                haptic="tap"
-                scaleValue={0.92}
-                style={{ alignItems: 'center', width: 70 }}
-              >
-                <View style={{ position: 'relative' }}>
-                  {/* gradient ring (常時): mypage HeroAvatar と同じテイスト
-                      公式は ring を強める (accent gradient → glow shadow を加算) */}
-                  <View
-                    style={{
-                      width: 60, height: 60, borderRadius: 30,
-                      alignItems: 'center', justifyContent: 'center',
-                      overflow: 'hidden',
-                      ...(c.is_official ? SHADOW.glow : null),
-                    }}
-                  >
-                    <LinearGradient
-                      colors={GRAD.primary}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
-                    />
-                    <View
-                      style={{
-                        width: 54,
-                        height: 54,
-                        borderRadius: 27,
-                        backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {c.icon_url ? (
-                        <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                      ) : (
-                        <Text style={{ fontSize: 28 }}>{c.icon_emoji}</Text>
-                      )}
-                    </View>
-                  </View>
-                  {c.is_official && (
-                    <View
-                      style={{
-                        position: 'absolute',
-                        right: -2,
-                        bottom: -2,
-                        borderWidth: 2,
-                        borderColor: C.bg,
-                        borderRadius: R.full,
-                      }}
-                    >
-                      <OfficialBadge size="sm" iconOnly />
-                    </View>
-                  )}
-                </View>
-                <Text
-                  numberOfLines={1}
-                  style={[T.caption, { color: C.text2, marginTop: 6, textAlign: 'center', fontWeight: '600' }]}
-                >
-                  {c.name}
-                </Text>
-              </PressableScale>
-            ))
-          )}
-
-          {/* 末尾に「探す」ボタン — glass outline (gradient ring 無し) */}
-          <PressableScale
-            onPress={() => router.push('/community/discover' as never)}
-            haptic="tap"
-            scaleValue={0.92}
-            style={{ alignItems: 'center', width: 70 }}
-          >
-            <View
-              style={{
-                width: 60,
-                height: 60,
-                borderRadius: 30,
-                backgroundColor: 'rgba(255,255,255,0.04)',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: 1,
-                borderColor: 'rgba(255,255,255,0.12)',
-                borderStyle: 'dashed',
-              }}
-            >
-              <Icon.search size={22} color={C.text3} strokeWidth={2.2} />
-            </View>
-            <Text
-              numberOfLines={1}
-              style={[T.caption, { color: C.text3, marginTop: 6, textAlign: 'center', fontWeight: '600' }]}
-            >
-              探す
-            </Text>
-          </PressableScale>
-        </ScrollView>
-      </View>
-
-      {/* 区切り */}
-      <View style={{ height: 1, backgroundColor: C.divider, marginHorizontal: SP['4'] }} />
-      <View style={{ height: SP['2'] }} />
+          {community.name} に移動
+        </Text>
+        <Icon.chevronR size={16} color="#fff" strokeWidth={2.6} />
+      </PressableScale>
     </View>
   );
 }
@@ -678,6 +655,7 @@ function CommunityPolishedEmpty({
   title: string;
   message?: string;
 }) {
+  const { C, GRAD, SHADOW } = useTheme();
   return (
     <View style={{ paddingTop: SP['6'], paddingBottom: SP['4'], alignItems: 'center', gap: SP['4'] }}>
       <View

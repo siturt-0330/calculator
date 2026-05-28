@@ -1,12 +1,10 @@
 import { Platform, Pressable, type PressableProps } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
-import { PRESS_SCALE, SPRING_SNAP } from '../../design/motion';
-
-type HapticType = 'tap' | 'select' | 'pop' | 'confirm' | 'success' | 'warn' | 'error';
+import { PRESS_SCALE, SPRING_SNAPPY } from '../../design/motion';
+import { haptic as triggerHapticPreset, type HapticKind } from '../../lib/haptics';
 
 type Props = PressableProps & {
-  haptic?: HapticType;
+  haptic?: HapticKind;
   scaleValue?: number;
   children?: React.ReactNode;
   // When provided, enables long-press behavior. Fires the callback after
@@ -17,11 +15,22 @@ type Props = PressableProps & {
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-// より反応の良い press-feedback に調整した PressableScale。
-// - SPRING_SNAP (stiffness 400, damping 14) で press-in→onPress の体感ラグを短く
-// - delayPressIn=0 で OS の遅延を排除
-// - デフォルト hitSlop=8 で誤タップを減らす
-// - haptic は press-in で即発火 (onPress 時より早い)
+// ============================================================
+// PressableScale
+// ============================================================
+//
+// Apple Photos / Reddit Android の press feedback に寄せた spring 系の
+// scale フィードバック。timing-based scale ではなく `withSpring` を使うことで、
+// 押下中も release 中も同じ物理モデルで自然に動く ("ピタッ" と止まる)。
+//
+//   - SPRING_SNAPPY (damping 18, stiffness 300, mass 0.6) で
+//     press-in / press-out 共通の spring 復元
+//   - 縮小率は scaleValue prop で override 可 (default: PRESS_SCALE = 0.96)
+//   - delayPressIn=0 で OS の遅延を排除 (体感応答速度 up)
+//   - デフォルト hitSlop=8 で誤タップを減らす
+//   - haptic は press-in で即発火 → onPress より早い体感
+//   - layout を動かさないよう `transform: [{ scale }]` のみで実装
+//
 export function PressableScale({
   haptic,
   scaleValue = PRESS_SCALE,
@@ -41,21 +50,6 @@ export function PressableScale({
 }: Props) {
   const scale = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
-
-  function triggerHaptic(type: HapticType) {
-    if (Platform.OS === 'web') return;
-    try {
-      switch (type) {
-        case 'tap': Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); break;
-        case 'select': Haptics.selectionAsync(); break;
-        case 'pop': Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); break;
-        case 'confirm': Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); break;
-        case 'success': Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); break;
-        case 'warn': Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); break;
-        case 'error': Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); break;
-      }
-    } catch {}
-  }
 
   // delayPressIn は AnimatedPressable の型に乗ってないのでキャストして渡す
   // (実際は Pressable がサポートしている — OS デフォルトの ~130ms 遅延を消す)
@@ -95,14 +89,14 @@ export function PressableScale({
         // disabled の時は scale animation も haptic も発火させない (誤って反応した
         // ように見える bug を防ぐ)
         if (disabled) return;
-        scale.value = withSpring(scaleValue, SPRING_SNAP);
+        scale.value = withSpring(scaleValue, SPRING_SNAPPY);
         // haptic を press-in で即発火 → 体感応答速度が上がる
-        if (haptic) triggerHaptic(haptic);
+        if (haptic) triggerHapticPreset(haptic);
         onPressIn?.(e);
       }}
       onPressOut={(e) => {
         if (disabled) return;
-        scale.value = withSpring(1, SPRING_SNAP);
+        scale.value = withSpring(1, SPRING_SNAPPY);
         onPressOut?.(e);
       }}
       onPress={onPress}
@@ -111,9 +105,7 @@ export function PressableScale({
           ? () => {
               if (disabled) return;
               // Medium impact for the longer press gesture.
-              if (Platform.OS !== 'web') {
-                try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
-              }
+              triggerHapticPreset('pop');
               onLongPress();
             }
           : undefined

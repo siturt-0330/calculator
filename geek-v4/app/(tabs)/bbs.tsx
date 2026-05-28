@@ -9,6 +9,9 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
+  withSpring,
+  withSequence,
+  withRepeat,
   Easing,
 } from 'react-native-reanimated';
 import { useBBS, useMyCommunityBBS } from '../../hooks/useBBS';
@@ -20,6 +23,9 @@ import { Icon } from '../../constants/icons';
 import { C, R, SP, SHADOW, GRAD } from '../../design/tokens';
 import { T, FONT } from '../../design/typography';
 import { TABBAR } from '../../design/tabbar';
+import { SPRING_SNAPPY } from '../../design/motion';
+import { useColors } from '../../hooks/useColors';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { formatRelative } from '../../lib/utils/date';
 import { parseQuery } from '../../lib/search/queryParser';
 import { generateVariants } from '../../lib/search/variants';
@@ -483,164 +489,29 @@ export default function BBSScreen() {
         contentContainerStyle={{
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
         }}
-        renderItem={(({ item: row }) => {
-          const item = row.item;
-          const catColor = item.category ? (CATEGORY_COLORS[item.category] ?? C.accent) : C.accent;
-          const community = item.community_id ? communityMeta[item.community_id] : undefined;
-          // 「hot」判定 — 返信 20 件超 or (10 件超 + 直近 24h で活発)
-          const lastReplyMs = new Date(item.last_reply_at ?? item.created_at).getTime();
-          const recentH = (Date.now() - lastReplyMs) / 3600000;
-          const isHot = item.replies_count > 20 || (item.replies_count > 10 && recentH < 24);
-          return (
-            <View style={{ width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'], paddingBottom: SP['3'], alignSelf: 'center' }}>
-              <PressableScale
-                onPress={() => {
-                  if (debounced) recordCtr(debounced, item.id);
-                  void logEvent({
-                    kind: 'thread_open',
-                    tags: [],
-                    category: item.category ?? undefined,
-                    thread_id: item.id,
-                  });
-                  router.push(`/bbs/${item.id}` as never);
-                }}
-                haptic="tap"
-                // glass 風: 半透明 background + 細い縁 + ふんわり shadow.xs
-                // hot スレは少し強い border + glow shadow で前に出す。
-                // (FlashList の recycle 性能を保つため BlurView は使わない. View only)
-                style={{
-                  flexDirection: 'row',
-                  borderRadius: R.lg,
-                  backgroundColor: isHot ? 'rgba(248,122,180,0.06)' : 'rgba(255,255,255,0.04)',
-                  borderWidth: 1,
-                  borderColor: isHot ? 'rgba(248,122,180,0.22)' : 'rgba(255,255,255,0.08)',
-                  overflow: 'hidden',
-                  ...(isHot ? SHADOW.sm : SHADOW.xs),
-                }}
-              >
-                {/* 左カラーバー — hot スレは GRAD.warm (桃→橙) で厚め (6px)。
-                    それ以外は category color → accent への gradient で 4px。 */}
-                <View style={{ width: isHot ? 6 : 4, overflow: 'hidden' }}>
-                  <LinearGradient
-                    colors={isHot ? GRAD.warm : ([catColor, C.accent] as const)}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 0, y: 1 }}
-                    style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
-                  />
-                </View>
-                {/* 本体 */}
-                <View style={{ flex: 1, padding: SP['3'], gap: SP['2'] }}>
-                  {/* コミュニティ紐付けバッジ (一般公開 + community_id がある場合)
-                      ネストされた PressableScale: 単独の tap target。outer の thread row tap
-                      は RN の responder system 上、deepest child が勝つので競合しないが、
-                      web の bubble に備えて stopPropagation も呼ぶ。 */}
-                  {community && item.community_id && (
-                    <View style={{ flexDirection: 'row' }}>
-                      <PressableScale
-                        onPress={(e) => {
-                          // web 環境では synthetic event に stopPropagation が乗る
-                          (e as unknown as { stopPropagation?: () => void }).stopPropagation?.();
-                          router.push(`/community/${item.community_id}` as never);
-                        }}
-                        haptic="select"
-                        scaleValue={0.96}
-                        hitSlop={6}
-                        style={{
-                          flexDirection: 'row', alignItems: 'center', gap: 4,
-                          paddingHorizontal: SP['2'], paddingVertical: 2,
-                          backgroundColor: C.bg3,
-                          borderRadius: R.full,
-                          borderWidth: 1, borderColor: C.border,
-                        }}
-                      >
-                        <Text style={{ fontSize: 10 }}>{community.icon_emoji || '🏠'}</Text>
-                        <Text style={[T.caption, { color: C.text2, fontSize: 10, fontWeight: '600' }]} numberOfLines={1}>
-                          #{community.name}
-                        </Text>
-                      </PressableScale>
-                    </View>
-                  )}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-                    {item.category && (
-                      <View style={{
-                        paddingHorizontal: SP['2'], paddingVertical: 2,
-                        backgroundColor: catColor + '22',
-                        borderRadius: R.sm,
-                        borderWidth: 1, borderColor: catColor + '55',
-                      }}>
-                        <Text style={[T.caption, { color: catColor, fontWeight: '700', fontSize: 10 }]}>
-                          {item.category}
-                        </Text>
-                      </View>
-                    )}
-                    <View style={{ flex: 1 }} />
-                    {/* 最終返信時刻 — 控えめだが clock icon で意味を明示 */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                      <Icon.clock size={11} color={C.text3} strokeWidth={2.2} />
-                      <Text style={[T.caption, { color: C.text3, fontSize: 11 }]}>
-                        {formatRelative(item.last_reply_at ?? item.created_at)}
-                      </Text>
-                    </View>
-                  </View>
-                  {showResults ? (
-                    <HighlightedText
-                      text={item.title}
-                      terms={highlightTerms}
-                      style={[T.h4, { color: C.text, fontWeight: '700', letterSpacing: -0.2, lineHeight: 23 }]}
-                      numberOfLines={2}
-                    />
-                  ) : (
-                    <Text
-                      style={[T.h4, { color: C.text, fontWeight: '700', letterSpacing: -0.2, lineHeight: 23 }]}
-                      numberOfLines={2}
-                    >
-                      {item.title}
-                    </Text>
-                  )}
-                  <View style={{ flexDirection: 'row', gap: SP['3'], alignItems: 'center' }}>
-                    {/* 返信数 — hot は色強調 + サイズ up で前に出す */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                      <Icon.comment
-                        size={14}
-                        color={isHot ? C.pink : C.text2}
-                        strokeWidth={2.2}
-                      />
-                      <Text style={[T.small, {
-                        color: isHot ? C.pink : C.text2,
-                        fontWeight: '700',
-                        fontSize: 13,
-                      }]}>
-                        {item.replies_count.toLocaleString('ja-JP')}
-                      </Text>
-                      <Text style={[T.caption, { color: C.text3, fontSize: 11, marginLeft: 1 }]}>
-                        返信
-                      </Text>
-                    </View>
-                    {isHot && (
-                      <View style={{
-                        flexDirection: 'row', alignItems: 'center', gap: 2,
-                        paddingHorizontal: 6, paddingVertical: 1,
-                        backgroundColor: 'rgba(248,122,180,0.15)',
-                        borderRadius: R.sm,
-                        borderWidth: 1,
-                        borderColor: 'rgba(248,122,180,0.32)',
-                      }}>
-                        <Text style={{ fontSize: 10 }}>🔥</Text>
-                        <Text style={{ fontSize: 10, color: '#F87AB4', fontWeight: '700' }}>賑わい中</Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-                {/* 右の chevron (デスクトップで) */}
-                {isDesktop && (
-                  <View style={{ paddingHorizontal: SP['3'], justifyContent: 'center' }}>
-                    <Icon.chevronR size={18} color={C.text3} strokeWidth={2.2} />
-                  </View>
-                )}
-              </PressableScale>
-            </View>
-          );
-        }) as ListRenderItem<{ item: BBSThread; score: number }>}
+        renderItem={(({ item: row }) => (
+          <ThreadRow
+            item={row.item}
+            community={row.item.community_id ? communityMeta[row.item.community_id] : undefined}
+            isDesktop={isDesktop}
+            containerMaxWidth={containerMaxWidth}
+            showResults={showResults}
+            highlightTerms={highlightTerms}
+            onPress={() => {
+              if (debounced) recordCtr(debounced, row.item.id);
+              void logEvent({
+                kind: 'thread_open',
+                tags: [],
+                category: row.item.category ?? undefined,
+                thread_id: row.item.id,
+              });
+              router.push(`/bbs/${row.item.id}` as never);
+            }}
+            onPressCommunity={(communityId) => {
+              router.push(`/community/${communityId}` as never);
+            }}
+          />
+        )) as ListRenderItem<{ item: BBSThread; score: number }>}
         ListEmptyComponent={
           loading ? (
             <View>
@@ -869,5 +740,260 @@ function PolishedEmpty({
         </PressableScale>
       )}
     </View>
+  );
+}
+
+// ============================================================
+// ThreadRow — FlashList の 1 行 (animation state-per-row 用に分離)
+// ------------------------------------------------------------
+// 設計:
+//   - FlashList の row は recycle されるが、shared value は instance 単位で
+//     useRef のように維持されるので、それぞれの thread 行に固有の
+//     entrance / hot pulse / comment-count bump アニメを持たせられる
+//   - useReducedMotion() を尊重 — true のとき shared value を最終状態に
+//     固定し、loop / sequence を一切走らせない (worklet 側でも判定)
+// ============================================================
+type ThreadRowProps = {
+  item: BBSThread;
+  community: { name: string; icon_emoji: string } | undefined;
+  isDesktop: boolean;
+  containerMaxWidth: number;
+  showResults: boolean;
+  highlightTerms: string[];
+  onPress: () => void;
+  onPressCommunity: (communityId: string) => void;
+};
+
+function ThreadRow({
+  item,
+  community,
+  isDesktop,
+  containerMaxWidth,
+  showResults,
+  highlightTerms,
+  onPress,
+  onPressCommunity,
+}: ThreadRowProps) {
+  const themeC = useColors();
+  const reduceMotion = useReducedMotion();
+
+  const catColor = item.category ? (CATEGORY_COLORS[item.category] ?? themeC.accent) : themeC.accent;
+  // 「hot」判定 — 返信 20 件超 or (10 件超 + 直近 24h で活発)
+  const lastReplyMs = new Date(item.last_reply_at ?? item.created_at).getTime();
+  const recentH = (Date.now() - lastReplyMs) / 3600000;
+  const isHot = item.replies_count > 20 || (item.replies_count > 10 && recentH < 24);
+
+  // --- entrance: opacity 0 → 1 + translateY 8 → 0 over 220ms (初回 mount のみ) ---
+  const isFirstMount = useRef(true);
+  const entranceOpacity = useSharedValue(reduceMotion ? 1 : 0);
+  const entranceTranslateY = useSharedValue(reduceMotion ? 0 : 8);
+  useEffect(() => {
+    if (!isFirstMount.current) return;
+    isFirstMount.current = false;
+    if (reduceMotion) {
+      entranceOpacity.value = 1;
+      entranceTranslateY.value = 0;
+      return;
+    }
+    entranceOpacity.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.quad) });
+    entranceTranslateY.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.quad) });
+  }, [reduceMotion, entranceOpacity, entranceTranslateY]);
+  const entranceStyle = useAnimatedStyle(() => ({
+    opacity: entranceOpacity.value,
+    transform: [{ translateY: entranceTranslateY.value }],
+  }));
+
+  // --- comment count bump: replies_count が増えた時に icon を 1 → 1.15 → spring back ---
+  const prevCommentCount = useRef(item.replies_count);
+  const commentScale = useSharedValue(1);
+  useEffect(() => {
+    if (prevCommentCount.current !== item.replies_count) {
+      const grew = item.replies_count > prevCommentCount.current;
+      prevCommentCount.current = item.replies_count;
+      if (grew && !reduceMotion) {
+        commentScale.value = withSequence(
+          withTiming(1.15, { duration: 140, easing: Easing.out(Easing.quad) }),
+          withSpring(1, SPRING_SNAPPY),
+        );
+      }
+    }
+  }, [item.replies_count, reduceMotion, commentScale]);
+  const commentScaleStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: commentScale.value }],
+  }));
+
+  // --- hot indicator pulse: 1 → 1.05 → 1 loop, 1400ms (is_hot のときだけ) ---
+  const hotPulse = useSharedValue(1);
+  useEffect(() => {
+    if (!isHot || reduceMotion) {
+      hotPulse.value = 1;
+      return;
+    }
+    hotPulse.value = withRepeat(
+      withSequence(
+        withTiming(1.05, { duration: 700, easing: Easing.inOut(Easing.quad) }),
+        withTiming(1, { duration: 700, easing: Easing.inOut(Easing.quad) }),
+      ),
+      -1,
+      false,
+    );
+  }, [isHot, reduceMotion, hotPulse]);
+  const hotPulseStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: hotPulse.value }],
+  }));
+
+  return (
+    <Animated.View
+      style={[
+        { width: '100%', maxWidth: containerMaxWidth, paddingHorizontal: SP['4'], paddingBottom: SP['3'], alignSelf: 'center' },
+        entranceStyle,
+      ]}
+    >
+      <PressableScale
+        onPress={onPress}
+        haptic="tap"
+        scaleValue={0.97}
+        // glass 風: 半透明 background + 細い縁 + ふんわり shadow.xs
+        // hot スレは少し強い border + glow shadow で前に出す。
+        // (FlashList の recycle 性能を保つため BlurView は使わない. View only)
+        style={{
+          flexDirection: 'row',
+          borderRadius: R.lg,
+          backgroundColor: isHot ? 'rgba(248,122,180,0.06)' : 'rgba(255,255,255,0.04)',
+          borderWidth: 1,
+          borderColor: isHot ? 'rgba(248,122,180,0.22)' : 'rgba(255,255,255,0.08)',
+          overflow: 'hidden',
+          ...(isHot ? SHADOW.sm : SHADOW.xs),
+        }}
+      >
+        {/* 左カラーバー — hot スレは GRAD.warm (桃→橙) で厚め (6px)。
+            それ以外は category color → accent への gradient で 4px。 */}
+        <View style={{ width: isHot ? 6 : 4, overflow: 'hidden' }}>
+          <LinearGradient
+            colors={isHot ? GRAD.warm : ([catColor, themeC.accent] as const)}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+          />
+        </View>
+        {/* 本体 */}
+        <View style={{ flex: 1, padding: SP['3'], gap: SP['2'] }}>
+          {/* コミュニティ紐付けバッジ (一般公開 + community_id がある場合)
+              ネストされた PressableScale: 単独の tap target。outer の thread row tap
+              は RN の responder system 上、deepest child が勝つので競合しないが、
+              web の bubble に備えて stopPropagation も呼ぶ。 */}
+          {community && item.community_id && (
+            <View style={{ flexDirection: 'row' }}>
+              <PressableScale
+                onPress={(e) => {
+                  // web 環境では synthetic event に stopPropagation が乗る
+                  (e as unknown as { stopPropagation?: () => void }).stopPropagation?.();
+                  if (item.community_id) onPressCommunity(item.community_id);
+                }}
+                haptic="select"
+                scaleValue={0.96}
+                hitSlop={6}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 4,
+                  paddingHorizontal: SP['2'], paddingVertical: 2,
+                  backgroundColor: themeC.bg3,
+                  borderRadius: R.full,
+                  borderWidth: 1, borderColor: themeC.border,
+                }}
+              >
+                <Text style={{ fontSize: 10 }}>{community.icon_emoji || '🏠'}</Text>
+                <Text style={[T.caption, { color: themeC.text2, fontSize: 10, fontWeight: '600' }]} numberOfLines={1}>
+                  #{community.name}
+                </Text>
+              </PressableScale>
+            </View>
+          )}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+            {item.category && (
+              <View style={{
+                paddingHorizontal: SP['2'], paddingVertical: 2,
+                backgroundColor: catColor + '22',
+                borderRadius: R.sm,
+                borderWidth: 1, borderColor: catColor + '55',
+              }}>
+                <Text style={[T.caption, { color: catColor, fontWeight: '700', fontSize: 10 }]}>
+                  {item.category}
+                </Text>
+              </View>
+            )}
+            <View style={{ flex: 1 }} />
+            {/* 最終返信時刻 — 控えめだが clock icon で意味を明示 */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+              <Icon.clock size={11} color={themeC.text3} strokeWidth={2.2} />
+              <Text style={[T.caption, { color: themeC.text3, fontSize: 11 }]}>
+                {formatRelative(item.last_reply_at ?? item.created_at)}
+              </Text>
+            </View>
+          </View>
+          {showResults ? (
+            <HighlightedText
+              text={item.title}
+              terms={highlightTerms}
+              style={[T.h4, { color: themeC.text, fontWeight: '700', letterSpacing: -0.2, lineHeight: 23 }]}
+              numberOfLines={2}
+            />
+          ) : (
+            <Text
+              style={[T.h4, { color: themeC.text, fontWeight: '700', letterSpacing: -0.2, lineHeight: 23 }]}
+              numberOfLines={2}
+            >
+              {item.title}
+            </Text>
+          )}
+          <View style={{ flexDirection: 'row', gap: SP['3'], alignItems: 'center' }}>
+            {/* 返信数 — hot は色強調 + サイズ up で前に出す
+                comment_count が増えると icon が 1.15 まで膨らんで spring back する */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Animated.View style={commentScaleStyle}>
+                <Icon.comment
+                  size={14}
+                  color={isHot ? themeC.pink : themeC.text2}
+                  strokeWidth={2.2}
+                />
+              </Animated.View>
+              <Text style={[T.small, {
+                color: isHot ? themeC.pink : themeC.text2,
+                fontWeight: '700',
+                fontSize: 13,
+              }]}>
+                {item.replies_count.toLocaleString('ja-JP')}
+              </Text>
+              <Text style={[T.caption, { color: themeC.text3, fontSize: 11, marginLeft: 1 }]}>
+                返信
+              </Text>
+            </View>
+            {isHot && (
+              <Animated.View
+                style={[
+                  {
+                    flexDirection: 'row', alignItems: 'center', gap: 2,
+                    paddingHorizontal: 6, paddingVertical: 1,
+                    backgroundColor: 'rgba(248,122,180,0.15)',
+                    borderRadius: R.sm,
+                    borderWidth: 1,
+                    borderColor: 'rgba(248,122,180,0.32)',
+                  },
+                  hotPulseStyle,
+                ]}
+              >
+                <Text style={{ fontSize: 10 }}>🔥</Text>
+                <Text style={{ fontSize: 10, color: '#F87AB4', fontWeight: '700' }}>賑わい中</Text>
+              </Animated.View>
+            )}
+          </View>
+        </View>
+        {/* 右の chevron (デスクトップで) */}
+        {isDesktop && (
+          <View style={{ paddingHorizontal: SP['3'], justifyContent: 'center' }}>
+            <Icon.chevronR size={18} color={themeC.text3} strokeWidth={2.2} />
+          </View>
+        )}
+      </PressableScale>
+    </Animated.View>
   );
 }

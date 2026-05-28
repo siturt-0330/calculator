@@ -201,9 +201,17 @@ function NativeMapPicker({
   coord: Coord;
   onChange: (c: Coord) => void;
 }) {
-  // require を関数内に gate して Web bundle から完全に外す
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const Maps = require('react-native-maps');
+  // require を関数内に gate して Web bundle から完全に外す。
+  // Metro は静的な `require('...')` も `const dynRequire = require` 経由の
+  // 別名 require も両方追跡してしまうので、`new Function('mod', 'return require(mod)')`
+  // で完全に runtime 評価にしてしまう (他 map ファイルと同じパターン)。
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+  const dynRequire = new Function('mod', 'return require(mod)') as (m: string) => unknown;
+  type MapsModule = {
+    default: React.ComponentType<Record<string, unknown>>;
+    Marker: React.ComponentType<Record<string, unknown>>;
+  };
+  const Maps = dynRequire('react-native-maps') as MapsModule;
   const MapView = Maps.default;
   const { Marker } = Maps;
 

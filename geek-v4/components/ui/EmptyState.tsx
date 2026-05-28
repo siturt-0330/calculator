@@ -1,85 +1,222 @@
+import { useEffect, type ComponentType } from 'react';
 import { View, Text } from 'react-native';
-import { C, SP } from '../../design/tokens';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withDelay,
+  withSpring,
+  Easing,
+} from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
+import type { LucideIcon } from 'lucide-react-native';
+import { SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { Button } from './Button';
-import type { LucideIcon } from 'lucide-react-native';
+import { useColors, useGradients, useShadows } from '../../hooks/useColors';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
+
+// ============================================================
+// EmptyState — 「気持ちのいい空っぽ」
+// ------------------------------------------------------------
+//   - 96x96 gradient circle に icon / emoji を float
+//   - mount 時に opacity / translateY / scale で 60ms stagger 入場
+//   - reduceMotion=true ならアニメは skip して即表示
+//   - tone は既存 7-tone を維持 (backward compat)
+// ============================================================
 
 type Tone = 'neutral' | 'accent' | 'amber' | 'green' | 'pink' | 'red' | 'blue';
 
-const TONES: Record<Tone, { bg: string; fg: string }> = {
-  neutral: { bg: C.bg3, fg: C.text2 },
-  accent:  { bg: C.accentBg, fg: C.accent },
-  amber:   { bg: C.amberBg, fg: C.amber },
-  green:   { bg: C.greenBg, fg: C.green },
-  pink:    { bg: C.pinkBg, fg: C.pink },
-  red:     { bg: C.redBg, fg: C.red },
-  blue:    { bg: C.blueBg, fg: C.blue },
-};
+// Reanimated 3 標準の入場 timing
+const FADE_MS = 250;
+const TRANSLATE_MS = 300;
+const SCALE_DAMPING = 14;
+const SCALE_STIFFNESS = 180;
+const STAGGER_MS = 60;
 
-export function EmptyState({
-  icon: I,
-  title,
-  message,
-  actionLabel,
-  onAction,
-  tone = 'accent',
-}: {
-  icon?: LucideIcon;
+type Props = {
+  /** Lucide icon または同形の component。指定すると circle 内に white で描画 */
+  icon?: LucideIcon | ComponentType<{ size: number; color: string; strokeWidth?: number }>;
+  /** Emoji を渡すと icon より優先して 44pt で float */
+  emoji?: string;
   title: string;
   message?: string;
   actionLabel?: string;
   onAction?: () => void;
+  /** tone は既存呼び出し側互換のため 7-tone 維持 */
   tone?: Tone;
-}) {
-  const t = TONES[tone];
+};
+
+export function EmptyState({
+  icon: IconComp,
+  emoji,
+  title,
+  message,
+  actionLabel,
+  onAction,
+  tone: _tone = 'accent',
+}: Props) {
+  const C = useColors();
+  const GRAD = useGradients();
+  const SHADOW = useShadows();
+  const reduceMotion = useReducedMotion();
+
+  // 入場アニメ — circle / title / message / CTA の 4 要素を stagger
+  const circleOpacity = useSharedValue(reduceMotion ? 1 : 0);
+  const circleScale = useSharedValue(reduceMotion ? 1 : 0.8);
+  const titleOpacity = useSharedValue(reduceMotion ? 1 : 0);
+  const titleTranslateY = useSharedValue(reduceMotion ? 0 : 12);
+  const messageOpacity = useSharedValue(reduceMotion ? 1 : 0);
+  const messageTranslateY = useSharedValue(reduceMotion ? 0 : 12);
+  const ctaOpacity = useSharedValue(reduceMotion ? 1 : 0);
+  const ctaTranslateY = useSharedValue(reduceMotion ? 0 : 12);
+
+  useEffect(() => {
+    if (reduceMotion) return;
+
+    // emoji circle: scale spring + opacity timing
+    circleOpacity.value = withTiming(1, { duration: FADE_MS, easing: Easing.out(Easing.ease) });
+    circleScale.value = withSpring(1, {
+      damping: SCALE_DAMPING,
+      stiffness: SCALE_STIFFNESS,
+      mass: 1,
+    });
+
+    // title — stagger 1
+    titleOpacity.value = withDelay(
+      STAGGER_MS,
+      withTiming(1, { duration: FADE_MS, easing: Easing.out(Easing.ease) }),
+    );
+    titleTranslateY.value = withDelay(
+      STAGGER_MS,
+      withTiming(0, { duration: TRANSLATE_MS, easing: Easing.out(Easing.quad) }),
+    );
+
+    // message — stagger 2
+    messageOpacity.value = withDelay(
+      STAGGER_MS * 2,
+      withTiming(1, { duration: FADE_MS, easing: Easing.out(Easing.ease) }),
+    );
+    messageTranslateY.value = withDelay(
+      STAGGER_MS * 2,
+      withTiming(0, { duration: TRANSLATE_MS, easing: Easing.out(Easing.quad) }),
+    );
+
+    // CTA — stagger 3
+    ctaOpacity.value = withDelay(
+      STAGGER_MS * 3,
+      withTiming(1, { duration: FADE_MS, easing: Easing.out(Easing.ease) }),
+    );
+    ctaTranslateY.value = withDelay(
+      STAGGER_MS * 3,
+      withTiming(0, { duration: TRANSLATE_MS, easing: Easing.out(Easing.quad) }),
+    );
+  }, [
+    reduceMotion,
+    circleOpacity,
+    circleScale,
+    titleOpacity,
+    titleTranslateY,
+    messageOpacity,
+    messageTranslateY,
+    ctaOpacity,
+    ctaTranslateY,
+  ]);
+
+  const circleStyle = useAnimatedStyle(() => ({
+    opacity: circleOpacity.value,
+    transform: [{ scale: circleScale.value }],
+  }));
+  const titleStyle = useAnimatedStyle(() => ({
+    opacity: titleOpacity.value,
+    transform: [{ translateY: titleTranslateY.value }],
+  }));
+  const messageStyle = useAnimatedStyle(() => ({
+    opacity: messageOpacity.value,
+    transform: [{ translateY: messageTranslateY.value }],
+  }));
+  const ctaStyle = useAnimatedStyle(() => ({
+    opacity: ctaOpacity.value,
+    transform: [{ translateY: ctaTranslateY.value }],
+  }));
+
+  const hasVisual = !!emoji || !!IconComp;
+
   return (
     <View style={{ padding: SP['10'], alignItems: 'center', gap: SP['4'] }}>
-      {I && (
-        // 大きめの円形 surface + 二重ハロー: 中央に icon、外側にうっすら accent を
-        // にじませて空状態に意味を持たせる。
-        <View
-          style={{
-            width: 96,
-            height: 96,
-            borderRadius: 48,
-            backgroundColor: t.bg,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderWidth: 1,
-            borderColor: t.fg + '44',
-            // soft outer glow — t.fg の薄い拡散
-            shadowColor: t.fg,
-            shadowOpacity: 0.25,
-            shadowRadius: 18,
-            shadowOffset: { width: 0, height: 0 },
-            elevation: 0,
-          }}
-        >
-          <I size={44} color={t.fg} strokeWidth={1.8} />
-        </View>
+      {hasVisual && (
+        // 96x96 gradient circle — 紫 → ピンク のブランドグラデ + soft halo。
+        // emoji があれば 44pt で float、なければ icon を white 36pt で描画。
+        <Animated.View style={[circleStyle, SHADOW.glow]}>
+          <LinearGradient
+            colors={[...GRAD.primary]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={{
+              width: 96,
+              height: 96,
+              borderRadius: 48,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {emoji ? (
+              // emoji は 44pt — gradient 上に「浮いている」見せ方
+              <Text
+                style={{
+                  fontSize: 44,
+                  lineHeight: 52,
+                  textAlign: 'center',
+                }}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              >
+                {emoji}
+              </Text>
+            ) : IconComp ? (
+              <IconComp size={36} color="#ffffff" strokeWidth={1.8} />
+            ) : null}
+          </LinearGradient>
+        </Animated.View>
       )}
-      <Text
+
+      <Animated.Text
         style={[
           T.h3,
           {
             color: C.text,
             textAlign: 'center',
             letterSpacing: -0.3,
+            fontWeight: '700',
             marginTop: SP['1'],
           },
+          titleStyle,
         ]}
       >
         {title}
-      </Text>
+      </Animated.Text>
+
       {message && (
-        <Text style={[T.body, { color: C.text2, textAlign: 'center', maxWidth: 320 }]}>
+        <Animated.Text
+          style={[
+            T.body,
+            {
+              color: C.text2,
+              textAlign: 'center',
+              maxWidth: 320,
+              lineHeight: 22,
+            },
+            messageStyle,
+          ]}
+        >
           {message}
-        </Text>
+        </Animated.Text>
       )}
+
       {actionLabel && onAction && (
-        <View style={{ marginTop: SP['3'] }}>
-          <Button label={actionLabel} onPress={onAction} fullWidth={false} />
-        </View>
+        <Animated.View style={[{ marginTop: SP['3'] }, SHADOW.glow, ctaStyle]}>
+          <Button label={actionLabel} onPress={onAction} variant="primary" fullWidth={false} />
+        </Animated.View>
       )}
     </View>
   );

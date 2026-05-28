@@ -42,6 +42,13 @@ import { expandWithCooccur } from '../lib/tagClustering/relations';
 import { classifyEntity } from '../lib/search/queryEntity';
 import { ReasonBadges } from '../components/search/ReasonBadge';
 import { DiscoverPhotoGrid } from '../components/search/DiscoverPhotoGrid';
+import { SearchHistoryChips } from '../components/search/SearchHistoryChips';
+import {
+  SearchFilterChips,
+  DEFAULT_SEARCH_FILTERS,
+  type SearchFilters,
+} from '../components/search/SearchFilterChips';
+import { useSearchHistory } from '../hooks/useSearchHistory';
 
 type BBSResult = { id: string; title: string; category: string; replies_count: number; created_at: string };
 type Category = 'all' | 'posts' | 'tags' | 'bbs';
@@ -129,11 +136,8 @@ const CATEGORY_LABELS: Record<Category, { label: string; emoji: string }> = {
   bbs: { label: '掲示板', emoji: '💬' },
 };
 
-const SORT_LABELS: Record<SortMode, { label: string; emoji: string }> = {
-  relevance: { label: '関連度', emoji: '🎯' },
-  newest: { label: '新着順', emoji: '🕐' },
-  popular: { label: '人気順', emoji: '🔥' },
-};
+// SORT_LABELS は V2 で SearchFilterChips に移譲 (relevance / newest / popular)。
+// 既存の sortMode 値はそのままで、UI レンダリングだけ新コンポーネントへ。
 
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
@@ -153,6 +157,15 @@ export default function SearchScreen() {
   // Infinite scroll prep — cursor / nextOffset for future paged fetches.
   // Reset on every new debounced query.
   const [, setNextOffset] = useState<number>(0);
+
+  // V2 検索 UX: フィルタ chip 行の state (期間 / 並び順 / コミュ)
+  const [filters, setFilters] = useState<SearchFilters>(DEFAULT_SEARCH_FILTERS);
+  // V2 autocomplete dropdown: ↑↓ キーボードナビ用 selected index (-1 = なし)
+  const [acIndex, setAcIndex] = useState<number>(-1);
+  // V2 autocomplete dropdown を一時的に閉じる (Esc キー押下時など)
+  const [acDismissed, setAcDismissed] = useState<boolean>(false);
+  // V2 履歴 hook (autocomplete LRU + 短期 store を wrap)
+  const { history: v2History, pickQuery: pickHistory, removeQuery: removeHistory, clearAll: clearAllHistory } = useSearchHistory(10);
 
   // 全 store destructure はキーストロークごとの toast / signal / cooccur 更新で
   // search.tsx 全体が再 render される原因。fields ごとに subscribe する。
@@ -203,6 +216,18 @@ export default function SearchScreen() {
   }, [hydrateGraph, hydrateHist, hydrateSignals, hydrateCooccur, ensureCooccur]);
 
   const signals = useMemo(() => aggregate(), [aggregate]);
+
+  // V2 filters と既存 sortMode を双方向同期
+  useEffect(() => {
+    if (filters.sort !== sortMode) setSortMode(filters.sort);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.sort]);
+
+  // 新クエリで autocomplete dismiss を解除 (1 回 Esc しても新しい入力で復活)
+  useEffect(() => {
+    setAcDismissed(false);
+    setAcIndex(-1);
+  }, [q]);
 
   useEffect(() => {
     // 220ms → 150ms (体感応答性 up)
@@ -393,10 +418,26 @@ export default function SearchScreen() {
     queryEntity,
   }), [likedSet, blockedSet, history, signals, trendingTagSet, coldStartMode, queryEntity]);
 
+  // V2 期間フィルタ — created_at の cutoff (ms epoch)。'all' なら 0
+  const periodCutoff = useMemo(() => {
+    const now = Date.now();
+    switch (filters.period) {
+      case 'day': return now - 24 * 60 * 60 * 1000;
+      case 'week': return now - 7 * 24 * 60 * 60 * 1000;
+      case 'month': return now - 30 * 24 * 60 * 60 * 1000;
+      case 'all':
+      default:
+        return 0;
+    }
+  }, [filters.period]);
+
   const rankedPosts = useMemo(() => {
+    const cutoff = periodCutoff;
     const scored = (postsQ.data ?? [])
       .map((p) => ({ item: p, ...scorePost(p, allVariantQueries, expandedTagSet, ctx) }))
-      .filter((r) => r.score > 0);
+      .filter((r) => r.score > 0)
+      // V2 期間フィルタを AND で適用
+      .filter((r) => cutoff === 0 || new Date(r.item.created_at).getTime() >= cutoff);
 
     if (sortMode === 'newest') scored.sort((a, b) => new Date(b.item.created_at).getTime() - new Date(a.item.created_at).getTime());
     else if (sortMode === 'popular') scored.sort((a, b) => (b.item.likes_count + b.item.comments_count) - (a.item.likes_count + a.item.comments_count));
@@ -421,7 +462,7 @@ export default function SearchScreen() {
       }
     }
     return [...seen.values()].slice(0, 50);
-  }, [postsQ.data, allVariantQueries, expandedTagSet, ctx, sortMode]);
+  }, [postsQ.data, allVariantQueries, expandedTagSet, ctx, sortMode, periodCutoff]);
 
   const rankedTags = useMemo(() => {
     const scored = (tagsQ.data ?? [])
@@ -430,6 +471,20 @@ export default function SearchScreen() {
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, 30);
   }, [tagsQ.data, allVariantQueries, expandedTagSet, ctx]);
+
+  // V2: BBS にも 期間 + 並び順 フィルタを AND で適用
+  const filteredBBS = useMemo(() => {
+    const cutoff = periodCutoff;
+    const rows = (bbsQ.data ?? []).filter(
+      (t) => cutoff === 0 || new Date(t.created_at).getTime() >= cutoff,
+    );
+    if (sortMode === 'newest') {
+      rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    } else if (sortMode === 'popular') {
+      rows.sort((a, b) => (b.replies_count ?? 0) - (a.replies_count ?? 0));
+    }
+    return rows;
+  }, [bbsQ.data, periodCutoff, sortMode]);
 
   // Did you mean? (上位タグから)
   const suggestion = useMemo(() => {
@@ -493,13 +548,15 @@ export default function SearchScreen() {
     return findClosestK(kw, allTagsQ.data, 4, 0.45);
   }, [parsedQuery, allTagsQ.data]);
 
-  // 検索 commit — Enter で即時 flush + history 追加
-  const commit = () => {
-    const trimmed = q.trim();
+  // 検索 commit — Enter で即時 flush + history 追加 (短期 store + 永続 stats 両方)
+  const commit = (override?: string) => {
+    const trimmed = (override ?? q).trim();
     if (!trimmed) return;
+    if (trimmed !== q) setQ(trimmed);
     // debounce を待たずに即時反映 (mobile では入力中の Enter で爆速検索 UX)
     if (trimmed !== debounced) setDebounced(trimmed);
     addHist(trimmed);
+    pickHistory(trimmed);
   };
 
   // Reset pagination cursor whenever the active query changes.
@@ -510,6 +567,59 @@ export default function SearchScreen() {
     setExpandedTags(false);
     setExpandedBBS(false);
   }, [debounced]);
+
+  // V2: Web 限定キーボードショートカット
+  //   - "/" → 検索 input に focus (他の input/textarea に focus 中はスキップ)
+  //   - Esc → autocomplete dropdown を閉じる (acDismissed=true)
+  //   - ↑/↓ → 候補 index 移動 (input focus 時のみ)
+  //   - Enter → acIndex の候補を確定して検索 (input focus 時のみ)
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    if (typeof document === 'undefined') return;
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInputLike = !!(target && (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      ));
+      // "/" focus shortcut — 他の input に focus 中はスキップ
+      if (e.key === '/' && !isInputLike) {
+        e.preventDefault();
+        try {
+          inputRef.current?.focus();
+        } catch { /* best-effort */ }
+        return;
+      }
+      // input focus 中だけ navigation を有効化
+      if (document.activeElement === (inputRef.current as unknown as Element | null)) {
+        if (e.key === 'Escape') {
+          setAcDismissed(true);
+          setAcIndex(-1);
+          return;
+        }
+        if (autocomplete.length === 0 || acDismissed) return;
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setAcIndex((i) => Math.min(i + 1, autocomplete.length - 1));
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setAcIndex((i) => Math.max(-1, i - 1));
+        } else if (e.key === 'Enter' && acIndex >= 0 && acIndex < autocomplete.length) {
+          e.preventDefault();
+          const picked = autocomplete[acIndex];
+          if (picked) {
+            setAcIndex(-1);
+            commit(picked);
+          }
+        }
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+    // commit / autocomplete は ref 経由ではなく state 駆動なので deps に含める
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autocomplete, acDismissed, acIndex]);
 
   // 検索入力 focus を Reanimated で滑らかに遷移 (border + halo)
   const focusProgress = useSharedValue(0);
@@ -603,7 +713,7 @@ export default function SearchScreen() {
 
   const loading = tagsQ.isLoading || postsQ.isLoading || bbsQ.isLoading;
   const showResults = debounced.length > 0;
-  const totalResults = rankedPosts.length + rankedTags.length + (bbsQ.data?.length ?? 0);
+  const totalResults = rankedPosts.length + rankedTags.length + filteredBBS.length;
   const showPosts = category === 'all' || category === 'posts';
   const showTags = category === 'all' || category === 'tags';
   const showBBS = category === 'all' || category === 'bbs';
@@ -651,7 +761,7 @@ export default function SearchScreen() {
               placeholderTextColor={C.text3}
               onFocus={() => setInputFocused(true)}
               onBlur={() => setInputFocused(false)}
-              onSubmitEditing={commit}
+              onSubmitEditing={() => commit()}
               returnKeyType="search"
               blurOnSubmit={false}
               autoFocus
@@ -775,17 +885,22 @@ export default function SearchScreen() {
           </View>
         )}
 
-        {/* オートコンプリート候補 — Google 風: 🕐 履歴 / 🔍 タグ / # 人気 + ↖ 入力欄に取り込む */}
-        {(autocomplete.length > 0 || fallbackSuggestions.length > 0) && q.length > 0 && (
+        {/* オートコンプリート候補 — Google 風: 🕐 履歴 / # タグ / sparkles 人気 + ↖ 入力欄に取り込む */}
+        {/* V2: acDismissed === true (Esc 押下後) は閉じたままにする */}
+        {!acDismissed && (autocomplete.length > 0 || fallbackSuggestions.length > 0) && q.length > 0 && (
           <View style={[
             {
-              backgroundColor: C.bg2,
+              // V2: GlassCard 風 — 半透明 + accent border の hint で focus 中の感じを出す
+              backgroundColor: Platform.OS === 'web' ? 'rgba(22,22,24,0.92)' : C.bg2,
               borderRadius: R.lg,
               borderWidth: 1,
               borderColor: C.border,
               overflow: 'hidden',
             },
             SHADOW.md,
+            Platform.OS === 'web'
+              ? ({ backdropFilter: 'blur(12px)' } as unknown as object)
+              : null,
           ]}>
             {autocomplete.map((name, idx) => {
               // 過去に検索 / クリックされていれば「履歴」アイコン (🕐) で示す
@@ -793,39 +908,52 @@ export default function SearchScreen() {
               const clickedBefore = (clickStats[q.trim()] ?? {})[name] !== undefined && clickStats[q.trim()]![name]! > 0;
               const seen = inHistory || clickedBefore;
               const isLast = idx === autocomplete.length - 1 && fallbackSuggestions.length === 0;
+              const isSelected = acIndex === idx;
               return (
                 <View
                   key={`v3:${name}`}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    paddingHorizontal: SP['3'],
-                    paddingVertical: SP['2'] + 2,
-                    borderBottomWidth: isLast ? 0 : 1,
-                    borderBottomColor: C.border + '40',
-                  }}
+                  style={[
+                    {
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingHorizontal: SP['3'],
+                      paddingVertical: SP['2'] + 2,
+                      borderBottomWidth: isLast ? 0 : 1,
+                      borderBottomColor: C.border + '40',
+                    },
+                    // V2: selected (キーボードナビ) は accent border + glow + 半透明 accent 背景
+                    isSelected
+                      ? {
+                          backgroundColor: C.accentBg,
+                          borderLeftWidth: 3,
+                          borderLeftColor: C.accent,
+                          ...SHADOW.glow,
+                        }
+                      : null,
+                  ]}
                 >
                   {/* 左: 履歴 or タグアイコン */}
                   {seen ? (
-                    <Icon.clock size={16} color={C.text3} strokeWidth={2} />
+                    <Icon.clock size={16} color={isSelected ? C.accentLight : C.text3} strokeWidth={2} />
                   ) : (
-                    <Icon.hash size={16} color={C.accent} strokeWidth={2} />
+                    <Icon.hash size={16} color={isSelected ? C.accentLight : C.accent} strokeWidth={2} />
                   )}
                   {/* 中: タグ名 — タップで実検索 */}
                   <PressableScale
                     onPress={() => {
                       recordClick(q.trim(), name);
-                      setQ(name);
-                      setDebounced(name);
-                      addHist(name);
+                      commit(name);
                     }}
                     haptic="select"
                     hitSlop={4}
                     accessibilityLabel={`${name} で検索`}
                     accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
                     style={{ flex: 1, paddingHorizontal: SP['2'], paddingVertical: 4 }}
                   >
-                    <Text style={[T.smallM, { color: C.text }]}>#{name}</Text>
+                    <Text style={[T.smallM, { color: isSelected ? C.accentLight : C.text, fontWeight: isSelected ? '700' : '400' }]}>
+                      #{name}
+                    </Text>
                   </PressableScale>
                   {/* 右: ↖ 入力欄に取り込む (検索はせず、編集を続ける) */}
                   <PressableScale
@@ -904,7 +1032,7 @@ export default function SearchScreen() {
                   const meta = CATEGORY_LABELS[c];
                   const cnt = c === 'posts' ? rankedPosts.length
                     : c === 'tags' ? rankedTags.length
-                    : c === 'bbs' ? (bbsQ.data?.length ?? 0)
+                    : c === 'bbs' ? filteredBBS.length
                     : totalResults;
                   return (
                     <PressableScale
@@ -941,33 +1069,15 @@ export default function SearchScreen() {
                 })}
               </View>
             </ScrollView>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={{ flexDirection: 'row', gap: 6 }}>
-                {(Object.keys(SORT_LABELS) as SortMode[]).map((s) => {
-                  const active = sortMode === s;
-                  const meta = SORT_LABELS[s];
-                  return (
-                    <PressableScale
-                      key={s}
-                      onPress={() => setSortMode(s)}
-                      haptic="tap"
-                      style={{
-                        flexDirection: 'row', alignItems: 'center', gap: 3,
-                        paddingHorizontal: 8, paddingVertical: 4,
-                        backgroundColor: active ? C.accentBg : 'transparent',
-                        borderRadius: R.full,
-                        borderWidth: 1, borderColor: active ? C.accent : C.border,
-                      }}
-                    >
-                      <Text style={{ fontSize: 10 }}>{meta.emoji}</Text>
-                      <Text style={[T.caption, { color: active ? C.accentLight : C.text2, fontWeight: '600' }]}>
-                        {meta.label}
-                      </Text>
-                    </PressableScale>
-                  );
-                })}
-              </View>
-            </ScrollView>
+            {/* V2 フィルタ chip 行 (期間 / 並び順 / コミュ) */}
+            <SearchFilterChips
+              filters={filters}
+              onChange={(next) => {
+                setFilters(next);
+                // 並び順は既存 sortMode へ即時同期 (rankedPosts の useMemo が拾う)
+                if (next.sort !== sortMode) setSortMode(next.sort);
+              }}
+            />
           </View>
         )}
       </View>
@@ -1007,33 +1117,25 @@ export default function SearchScreen() {
               </View>
             )}
 
-            {/* 検索履歴 */}
-            {history.length > 0 ? (
-              <View style={{ gap: SP['2'] }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>履歴</Text>
-                  <PressableScale onPress={clearHist} haptic="warn" hitSlop={6}>
-                    <Text style={[T.caption, { color: C.text3 }]}>消去</Text>
-                  </PressableScale>
-                </View>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-                  {history.map((h) => (
-                    <View key={h} style={{
-                      flexDirection: 'row', alignItems: 'center', gap: 4,
-                      paddingHorizontal: SP['3'], paddingVertical: 6,
-                      backgroundColor: C.bg3, borderRadius: R.full,
-                      borderWidth: 1, borderColor: C.border,
-                    }}>
-                      <PressableScale onPress={() => setQ(h)} haptic="tap" hitSlop={4}>
-                        <Text style={[T.smallM, { color: C.text }]}>🕐 {h}</Text>
-                      </PressableScale>
-                      <PressableScale onPress={() => removeHist(h)} haptic="warn" style={{ padding: 2 }} hitSlop={6}>
-                        <Text style={{ fontSize: 11, color: C.text3 }}>✕</Text>
-                      </PressableScale>
-                    </View>
-                  ))}
-                </View>
-              </View>
+            {/* V2 最近の検索 chips (autocomplete LRU + 短期 store の merge) */}
+            {v2History.length > 0 ? (
+              <SearchHistoryChips
+                history={v2History}
+                onPickQuery={(h) => {
+                  setQ(h);
+                  setDebounced(h);
+                  pickHistory(h);
+                }}
+                onRemoveQuery={(h) => {
+                  removeHistory(h);
+                  removeHist(h);
+                }}
+                onClearAll={() => {
+                  clearAllHistory();
+                  clearHist();
+                }}
+                maxItems={10}
+              />
             ) : !savedSearches.length && (
               // ⭐ 履歴も保存検索もまだ無い真っさらユーザー — gradient circle + CTA で
               // 「ここで何が出来るか」を一目で伝える
@@ -1248,21 +1350,21 @@ export default function SearchScreen() {
             )}
 
             {/* 掲示板スレッド */}
-            {showBBS && (bbsQ.data?.length ?? 0) > 0 && (
+            {showBBS && filteredBBS.length > 0 && (
               <SectionContainer
                 title="掲示板"
                 icon="💬"
-                total={bbsQ.data!.length}
+                total={filteredBBS.length}
                 expanded={expandedBBS}
-                limit={category === 'all' ? PREVIEW_LIMIT : bbsQ.data!.length}
+                limit={category === 'all' ? PREVIEW_LIMIT : filteredBBS.length}
                 onExpand={() => {
                   setCategory('bbs');
                   setExpandedBBS(true);
                 }}
               >
                 {(category === 'all' && !expandedBBS
-                  ? bbsQ.data!.slice(0, PREVIEW_LIMIT)
-                  : bbsQ.data!.slice(0, 12)
+                  ? filteredBBS.slice(0, PREVIEW_LIMIT)
+                  : filteredBBS.slice(0, 12)
                 ).map((t) => (
                   <PressableScale
                     key={t.id}
@@ -1347,7 +1449,7 @@ export default function SearchScreen() {
             )}
 
             {totalResults === 0 && !suggestion && (
-              <View style={{ padding: SP['8'], alignItems: 'center', gap: SP['4'] }}>
+              <View style={{ padding: SP['6'], alignItems: 'center', gap: SP['4'] }}>
                 <View style={{
                   width: 96, height: 96, borderRadius: 48,
                   backgroundColor: C.amberBg, alignItems: 'center', justifyContent: 'center',
@@ -1355,12 +1457,85 @@ export default function SearchScreen() {
                 }}>
                   <Icon.search size={40} color={C.amber} strokeWidth={2} />
                 </View>
-                <Text style={[T.h4, { color: C.text, textAlign: 'center' }]}>
-                  「{debounced}」に一致する結果はありません
+                <Text style={[T.h3, { color: C.text, textAlign: 'center' }]}>
+                  <Text style={{ color: C.accentLight, fontWeight: '800' }}>「{debounced}」</Text>
+                  に一致する結果はありません
                 </Text>
-                <Text style={[T.small, { color: C.text3, textAlign: 'center', maxWidth: 280 }]}>
-                  別のキーワードで試すか、人気のタグから探してみよう
+                <Text style={[T.small, { color: C.text3, textAlign: 'center', maxWidth: 320 }]}>
+                  検索の絞り込みを緩めるか、別の言葉やタグから探してみよう。
                 </Text>
+
+                {/* V2 候補: typo 補正 / フィルタリセット / タグ検索 */}
+                <View style={{
+                  flexDirection: 'row', flexWrap: 'wrap',
+                  justifyContent: 'center', gap: SP['2'],
+                  marginTop: SP['2'],
+                }}>
+                  {/* typo 補正 — moreSuggestions の先頭を採用 */}
+                  {moreSuggestions[0] && (
+                    <PressableScale
+                      onPress={() => {
+                        const fix = moreSuggestions[0]!;
+                        setQ(fix);
+                        setDebounced(fix);
+                      }}
+                      haptic="confirm"
+                      style={{
+                        flexDirection: 'row', alignItems: 'center', gap: 6,
+                        paddingHorizontal: SP['3'], paddingVertical: 8,
+                        backgroundColor: C.accentBg,
+                        borderRadius: R.full,
+                        borderWidth: 1, borderColor: C.accent + '66',
+                      }}
+                    >
+                      <Icon.sparkles size={14} color={C.accentLight} strokeWidth={2.2} />
+                      <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>
+                        「{moreSuggestions[0]}」で再検索
+                      </Text>
+                    </PressableScale>
+                  )}
+                  {/* フィルタを緩める — 全 reset */}
+                  {(filters.period !== 'all' ||
+                    filters.community !== 'all' ||
+                    filters.sort !== 'relevance') && (
+                    <PressableScale
+                      onPress={() => {
+                        setFilters(DEFAULT_SEARCH_FILTERS);
+                        setSortMode('relevance');
+                      }}
+                      haptic="tap"
+                      style={{
+                        flexDirection: 'row', alignItems: 'center', gap: 6,
+                        paddingHorizontal: SP['3'], paddingVertical: 8,
+                        backgroundColor: C.bg2,
+                        borderRadius: R.full,
+                        borderWidth: 1, borderColor: C.border,
+                      }}
+                    >
+                      <Icon.filter size={14} color={C.text2} strokeWidth={2.2} />
+                      <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>
+                        フィルタを緩める
+                      </Text>
+                    </PressableScale>
+                  )}
+                  {/* タグで検索 — タググラフ画面へリンク */}
+                  <PressableScale
+                    onPress={() => router.push('/filter' as never)}
+                    haptic="tap"
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 6,
+                      paddingHorizontal: SP['3'], paddingVertical: 8,
+                      backgroundColor: C.bg2,
+                      borderRadius: R.full,
+                      borderWidth: 1, borderColor: C.border,
+                    }}
+                  >
+                    <Icon.hash size={14} color={C.text2} strokeWidth={2.2} />
+                    <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>
+                      タグで検索する
+                    </Text>
+                  </PressableScale>
+                </View>
               </View>
             )}
           </>

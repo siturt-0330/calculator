@@ -4,8 +4,9 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, R, SP } from '../../design/tokens';
-import { T } from '../../design/typography';
+import { R, SP } from '../../design/tokens';
+import { useColors } from '../../hooks/useColors';
+import { T, LOGO_FONT, LOGO_FONT_WEIGHT } from '../../design/typography';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { PressableScale } from '../../components/ui/PressableScale';
@@ -35,6 +36,8 @@ export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const EyeIcon = showPass ? Icon.eyeOff : Icon.eye;
   const MailIcon = Icon.at;
+  // テーマ購読 — ライト/ダーク両対応
+  const C = useColors();
 
   // 厳しめのメール正規表現 — 1 文字ドメイン (a@b.c) を弾く
   // TLD は最低 2 文字必要、@ 前後は単純な英数記号許可
@@ -163,7 +166,7 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={{ marginBottom: SP['6'] }}>
-          <Text style={[T.display, { color: C.text, marginBottom: SP['2'], letterSpacing: -0.6 }]}>Geek</Text>
+          <Text style={[T.display, { fontFamily: LOGO_FONT, fontWeight: LOGO_FONT_WEIGHT, color: C.text, marginBottom: SP['2'], letterSpacing: -0.6 }]}>Geek</Text>
           {/* ログイン画面は他のラベル (メールアドレス/パスワード/ログイン等) も
               全てハードコード日本語。auth.tagline だけ DICT 経由だと lang=en で
               「Love what you love — anonymously, safely.」が混ざる事故が出るため、

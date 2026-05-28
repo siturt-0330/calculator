@@ -12,6 +12,13 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["serve", "geek-admin/dist", "-s", "-l", "9126"],
       "port": 9126
+    },
+    {
+      "name": "geek-web-dev",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "cd", "/d", "geek-v4", "&&", "npx", "expo", "start", "--web", "--port", "8082"],
+      "port": 8082,
+      "autoPort": false
     }
   ]
 }
