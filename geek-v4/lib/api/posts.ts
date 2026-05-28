@@ -11,7 +11,7 @@ export type SortMode = 'for-you' | 'hot' | 'new' | 'top' | 'rising';
 // posts SELECT で取得するカラム一覧 (一箇所でメンテ可能)
 // author_id は公式コミュ管理者投稿を de-anonymize する判定に使う (RLS で誰でも読める)
 const POSTS_SELECT_COLS =
-  'id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, qa_mode, created_at, author_id';
+  'id, content, title, last_activity_at, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, qa_mode, created_at, author_id';
 
 // posts + post_communities + communities を 1 RTT で取得するための embed セット。
 // attachOfficialAuthor が必要としていた 2nd round-trip を畳み込み、
@@ -476,6 +476,7 @@ export async function fetchDiscoverMediaPosts(opts: {
 
 export async function createPost({
   content,
+  title = null,
   mediaUris,
   videoUris = [],
   videoDurations = [],
@@ -492,6 +493,8 @@ export async function createPost({
   community_ids = [],
 }: {
   content: string;
+  /** ★ BBS 統合 (migration 0075): スレ形式 post の title。 null なら通常の写真投稿。 */
+  title?: string | null;
   /**
    * 画像の公開 URL 配列。**必ず** lib/media.ts の uploadPostImage で Storage に
    * upload した後の URL を渡すこと。ローカル URI (file:// / blob:) を直接渡すと
@@ -545,8 +548,12 @@ export async function createPost({
     }
   }
 
+  // title は 80 字 cap + trim、 空文字なら null
+  const safeTitle = title ? (sanitizeContent(title, { maxLength: 80 }).trim() || null) : null;
+
   const { data: post, error } = await supabase.from('posts').insert({
     content: safeContent,
+    title: safeTitle,
     media_urls: mediaUris,
     media_blurhashes: [],
     video_urls: videoUris,

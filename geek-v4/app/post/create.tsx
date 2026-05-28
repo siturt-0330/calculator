@@ -48,7 +48,7 @@ const VISIBILITY_OPTIONS: VisibilityOption[] = [
 
 export default function CreatePost() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ community_id?: string; prefill_tag?: string }>();
+  const params = useLocalSearchParams<{ community_id?: string; prefill_tag?: string; title?: string }>();
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
   const { show } = useToastStore();
@@ -60,6 +60,10 @@ export default function CreatePost() {
   const [video, setVideo] = useState<PickedVideo | null>(null);
   // uploading は post 中の進捗ラベル表示用 (大きい動画では数秒〜分単位かかる)
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  // BBS 由来の「スレ形式」投稿 (?title=1) のときだけタイトル入力欄を出す。
+  // 通常の写真投稿 (タイトルなし) と区別したいため明示パラメータで gate。
+  const showTitleInput = params.title === '1';
+  const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
@@ -404,6 +408,8 @@ export default function CreatePost() {
       const isPublic = visibility !== 'private';
       await createPost({
         content,
+        // BBS 由来「スレ形式」のときだけ title を投げる (通常投稿は null)
+        title: showTitleInput ? (title.trim() || null) : null,
         mediaUris: uploadedImageUrls,
         videoUris: uploadedVideoUrls,
         videoDurations: [], // duration は client で取得困難 (expo-video の getStatus が必要) — 後続改善
@@ -517,6 +523,27 @@ export default function CreatePost() {
           }}
           keyboardShouldPersistTaps="handled"
         >
+          {/* ===== タイトル (BBS 由来の「スレ形式」投稿のときだけ表示) ===== */}
+          {showTitleInput && (
+            <View style={{ gap: SP['2'] }}>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
+                <Text style={[T.smallB, { color: C.text2 }]}>タイトル</Text>
+                <View style={{ flex: 1 }} />
+                {title.length > 0 && (
+                  <Text style={[T.caption, { color: title.length >= 50 ? C.amber : C.text3 }]}>
+                    {title.length} / 80
+                  </Text>
+                )}
+              </View>
+              <Input
+                placeholder="タイトル (50 文字まで)"
+                value={title}
+                onChangeText={setTitle}
+                maxLength={80}
+              />
+            </View>
+          )}
+
           {/* ===== 本文 + 画像 ===== */}
           <View style={{ gap: SP['2'] }}>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>

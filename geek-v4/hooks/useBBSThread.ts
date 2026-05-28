@@ -1,3 +1,8 @@
+/**
+ * @deprecated since migration 0075 (2026-05-28). BBS threads are unified into posts.
+ *   `/bbs/[id]` route now redirects to `/post/[id]` (U5). Use `useFeedPage([id])` and
+ *   `useComments(id)` for thread-style posts. To be removed in 0080.
+ */
 import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchReplies, createReply, fetchThread } from '../lib/api/bbs';

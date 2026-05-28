@@ -10,7 +10,7 @@ import { useResolvedTheme } from '../../lib/theme/themeStore';
 
 const ROUTE_TO_TAB: Record<string, TabKey> = {
   feed: 'home',
-  bbs: 'bbs',
+  search: 'search',
   community: 'community',
   mypage: 'mypage',
 };

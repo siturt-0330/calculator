@@ -442,6 +442,11 @@ export default function PostDetailScreen() {
               <Text style={[T.caption, { color: C.text3, flex: 1 }]}>{formatRelative(post.created_at)}</Text>
               <ObsidianSaveButton note={postToObsidianNote(post)} size={18} />
             </View>
+            {post.title && (
+              <Text style={[T.h2, { color: C.text, fontWeight: '800', marginBottom: SP['2'] }]} numberOfLines={4}>
+                {post.title}
+              </Text>
+            )}
             <Text style={[T.body, { color: C.text, lineHeight: 24 }]}>{post.content}</Text>
             {/* コミュニティピル (cross-post / community_*) — タップで該当コミュへ */}
             {postCommunities.length > 0 && (

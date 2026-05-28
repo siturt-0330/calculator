@@ -1469,6 +1469,22 @@ function AnonPostCardInner({
         </DoubleTapHeart>
       )}
 
+      {/* ★ BBS 統合 (migration 0075) — title あれば content の上に大きく表示。
+          スレ形式 post (旧 BBS thread) は title が main contentで、 content は ''。
+          tap で post detail へ遷移 (本文 PressableScale と同じ behavior)。 */}
+      {post.title && !isCwHidden ? (
+        <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'], paddingBottom: post.content ? SP['1'] : SP['3'] }}>
+          <PressableScale onPress={onComment} haptic="tap" scaleValue={0.97}>
+            <Text
+              style={[T.h4, { color: C.text, fontWeight: '700' }]}
+              numberOfLines={3}
+            >
+              {post.title}
+            </Text>
+          </PressableScale>
+        </View>
+      ) : null}
+
       {/* 本文 — 外側カードの paddingHorizontal を流用 (double-padding 回避)
           ★ Reddit iOS 風 press feedback:
             - scaleValue=0.94 (default 0.96 より dramatic に「凹む」)

@@ -1,3 +1,10 @@
+/**
+ * @deprecated since migration 0075 (2026-05-28). BBS threads are unified into posts.
+ *   Use `useFeed` + filter `post.title !== null` for thread-style posts.
+ *   This hook remains importable but its callers (app/(tabs)/bbs.tsx, community/[id]/bbs.tsx)
+ *   were converted to redirects in U5. New code should not reference this file.
+ *   To be removed in migration 0080 (1-2 weeks after stability).
+ */
 import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchThreads, createThread, fetchMyJoinedCommunityThreads, fetchReplies } from '../lib/api/bbs';

@@ -14,11 +14,11 @@ import { TABBAR } from '../../design/tabbar';
 import { SPRING_BOUNCY } from '../../design/motion';
 import { Icon, type IconName } from '../../constants/icons';
 
-export type TabKey = 'home' | 'bbs' | 'game' | 'community' | 'mypage';
+export type TabKey = 'home' | 'search' | 'game' | 'community' | 'mypage';
 
 const TAB_TO_ICON: Record<TabKey, IconName> = {
   home: 'home',
-  bbs: 'bbs',
+  search: 'search',
   game: 'game',
   community: 'community',
   mypage: 'mypage',
