@@ -5,8 +5,9 @@ import Animated, {
   useAnimatedStyle,
   SharedValue,
 } from 'react-native-reanimated';
-import { C, SP, SIZE } from '../../design/tokens';
+import { SP, SIZE } from '../../design/tokens';
 import { T } from '../../design/typography';
+import { useColors } from '../../hooks/useColors';
 
 type Props = {
   title?: string;
@@ -28,6 +29,7 @@ export function TopBar({
   border = true,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const C = useColors();
   // large モードのときは、スクロール時に上部タイトルがフェードイン
   // それまでは上部タイトルは非表示
   const aTitle = useAnimatedStyle(() => {

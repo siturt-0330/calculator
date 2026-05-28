@@ -15,7 +15,8 @@ import { useFeedPage } from '../../hooks/useFeedPage';
 import { useReactionToggle } from '../../hooks/useReactions';
 import { invalidateFeedPage } from '../../lib/cacheUpdates/feedPagePatcher';
 import { MemeReactionPicker } from '../../components/feed/MemeReactionPicker';
-import { C, SP, R } from '../../design/tokens';
+import { SP, R } from '../../design/tokens';
+import { useColors } from '../../hooks/useColors';
 import { T } from '../../design/typography';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { Avatar } from '../../components/ui/Avatar';
@@ -58,6 +59,8 @@ export default function PostDetailScreen() {
   const [text, setText] = useState('');
   const SendIcon = Icon.send;
   const BackIcon = Icon.arrowL;
+  // テーマ購読 — light/dark 切替で post 詳細が自動再 render
+  const C = useColors();
 
   // ============================================================
   // 既読/未読ハイライト (issue #18)

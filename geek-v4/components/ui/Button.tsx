@@ -3,8 +3,9 @@ import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { PressableScale } from './PressableScale';
-import { C, SP, R, SHADOW } from '../../design/tokens';
+import { SP, R } from '../../design/tokens';
 import { T } from '../../design/typography';
+import { useColors, useShadows } from '../../hooks/useColors';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 type Size = 'sm' | 'md' | 'lg';
@@ -48,6 +49,9 @@ export function Button({
   const textStyle = textStyleForSize(size);
   const isDisabled = disabled || loading;
   const opacity = isDisabled ? 0.5 : 1;
+  // テーマ購読 — secondary / danger 背景色がライト/ダーク両対応
+  const C = useColors();
+  const SHADOW = useShadows();
 
   const textColor =
     variant === 'primary'

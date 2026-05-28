@@ -23,6 +23,7 @@ import {
   Users2, Globe2,
   Gamepad2,
   Copy,
+  Moon, Sun, Palette,
 } from 'lucide-react-native';
 
 export const Icon = {
@@ -40,6 +41,7 @@ export const Icon = {
   eye: Eye, eyeOff: EyeOff, edit: Edit3, trash: Trash2, copy: Copy,
   send: Send, hash: Hash, at: AtSign, phone: Phone, clock: Clock,
   community: Users2, globe: Globe2,
+  moon: Moon, sun: Sun, palette: Palette,
   // TabIcon.tsx の TabKey 'game' から参照されている (dead route だが型に存在)
   game: Gamepad2,
 } as const;

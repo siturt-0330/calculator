@@ -55,7 +55,8 @@ import { PressableScale } from '../../components/ui/PressableScale';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Icon } from '../../constants/icons';
-import { C, SP, SHADOW, GRAD } from '../../design/tokens';
+import { SP } from '../../design/tokens';
+import { useTheme } from '../../hooks/useColors';
 import { FONT } from '../../design/typography';
 import { TABBAR } from '../../design/tabbar';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -64,6 +65,8 @@ import type { Post } from '../../types/models';
 export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  // テーマ購読 — light/dark 切替で feed 画面が自動再 render される
+  const { C, GRAD, SHADOW } = useTheme();
   const { posts, reasonsMap, communitiesByPost, ads, interestTags, loading, refreshing, refresh, loadMore } = useFeed();
   const { blockedCount } = useTagFilter();
   const likedTags = useTagFilterStore((s) => s.likedTags);
@@ -447,9 +450,9 @@ export default function FeedScreen() {
               borderRadius: 19,
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: 'rgba(255,255,255,0.06)',
+              backgroundColor: C.glass,
               borderWidth: 1,
-              borderColor: 'rgba(255,255,255,0.08)',
+              borderColor: C.glassBorder,
               marginLeft: SP['1'],
             }}
           >
@@ -466,9 +469,9 @@ export default function FeedScreen() {
               borderRadius: 19,
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: 'rgba(255,255,255,0.06)',
+              backgroundColor: C.glass,
               borderWidth: 1,
-              borderColor: 'rgba(255,255,255,0.08)',
+              borderColor: C.glassBorder,
               marginLeft: SP['1'],
             }}
           >
@@ -500,7 +503,7 @@ export default function FeedScreen() {
 
       {/* ヘッダーとリストの境界 — glass card style に合わせて hairline を弱めに
           (旧 C.divider はカードと衝突して "二重 border" に見えていた) */}
-      <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.04)' }} />
+      <View style={{ height: 1, backgroundColor: C.divider }} />
 
       <FlashList
         ref={listRef}

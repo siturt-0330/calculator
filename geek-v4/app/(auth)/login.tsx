@@ -4,7 +4,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, R, SP } from '../../design/tokens';
+import { R, SP } from '../../design/tokens';
+import { useColors } from '../../hooks/useColors';
 import { T } from '../../design/typography';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -35,6 +36,8 @@ export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const EyeIcon = showPass ? Icon.eyeOff : Icon.eye;
   const MailIcon = Icon.at;
+  // テーマ購読 — ライト/ダーク両対応
+  const C = useColors();
 
   // 厳しめのメール正規表現 — 1 文字ドメイン (a@b.c) を弾く
   // TLD は最低 2 文字必要、@ 前後は単純な英数記号許可

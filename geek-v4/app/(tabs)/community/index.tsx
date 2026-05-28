@@ -6,7 +6,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { C, R, SP, SHADOW, GRAD } from '../../../design/tokens';
+import { R, SP } from '../../../design/tokens';
+import { useTheme } from '../../../hooks/useColors';
 import { T } from '../../../design/typography';
 import { TABBAR } from '../../../design/tabbar';
 import { Icon } from '../../../constants/icons';
@@ -53,6 +54,8 @@ export default function CommunityScreen() {
   const user = useAuthStore((s) => s.user);
   const qc = useQueryClient();
   const { show: showToast } = useToastStore();
+  // テーマ購読 — light/dark 切替で community 画面が自動再 render
+  const { C, GRAD, SHADOW } = useTheme();
 
   // YouTube 登録チャンネル風 UX — avatar 行で community を tap すると
   // 詳細ページ遷移ではなく **画面内で post を絞り込む**。
@@ -589,6 +592,7 @@ type GoToCommunityChipProps = {
 };
 
 function GoToCommunityChip({ community, onPress }: GoToCommunityChipProps) {
+  const { GRAD, SHADOW } = useTheme();
   return (
     <View style={{ paddingHorizontal: SP['4'], paddingVertical: SP['2'] }}>
       <PressableScale
@@ -651,6 +655,7 @@ function CommunityPolishedEmpty({
   title: string;
   message?: string;
 }) {
+  const { C, GRAD, SHADOW } = useTheme();
   return (
     <View style={{ paddingTop: SP['6'], paddingBottom: SP['4'], alignItems: 'center', gap: SP['4'] }}>
       <View

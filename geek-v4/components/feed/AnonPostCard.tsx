@@ -9,7 +9,9 @@ import { useAuthStore } from '../../stores/authStore';
 import { translateDynamic, useT } from '../../lib/i18n';
 import { MemeReactionPicker } from './MemeReactionPicker';
 import type { ReactionAgg } from '../../lib/api/reactions';
-import { C, R, SP } from '../../design/tokens';
+import { R, SP } from '../../design/tokens';
+import { useColors } from '../../hooks/useColors';
+import type { ColorPalette } from '../../lib/theme/palettes';
 import { T } from '../../design/typography';
 import { PressableScale } from '../ui/PressableScale';
 import { ProgressiveImage } from '../ui/ProgressiveImage';
@@ -111,7 +113,11 @@ function shortHost(url: string): string {
 //   各カードの re-render 時の reconciliation コストが大幅に下がる。
 // 動的な (props/state に依存する) style は useMemo か per-item ファクトリで処理する。
 // ────────────────────────────────────────────────────────────────────
-const STYLES = StyleSheet.create({
+// 旧 `STYLES = StyleSheet.create(...)` だと module top-level で C が
+// capture されてしまい、テーマ切替で色が変わらない (StyleSheet は 1 回しか
+// 評価されない)。factory にして component 内 useMemo で C 毎に再生成する。
+// 同テーマ render では useMemo が同一参照を返すので reconciliation コストは増えない。
+const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // 低信頼バナー
   lowTrustBanner: {
     flexDirection: 'row',
@@ -297,7 +303,12 @@ const STYLES = StyleSheet.create({
 //   - base 側 (StyleSheet ID) は安定なので reconciliation コストは差分分のみ
 // ────────────────────────────────────────────────────────────────────
 
-function communityChipBorder(isOfficial: boolean): { borderColor: string } {
+// 旧 module-level helper は C を直接参照していたので、テーマ切替で色が変わらない。
+// 第 1 引数で C を受ける形に変え、呼び出し側 (component) で `const C = useColors()`
+// 結果を渡す。境界は薄いが、styles.communityChipBorder のような差分 style 生成は
+// `[STYLES.base, communityChipBorder(C, isOfficial)]` の合成で済む (StyleSheet ID
+// が安定なので reconciliation コストは差分プロパティ分のみ)。
+function communityChipBorder(C: ColorPalette, isOfficial: boolean): { borderColor: string } {
   return { borderColor: isOfficial ? C.accent + '66' : C.border };
 }
 
@@ -305,18 +316,18 @@ function mediaItemAspect(aspect: number): { aspectRatio: number } {
   return { aspectRatio: aspect };
 }
 
-function reactionPillColors(mine: boolean): { backgroundColor: string; borderColor: string } {
+function reactionPillColors(C: ColorPalette, mine: boolean): { backgroundColor: string; borderColor: string } {
   return {
     backgroundColor: mine ? C.accentBg : C.bg3,
     borderColor: mine ? C.accent : C.border,
   };
 }
 
-function reactionPillLabel(mine: boolean): { fontSize: number; color: string; fontWeight: '700' } {
+function reactionPillLabel(C: ColorPalette, mine: boolean): { fontSize: number; color: string; fontWeight: '700' } {
   return { fontSize: 11, color: mine ? C.accentLight : C.text2, fontWeight: '700' };
 }
 
-function reactionPillCount(mine: boolean): { fontSize: number; color: string; fontWeight: '700' } {
+function reactionPillCount(C: ColorPalette, mine: boolean): { fontSize: number; color: string; fontWeight: '700' } {
   return { fontSize: 10, color: mine ? C.accentLight : C.text3, fontWeight: '700' };
 }
 
@@ -371,6 +382,11 @@ function AnonPostCardInner({
   const Warn = Icon.warn;
   const t = useT();
   const qc = useQueryClient();
+  // ★ テーマ購読 — light/dark で全 style が再評価される。
+  //   makeStyles は新 StyleSheet を生成するが useMemo で同テーマ render では
+  //   同一参照を返すので、Card 再 render は色変化のときだけ。
+  const C = useColors();
+  const STYLES = useMemo(() => makeStyles(C), [C]);
 
   // ★ ModActionMenu 配線 (mod だけに見える 3-dot)
   // post.community_id は型に無いが post_communities junction で 1 件以上紐付く。
@@ -623,7 +639,7 @@ function AnonPostCardInner({
               key={c.community_id}
               onPress={() => onCommunityPress?.(c.community_id)}
               haptic="tap"
-              style={[STYLES.communityChipBase, communityChipBorder(!!c.is_official)]}
+              style={[STYLES.communityChipBase, communityChipBorder(C, !!c.is_official)]}
             >
               <Text style={STYLES.communityChipText}>
                 {`\u{1F3E0} ${c.icon_emoji} ${c.name}`}
@@ -849,12 +865,12 @@ function AnonPostCardInner({
               haptic="tap"
               hitSlop={10}
               accessibilityLabel={`${r.meme} ${r.count} 件 ${r.mine ? '(押下済み)' : ''}`}
-              style={[STYLES.reactionPillBase, reactionPillColors(r.mine)]}
+              style={[STYLES.reactionPillBase, reactionPillColors(C, r.mine)]}
             >
-              <Text style={reactionPillLabel(r.mine)}>
+              <Text style={reactionPillLabel(C, r.mine)}>
                 {r.meme}
               </Text>
-              <Text style={reactionPillCount(r.mine)}>
+              <Text style={reactionPillCount(C, r.mine)}>
                 {r.count}
               </Text>
             </PressableScale>

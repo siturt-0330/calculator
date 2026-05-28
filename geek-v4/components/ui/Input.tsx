@@ -8,9 +8,10 @@ import Animated, {
   withTiming,
   interpolateColor,
 } from 'react-native-reanimated';
-import { C, SP, R, SIZE } from '../../design/tokens';
+import { SP, R, SIZE } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { TIMING_FAST } from '../../design/motion';
+import { useColors } from '../../hooks/useColors';
 
 type Props = TextInputProps & {
   label?: string;
@@ -34,6 +35,8 @@ export const Input = forwardRef<TextInput, Props>(function Input(
   const [focused, setFocused] = useState(false);
   const multiline = rest.multiline === true;
   const effectiveMaxLength = maxLength ?? DEFAULT_INPUT_MAX_LENGTH;
+  // テーマ購読 — light で入力欄が white-on-white にならないように
+  const C = useColors();
   // エラー状態: 視覚的に明確にする (赤枠) — focused より優先
   const showError = Boolean(error);
 

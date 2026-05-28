@@ -18,7 +18,8 @@
 import { View, Text, ScrollView } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { C, R, SP, SHADOW, GRAD } from '../../design/tokens';
+import { R, SP } from '../../design/tokens';
+import { useTheme } from '../../hooks/useColors';
 import { T } from '../../design/typography';
 import { Icon } from '../../constants/icons';
 import { PressableScale } from '../ui/PressableScale';
@@ -74,6 +75,7 @@ export function CommunityAvatarBar({
   showJoinHint = true,
 }: Props) {
   const isAllSelected = selectedId === null;
+  const { C } = useTheme();
 
   return (
     <View
@@ -164,6 +166,7 @@ function AvatarItem({
   isAllVariant = false,
 }: AvatarItemProps) {
   const truncated = truncateLabel(label, LABEL_MAX_CHARS);
+  const { C, GRAD, SHADOW } = useTheme();
 
   return (
     <PressableScale

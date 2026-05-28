@@ -29,7 +29,8 @@ import { FeedbackFAB } from '../components/feedback/FeedbackFAB';
 import { initAnalytics } from '../lib/analytics';
 import { initSentry, setSentryUser, clearSentryUser } from '../lib/sentry';
 import { initWebVitals } from '../lib/webVitals';
-import { C } from '../design/tokens';
+import { useThemeStore, useResolvedTheme } from '../lib/theme/themeStore';
+import { useColors } from '../hooks/useColors';
 import { AppState } from 'react-native';
 import { supabase } from '../lib/supabase';
 import {
@@ -130,6 +131,11 @@ export default function RootLayout() {
   const lang = useLanguageStore((s) => s.lang);
   const hydrateTagFilter = useTagFilterStore((s) => s.hydrate);
   const hydrateAdPrefs = useAdPreferencesStore((s) => s.hydrate);
+  // ★ テーマ — system / light / dark 切替に対応。
+  //   hydrate は同期 (MMKV/localStorage)、UI は useColors() で各画面が購読。
+  const hydrateTheme = useThemeStore((s) => s.hydrate);
+  const C = useColors();
+  const resolvedTheme = useResolvedTheme();
 
   // ★ 言語切替反映 (Web):
   // `document.documentElement.lang` を更新することで:
@@ -155,6 +161,8 @@ export default function RootLayout() {
     //   - lang / adPrefs は AsyncStorage のまま (cold start クリティカルパスに
     //     乗らないため改修対象外)
     // signature は Promise を返す互換のままで、allSettled で堅牢化を維持。
+    // テーマは同期 MMKV / localStorage 読み出し → 即 set
+    try { hydrateTheme(); } catch {}
     void Promise.allSettled([
       hydrateAuth(),
       hydrateSettings(),
@@ -162,7 +170,27 @@ export default function RootLayout() {
       hydrateTagFilter(),
       hydrateAdPrefs(),
     ]);
-  }, [hydrateAuth, hydrateSettings, hydrateLang, hydrateTagFilter, hydrateAdPrefs]);
+  }, [hydrateAuth, hydrateSettings, hydrateLang, hydrateTagFilter, hydrateAdPrefs, hydrateTheme]);
+
+  // ★ Web: テーマに合わせて :root の background-color と meta theme-color を更新。
+  // RN inline style は capture-time の値なので、未移行 component はテーマ切替で
+  // 自動で色が変わらない。せめて body 背景だけ追従させて「角の黒帯/白帯」を抑制。
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    try {
+      document.documentElement.style.backgroundColor = C.bg;
+      document.body.style.backgroundColor = C.bg;
+      document.documentElement.dataset.theme = resolvedTheme;
+      // meta theme-color (Mobile Safari address bar / Android Chrome statusbar)
+      let meta = document.querySelector('meta[name="theme-color"]');
+      if (!meta) {
+        meta = document.createElement('meta');
+        meta.setAttribute('name', 'theme-color');
+        document.head.appendChild(meta);
+      }
+      meta.setAttribute('content', C.bg);
+    } catch { /* ignore */ }
+  }, [C.bg, resolvedTheme]);
 
   // ★ コミュニティタブ pre-warm:
   //   ログイン済 & auth hydrate 完了で「コミュニティタブを開いたときに 1-2 秒
@@ -338,7 +366,7 @@ export default function RootLayout() {
           >
             <BottomSheetModalProvider>
               <View style={{ flex: 1, backgroundColor: C.bg }}>
-                <StatusBar style="light" />
+                <StatusBar style={resolvedTheme === 'light' ? 'dark' : 'light'} />
                 <OfflineBanner />
                 <Stack
                   screenOptions={{
@@ -378,6 +406,7 @@ export default function RootLayout() {
                   <Stack.Screen name="settings/plan" />
                   <Stack.Screen name="settings/notifications" />
                   <Stack.Screen name="settings/language" />
+                  <Stack.Screen name="settings/appearance" />
                   <Stack.Screen name="settings/blocked-users" />
                   <Stack.Screen name="settings/blocked-tags" />
                   <Stack.Screen name="settings/feedback-admin" />
