@@ -22,7 +22,10 @@ import { IntroAnimation, markIntroShown } from '../components/ui/IntroAnimation'
 import { useIntroStore } from '../stores/introStore';
 import { OfflineBanner } from '../components/ui/OfflineBanner';
 import { FeedbackFAB } from '../components/feedback/FeedbackFAB';
-import { useOfflineQueueProcessor } from '../hooks/useOfflineQueueProcessor';
+// useOfflineQueue は legacy useOfflineQueueProcessor を内部で wrap し、
+// 新規 lib/offline/queue.ts の flush + networkMonitor 購読も一括で起動する。
+// OfflineBanner が内部で useOfflineQueue を呼ぶので、root では別途 runner を
+// 置く必要は無い。
 import { initAnalytics } from '../lib/analytics';
 import { initSentry, setSentryUser, clearSentryUser } from '../lib/sentry';
 import { initWebVitals } from '../lib/webVitals';
@@ -333,7 +336,6 @@ export default function RootLayout() {
             client={qc}
             persistOptions={{ persister, maxAge: 1000 * 60 * 60 * 2 }}
           >
-            <OfflineQueueRunner />
             <BottomSheetModalProvider>
               <View style={{ flex: 1, backgroundColor: C.bg }}>
                 <StatusBar style="light" />
@@ -448,9 +450,8 @@ export default function RootLayout() {
   );
 }
 
-// ネットワーク復活時に保留中アクションを再実行。
-// useQueryClient() を呼ぶので PersistQueryClientProvider の中に置く必要がある。
-function OfflineQueueRunner() {
-  useOfflineQueueProcessor();
-  return null;
-}
+// ネットワーク復活時の保留中アクション再実行は、OfflineBanner 内部の
+// useOfflineQueue() が legacy useOfflineQueueProcessor を wrap して起動するため、
+// ここに専用 Runner を置く必要は無い。OfflineBanner は SafeAreaProvider /
+// PersistQueryClientProvider の中に配置されているので useQueryClient() の
+// 制約も満たしている。
