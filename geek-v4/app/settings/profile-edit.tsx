@@ -55,6 +55,9 @@ export default function ProfileEditScreen() {
 
   const pickPhoto = async () => {
     if (!user) return;
+    // 再エントリ防止 — uploading 中の再 tap や permission dialog 開いてる最中の
+    // 連打で picker が 2 重起動するのを避ける
+    if (uploading) return;
     if (Platform.OS !== 'web') {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {

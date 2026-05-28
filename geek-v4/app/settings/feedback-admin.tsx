@@ -222,10 +222,20 @@ function FeedbackCard({
   const [saving, setSaving] = useState(false);
 
   const saveNotes = async () => {
+    // 再エントリ防止 — disabled は付いてるが state 反映の 1 frame ズレで
+    // 連打されると onUpdate が 2 度走る race を防ぐ
+    if (saving) return;
     setSaving(true);
-    await onUpdate({ admin_notes: notes });
-    setSaving(false);
-    setNotesEditing(false);
+    try {
+      await onUpdate({ admin_notes: notes });
+      setNotesEditing(false);
+    } catch (e) {
+      // onUpdate 側で toast を出している (feedback-admin の上位) ので
+      // ここでは追加 toast は出さず、editing は閉じない (再 save できるよう)
+      console.warn('[feedback-admin] save notes failed:', e);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (

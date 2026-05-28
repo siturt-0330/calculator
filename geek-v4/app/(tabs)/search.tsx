@@ -1,996 +1,596 @@
 // ============================================================
-// (tabs)/search.tsx — Discovery タブ
+// (tabs)/search.tsx — 「Geek 内を検索」 (Google 検索 inspired, iOS-native)
 // ------------------------------------------------------------
-// app/search.tsx を Discovery レイアウト付きで tab 化した版。
-// - query 空: HotPostsRow / TrendingRow / RecommendedCommunities /
-//   InterestCategories / ForYouShelf / DiscoverPhotoGrid を縦並びで
-//   見せる「探す」体験 (Reddit + Instagram の発見タブ)
-// - query 入力時: 既存 search.tsx の結果 UI (投稿 / タグ / 掲示板) を
-//   そのまま提供
+// 設計思想:
+//   - 入力 empty: Discovery (Trending / Hot / おすすめコミュ / カテゴリ / ForYou)
+//   - 入力あり (focus + empty): 最近の検索 5-10 件 + 候補
+//   - 入力あり: useSearchV4 で「投稿 / コミュニティ」のグルーピング結果
+//   - iOS native ぽい sticky search bar (radius 12) + 拡大鏡 / clear / voice icon
 //
-// 旧 app/search.tsx は Redirect で /(tabs)/search に転送。
+// 検索 UX:
+//   - 200ms debounce で query を確定
+//   - 履歴は useSearchHistory (MMKV / autocomplete LRU を wrap)
+//   - 結果 0 件は「もしかして…」 (synonym 候補) + 「フィルタを緩める」
+//
+// v4 連携 (このリビジョン):
+//   1) useSearchV4 — 多 signal ランキング (text_relevance / recency / eeat /
+//      usability / safety_negation / freshness / diversity_penalty / etc.)
+//   2) useQueryIntent — クエリ意図を控えめに表示 ("intent: 〇〇")
+//   3) useLogSearchEngagement — impression / click / dwell を server に送信
+//      (fire-and-forget, retry なし)
+//   4) RankingExplainer — 各 row の ⓘ アイコンから「なぜこの結果?」modal
+//   5) useSearchPreferences — diversify_results を v4 に渡す
+//   6) community filter — `?community=<id>` で受けて scope 付き検索
+//
+// 担当外:
+//   - components/search/* (C3 が拡張)
+//   - lib/api/* (C2 が拡張) — 本ファイルは hook 経由でのみ参照
 // ============================================================
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, ScrollView, ActivityIndicator, TextInput, Platform } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming, interpolateColor } from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  ActivityIndicator,
+  TextInput,
+  RefreshControl,
+  Keyboard,
+} from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  interpolateColor,
+} from 'react-native-reanimated';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
-import { supabase } from '../../lib/supabase';
-import { fetchTrendingTags } from '../../lib/api/trending';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TopBar } from '../../components/nav/TopBar';
 import { PressableScale } from '../../components/ui/PressableScale';
-import { Avatar } from '../../components/ui/Avatar';
 import { HighlightedText } from '../../components/ui/HighlightedText';
+import { Avatar } from '../../components/ui/Avatar';
 import { Icon } from '../../constants/icons';
-import { C, GRAD, R, SHADOW, SP } from '../../design/tokens';
+import { C, R, SHADOW, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { TIMING_FAST } from '../../design/motion';
 import { formatRelative } from '../../lib/utils/date';
-import { useTagGraphStore } from '../../stores/tagGraphStore';
-import { useSearchHistoryStore } from '../../stores/searchHistoryStore';
-import { useSearchSignalsStore } from '../../stores/searchSignalsStore';
-import { useTagFilterStore } from '../../stores/tagFilterStore';
-import { useTagCooccurStore } from '../../stores/tagCooccurStore';
-import { findRelatedTags } from '../../lib/search/tagVector';
-import { parseQuery, type ParsedQuery } from '../../lib/search/queryParser';
-import { normalize, deepNormalize } from '../../lib/search/tokenize';
-import { scorePost, scoreTagItem, type PostDoc, type TagDoc } from '../../lib/search/scoring';
-import { findClosest, findClosestK } from '../../lib/search/typoCorrect';
-import { generateVariants, previewVariants } from '../../lib/search/variants';
-import { getAutocompleteSuggestions } from '../../lib/search/autocomplete';
-import { useLanguageStore } from '../../stores/languageStore';
-import { useSavedSearches, useCreateSavedSearch, useDeleteSavedSearch } from '../../hooks/useSavedSearches';
-import { useToastStore } from '../../stores/toastStore';
-import { logEvent } from '../../lib/personalize';
-import { useTagSearchV3 } from '../../hooks/useTagSearchV3';
-import { useSearchClickStore } from '../../stores/searchClickStore';
-import { generateRelatedQueries } from '../../lib/search/relatedSearches';
-import { expandWithTagGraph } from '../../lib/utils/searchAlgo';
-import { expandWithCooccur } from '../../lib/tagClustering/relations';
-import { classifyEntity } from '../../lib/search/queryEntity';
-import { ReasonBadges } from '../../components/search/ReasonBadge';
-import { DiscoverPhotoGrid } from '../../components/search/DiscoverPhotoGrid';
-import { SearchHistoryChips } from '../../components/search/SearchHistoryChips';
-import {
-  SearchFilterChips,
-  DEFAULT_SEARCH_FILTERS,
-  type SearchFilters,
-} from '../../components/search/SearchFilterChips';
+import { fetchPostById } from '../../lib/api/posts';
+import { searchCommunities, type CommunityHit } from '../../lib/api/communities';
 import { useSearchHistory } from '../../hooks/useSearchHistory';
-// Discovery (query 空) で並べる横スクロール / グリッド系コンポーネント
+import {
+  useSearchV4,
+  useQueryIntent,
+  useLogSearchEngagement,
+} from '../../hooks/useSearchV4';
+import { useTrendingTopics } from '../../hooks/useSearchV2';
+import { useSearchPreferences } from '../../hooks/useSearchPreferences';
+import { useSearchSignalsStore } from '../../stores/searchSignalsStore';
+import { findClosest } from '../../lib/search/typoCorrect';
+import { useTagGraphStore } from '../../stores/tagGraphStore';
+import type { Post } from '../../types/models';
+// Discovery セクション (C3 担当 — props で連携)
 import { HotPostsRow } from '../../components/search/HotPostsRow';
 import { RecommendedCommunities } from '../../components/search/RecommendedCommunities';
 import { InterestCategories } from '../../components/search/InterestCategories';
 import { ForYouShelf } from '../../components/search/ForYouShelf';
-import { TrendingRow } from '../../components/feed/TrendingRow';
+import { RankingExplainer } from '@/components/search/RankingExplainer';
 
-type BBSResult = { id: string; title: string; category: string; replies_count: number; created_at: string };
-type Category = 'all' | 'posts' | 'tags' | 'bbs';
-type SortMode = 'relevance' | 'newest' | 'popular';
+// 検索 input の debounce — typing 中の不要な fetch を抑える
+const DEBOUNCE_MS = 200;
+// 結果セクションあたりの初期表示件数 (「もっと見る」で展開)
+const PREVIEW_LIMIT = 5;
 
-// Google 風の "all" ビュー: 各セクション max 3 件 + 「もっと見る」で展開
-const PREVIEW_LIMIT = 3;
+type ResultCategory = 'all' | 'posts' | 'communities';
 
-// ============= サーバー検索 =============
-async function fetchTags(queries: string[]): Promise<TagDoc[]> {
-  if (queries.length === 0) return [];
-  const filters = queries.slice(0, 16).map((q) => `name.ilike.%${q}%`).join(',');
-  const { data } = await supabase
-    .from('tags')
-    .select('name, post_count, member_count')
-    .or(filters)
-    .order('member_count', { ascending: false })
-    .limit(60);
-  return (data ?? []) as TagDoc[];
-}
-
-async function fetchAllTags(): Promise<string[]> {
-  const { data } = await supabase
-    .from('tags')
-    .select('name')
-    .order('member_count', { ascending: false })
-    .limit(200);
-  return (data ?? []).map((t: { name: string }) => t.name);
-}
-
-async function fetchPosts(queries: string[], tagFilters: string[]): Promise<PostDoc[]> {
-  const map = new Map<string, PostDoc>();
-  const SELECT = 'id, content, tag_names, likes_count, comments_count, concern_count, created_at, trust_score_at_post, media_urls, source_url, kind';
-
-  // 本文検索
-  if (queries.length > 0) {
-    const filters = queries.slice(0, 16).map((q) => `content.ilike.%${q}%`).join(',');
-    const { data } = await supabase
-      .from('posts').select(SELECT).or(filters)
-      .eq('is_anonymous', true).eq('is_public', true)
-      .order('created_at', { ascending: false }).limit(80);
-    for (const p of (data ?? []) as PostDoc[]) map.set(p.id, p);
-  }
-  // タグ overlap 検索
-  const tagQueries = [...queries, ...tagFilters].filter(Boolean).slice(0, 12);
-  if (tagQueries.length > 0) {
-    const { data } = await supabase
-      .from('posts').select(SELECT).overlaps('tag_names', tagQueries)
-      .eq('is_anonymous', true).eq('is_public', true)
-      .order('created_at', { ascending: false }).limit(80);
-    for (const p of (data ?? []) as PostDoc[]) map.set(p.id, p);
-  }
-  return [...map.values()];
-}
-
-async function fetchBBS(q: string): Promise<BBSResult[]> {
-  if (!q) return [];
-  const { data } = await supabase
-    .from('bbs_threads')
-    .select('id, title, category, replies_count, created_at')
-    .ilike('title', `%${q}%`)
-    .order('last_reply_at', { ascending: false, nullsFirst: false })
-    .limit(30);
-  const rows = (data ?? []) as BBSResult[];
-  // 同タイトル + 同カテゴリの重複を dedupe — seed data や bot クローンのスレッドが
-  // 何個も並ぶのを防ぐ
-  const seen = new Map<string, BBSResult>();
-  for (const r of rows) {
-    const key = `${(r.title || '').trim().toLowerCase()}|${r.category}`;
-    const existing = seen.get(key);
-    if (!existing) {
-      seen.set(key, r);
-    } else {
-      // 返信数が多い方を残す (より「活発な方」)
-      if ((r.replies_count ?? 0) > (existing.replies_count ?? 0)) seen.set(key, r);
-    }
-  }
-  return [...seen.values()];
-}
-
-const CATEGORY_LABELS: Record<Category, { label: string; emoji: string }> = {
-  all: { label: 'すべて', emoji: '✨' },
-  posts: { label: '投稿', emoji: '📝' },
-  tags: { label: 'タグ', emoji: '#' },
-  bbs: { label: '掲示板', emoji: '💬' },
-};
-
-// SORT_LABELS は V2 で SearchFilterChips に移譲 (relevance / newest / popular)。
-// 既存の sortMode 値はそのままで、UI レンダリングだけ新コンポーネントへ。
-
+// ============================================================
+// SearchScreen
+// ============================================================
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const [q, setQ] = useState('');
-  const [debounced, setDebounced] = useState('');
-  const [category, setCategory] = useState<Category>('all');
-  const [sortMode, setSortMode] = useState<SortMode>('relevance');
-  // Google 風: 'all' タブで各 section の「もっと見る」展開状態を持つ
-  const [expandedPosts, setExpandedPosts] = useState(false);
-  const [expandedTags, setExpandedTags] = useState(false);
-  const [expandedBBS, setExpandedBBS] = useState(false);
-  // 検索 input の focus 状態 (glow shadow / animated border 用)
-  const [inputFocused, setInputFocused] = useState(false);
+  const params = useLocalSearchParams<{ q?: string; community?: string }>();
+  const qc = useQueryClient();
+
+  // ============= state =============
+  const [rawQuery, setRawQuery] = useState<string>(typeof params.q === 'string' ? params.q : '');
+  const [debouncedQuery, setDebouncedQuery] = useState<string>(typeof params.q === 'string' ? params.q : '');
+  const [inputFocused, setInputFocused] = useState<boolean>(false);
+  const [category, setCategory] = useState<ResultCategory>('all');
+  const [expandPosts, setExpandPosts] = useState<boolean>(false);
+  const [expandCommunities, setExpandCommunities] = useState<boolean>(false);
   const inputRef = useRef<TextInput | null>(null);
-  // Infinite scroll prep — cursor / nextOffset for future paged fetches.
-  // Reset on every new debounced query.
-  const [, setNextOffset] = useState<number>(0);
+  // RankingExplainer modal — どの post の説明を開いているか
+  const [explainPost, setExplainPost] = useState<{ id: string; query: string } | null>(null);
+  // URL ?community=<id> で community scope filter を効かせる
+  const communityId = typeof params.community === 'string' && params.community.length > 0
+    ? params.community
+    : undefined;
 
-  // V2 検索 UX: フィルタ chip 行の state (期間 / 並び順 / コミュ)
-  const [filters, setFilters] = useState<SearchFilters>(DEFAULT_SEARCH_FILTERS);
-  // V2 autocomplete dropdown: ↑↓ キーボードナビ用 selected index (-1 = なし)
-  const [acIndex, setAcIndex] = useState<number>(-1);
-  // V2 autocomplete dropdown を一時的に閉じる (Esc キー押下時など)
-  const [acDismissed, setAcDismissed] = useState<boolean>(false);
-  // V2 履歴 hook (autocomplete LRU + 短期 store を wrap)
-  const { history: v2History, pickQuery: pickHistory, removeQuery: removeHistory, clearAll: clearAllHistory } = useSearchHistory(10);
-
-  // 全 store destructure はキーストロークごとの toast / signal / cooccur 更新で
-  // search.tsx 全体が再 render される原因。fields ごとに subscribe する。
-  const nodes = useTagGraphStore((s) => s.nodes);
-  const hydrateGraph = useTagGraphStore((s) => s.hydrate);
-  const lang = useLanguageStore((s) => s.lang);
-  const history = useSearchHistoryStore((s) => s.history);
-  const hydrateHist = useSearchHistoryStore((s) => s.hydrate);
-  const addHist = useSearchHistoryStore((s) => s.add);
-  const removeHist = useSearchHistoryStore((s) => s.remove);
-  const clearHist = useSearchHistoryStore((s) => s.clear);
-  // 保存検索
-  const { searches: savedSearches } = useSavedSearches();
-  const { mutateAsync: createSavedSearchMut } = useCreateSavedSearch();
-  const { mutateAsync: deleteSavedSearchMut } = useDeleteSavedSearch();
-  const showToast = useToastStore((s) => s.show);
-  const saveCurrentQuery = () => {
-    if (!debounced.trim()) return;
-    createSavedSearchMut({ query: debounced })
-      .then(() => showToast('検索を保存しました', 'success'))
-      .catch(() => showToast('保存に失敗しました', 'error'));
-  };
-  const removeSavedSearchFn = (id: string) => {
-    deleteSavedSearchMut(id).catch(() => showToast('削除に失敗しました', 'error'));
-  };
-  const isCurrentSaved = useMemo(
-    () => savedSearches.some((s) => s.query === debounced.trim()),
-    [savedSearches, debounced],
-  );
-  const hydrateSignals = useSearchSignalsStore((s) => s.hydrate);
+  // ============= 履歴 / シグナル =============
+  const {
+    history,
+    pickQuery,
+    removeQuery,
+    clearAll,
+  } = useSearchHistory(10);
   const recordSignal = useSearchSignalsStore((s) => s.record);
-  const aggregate = useSearchSignalsStore((s) => s.aggregate);
-  const likedTags = useTagFilterStore((s) => s.likedTags);
-  const blockedTags = useTagFilterStore((s) => s.blockedTags);
-  const cooccur = useTagCooccurStore((s) => s.cooccur);
-  const tagPopularity = useTagCooccurStore((s) => s.tagPopularity);
-  const hydrateCooccur = useTagCooccurStore((s) => s.hydrate);
-  const ensureCooccur = useTagCooccurStore((s) => s.ensureFresh);
-  const likedSet = useMemo(() => new Set(likedTags), [likedTags]);
-  const blockedSet = useMemo(() => new Set(blockedTags), [blockedTags]);
+  const hydrateGraph = useTagGraphStore((s) => s.hydrate);
 
   useEffect(() => {
     void hydrateGraph();
-    void hydrateHist();
-    void hydrateSignals();
-    void hydrateCooccur();
-    void ensureCooccur();
-  }, [hydrateGraph, hydrateHist, hydrateSignals, hydrateCooccur, ensureCooccur]);
+  }, [hydrateGraph]);
 
-  const signals = useMemo(() => aggregate(), [aggregate]);
-
-  // V2 filters と既存 sortMode を双方向同期
+  // ============= URL `?q=` で初期化 =============
   useEffect(() => {
-    if (filters.sort !== sortMode) setSortMode(filters.sort);
+    const q = typeof params.q === 'string' ? params.q : '';
+    if (q && q !== rawQuery) {
+      setRawQuery(q);
+      setDebouncedQuery(q);
+    }
+    // 初回 mount 限定 — rawQuery を deps に入れると navigate のたびに上書きされる
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.sort]);
+  }, [params.q]);
 
-  // 新クエリで autocomplete dismiss を解除 (1 回 Esc しても新しい入力で復活)
+  // ============= debounce =============
   useEffect(() => {
-    setAcDismissed(false);
-    setAcIndex(-1);
-  }, [q]);
-
-  useEffect(() => {
-    // 220ms → 150ms (体感応答性 up)
-    // 短いクエリ (≤2 文字) は 100ms — autocomplete を爆速に
-    const delay = q.trim().length <= 2 ? 100 : 150;
     const t = setTimeout(() => {
-      const trimmed = q.trim();
-      setDebounced(trimmed);
-      // パーソナライズ用シグナル: 2 文字以上の本気のクエリだけ記録
-      if (trimmed.length >= 2) {
-        void logEvent({ kind: 'search_submit', tags: [trimmed], query: trimmed });
-      }
-    }, delay);
+      const trimmed = rawQuery.trim();
+      setDebouncedQuery(trimmed);
+    }, DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [q]);
+  }, [rawQuery]);
 
-  // クエリパース
-  const parsedQuery: ParsedQuery = useMemo(() => parseQuery(debounced), [debounced]);
-  // タググラフからの拡張
-  const expansion = useMemo(() => {
-    const queries = [...parsedQuery.keywords, ...parsedQuery.tags];
-    const out: { tag: string; reason: string }[] = [];
-    for (const k of queries) {
-      out.push(...expandWithTagGraph(k, nodes));
-    }
-    return out;
-  }, [parsedQuery, nodes]);
-
-  // 全検索クエリ (キーワード → variants[] + フレーズ + タググラフ)
-  const variantsPerKeyword = useMemo(() => {
-    const map: Record<string, string[]> = {};
-    for (const kw of parsedQuery.keywords) {
-      map[kw] = generateVariants(kw);
-    }
-    return map;
-  }, [parsedQuery.keywords]);
-
-  // ベクトル類似度 (共起 + 字面 + グラフ) で関連タグを発見
-  const vectorRelated = useMemo(() => {
-    if (parsedQuery.keywords.length === 0) return [] as { tag: string; score: number }[];
-    const candidates = new Set<string>();
-    for (const t of Object.keys(tagPopularity)) candidates.add(t);
-    for (const n of Object.values(nodes)) {
-      candidates.add(n.label);
-      for (const a of n.aliases) candidates.add(a);
-      for (const r of n.related ?? []) candidates.add(r);
-    }
-    const out: { tag: string; score: number }[] = [];
-    for (const kw of parsedQuery.keywords) {
-      const top = findRelatedTags(kw, [...candidates], { nodes, cooccur }, { topK: 10, minScore: 0.3 });
-      out.push(...top);
-    }
-    // ユニーク化 (高 score 優先)
-    const map = new Map<string, { tag: string; score: number }>();
-    for (const r of out) {
-      const prev = map.get(r.tag);
-      if (!prev || r.score > prev.score) map.set(r.tag, r);
-    }
-    return [...map.values()].sort((a, b) => b.score - a.score).slice(0, 12);
-  }, [parsedQuery, nodes, cooccur, tagPopularity]);
-
-  const allQueries = useMemo(() => {
-    const set = new Set<string>();
-    for (const variants of Object.values(variantsPerKeyword)) {
-      for (const v of variants) set.add(v);
-    }
-    for (const p of parsedQuery.phrases) {
-      for (const v of generateVariants(p)) set.add(v);
-    }
-    for (const e of expansion) set.add(normalize(e.tag));
-    // ベクトル類似度上位もクエリに追加
-    for (const r of vectorRelated.slice(0, 6)) set.add(normalize(r.tag));
-    // 短すぎる variants (1文字) は重複・誤マッチを増やすので除外
-    return [...set].filter((x) => x.length >= 2);
-  }, [variantsPerKeyword, parsedQuery, expansion, vectorRelated]);
-
-  // Phase 2: cluster cooccur primitive — vectorRelated/expansion で取りこぼした
-  // 純粋な共起ペアも拡張集合に追加 (e.g. graph に無いがよく一緒に投稿される)。
-  const cooccurExpanded = useMemo(() => {
-    const inputs = [...parsedQuery.keywords, ...parsedQuery.tags];
-    if (inputs.length === 0) return [] as { tag: string; score: number }[];
-    return expandWithCooccur(inputs, cooccur, { topK: 12, minCount: 3 });
-  }, [parsedQuery, cooccur]);
-
-  const expandedTagSet = useMemo(() => {
-    const s = new Set(expansion.map((e) => e.tag));
-    for (const r of vectorRelated) s.add(r.tag);
-    for (const r of cooccurExpanded) s.add(r.tag);
-    return s;
-  }, [expansion, vectorRelated, cooccurExpanded]);
-
-  // Phase 4: クエリ意味解釈 (entity / modifiers / relatedEntities)
-  // knownTagSet は「我々がタグとして認識しているもの全部」 — cooccur + popularity + graph
-  // ノードの label / alias を deepNormalize で正規化した集合。
-  // ここに query の keyword が当たれば「これは entity (対象タグ) だ」 と判断する。
-  const knownTagSet = useMemo(() => {
-    const s = new Set<string>();
-    for (const k of Object.keys(tagPopularity)) {
-      const n = deepNormalize(k);
-      if (n) s.add(n);
-    }
-    for (const k of Object.keys(cooccur)) {
-      const n = deepNormalize(k);
-      if (n) s.add(n);
-    }
-    for (const node of Object.values(nodes)) {
-      const ln = deepNormalize(node.label);
-      if (ln) s.add(ln);
-      for (const a of node.aliases) {
-        const an = deepNormalize(a);
-        if (an) s.add(an);
-      }
-    }
-    return s;
-  }, [tagPopularity, cooccur, nodes]);
-
-  const queryEntity = useMemo(
-    () => classifyEntity(parsedQuery, knownTagSet, { cooccur, relatedTopK: 6 }),
-    [parsedQuery, knownTagSet, cooccur],
-  );
-
-  // クエリ全 variants をマージ (スコアリング & ハイライト用)
-  const allVariantQueries: ParsedQuery = useMemo(() => {
-    const keywords = new Set<string>();
-    for (const variants of Object.values(variantsPerKeyword)) {
-      for (const v of variants) keywords.add(v);
-    }
-    return { ...parsedQuery, keywords: [...keywords] };
-  }, [parsedQuery, variantsPerKeyword]);
-
-  // データ取得
-  const allTagsQ = useQuery({
-    queryKey: ['all-tag-names'],
-    queryFn: fetchAllTags,
-    staleTime: 60_000,
-  });
-
-  const tagsQ = useQuery({
-    queryKey: ['search-tags-v3', allQueries.join('|')],
-    queryFn: () => fetchTags(allQueries),
-    enabled: debounced.length > 0,
-  });
-
-  const postsQ = useQuery({
-    queryKey: ['search-posts-v3', allQueries.join('|'), parsedQuery.tags.join('|')],
-    queryFn: () => fetchPosts(allQueries, parsedQuery.tags),
-    enabled: debounced.length > 0,
-  });
-
-  const bbsQ = useQuery({
-    queryKey: ['search-bbs-v3', debounced],
-    queryFn: () => fetchBBS(parsedQuery.keywords.join(' ')),
-    enabled: debounced.length > 0 && parsedQuery.keywords.length > 0,
-  });
-
-  // 加速度ベースのトレンドタグ取得 (scorePost の trendingTags ctx 用)
-  const trendingAccel = useQuery({
-    queryKey: ['search-trending-accel'],
-    queryFn: () => fetchTrendingTags(20),
-    staleTime: 5 * 60 * 1000,
-  });
-
-  // isSpike === true OR acceleration > 0 のタグ名 Set
-  const trendingTagSet = useMemo(() => {
-    const s = new Set<string>();
-    for (const t of trendingAccel.data ?? []) {
-      if (t.isSpike || t.acceleration > 0) s.add(t.name);
-    }
-    return s;
-  }, [trendingAccel.data]);
-
-  // Cold-start: 好きなタグ < 3 かつ クエリ履歴 < 5
-  const coldStartMode = useMemo(
-    () => likedTags.length < 3 && history.length < 5,
-    [likedTags, history],
-  );
-
-  // パーソナライゼーション + スコアリング
-  const ctx = useMemo(() => ({
-    likedTags: likedSet,
-    blockedTags: blockedSet,
-    recentQueries: history,
-    tagAffinity: signals.tagFreq,
-    recentTags: signals.recentTags,
-    trendingTags: trendingTagSet,
-    coldStartMode,
-    // Phase 4: scoring に entity / relatedEntities boost を渡す
-    queryEntity,
-  }), [likedSet, blockedSet, history, signals, trendingTagSet, coldStartMode, queryEntity]);
-
-  // V2 期間フィルタ — created_at の cutoff (ms epoch)。'all' なら 0
-  const periodCutoff = useMemo(() => {
-    const now = Date.now();
-    switch (filters.period) {
-      case 'day': return now - 24 * 60 * 60 * 1000;
-      case 'week': return now - 7 * 24 * 60 * 60 * 1000;
-      case 'month': return now - 30 * 24 * 60 * 60 * 1000;
-      case 'all':
-      default:
-        return 0;
-    }
-  }, [filters.period]);
-
-  const rankedPosts = useMemo(() => {
-    const cutoff = periodCutoff;
-    const scored = (postsQ.data ?? [])
-      .map((p) => ({ item: p, ...scorePost(p, allVariantQueries, expandedTagSet, ctx) }))
-      .filter((r) => r.score > 0)
-      // V2 期間フィルタを AND で適用
-      .filter((r) => cutoff === 0 || new Date(r.item.created_at).getTime() >= cutoff);
-
-    if (sortMode === 'newest') scored.sort((a, b) => new Date(b.item.created_at).getTime() - new Date(a.item.created_at).getTime());
-    else if (sortMode === 'popular') scored.sort((a, b) => (b.item.likes_count + b.item.comments_count) - (a.item.likes_count + a.item.comments_count));
-    else scored.sort((a, b) => b.score - a.score);
-
-    // 内容ベースの dedupe — 同じ content + 同じ tag セットの重複投稿を 1 つに
-    // (seed data 由来の同文重複 / botクローン投稿対策)
-    // 上位スコアを残す方針なので、ソート後に dedupe する
-    const seen = new Map<string, typeof scored[0]>();
-    for (const r of scored) {
-      // 内容の最初の 80 文字 + tags の sorted hash で de-dup key を作る
-      const contentKey = normalize(r.item.content.slice(0, 80));
-      const tagKey = (r.item.tag_names ?? []).slice().sort().join(',');
-      const key = `${contentKey}|${tagKey}`;
-      if (!seen.has(key)) seen.set(key, r);
-      else {
-        // 既存より新しいなら入れ替え (new sort 時の挙動を尊重)
-        const existing = seen.get(key)!;
-        if (sortMode === 'newest' && new Date(r.item.created_at).getTime() > new Date(existing.item.created_at).getTime()) {
-          seen.set(key, r);
-        }
-      }
-    }
-    return [...seen.values()].slice(0, 50);
-  }, [postsQ.data, allVariantQueries, expandedTagSet, ctx, sortMode, periodCutoff]);
-
-  const rankedTags = useMemo(() => {
-    const scored = (tagsQ.data ?? [])
-      .map((t) => ({ item: t, ...scoreTagItem(t, allVariantQueries, expandedTagSet, ctx) }))
-      .filter((r) => r.score > 0);
-    scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, 30);
-  }, [tagsQ.data, allVariantQueries, expandedTagSet, ctx]);
-
-  // V2: BBS にも 期間 + 並び順 フィルタを AND で適用
-  const filteredBBS = useMemo(() => {
-    const cutoff = periodCutoff;
-    const rows = (bbsQ.data ?? []).filter(
-      (t) => cutoff === 0 || new Date(t.created_at).getTime() >= cutoff,
-    );
-    if (sortMode === 'newest') {
-      rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    } else if (sortMode === 'popular') {
-      rows.sort((a, b) => (b.replies_count ?? 0) - (a.replies_count ?? 0));
-    }
-    return rows;
-  }, [bbsQ.data, periodCutoff, sortMode]);
-
-  // Did you mean? (上位タグから)
-  const suggestion = useMemo(() => {
-    if (rankedTags.length > 0 || debounced.length < 2) return null;
-    if (!allTagsQ.data) return null;
-    const kw = parsedQuery.keywords[0];
-    if (!kw) return null;
-    return findClosest(kw, allTagsQ.data, 0.55);
-  }, [rankedTags, debounced, parsedQuery, allTagsQ.data]);
-
-  // オートコンプリート: V3 エンジン
-  const { ctx: v3Ctx, search: tagSearchV3, predict: predictV3 } = useTagSearchV3();
-  const recordClick = useSearchClickStore((s) => s.record);
-  const clickStats = useSearchClickStore((s) => s.queryToTagCount);
-  const recentInLastHour = useSearchHistoryStore((s) => s.recentInLastHour);
-
-  // 関連検索 (Google "Related searches")
-  const relatedQueries = useMemo(() => {
-    if (!debounced.trim()) return [];
-    return generateRelatedQueries(debounced, {
-      nodes: v3Ctx.nodes,
-      cooccur: v3Ctx.cooccur,
-      embeddings: v3Ctx.embeddings,
-      clickStats,
-    }, 6);
-  }, [debounced, v3Ctx.nodes, v3Ctx.cooccur, v3Ctx.embeddings, clickStats]);
-
-  // 直近1時間に検索したクエリ
-  const hourlyRecent = useMemo(() => recentInLastHour().slice(0, 5), [recentInLastHour]);
-  const autocomplete = useMemo(() => {
-    if (q.trim().length < 1) return [];
-    const lastToken = q.trim().split(/\s+/).pop() || '';
-    if (lastToken.length < 1) return [];
-    const results = tagSearchV3(lastToken, 8);
-    return results.map((r) => r.tag);
-  }, [q, tagSearchV3]);
-
-  // Ghost typeahead: アニ → アニメ を予測
-  const ghostPrediction = useMemo(() => {
-    if (q.trim().length < 1) return null;
-    const lastToken = q.trim().split(/\s+/).pop() || '';
-    if (lastToken.length < 1) return null;
-    const pred = predictV3(lastToken);
-    if (!pred || pred === lastToken) return null;
-    // 元クエリの prefix を保ちつつ、続きを ghost で表示
-    const lower = lastToken.toLowerCase();
-    if (!pred.toLowerCase().startsWith(lower)) return null;
-    return { full: pred, suffix: pred.slice(lastToken.length) };
-  }, [q, predictV3]);
-
-  // バリアントプレビュー (Google 風: "ポケモン も検索しています")
-  const variantPreview = useMemo(() => {
-    if (q.trim().length < 1) return [];
-    return previewVariants(q.trim(), lang, 4);
-  }, [q, lang]);
-
-  const moreSuggestions = useMemo(() => {
-    if (!allTagsQ.data) return [];
-    const kw = parsedQuery.keywords[0];
-    if (!kw) return [];
-    return findClosestK(kw, allTagsQ.data, 4, 0.45);
-  }, [parsedQuery, allTagsQ.data]);
-
-  // 検索 commit — Enter で即時 flush + history 追加 (短期 store + 永続 stats 両方)
-  const commit = (override?: string) => {
-    const trimmed = (override ?? q).trim();
-    if (!trimmed) return;
-    if (trimmed !== q) setQ(trimmed);
-    // debounce を待たずに即時反映 (mobile では入力中の Enter で爆速検索 UX)
-    if (trimmed !== debounced) setDebounced(trimmed);
-    addHist(trimmed);
-    pickHistory(trimmed);
-  };
-
-  // Reset pagination cursor whenever the active query changes.
-  // 同時に「もっと見る」の展開状態も resetする (新クエリは初期 preview から見せる)
+  // 新クエリで「もっと見る」展開状態を初期化
   useEffect(() => {
-    setNextOffset(0);
-    setExpandedPosts(false);
-    setExpandedTags(false);
-    setExpandedBBS(false);
-  }, [debounced]);
+    setExpandPosts(false);
+    setExpandCommunities(false);
+  }, [debouncedQuery]);
 
-  // V2: Web 限定キーボードショートカット
-  //   - "/" → 検索 input に focus (他の input/textarea に focus 中はスキップ)
-  //   - Esc → autocomplete dropdown を閉じる (acDismissed=true)
-  //   - ↑/↓ → 候補 index 移動 (input focus 時のみ)
-  //   - Enter → acIndex の候補を確定して検索 (input focus 時のみ)
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    if (typeof document === 'undefined') return;
-    const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const isInputLike = !!(target && (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-      ));
-      // "/" focus shortcut — 他の input に focus 中はスキップ
-      if (e.key === '/' && !isInputLike) {
-        e.preventDefault();
-        try {
-          inputRef.current?.focus();
-        } catch { /* best-effort */ }
-        return;
-      }
-      // input focus 中だけ navigation を有効化
-      if (document.activeElement === (inputRef.current as unknown as Element | null)) {
-        if (e.key === 'Escape') {
-          setAcDismissed(true);
-          setAcIndex(-1);
-          return;
-        }
-        if (autocomplete.length === 0 || acDismissed) return;
-        if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          setAcIndex((i) => Math.min(i + 1, autocomplete.length - 1));
-        } else if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          setAcIndex((i) => Math.max(-1, i - 1));
-        } else if (e.key === 'Enter' && acIndex >= 0 && acIndex < autocomplete.length) {
-          e.preventDefault();
-          const picked = autocomplete[acIndex];
-          if (picked) {
-            setAcIndex(-1);
-            commit(picked);
-          }
-        }
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-    // commit / autocomplete は ref 経由ではなく state 駆動なので deps に含める
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autocomplete, acDismissed, acIndex]);
-
-  // 検索入力 focus を Reanimated で滑らかに遷移 (border + halo)
+  // ============= focus 時 animated border (iOS-native) =============
   const focusProgress = useSharedValue(0);
   useEffect(() => {
     focusProgress.value = withTiming(inputFocused ? 1 : 0, TIMING_FAST);
   }, [inputFocused, focusProgress]);
+
   const aSearchBorder = useAnimatedStyle(() => ({
     borderColor: interpolateColor(
       focusProgress.value,
       [0, 1],
-      ['rgba(255,255,255,0.08)', C.accent],
+      ['rgba(255,255,255,0.08)', C.accent + 'CC'],
     ),
   }));
 
-  // ハイライト用のターム
-  const highlightTerms = useMemo(
-    () => [...parsedQuery.keywords, ...parsedQuery.phrases, ...parsedQuery.tags].filter((t) => t.length > 0),
-    [parsedQuery],
-  );
+  // ============= 検索クエリ実行 (v4) =============
+  const showResults = debouncedQuery.length > 0;
 
-  const trending = useQuery({
-    queryKey: ['trending-tags'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('tags')
-        .select('name, post_count, member_count')
-        .order('member_count', { ascending: false })
-        .limit(12);
-      return (data ?? []) as TagDoc[];
-    },
-    // TrendingRow と共有 — 5 分は信用する (一覧画面横断で重複 fetch 削減)
-    staleTime: 5 * 60_000,
+  // 検索 personalization 設定 — diversify_results を v4 に渡す
+  const { preferences } = useSearchPreferences();
+
+  // 投稿検索 — useSearchV4 (多 signal ランキング + intent + diversify)
+  const searchV4 = useSearchV4({
+    query: debouncedQuery,
+    limit: 30,
+    offset: 0,
+    community_id: communityId,
+    use_diversify: preferences.diversify_results,
   });
 
-  // Fallback autocomplete: V3 tag engine が候補を出せなかった時に
-  // history + popular tags でカバーする (lib/search/autocomplete 経由)
-  const fallbackSuggestions = useMemo(() => {
-    if (q.trim().length < 1) return [];
-    const popularTags = (trending.data ?? []).map((t) => ({
-      name: t.name,
-      count: t.member_count,
-    }));
-    return getAutocompleteSuggestions(
-      q.trim().split(/\s+/).pop() ?? '',
-      {
-        history,
-        popularTags,
-        existingTagSuggestions: autocomplete,
-      },
-      5,
-    );
-  }, [q, history, trending.data, autocomplete]);
+  // 検索ヒット post の本体を 1 RTT で取りに行く
+  // (useSearchV4 は post_id + final_score + signal breakdown だけ返すため)
+  const postIds = useMemo(
+    () => (searchV4.data ?? []).map((r) => r.post_id),
+    [searchV4.data],
+  );
 
-  const loading = tagsQ.isLoading || postsQ.isLoading || bbsQ.isLoading;
-  const showResults = debounced.length > 0;
-  const totalResults = rankedPosts.length + rankedTags.length + filteredBBS.length;
-  const showPosts = category === 'all' || category === 'posts';
-  const showTags = category === 'all' || category === 'tags';
-  const showBBS = category === 'all' || category === 'bbs';
+  const postsQuery = useQuery<Post[]>({
+    queryKey: ['searchV4-posts', postIds.join('|')],
+    queryFn: async () => {
+      if (postIds.length === 0) return [];
+      // 投稿ごとに 1 RTT を許容 — useSearchV4 の上位 N (= 30) に絞っているので
+      // 並列で問題ないが、Promise.allSettled で 1 件失敗が全体を壊さないようにする
+      const settled = await Promise.allSettled(postIds.map((id) => fetchPostById(id)));
+      return settled
+        .map((r) => (r.status === 'fulfilled' ? r.value : null))
+        .filter((p): p is Post => p !== null);
+    },
+    enabled: postIds.length > 0,
+    staleTime: 60_000,
+  });
+
+  // ============= クエリ意図 (intent display) =============
+  const intentQuery = useQueryIntent(debouncedQuery);
+  // confidence 降順 top1 のみ表示 (server 側で order by 済み想定だが念のため再 sort)
+  const topIntent = useMemo(() => {
+    const list = intentQuery.data ?? [];
+    if (list.length === 0) return null;
+    const sorted = [...list].sort((a, b) => b.confidence - a.confidence);
+    const head = sorted[0];
+    if (!head) return null;
+    // 'general' は無意味な fallback なので非表示
+    if (head.intent === 'general') return null;
+    return head;
+  }, [intentQuery.data]);
+
+  // ============= engagement ログ (impression / click / dwell) =============
+  const logEngagement = useLogSearchEngagement();
+
+  // 結果到着後、可視範囲の post に対し impression を一括 log
+  // (PREVIEW_LIMIT 内 = ユーザーが最初に目にする可能性が高い行)
+  const impressionFiredRef = useRef<Set<string>>(new Set());
+  // 新 query になったら impression 記録セットをリセット
+  useEffect(() => {
+    impressionFiredRef.current = new Set();
+  }, [debouncedQuery]);
+
+  useEffect(() => {
+    if (!showResults) return;
+    const rows = searchV4.data ?? [];
+    if (rows.length === 0) return;
+    // category=posts なら全件、それ以外は preview 範囲のみ
+    const visibleCount = category === 'posts' || expandPosts
+      ? rows.length
+      : Math.min(rows.length, PREVIEW_LIMIT);
+    for (let i = 0; i < visibleCount; i += 1) {
+      const r = rows[i];
+      if (!r) continue;
+      const dedupeKey = `${debouncedQuery}::${r.post_id}::${i + 1}`;
+      if (impressionFiredRef.current.has(dedupeKey)) continue;
+      impressionFiredRef.current.add(dedupeKey);
+      logEngagement.mutate({
+        query: debouncedQuery,
+        post_id: r.post_id,
+        position: i + 1,
+        action: 'impression',
+      });
+    }
+    // logEngagement は stable な mutation 参照のため deps から外す
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchV4.data, debouncedQuery, showResults, category, expandPosts]);
+
+  // ============= dwell 計測 (post 詳細 navigate -> 戻り) =============
+  // navigate 直前に start を記録し、focus が戻ったら経過 ms を server に送る。
+  // ref で保持して、画面再描画では消えないようにする。
+  const dwellRef = useRef<{
+    postId: string;
+    query: string;
+    position: number;
+    startedAt: number;
+  } | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      // focus 戻り時に未送信 dwell があれば送る
+      return () => {
+        // cleanup (= unfocus 時) ではなく、focus 時に判定したい — useFocusEffect は
+        // setup 関数が focus 時に呼ばれるので、ここに来た瞬間に「直前まで unfocus」だった
+        // ことを意味する。ただし初回 mount でも呼ばれるので dwellRef が null なら no-op。
+      };
+    }, []),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      const pending = dwellRef.current;
+      if (pending) {
+        const dwellMs = Date.now() - pending.startedAt;
+        // 100ms 未満は誤タップ判定で送らない (server で弾かれるが事前 cap)
+        if (dwellMs >= 100) {
+          logEngagement.mutate({
+            query: pending.query,
+            post_id: pending.postId,
+            position: pending.position,
+            action: 'dwell',
+            dwell_ms: dwellMs,
+          });
+        }
+        dwellRef.current = null;
+      }
+      return undefined;
+      // logEngagement は stable
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
+  );
+
+  /**
+   * 検索結果カードがタップされたときに呼ぶ。
+   *  - click event を server に送る
+   *  - dwellRef を「navigate 直前」として記録
+   *  - signal 記録 (signals store) と router.push は呼び出し側で同期実行
+   */
+  const recordClickAndDwellStart = useCallback(
+    (postId: string, position: number) => {
+      logEngagement.mutate({
+        query: debouncedQuery,
+        post_id: postId,
+        position,
+        action: 'click',
+      });
+      dwellRef.current = {
+        postId,
+        query: debouncedQuery,
+        position,
+        startedAt: Date.now(),
+      };
+    },
+    [debouncedQuery, logEngagement],
+  );
+
+  // コミュニティ検索 — searchCommunities (既存 lib/api/communities.ts)
+  const communitiesQuery = useQuery<CommunityHit[]>({
+    queryKey: ['search-communities', debouncedQuery],
+    queryFn: () => searchCommunities({ query: debouncedQuery, limit: 20 }),
+    enabled: showResults,
+    staleTime: 60_000,
+  });
+
+  // ============= "もしかして..." (typo 補正) =============
+  const trending = useTrendingTopics(24, 12);
+  const trendingNames = useMemo(
+    () => (trending.data ?? []).map((t) => t.topic),
+    [trending.data],
+  );
+
+  const didYouMean = useMemo<string | null>(() => {
+    if (!showResults) return null;
+    const noResults = (postsQuery.data?.length ?? 0) === 0
+      && (communitiesQuery.data?.length ?? 0) === 0
+      && !postsQuery.isLoading
+      && !communitiesQuery.isLoading;
+    if (!noResults) return null;
+    if (debouncedQuery.length < 2) return null;
+    const corpus = trendingNames.length > 0 ? trendingNames : [];
+    if (corpus.length === 0) return null;
+    return findClosest(debouncedQuery, corpus, 0.55);
+  }, [showResults, postsQuery.data, postsQuery.isLoading, communitiesQuery.data, communitiesQuery.isLoading, debouncedQuery, trendingNames]);
+
+  // ============= ハイライト用 terms =============
+  const highlightTerms = useMemo(
+    () => debouncedQuery.split(/\s+/).filter((s) => s.length > 0),
+    [debouncedQuery],
+  );
+
+  // ============= 検索 commit (Enter / 履歴タップ / 候補タップ) =============
+  const commit = useCallback((override?: string) => {
+    const next = (override ?? rawQuery).trim();
+    if (!next) return;
+    if (next !== rawQuery) setRawQuery(next);
+    if (next !== debouncedQuery) setDebouncedQuery(next);
+    pickQuery(next);
+    Keyboard.dismiss();
+  }, [rawQuery, debouncedQuery, pickQuery]);
+
+  const clearInput = useCallback(() => {
+    setRawQuery('');
+    setDebouncedQuery('');
+    inputRef.current?.focus();
+  }, []);
+
+  // ============= pull-to-refresh =============
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      if (showResults) {
+        await Promise.allSettled([
+          searchV4.refetch(),
+          postsQuery.refetch(),
+          communitiesQuery.refetch(),
+        ]);
+      } else {
+        // Discovery 全 section の query を invalidate
+        await Promise.allSettled([
+          qc.invalidateQueries({ queryKey: ['hot-posts-row'] }),
+          qc.invalidateQueries({ queryKey: ['recommended-communities'] }),
+          qc.invalidateQueries({ queryKey: ['for-you-shelf'] }),
+          qc.invalidateQueries({ queryKey: ['trendingTopics'] }),
+          qc.invalidateQueries({ queryKey: ['trending-tags'] }),
+        ]);
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }, [showResults, searchV4, postsQuery, communitiesQuery, qc]);
+
+  // ============= 派生 =============
+  const posts = postsQuery.data ?? [];
+  const communities = communitiesQuery.data ?? [];
+  const totalCount = posts.length + communities.length;
+  const isLoading = (searchV4.isLoading || postsQuery.isLoading || communitiesQuery.isLoading)
+    && !refreshing;
+
+  // 結果 0 件 (loading 終了後)
+  const isEmpty = showResults
+    && !isLoading
+    && totalCount === 0;
+
+  // ============= history を表示するか? (input focus + empty + 履歴あり) =============
+  const showHistory = inputFocused && rawQuery.length === 0 && history.length > 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <TopBar title="検索" />
 
-      {/* 検索入力 + クエリチップ */}
-      <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'], gap: SP['2'] }}>
-        {/* prominent glass search bar — focus 時に accent border + halo */}
+      {/* ============= sticky 検索 input ============= */}
+      <View
+        style={{
+          paddingHorizontal: SP['4'],
+          paddingTop: SP['2'],
+          paddingBottom: SP['2'],
+          backgroundColor: C.bg,
+          // sticky な見え方 (z-index で history dropdown を被せる)
+          zIndex: 10,
+        }}
+      >
         <Animated.View
           style={[
             {
               flexDirection: 'row',
               alignItems: 'center',
               gap: SP['2'],
-              paddingHorizontal: SP['4'],
+              paddingHorizontal: 12,
               paddingVertical: 10,
-              // 半透明 glass 風 surface — Native は subtle blur 風、Web は rgba で十分
               backgroundColor: C.bg2,
-              borderRadius: R.full,
-              borderWidth: 1.5,
+              // iOS-native 検索バー風 — pill ではなく radius 12 の rounded rect
+              borderRadius: 12,
+              borderWidth: 1,
             },
             aSearchBorder,
-            // focus 中: 紫 glow shadow を盛る (Native は SHADOW.glow, Web は CSS halo)
-            inputFocused ? SHADOW.glow : SHADOW.sm,
-            Platform.OS === 'web' && inputFocused
-              ? // RN-web は box-shadow を直接通す
-                ({ boxShadow: '0 0 0 4px rgba(124,106,247,0.22)' } as object)
-              : null,
+            inputFocused ? SHADOW.sm : SHADOW.xs,
           ]}
         >
           <Icon.search
-            size={20}
-            color={inputFocused ? C.accent : C.text3}
+            size={18}
+            color={inputFocused ? C.accentLight : C.text3}
             strokeWidth={2.2}
           />
-          <View style={{ flex: 1, position: 'relative', justifyContent: 'center' }}>
-            <TextInput
-              ref={inputRef}
-              value={q}
-              onChangeText={setQ}
-              placeholder="タグ・投稿・掲示板を検索"
-              placeholderTextColor={C.text3}
-              onFocus={() => setInputFocused(true)}
-              onBlur={() => setInputFocused(false)}
-              onSubmitEditing={() => commit()}
-              returnKeyType="search"
-              blurOnSubmit={false}
-              autoCorrect={false}
-              autoCapitalize="none"
-              keyboardAppearance="dark"
-              selectionColor={C.accent}
-              cursorColor={C.accent}
-              accessibilityLabel="検索キーワード入力"
-              // memory DoS 対策: 検索クエリは 200 文字 cap
-              maxLength={200}
-              style={[T.body, { color: C.text, paddingVertical: 0 }]}
-            />
-            {/* ゴースト予測補完 */}
-            {ghostPrediction && (
-              <View pointerEvents="none" style={{
-                position: 'absolute',
-                left: 0, top: 0, right: 0, bottom: 0,
-                flexDirection: 'row',
-                alignItems: 'center',
-              }}>
-                <Text style={[T.body, { color: 'transparent', paddingVertical: 0 }]} numberOfLines={1}>
-                  {q}
-                  <Text style={{ color: C.text3 }}>{ghostPrediction.suffix}</Text>
-                </Text>
-              </View>
-            )}
-          </View>
-          {q.length > 0 && (
+          <TextInput
+            ref={inputRef}
+            value={rawQuery}
+            onChangeText={setRawQuery}
+            placeholder="Geek 内を検索"
+            placeholderTextColor={C.text3}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
+            onSubmitEditing={() => commit()}
+            returnKeyType="search"
+            blurOnSubmit
+            autoCorrect={false}
+            autoCapitalize="none"
+            keyboardAppearance="dark"
+            selectionColor={C.accent}
+            cursorColor={C.accent}
+            accessibilityLabel="検索キーワード入力"
+            // memory DoS 対策
+            maxLength={200}
+            style={[T.body, { flex: 1, color: C.text, paddingVertical: 0 }]}
+          />
+
+          {/* right side: clear (× when typing) / voice icon (placeholder) */}
+          {rawQuery.length > 0 ? (
             <PressableScale
-              onPress={() => { setQ(''); setDebounced(''); inputRef.current?.focus(); }}
+              onPress={clearInput}
               haptic="tap"
               hitSlop={10}
               accessibilityLabel="入力をクリア"
               accessibilityRole="button"
               style={{
-                width: 24, height: 24, borderRadius: 12,
-                alignItems: 'center', justifyContent: 'center',
+                width: 22,
+                height: 22,
+                borderRadius: 11,
+                alignItems: 'center',
+                justifyContent: 'center',
                 backgroundColor: C.bg4,
               }}
             >
-              <Icon.close size={14} color={C.text2} strokeWidth={2.4} />
+              <Icon.close size={13} color={C.text2} strokeWidth={2.4} />
             </PressableScale>
+          ) : (
+            // Voice icon — placeholder のみ (tap 無効)
+            <View
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+              style={{
+                width: 22,
+                height: 22,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: 0.45,
+              }}
+            >
+              <Icon.phone size={16} color={C.text3} strokeWidth={2} />
+            </View>
           )}
         </Animated.View>
 
-        {/* 保存ボタン (検索中) — アイコン付きで意図を明確化 */}
-        {debounced.trim().length > 0 && (
-          <PressableScale
-            onPress={saveCurrentQuery}
-            haptic="confirm"
-            disabled={isCurrentSaved}
-            hitSlop={6}
-            accessibilityLabel={isCurrentSaved ? '保存済みの検索' : 'この検索を保存'}
-            accessibilityRole="button"
-            style={{
-              alignSelf: 'flex-start',
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 4,
-              paddingHorizontal: SP['3'], paddingVertical: 6,
-              backgroundColor: isCurrentSaved ? C.accentBg : C.accent,
-              borderRadius: R.full,
-              borderWidth: 1,
-              borderColor: isCurrentSaved ? C.accent + '55' : 'transparent',
-            }}
+        {/* ============= 履歴 dropdown (focus + empty) ============= */}
+        {showHistory && (
+          <View
+            style={[
+              {
+                marginTop: SP['2'],
+                backgroundColor: C.bg2,
+                borderRadius: R.lg,
+                borderWidth: 1,
+                borderColor: C.border,
+                overflow: 'hidden',
+              },
+              SHADOW.md,
+            ]}
           >
-            <Text style={{ fontSize: 12 }}>{isCurrentSaved ? '⭐' : '☆'}</Text>
-            <Text style={[T.caption, { color: isCurrentSaved ? C.accent : '#fff', fontWeight: '700' }]}>
-              {isCurrentSaved ? '保存済み' : 'この検索を保存'}
-            </Text>
-          </PressableScale>
-        )}
-
-        {/* 保存検索一覧 (検索無し時のみ) */}
-        {!debounced.trim() && savedSearches.length > 0 && (
-          <View style={{ gap: SP['1'] }}>
-            <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>保存した検索</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-              {savedSearches.map((s) => (
-                <View key={s.id} style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 4,
-                  paddingHorizontal: SP['2'], paddingVertical: 4,
-                  backgroundColor: C.accentBg, borderRadius: R.full,
-                  borderWidth: 1, borderColor: C.accentSoft,
-                }}>
-                  <PressableScale onPress={() => { setQ(s.query); setDebounced(s.query); }} haptic="tap">
-                    <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>★ {s.query}</Text>
-                  </PressableScale>
-                  <PressableScale onPress={() => removeSavedSearchFn(s.id)} haptic="warn">
-                    <Text style={{ fontSize: 10, color: C.text3 }}>✕</Text>
-                  </PressableScale>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* バリアントプレビュー: アルファベット入力時に日本語変換を表示 */}
-        {variantPreview.length > 0 && (
-          <View style={{
-            flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6,
-          }}>
-            {variantPreview.map((v) => (
+            {/* header — 「最近の検索」 + 「すべて消去」 */}
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingHorizontal: SP['3'],
+                paddingVertical: SP['2'],
+                borderBottomWidth: 1,
+                borderBottomColor: C.divider,
+              }}
+            >
+              <Text style={[T.captionM, { color: C.text3, letterSpacing: 0.5 }]}>
+                最近の検索
+              </Text>
               <PressableScale
-                key={v}
-                onPress={() => { setQ(v); setDebounced(v); addHist(v); }}
-                haptic="select"
-                style={{
-                  paddingHorizontal: SP['2'], paddingVertical: 3,
-                  backgroundColor: C.accentBg,
-                  borderRadius: R.full,
-                  borderWidth: 1, borderColor: C.accentSoft,
+                onPress={() => {
+                  clearAll();
                 }}
+                haptic="warn"
+                hitSlop={6}
+                accessibilityLabel="検索履歴をすべて消去"
+                accessibilityRole="button"
               >
-                <Text style={{ fontSize: 11, color: C.accentLight, fontWeight: '700' }}>
-                  → {v}
+                <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>
+                  すべて消去
                 </Text>
               </PressableScale>
-            ))}
-          </View>
-        )}
+            </View>
 
-        {/* オートコンプリート候補 — Google 風: 🕐 履歴 / # タグ / sparkles 人気 + ↖ 入力欄に取り込む */}
-        {/* V2: acDismissed === true (Esc 押下後) は閉じたままにする */}
-        {!acDismissed && (autocomplete.length > 0 || fallbackSuggestions.length > 0) && q.length > 0 && (
-          <View style={[
-            {
-              // V2: GlassCard 風 — 半透明 + accent border の hint で focus 中の感じを出す
-              backgroundColor: Platform.OS === 'web' ? 'rgba(22,22,24,0.92)' : C.bg2,
-              borderRadius: R.lg,
-              borderWidth: 1,
-              borderColor: C.border,
-              overflow: 'hidden',
-            },
-            SHADOW.md,
-            Platform.OS === 'web'
-              ? ({ backdropFilter: 'blur(12px)' } as unknown as object)
-              : null,
-          ]}>
-            {autocomplete.map((name, idx) => {
-              // 過去に検索 / クリックされていれば「履歴」アイコン (🕐) で示す
-              const inHistory = history.includes(name);
-              const clickedBefore = (clickStats[q.trim()] ?? {})[name] !== undefined && clickStats[q.trim()]![name]! > 0;
-              const seen = inHistory || clickedBefore;
-              const isLast = idx === autocomplete.length - 1 && fallbackSuggestions.length === 0;
-              const isSelected = acIndex === idx;
+            {/* rows */}
+            {history.slice(0, 10).map((h, idx) => {
+              const isLast = idx === Math.min(history.length, 10) - 1;
               return (
                 <View
-                  key={`v3:${name}`}
-                  style={[
-                    {
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      paddingHorizontal: SP['3'],
-                      paddingVertical: SP['2'] + 2,
-                      borderBottomWidth: isLast ? 0 : 1,
-                      borderBottomColor: C.border + '40',
-                    },
-                    // V2: selected (キーボードナビ) は accent border + glow + 半透明 accent 背景
-                    isSelected
-                      ? {
-                          backgroundColor: C.accentBg,
-                          borderLeftWidth: 3,
-                          borderLeftColor: C.accent,
-                          ...SHADOW.glow,
-                        }
-                      : null,
-                  ]}
-                >
-                  {/* 左: 履歴 or タグアイコン */}
-                  {seen ? (
-                    <Icon.clock size={16} color={isSelected ? C.accentLight : C.text3} strokeWidth={2} />
-                  ) : (
-                    <Icon.hash size={16} color={isSelected ? C.accentLight : C.accent} strokeWidth={2} />
-                  )}
-                  {/* 中: タグ名 — タップで実検索 */}
-                  <PressableScale
-                    onPress={() => {
-                      recordClick(q.trim(), name);
-                      commit(name);
-                    }}
-                    haptic="select"
-                    hitSlop={4}
-                    accessibilityLabel={`${name} で検索`}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: isSelected }}
-                    style={{ flex: 1, paddingHorizontal: SP['2'], paddingVertical: 4 }}
-                  >
-                    <Text style={[T.smallM, { color: isSelected ? C.accentLight : C.text, fontWeight: isSelected ? '700' : '400' }]}>
-                      #{name}
-                    </Text>
-                  </PressableScale>
-                  {/* 右: ↖ 入力欄に取り込む (検索はせず、編集を続ける) */}
-                  <PressableScale
-                    onPress={() => setQ(name)}
-                    haptic="tap"
-                    hitSlop={8}
-                    accessibilityLabel={`${name} を入力欄に取り込む`}
-                    style={{ padding: 4 }}
-                  >
-                    <Icon.arrowUL size={18} color={C.text3} strokeWidth={2} />
-                  </PressableScale>
-                </View>
-              );
-            })}
-            {/* fallback: lib/search/autocomplete (history + popular tag merge) */}
-            {fallbackSuggestions.map((item, idx) => {
-              const isLast = idx === fallbackSuggestions.length - 1;
-              const IconC = item.kind === 'history' ? Icon.clock : Icon.sparkles;
-              const iconColor = item.kind === 'history' ? C.text3 : C.accentLight;
-              return (
-                <View
-                  key={`fb:${item.kind}:${item.text}`}
+                  key={`hist-${h}`}
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
-                    paddingHorizontal: SP['3'],
-                    paddingVertical: SP['2'] + 2,
                     borderBottomWidth: isLast ? 0 : 1,
-                    borderBottomColor: C.border + '40',
+                    borderBottomColor: C.divider,
                   }}
                 >
-                  <IconC size={16} color={iconColor} strokeWidth={2} />
                   <PressableScale
-                    onPress={() => {
-                      setQ(item.text);
-                      setDebounced(item.text);
-                      addHist(item.text);
-                    }}
+                    onPress={() => commit(h)}
                     haptic="select"
-                    hitSlop={4}
-                    accessibilityLabel={`${item.text} で検索`}
+                    accessibilityLabel={`${h} で再検索`}
                     accessibilityRole="button"
-                    style={{ flex: 1, paddingHorizontal: SP['2'], paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                    style={{
+                      flex: 1,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: SP['2'],
+                      paddingHorizontal: SP['3'],
+                      paddingVertical: SP['3'],
+                    }}
                   >
-                    <Text style={[T.smallM, { color: C.text, flex: 1 }]} numberOfLines={1}>
-                      {item.text}
+                    <Icon.clock size={16} color={C.text3} strokeWidth={2} />
+                    <Text style={[T.body, { color: C.text, flex: 1 }]} numberOfLines={1}>
+                      {h}
                     </Text>
-                    {item.detail && (
-                      <Text style={[T.caption, { color: C.text3 }]}>
-                        {item.detail}
-                      </Text>
-                    )}
                   </PressableScale>
                   <PressableScale
-                    onPress={() => setQ(item.text)}
-                    haptic="tap"
+                    onPress={() => removeQuery(h)}
+                    haptic="warn"
                     hitSlop={8}
-                    accessibilityLabel={`${item.text} を入力欄に取り込む`}
-                    style={{ padding: 4 }}
+                    accessibilityLabel={`${h} を履歴から削除`}
+                    accessibilityRole="button"
+                    style={{
+                      paddingHorizontal: SP['3'],
+                      paddingVertical: SP['3'],
+                    }}
                   >
-                    <Icon.arrowUL size={18} color={C.text3} strokeWidth={2} />
+                    <Icon.close size={14} color={C.text3} strokeWidth={2.2} />
                   </PressableScale>
                 </View>
               );
@@ -998,46 +598,113 @@ export default function SearchScreen() {
           </View>
         )}
 
-        {/* カテゴリタブ + ソート (検索中のみ) */}
-        {showResults && (
-          <View style={{ gap: SP['2'] }}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        {/* ============= intent 表示 (結果あり時のみ、控えめに) ============= */}
+        {showResults && !showHistory && topIntent && (
+          <View
+            style={{
+              marginTop: SP['2'],
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              paddingHorizontal: 2,
+            }}
+            accessibilityLabel={`検索意図: ${topIntent.intent}`}
+          >
+            <Icon.sparkles size={11} color={C.text3} strokeWidth={2.2} />
+            <Text style={[T.caption, { color: C.text3, letterSpacing: 0.3 }]}>
+              intent: {topIntent.intent}
+            </Text>
+          </View>
+        )}
+
+        {/* ============= community filter chip (URL ?community=<id>) ============= */}
+        {showResults && !showHistory && communityId && (
+          <View
+            style={{
+              marginTop: SP['2'],
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              paddingHorizontal: SP['2'],
+              paddingVertical: 5,
+              backgroundColor: C.accentBg,
+              borderRadius: R.full,
+              borderWidth: 1,
+              borderColor: C.accent + '55',
+              alignSelf: 'flex-start',
+            }}
+            accessibilityLabel={`コミュニティ内検索: ${communityId}`}
+          >
+            <Icon.community size={11} color={C.accentLight} strokeWidth={2.2} />
+            <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>
+              このコミュニティ内
+            </Text>
+          </View>
+        )}
+
+        {/* ============= カテゴリタブ (結果あり時のみ) ============= */}
+        {showResults && !showHistory && (
+          <View style={{ marginTop: SP['2'] }}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
               <View style={{ flexDirection: 'row', gap: 6 }}>
-                {(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => {
+                {(['all', 'posts', 'communities'] as ResultCategory[]).map((c) => {
                   const active = category === c;
-                  const meta = CATEGORY_LABELS[c];
-                  const cnt = c === 'posts' ? rankedPosts.length
-                    : c === 'tags' ? rankedTags.length
-                    : c === 'bbs' ? filteredBBS.length
-                    : totalResults;
+                  const label = c === 'all' ? 'すべて' : c === 'posts' ? '投稿' : 'コミュニティ';
+                  const count = c === 'posts' ? posts.length
+                    : c === 'communities' ? communities.length
+                    : totalCount;
                   return (
                     <PressableScale
                       key={c}
                       onPress={() => setCategory(c)}
                       haptic="select"
+                      accessibilityRole="button"
                       accessibilityState={{ selected: active }}
                       style={{
-                        flexDirection: 'row', alignItems: 'center', gap: 4,
-                        paddingHorizontal: SP['3'], paddingVertical: 7,
-                        // active: 紫 accentBg + 紫 border (柔らかい "選択中" 表現)
-                        // inactive: glass-like bg2 + subtle border
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        paddingHorizontal: SP['3'],
+                        paddingVertical: 7,
                         backgroundColor: active ? C.accentBg : C.bg2,
                         borderRadius: R.full,
                         borderWidth: 1,
                         borderColor: active ? C.accent : C.border,
                       }}
                     >
-                      <Text style={{ fontSize: 11 }}>{meta.emoji}</Text>
-                      <Text style={[T.caption, { color: active ? C.accentLight : C.text, fontWeight: '700' }]}>
-                        {meta.label}
+                      <Text
+                        style={[
+                          T.smallM,
+                          {
+                            color: active ? C.accentLight : C.text,
+                            fontWeight: '700',
+                          },
+                        ]}
+                      >
+                        {label}
                       </Text>
-                      <View style={{
-                        paddingHorizontal: 5, paddingVertical: 1,
-                        backgroundColor: active ? C.accent : C.bg4,
-                        borderRadius: R.sm,
-                      }}>
-                        <Text style={{ fontSize: 9, color: active ? '#fff' : C.text3, fontWeight: '700' }}>
-                          {cnt}
+                      <View
+                        style={{
+                          paddingHorizontal: 5,
+                          paddingVertical: 1,
+                          backgroundColor: active ? C.accent : C.bg4,
+                          borderRadius: R.sm,
+                          minWidth: 18,
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 9,
+                            color: active ? '#fff' : C.text3,
+                            fontWeight: '700',
+                          }}
+                        >
+                          {count}
                         </Text>
                       </View>
                     </PressableScale>
@@ -1045,519 +712,246 @@ export default function SearchScreen() {
                 })}
               </View>
             </ScrollView>
-            {/* V2 フィルタ chip 行 (期間 / 並び順 / コミュ) */}
-            <SearchFilterChips
-              filters={filters}
-              onChange={(next) => {
-                setFilters(next);
-                // 並び順は既存 sortMode へ即時同期 (rankedPosts の useMemo が拾う)
-                if (next.sort !== sortMode) setSortMode(next.sort);
-              }}
-            />
           </View>
         )}
       </View>
 
+      {/* ============= スクロール本体 ============= */}
       <ScrollView
         contentContainerStyle={{
-          paddingTop: SP['4'],
+          paddingTop: SP['2'],
           paddingBottom: insets.bottom + SP['10'],
           gap: SP['4'],
         }}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={C.accent}
+            colors={[C.accent]}
+            progressBackgroundColor={C.bg2}
+          />
+        }
       >
         {!showResults ? (
-          // ============================================================
-          // Discovery (query 空): 探す体験
-          // - HotPostsRow / TrendingRow を上に置く (今盛り上がっている)
-          // - ForYouShelf でパーソナライズ
-          // - RecommendedCommunities でコミュ発見
-          // - InterestCategories でジャンルから入る
-          // - SearchHistoryChips / 保存検索 は subtle に下層へ
-          // - DiscoverPhotoGrid (Instagram 風) で最後に偶然の出会い
-          //
-          // 各 row は自前で paddingHorizontal: SP['4'] を内側で持つので、
-          // ScrollView 自体は左右 padding を持たない (= 横スクロールが端まで届く)
-          // ============================================================
-          <View style={{ gap: SP['5'] }}>
-            {/* 1) 今、盛り上がっている — Hot 投稿 + Trending タグ */}
-            <View style={{ gap: SP['3'] }}>
-              <HotPostsRow />
-              <TrendingRow />
-            </View>
-
-            {/* 2) あなたへのおすすめ — パーソナライズ shelf (未ログイン時は描画されない) */}
-            <ForYouShelf />
-
-            {/* 3) コミュニティを探す */}
-            <RecommendedCommunities />
-
-            {/* 4) ジャンル別 */}
-            <InterestCategories />
-
-            {/* 5) 履歴 / 保存検索 / popular tags は補助。横 padding は要るので内側で持つ */}
-            <View style={{ paddingHorizontal: SP['4'], gap: SP['4'] }}>
-              {/* 直近1時間の検索 */}
-              {hourlyRecent.length > 0 && (
-                <View style={{ gap: SP['2'] }}>
-                  <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>直近1時間</Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-                    {hourlyRecent.map((h) => (
-                      <PressableScale
-                        key={h}
-                        onPress={() => { setQ(h); setDebounced(h); }}
-                        haptic="tap"
-                        style={{
-                          paddingHorizontal: SP['3'], paddingVertical: 6,
-                          backgroundColor: C.bg3, borderRadius: R.full,
-                          borderWidth: 1, borderColor: C.border,
-                          flexDirection: 'row', alignItems: 'center', gap: 4,
-                        }}
-                      >
-                        <Text style={{ fontSize: 10 }}>↺</Text>
-                        <Text style={[T.smallM, { color: C.text }]}>{h}</Text>
-                      </PressableScale>
-                    ))}
-                  </View>
-                </View>
-              )}
-
-              {/* V2 最近の検索 chips (autocomplete LRU + 短期 store の merge) */}
-              {v2History.length > 0 ? (
-                <SearchHistoryChips
-                  history={v2History}
-                  onPickQuery={(h) => {
-                    setQ(h);
-                    setDebounced(h);
-                    pickHistory(h);
-                  }}
-                  onRemoveQuery={(h) => {
-                    removeHistory(h);
-                    removeHist(h);
-                  }}
-                  onClearAll={() => {
-                    clearAllHistory();
-                    clearHist();
-                  }}
-                  maxItems={10}
-                />
-              ) : !savedSearches.length && (
-                // ⭐ 履歴も保存検索もまだ無い真っさらユーザー — gradient circle + CTA で
-                // 「ここで何が出来るか」を一目で伝える
-                <View style={{
-                  alignItems: 'center',
-                  paddingVertical: SP['6'],
-                  paddingHorizontal: SP['4'],
-                  gap: SP['3'],
-                }}>
-                  <View style={{
-                    borderRadius: 48,
-                    ...SHADOW.glow,
-                  }}>
-                    <LinearGradient
-                      colors={GRAD.primary}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={{
-                        width: 96, height: 96, borderRadius: 48,
-                        alignItems: 'center', justifyContent: 'center',
-                      }}
-                    >
-                      <Icon.search size={42} color="#fff" strokeWidth={2.2} />
-                    </LinearGradient>
-                  </View>
-                  <Text style={[T.h3, { color: C.text, textAlign: 'center' }]}>
-                    何でも検索しよう
-                  </Text>
-                  <Text style={[T.small, { color: C.text2, textAlign: 'center', maxWidth: 320, lineHeight: 20 }]}>
-                    タグ・投稿・掲示板を一気に検索。{'\n'}
-                    半角/全角・カタカナ/ひらがな・読み方の違いも自動で吸収します。
-                  </Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
-                    {['ホロライブ', 'ぽけもん', 'ｲｺﾗﾌﾞ'].map((ex) => (
-                      <PressableScale
-                        key={ex}
-                        onPress={() => { setQ(ex); setDebounced(ex); addHist(ex); }}
-                        haptic="tap"
-                        style={{
-                          paddingHorizontal: SP['3'], paddingVertical: 6,
-                          backgroundColor: C.accentBg,
-                          borderRadius: R.full,
-                          borderWidth: 1, borderColor: C.accent + '55',
-                        }}
-                      >
-                        <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>
-                          {ex}
-                        </Text>
-                      </PressableScale>
-                    ))}
-                  </View>
-                </View>
-              )}
-
-              {/* 人気タグ — chip 列 (TrendingRow と違って member_count 順) */}
-              <View style={{ gap: SP['2'] }}>
-                <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>人気のタグ</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-                  {trending.data?.map((tg) => (
-                    <PressableScale
-                      key={tg.name}
-                      onPress={() => router.push(`/tag/${encodeURIComponent(tg.name)}` as never)}
-                      haptic="tap"
-                      style={{
-                        paddingHorizontal: SP['3'], paddingVertical: SP['2'],
-                        backgroundColor: C.bg2, borderRadius: R.full,
-                        borderWidth: 1, borderColor: C.border,
-                      }}
-                    >
-                      <Text style={[T.smallM, { color: C.text }]}>
-                        #{tg.name}
-                        <Text style={[T.caption, { color: C.text3 }]}> · {tg.member_count.toLocaleString('ja-JP')}</Text>
-                      </Text>
-                    </PressableScale>
-                  ))}
-                </View>
-              </View>
-
-              {/* 写真で発見 (Instagram 風 3 列グリッド) */}
-              <DiscoverPhotoGrid />
-            </View>
-          </View>
-        ) : loading ? (
-          <View style={{ padding: SP['8'], alignItems: 'center' }}>
+          <DiscoveryView />
+        ) : isLoading && totalCount === 0 ? (
+          <View style={{ paddingVertical: SP['10'], alignItems: 'center' }}>
             <ActivityIndicator color={C.accent} />
           </View>
+        ) : isEmpty ? (
+          <EmptyResultsView
+            query={debouncedQuery}
+            didYouMean={didYouMean}
+            onPickSuggestion={(s) => commit(s)}
+            onClear={clearInput}
+          />
         ) : (
           <View style={{ paddingHorizontal: SP['4'], gap: SP['4'] }}>
-            {/* 関連検索 */}
-            {relatedQueries.length > 0 && (
-              <View style={{ gap: SP['2'] }}>
-                <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>関連</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  {relatedQueries.map((r) => (
-                    <PressableScale
-                      key={r.query}
-                      onPress={() => { setQ(r.query); setDebounced(r.query); addHist(r.query); }}
-                      haptic="tap"
-                      style={{
-                        paddingHorizontal: SP['3'], paddingVertical: 6,
-                        backgroundColor: C.bg2,
-                        borderRadius: R.full,
-                        borderWidth: 1, borderColor: C.border,
-                      }}
-                    >
-                      <Text style={[T.smallM, { color: C.text }]}>{r.query}</Text>
-                    </PressableScale>
-                  ))}
-                </View>
-              </View>
-            )}
-
-            {/* Did you mean */}
-            {suggestion && (
-              <View style={{
-                padding: SP['3'],
-                backgroundColor: 'rgba(245,179,66,0.13)',
-                borderRadius: R.md,
-                borderWidth: 1, borderColor: 'rgba(245,179,66,0.4)',
-                gap: SP['1'],
-              }}>
-                <Text style={[T.caption, { color: '#F5B342', fontWeight: '700' }]}>
-                  もしかして…?
-                </Text>
-                <PressableScale onPress={() => setQ(suggestion)} haptic="confirm">
-                  <Text style={[T.bodyMd, { color: '#F5B342', fontWeight: '800' }]}>
-                    🔎 {suggestion}
-                  </Text>
-                </PressableScale>
-                {moreSuggestions.filter((s) => s !== suggestion).length > 0 && (
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                    {moreSuggestions.filter((s) => s !== suggestion).slice(0, 3).map((s) => (
-                      <PressableScale key={s} onPress={() => setQ(s)} haptic="tap"
-                        style={{
-                          paddingHorizontal: 6, paddingVertical: 2,
-                          backgroundColor: 'rgba(245,179,66,0.18)',
-                          borderRadius: R.sm,
-                        }}>
-                        <Text style={{ fontSize: 10, color: '#F5B342' }}>{s}</Text>
-                      </PressableScale>
-                    ))}
-                  </View>
-                )}
-              </View>
-            )}
-
-            {/*
-              Google 風セグメント結果:
-                - 'all' タブ → 投稿 / コミュニティ(タグ) / タグ / ユーザー の順、各 max 3 + 「もっと見る」
-                - その他のタブ → そのカテゴリだけ全件表示
-              現状の rankedPosts / rankedTags / bbsQ.data はそれぞれ後段で
-              スライスして「preview limit」を適用する。
-            */}
-
-            {/* 投稿結果 */}
-            {showPosts && rankedPosts.length > 0 && (
-              <SectionContainer
+            {/* ============= 投稿セクション ============= */}
+            {(category === 'all' || category === 'posts') && posts.length > 0 && (
+              <ResultSection
                 title="投稿"
-                icon="📝"
-                total={rankedPosts.length}
-                expanded={expandedPosts}
-                limit={category === 'all' ? PREVIEW_LIMIT : rankedPosts.length}
+                icon="post"
+                total={posts.length}
+                expanded={expandPosts || category === 'posts'}
+                limit={category === 'all' ? PREVIEW_LIMIT : posts.length}
                 onExpand={() => {
+                  setExpandPosts(true);
                   setCategory('posts');
-                  setExpandedPosts(true);
                 }}
               >
-                {(category === 'all' && !expandedPosts
-                  ? rankedPosts.slice(0, PREVIEW_LIMIT)
-                  : rankedPosts
-                ).map(({ item: p, reasons }) => (
-                  <PressableScale
+                {(category === 'all' && !expandPosts
+                  ? posts.slice(0, PREVIEW_LIMIT)
+                  : posts
+                ).map((p, idx) => (
+                  <CompactPostCard
                     key={p.id}
+                    post={p}
+                    highlightTerms={highlightTerms}
                     onPress={() => {
-                      commit();
+                      // 1-based position を server に送る
+                      recordClickAndDwellStart(p.id, idx + 1);
                       recordSignal({ kind: 'post', id: p.id, tags: p.tag_names });
                       router.push(`/post/${p.id}` as never);
                     }}
-                    haptic="tap"
-                    style={{
-                      padding: SP['3'],
-                      backgroundColor: C.bg2,
-                      borderRadius: R.lg,
-                      borderWidth: 1, borderColor: C.border,
-                      gap: SP['2'],
+                    onExplain={() => {
+                      setExplainPost({ id: p.id, query: debouncedQuery });
                     }}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], flexWrap: 'wrap' }}>
-                      <Avatar size={20} anonymous />
-                      <Text style={[T.caption, { color: C.text3, flex: 1 }]}>
-                        匿名 · {formatRelative(p.created_at)} · ♥{p.likes_count} 💬{p.comments_count}
-                      </Text>
-                    </View>
-                    <HighlightedText
-                      text={p.content}
-                      terms={highlightTerms}
-                      style={[T.body, { color: C.text }]}
-                      numberOfLines={3}
-                    />
-                    {p.tag_names.length > 0 && (
-                      <View style={{ flexDirection: 'row', gap: SP['1'], flexWrap: 'wrap' }}>
-                        {Array.from(new Set(p.tag_names)).map((tg) => (
-                          <Text key={tg} style={[T.caption, { color: highlightTerms.some((h) => normalize(tg).includes(normalize(h))) ? C.accentLight : C.accent, fontWeight: highlightTerms.some((h) => normalize(tg).includes(normalize(h))) ? '700' : '400' }]}>
-                            #{tg}
-                          </Text>
-                        ))}
-                      </View>
-                    )}
-                    <ReasonBadges reasons={reasons} />
-                  </PressableScale>
+                  />
                 ))}
-              </SectionContainer>
+              </ResultSection>
             )}
 
-            {/* 掲示板スレッド */}
-            {showBBS && filteredBBS.length > 0 && (
-              <SectionContainer
-                title="掲示板"
-                icon="💬"
-                total={filteredBBS.length}
-                expanded={expandedBBS}
-                limit={category === 'all' ? PREVIEW_LIMIT : filteredBBS.length}
+            {/* ============= コミュニティセクション ============= */}
+            {(category === 'all' || category === 'communities') && communities.length > 0 && (
+              <ResultSection
+                title="コミュニティ"
+                icon="community"
+                total={communities.length}
+                expanded={expandCommunities || category === 'communities'}
+                limit={category === 'all' ? PREVIEW_LIMIT : communities.length}
                 onExpand={() => {
-                  setCategory('bbs');
-                  setExpandedBBS(true);
+                  setExpandCommunities(true);
+                  setCategory('communities');
                 }}
               >
-                {(category === 'all' && !expandedBBS
-                  ? filteredBBS.slice(0, PREVIEW_LIMIT)
-                  : filteredBBS.slice(0, 12)
-                ).map((t) => (
-                  <PressableScale
-                    key={t.id}
+                {(category === 'all' && !expandCommunities
+                  ? communities.slice(0, PREVIEW_LIMIT)
+                  : communities
+                ).map((c) => (
+                  <CompactCommunityCard
+                    key={c.id}
+                    community={c}
+                    highlightTerms={highlightTerms}
                     onPress={() => {
-                      commit();
-                      recordSignal({ kind: 'bbs', id: t.id, tags: [t.category] });
-                      router.push(`/bbs/${t.id}` as never);
+                      router.push(`/community/${c.id}` as never);
                     }}
-                    haptic="tap"
-                    style={{
-                      padding: SP['3'],
-                      backgroundColor: C.bg2,
-                      borderRadius: R.lg,
-                      borderWidth: 1, borderColor: C.border,
-                      gap: 4,
-                    }}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-                      <Text style={{ fontSize: 14 }}>💬</Text>
-                      <View style={{ flex: 1 }}>
-                        <HighlightedText text={t.title} terms={highlightTerms} style={T.bodyMd} numberOfLines={1} />
-                      </View>
-                    </View>
-                    <Text style={[T.caption, { color: C.text3 }]}>
-                      {t.category} · {t.replies_count.toLocaleString('ja-JP')} 返信 · {formatRelative(t.created_at)}
-                    </Text>
-                  </PressableScale>
+                  />
                 ))}
-              </SectionContainer>
-            )}
-
-            {/* タグ結果 */}
-            {showTags && rankedTags.length > 0 && (
-              <SectionContainer
-                title="タグ"
-                icon="#️⃣"
-                total={rankedTags.length}
-                expanded={expandedTags}
-                limit={category === 'all' ? PREVIEW_LIMIT : rankedTags.length}
-                onExpand={() => {
-                  setCategory('tags');
-                  setExpandedTags(true);
-                }}
-              >
-                {(category === 'all' && !expandedTags
-                  ? rankedTags.slice(0, PREVIEW_LIMIT)
-                  : rankedTags
-                ).map(({ item: tg, reasons }) => (
-                  <PressableScale
-                    key={tg.name}
-                    onPress={() => {
-                      commit();
-                      recordSignal({ kind: 'tag', id: tg.name, tags: [tg.name] });
-                      router.push(`/tag/${encodeURIComponent(tg.name)}` as never);
-                    }}
-                    haptic="tap"
-                    style={{
-                      flexDirection: 'row', alignItems: 'center', gap: SP['3'],
-                      padding: SP['3'],
-                      backgroundColor: C.bg2,
-                      borderRadius: R.lg,
-                      borderWidth: 1, borderColor: C.border,
-                    }}
-                  >
-                    <View style={{
-                      width: 40, height: 40, borderRadius: 20,
-                      backgroundColor: C.accentSoft,
-                      alignItems: 'center', justifyContent: 'center',
-                    }}>
-                      <Text style={{ fontSize: 18, color: C.accent, fontWeight: '700' }}>#</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <HighlightedText text={`#${tg.name}`} terms={highlightTerms} style={T.bodyMd} />
-                      <Text style={[T.caption, { color: C.text3 }]}>
-                        {tg.member_count.toLocaleString('ja-JP')} メンバー · {tg.post_count.toLocaleString('ja-JP')} 投稿
-                      </Text>
-                    </View>
-                    <ReasonBadges reasons={reasons} />
-                  </PressableScale>
-                ))}
-              </SectionContainer>
-            )}
-
-            {totalResults === 0 && !suggestion && (
-              <View style={{ padding: SP['6'], alignItems: 'center', gap: SP['4'] }}>
-                <View style={{
-                  width: 96, height: 96, borderRadius: 48,
-                  backgroundColor: C.amberBg, alignItems: 'center', justifyContent: 'center',
-                  borderWidth: 1, borderColor: C.amber + '40',
-                }}>
-                  <Icon.search size={40} color={C.amber} strokeWidth={2} />
-                </View>
-                <Text style={[T.h3, { color: C.text, textAlign: 'center' }]}>
-                  <Text style={{ color: C.accentLight, fontWeight: '800' }}>「{debounced}」</Text>
-                  に一致する結果はありません
-                </Text>
-                <Text style={[T.small, { color: C.text3, textAlign: 'center', maxWidth: 320 }]}>
-                  検索の絞り込みを緩めるか、別の言葉やタグから探してみよう。
-                </Text>
-
-                {/* V2 候補: typo 補正 / フィルタリセット / タグ検索 */}
-                <View style={{
-                  flexDirection: 'row', flexWrap: 'wrap',
-                  justifyContent: 'center', gap: SP['2'],
-                  marginTop: SP['2'],
-                }}>
-                  {/* typo 補正 — moreSuggestions の先頭を採用 */}
-                  {moreSuggestions[0] && (
-                    <PressableScale
-                      onPress={() => {
-                        const fix = moreSuggestions[0]!;
-                        setQ(fix);
-                        setDebounced(fix);
-                      }}
-                      haptic="confirm"
-                      style={{
-                        flexDirection: 'row', alignItems: 'center', gap: 6,
-                        paddingHorizontal: SP['3'], paddingVertical: 8,
-                        backgroundColor: C.accentBg,
-                        borderRadius: R.full,
-                        borderWidth: 1, borderColor: C.accent + '66',
-                      }}
-                    >
-                      <Icon.sparkles size={14} color={C.accentLight} strokeWidth={2.2} />
-                      <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>
-                        「{moreSuggestions[0]}」で再検索
-                      </Text>
-                    </PressableScale>
-                  )}
-                  {/* フィルタを緩める — 全 reset */}
-                  {(filters.period !== 'all' ||
-                    filters.community !== 'all' ||
-                    filters.sort !== 'relevance') && (
-                    <PressableScale
-                      onPress={() => {
-                        setFilters(DEFAULT_SEARCH_FILTERS);
-                        setSortMode('relevance');
-                      }}
-                      haptic="tap"
-                      style={{
-                        flexDirection: 'row', alignItems: 'center', gap: 6,
-                        paddingHorizontal: SP['3'], paddingVertical: 8,
-                        backgroundColor: C.bg2,
-                        borderRadius: R.full,
-                        borderWidth: 1, borderColor: C.border,
-                      }}
-                    >
-                      <Icon.filter size={14} color={C.text2} strokeWidth={2.2} />
-                      <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>
-                        フィルタを緩める
-                      </Text>
-                    </PressableScale>
-                  )}
-                  {/* タグで検索 — タググラフ画面へリンク */}
-                  <PressableScale
-                    onPress={() => router.push('/filter' as never)}
-                    haptic="tap"
-                    style={{
-                      flexDirection: 'row', alignItems: 'center', gap: 6,
-                      paddingHorizontal: SP['3'], paddingVertical: 8,
-                      backgroundColor: C.bg2,
-                      borderRadius: R.full,
-                      borderWidth: 1, borderColor: C.border,
-                    }}
-                  >
-                    <Icon.hash size={14} color={C.text2} strokeWidth={2.2} />
-                    <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>
-                      タグで検索する
-                    </Text>
-                  </PressableScale>
-                </View>
-              </View>
+              </ResultSection>
             )}
           </View>
         )}
+      </ScrollView>
+
+      {/* ============= 「なぜこの結果?」 modal =============
+          RankingExplainer は別 agent が並列で実装中の C5 component。
+          open / post_id / query / onClose を最低限 props として受ける想定。
+          modal 内部で useResultExplanation を呼んで factor breakdown を描画する。 */}
+      <RankingExplainer
+        visible={explainPost !== null}
+        postId={explainPost?.id ?? ''}
+        query={explainPost?.query ?? ''}
+        onClose={() => setExplainPost(null)}
+      />
+    </View>
+  );
+}
+
+// ============================================================
+// DiscoveryView — query 空時の "探す" 体験
+// ------------------------------------------------------------
+// 各 row は内側で paddingHorizontal: SP['4'] を持つ前提で並べる
+// (= 親 ScrollView は左右 padding を持たない)。
+// ============================================================
+function DiscoveryView() {
+  return (
+    <View style={{ gap: SP['5'] }}>
+      {/* 1) Trending — topic chip 行 (server-side acceleration) */}
+      <TrendingTopicsRow />
+
+      {/* 2) 今日のホット — 横スクロールカード */}
+      <HotPostsRow />
+
+      {/* 3) あなたへのおすすめ — パーソナライズ (未ログインで non-render) */}
+      <ForYouShelf />
+
+      {/* 4) コミュニティを探す */}
+      <RecommendedCommunities />
+
+      {/* 5) ジャンル別 */}
+      <InterestCategories />
+    </View>
+  );
+}
+
+// ============================================================
+// TrendingTopicsRow — useTrendingTopics で server-side ランキング
+// ------------------------------------------------------------
+// 旧 TrendingRow は acceleration ベースの tag ランキング (lib/api/trending.ts)。
+// 本 row は v2 (server BM25 + recency window) の topic を chip 列で表示。
+// search 画面に「今 Geek で何が話題か」を一目で見せる入口になる。
+// ============================================================
+function TrendingTopicsRow() {
+  const router = useRouter();
+  const { data: topics } = useTrendingTopics(24, 12);
+  const items = topics ?? [];
+  if (items.length === 0) return null;
+
+  return (
+    <View style={{ gap: SP['2'] }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+          paddingHorizontal: SP['4'],
+        }}
+      >
+        <Icon.sparkles size={14} color={C.text3} strokeWidth={2.2} />
+        <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>
+          いまのトレンド
+        </Text>
+      </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{
+          gap: 6,
+          paddingHorizontal: SP['4'],
+        }}
+      >
+        {items.map((t, i) => (
+          <PressableScale
+            key={t.topic}
+            onPress={() => router.push(`/search?q=${encodeURIComponent(t.topic)}` as never)}
+            haptic="tap"
+            accessibilityLabel={`トレンドで検索: ${t.topic}`}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 4,
+              paddingHorizontal: SP['3'],
+              paddingVertical: SP['2'],
+              backgroundColor: i === 0 ? 'rgba(255,140,48,0.18)' : C.bg2,
+              borderRadius: R.full,
+              borderWidth: 1,
+              borderColor: i === 0 ? 'rgba(255,140,48,0.5)' : C.border,
+            }}
+          >
+            <Text
+              style={[
+                T.smallM,
+                { color: i === 0 ? '#FF8C30' : C.text, fontWeight: '700' },
+              ]}
+            >
+              {t.topic.startsWith('#') ? t.topic : `#${t.topic}`}
+            </Text>
+            <View
+              style={{
+                paddingHorizontal: 5,
+                paddingVertical: 1,
+                backgroundColor: i === 0 ? 'rgba(255,140,48,0.3)' : C.bg3,
+                borderRadius: R.sm,
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 10,
+                  color: i === 0 ? '#FF8C30' : C.text3,
+                  fontWeight: '700',
+                }}
+              >
+                +{t.post_count}
+              </Text>
+            </View>
+          </PressableScale>
+        ))}
       </ScrollView>
     </View>
   );
 }
 
 // ============================================================
-// SectionContainer — Google 風セグメント結果セクションのフレーム
+// ResultSection — 検索結果のセクションフレーム
 // ------------------------------------------------------------
-// title + icon + 件数 + 子コンポーネント を共通レイアウトで描画する。
-// preview mode (limit < total) では「もっと見る」ボタンを下に出す。
+// SF Pro semibold 17pt 相当のヘッダー (T.h4 = 16 / 700 を流用)。
+// preview limit を超えたら「もっと見る (+N)」を下に出す。
 // ============================================================
-function SectionContainer({
+function ResultSection({
   title,
   icon,
   total,
@@ -1567,34 +961,45 @@ function SectionContainer({
   children,
 }: {
   title: string;
-  icon: string;
+  icon: 'post' | 'community';
   total: number;
   limit: number;
   expanded: boolean;
   onExpand: () => void;
   children: React.ReactNode;
 }) {
+  const IconC = icon === 'post' ? Icon.post : Icon.community;
+  const remaining = total - limit;
   const showMore = !expanded && total > limit;
+
   return (
     <View style={{ gap: SP['2'] }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+      {/* SF Pro semibold 17pt 相当のヘッダー */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Text style={{ fontSize: 14 }}>{icon}</Text>
-          <Text style={[T.smallM, { color: C.text2, fontWeight: '700', letterSpacing: 0.3 }]}>
-            {title}
-          </Text>
-          <View style={{
-            paddingHorizontal: 6, paddingVertical: 1,
-            backgroundColor: C.bg3,
-            borderRadius: R.sm,
-          }}>
+          <IconC size={16} color={C.text2} strokeWidth={2.2} />
+          <Text style={[T.h4, { color: C.text }]}>{title}</Text>
+          <View
+            style={{
+              paddingHorizontal: 6,
+              paddingVertical: 1,
+              backgroundColor: C.bg3,
+              borderRadius: R.sm,
+            }}
+          >
             <Text style={{ fontSize: 10, color: C.text3, fontWeight: '700' }}>
               {total}
             </Text>
           </View>
         </View>
       </View>
-      {children}
+      <View style={{ gap: SP['2'] }}>{children}</View>
       {showMore && (
         <PressableScale
           onPress={onExpand}
@@ -1603,10 +1008,10 @@ function SectionContainer({
           accessibilityLabel={`${title}をもっと見る`}
           style={{
             marginTop: SP['1'],
-            paddingVertical: SP['2'] + 2,
+            paddingVertical: 10,
             paddingHorizontal: SP['3'],
             backgroundColor: C.bg2,
-            borderRadius: R.full,
+            borderRadius: R.md,
             borderWidth: 1,
             borderColor: C.accent + '40',
             flexDirection: 'row',
@@ -1616,7 +1021,7 @@ function SectionContainer({
           }}
         >
           <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>
-            {title}をもっと見る ({total - limit})
+            {title}をもっと見る (+{remaining})
           </Text>
           <Icon.chevronR size={14} color={C.accentLight} strokeWidth={2.2} />
         </PressableScale>
@@ -1624,3 +1029,312 @@ function SectionContainer({
     </View>
   );
 }
+
+// ============================================================
+// CompactPostCard — 検索結果用の小型投稿カード
+// ------------------------------------------------------------
+// AnonPostCard はリアクション / メディア / コメントなどを全部抱えていて重い。
+// 検索結果は「何の話か」一目で分かれば良いので、title + content 抜粋 + meta
+// だけのコンパクト版にする。
+// ============================================================
+function CompactPostCard({
+  post,
+  highlightTerms,
+  onPress,
+  onExplain,
+}: {
+  post: Post;
+  highlightTerms: string[];
+  onPress: () => void;
+  /** ⓘ「なぜこの結果?」アイコンをタップしたとき */
+  onExplain: () => void;
+}) {
+  // タイトル (title フィールド or content 1 行目)
+  const title = useMemo(() => {
+    if (post.title && post.title.trim().length > 0) return post.title;
+    const firstLine = (post.content ?? '').split('\n')[0]?.trim() ?? '';
+    return firstLine.length > 0 ? firstLine : null;
+  }, [post.title, post.content]);
+
+  // 本文プレビュー (title と重複しないように)
+  const preview = useMemo(() => {
+    const content = (post.content ?? '').trim();
+    if (!content) return '';
+    if (post.title) return content.slice(0, 160);
+    // title が content の 1 行目から来ているなら、2 行目以降を出す
+    const rest = content.split('\n').slice(1).join(' ').trim();
+    return rest.length > 0 ? rest.slice(0, 160) : '';
+  }, [post.title, post.content]);
+
+  return (
+    <PressableScale
+      onPress={onPress}
+      haptic="tap"
+      accessibilityRole="button"
+      accessibilityLabel={`投稿を開く: ${title ?? ''}`}
+      style={{
+        padding: SP['3'],
+        backgroundColor: C.bg2,
+        borderRadius: R.lg,
+        borderWidth: 1,
+        borderColor: C.border,
+        gap: SP['2'],
+      }}
+    >
+      {/* meta — 匿名 + 相対時刻 + 反応カウント + 「なぜこの結果?」 */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+        <Avatar size={20} anonymous />
+        <Text style={[T.caption, { color: C.text3, flex: 1 }]} numberOfLines={1}>
+          匿名 · {formatRelative(post.created_at)}
+        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <Icon.heart size={11} color={C.text3} strokeWidth={2} />
+          <Text style={[T.caption, { color: C.text3, fontWeight: '700' }]}>
+            {post.likes_count.toLocaleString('ja-JP')}
+          </Text>
+          <Icon.comment size={11} color={C.text3} strokeWidth={2} />
+          <Text style={[T.caption, { color: C.text3, fontWeight: '700' }]}>
+            {post.comments_count.toLocaleString('ja-JP')}
+          </Text>
+        </View>
+        {/* ⓘ「なぜこの結果?」 — RankingExplainer modal を開く
+            React Native の Pressable は default で親へイベント伝播しない
+            (capture/bubble は SyntheticEvent 経路を取らない) ため、
+            stopPropagation は不要 — 子の onPress は親の onPress を
+            発火させない。 */}
+        <PressableScale
+          onPress={onExplain}
+          haptic="tap"
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="この結果が出た理由を見る"
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: 11,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: C.bg3,
+          }}
+        >
+          <Icon.info size={12} color={C.text3} strokeWidth={2.2} />
+        </PressableScale>
+      </View>
+
+      {/* title — 大きく */}
+      {title && (
+        <HighlightedText
+          text={title}
+          terms={highlightTerms}
+          style={[T.bodyB, { color: C.text }]}
+          numberOfLines={2}
+        />
+      )}
+
+      {/* 本文 preview */}
+      {preview.length > 0 && (
+        <HighlightedText
+          text={preview}
+          terms={highlightTerms}
+          style={[T.small, { color: C.text2 }]}
+          numberOfLines={2}
+        />
+      )}
+
+      {/* tag chips (上位 3 件まで) */}
+      {post.tag_names && post.tag_names.length > 0 && (
+        <View style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
+          {Array.from(new Set(post.tag_names)).slice(0, 3).map((tg) => (
+            <Text
+              key={tg}
+              style={[T.caption, { color: C.accent, fontWeight: '700' }]}
+            >
+              #{tg}
+            </Text>
+          ))}
+        </View>
+      )}
+    </PressableScale>
+  );
+}
+
+// ============================================================
+// CompactCommunityCard — 検索結果用のコミュ行
+// ------------------------------------------------------------
+// 既存 RecommendedCommunities は 120x140 縦カード (Discovery 用)。
+// 検索結果は横長 row のほうが情報密度が高い。
+// ============================================================
+function CompactCommunityCard({
+  community,
+  highlightTerms,
+  onPress,
+}: {
+  community: CommunityHit;
+  highlightTerms: string[];
+  onPress: () => void;
+}) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      haptic="tap"
+      accessibilityRole="button"
+      accessibilityLabel={`コミュニティを開く: ${community.name}`}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SP['3'],
+        padding: SP['3'],
+        backgroundColor: C.bg2,
+        borderRadius: R.lg,
+        borderWidth: 1,
+        borderColor: C.border,
+      }}
+    >
+      {/* icon — 既存 emoji + color stripe を踏襲 */}
+      <View
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: 22,
+          backgroundColor: community.icon_color || C.bg3,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Text style={{ fontSize: 22 }}>{community.icon_emoji || '🏷'}</Text>
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <HighlightedText
+          text={community.name}
+          terms={highlightTerms}
+          style={[T.bodyB, { color: C.text }]}
+          numberOfLines={1}
+        />
+        {community.description && community.description.length > 0 && (
+          <HighlightedText
+            text={community.description}
+            terms={highlightTerms}
+            style={[T.caption, { color: C.text3 }]}
+            numberOfLines={1}
+          />
+        )}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+          <Icon.friends size={11} color={C.text3} strokeWidth={2} />
+          <Text style={[T.caption, { color: C.text3, fontWeight: '700' }]}>
+            {community.member_count.toLocaleString('ja-JP')} 人
+          </Text>
+        </View>
+      </View>
+      <Icon.chevronR size={16} color={C.text3} strokeWidth={2} />
+    </PressableScale>
+  );
+}
+
+// ============================================================
+// EmptyResultsView — 結果 0 件
+// ------------------------------------------------------------
+// - "もしかして..." (synonym 候補)
+// - 入力をクリア / トレンドへ
+// ============================================================
+function EmptyResultsView({
+  query,
+  didYouMean,
+  onPickSuggestion,
+  onClear,
+}: {
+  query: string;
+  didYouMean: string | null;
+  onPickSuggestion: (q: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <View
+      style={{
+        paddingHorizontal: SP['4'],
+        paddingVertical: SP['6'],
+        alignItems: 'center',
+        gap: SP['4'],
+      }}
+    >
+      <View
+        style={{
+          width: 84,
+          height: 84,
+          borderRadius: 42,
+          backgroundColor: C.amberBg,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderWidth: 1,
+          borderColor: C.amber + '40',
+        }}
+      >
+        <Icon.search size={36} color={C.amber} strokeWidth={2} />
+      </View>
+      <View style={{ alignItems: 'center', gap: SP['2'] }}>
+        <Text style={[T.h3, { color: C.text, textAlign: 'center' }]}>
+          結果がありません
+        </Text>
+        <Text
+          style={[T.small, { color: C.text3, textAlign: 'center', maxWidth: 320 }]}
+        >
+          <Text style={{ color: C.accentLight, fontWeight: '700' }}>「{query}」</Text>
+          に一致する投稿やコミュニティが見つかりませんでした。
+        </Text>
+      </View>
+      <View
+        style={{
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+          gap: SP['2'],
+        }}
+      >
+        {didYouMean && (
+          <PressableScale
+            onPress={() => onPickSuggestion(didYouMean)}
+            haptic="confirm"
+            accessibilityRole="button"
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              paddingHorizontal: SP['3'],
+              paddingVertical: 8,
+              backgroundColor: C.accentBg,
+              borderRadius: R.full,
+              borderWidth: 1,
+              borderColor: C.accent + '66',
+            }}
+          >
+            <Icon.sparkles size={14} color={C.accentLight} strokeWidth={2.2} />
+            <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>
+              「{didYouMean}」で検索
+            </Text>
+          </PressableScale>
+        )}
+        <PressableScale
+          onPress={onClear}
+          haptic="tap"
+          accessibilityRole="button"
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            paddingHorizontal: SP['3'],
+            paddingVertical: 8,
+            backgroundColor: C.bg2,
+            borderRadius: R.full,
+            borderWidth: 1,
+            borderColor: C.border,
+          }}
+        >
+          <Icon.close size={14} color={C.text2} strokeWidth={2.2} />
+          <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>
+            検索をクリア
+          </Text>
+        </PressableScale>
+      </View>
+    </View>
+  );
+}
+

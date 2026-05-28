@@ -30,16 +30,27 @@ config.transformer = {
     transform: {
       experimentalImportSupport: false,
       // 起動時に touch されない module を require 地点まで遅延化
-      inlineRequires: true,
+      // ただし react-native-reanimated は worklet runtime の初期化に
+      // top-level side-effect が必須なので除外する (除外しないと web で
+      // _WORKLET global が undefined になり起動時に white screen)。
+      inlineRequires: {
+        blockList: {
+          'react-native-reanimated': true,
+        },
+      },
     },
   }),
 };
 
-// resolver の main field 優先順位を明示 (RN → web → 汎用)
-config.resolver = {
-  ...config.resolver,
-  resolverMainFields: ['react-native', 'browser', 'main'],
-};
+// resolver の main field 優先順位
+// ⚠️ Expo getDefaultConfig は platform 別に自動で適切な値を入れる:
+//   - native (ios/android): ['react-native', 'browser', 'main']
+//   - web:                  ['browser', 'main']
+// ここで全 platform 共通に上書きすると、web が react-native field を
+// 拾ってしまい、Reanimated 3 のような package が native 用 src/ を
+// bundle に含めてしまう ("_getAnimationTimestamp is not a function"
+// 等の web ランタイムエラーの原因)。
+// 上書きせず default に任せる。
 
 // ワーカ数: 物理コア数 - 1 (最低 1)
 config.maxWorkers = Math.max(1, os.cpus().length - 1);

@@ -26,7 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFeed } from '../../hooks/useFeed';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
-import { useTagFilter } from '../../hooks/useTagFilter';
+// useTagFilter は BlockedTagBanner と一緒に削除済み (banner をホームから外した)
 import { useTagFilterStore } from '../../stores/tagFilterStore';
 import { useLike, useLikes } from '../../hooks/useLike';
 import { useConcern, useConcerns } from '../../hooks/useConcern';
@@ -112,7 +112,7 @@ const FeedRowEnter = memo(function FeedRowEnter({
 });
 
 import { ScopeToggle } from '../../components/feed/ScopeToggle';
-import { BlockedTagBanner } from '../../components/feed/BlockedTagBanner';
+// BlockedTagBanner はホームから非表示にした (フィルタ画面 /filter で確認可能)
 import { logEvent } from '../../lib/personalize';
 import { PostCardSkeleton } from '../../components/feed/PostCardSkeleton';
 import { TrendingRow } from '../../components/feed/TrendingRow';
@@ -136,7 +136,7 @@ export default function FeedScreen() {
   // Smart skeleton timing — skeleton only after 200ms of continuous loading.
   // <200ms loads (cache hits / fast network) skip skeleton entirely to avoid flash.
   const showSkeleton = useDelayedLoading(loading, 200);
-  const { blockedCount } = useTagFilter();
+  // ★ blockedCount は元々 BlockedTagBanner で表示していたが、ホームから外したため未使用
   const likedTags = useTagFilterStore((s) => s.likedTags);
   const scope = useFeedStore((s) => s.scope);
   const setScope = useFeedStore((s) => s.setScope);
@@ -531,14 +531,12 @@ export default function FeedScreen() {
 
   // Stable header element — recreating the inline <View> each parent render
   // would break header memoization and force TrendingRow to remount visuals.
+  // ★ BlockedTagBanner はユーザー要望でホームから削除済み (フィルタ画面 /filter で確認可能)
   const ListHeader = useMemo(() => (
     <View>
       <TrendingRow />
-      {blockedCount > 0 ? (
-        <BlockedTagBanner count={blockedCount} onPress={() => router.push('/filter' as never)} />
-      ) : null}
     </View>
-  ), [blockedCount, router]);
+  ), []);
 
   const Bell = Icon.bell;
   const Search = Icon.search;

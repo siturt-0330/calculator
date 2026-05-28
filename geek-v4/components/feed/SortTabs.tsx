@@ -8,10 +8,10 @@ import Animated, {
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { PressableScale } from '../ui/PressableScale';
-import { R, SP, SHADOW } from '../../design/tokens';
+import { R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { TIMING_NORM } from '../../design/motion';
-import { useColors, useGradients } from '../../hooks/useColors';
+import { useColors, useGradients, useShadows } from '../../hooks/useColors';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { useT } from '../../lib/i18n';
 import type { SortMode } from '../../lib/api/posts';
@@ -47,6 +47,7 @@ export function SortTabs({
   const t = useT();
   const C = useColors();
   const GRAD = useGradients();
+  const SHADOW = useShadows();
   const reduceMotion = useReducedMotion();
 
   const [w, setW] = useState(0);
@@ -83,7 +84,7 @@ export function SortTabs({
         borderRadius: R.full,
         padding: PAD,
         borderWidth: 1,
-        borderColor: C.border,
+        borderColor: C.divider,
         position: 'relative',
         // safety net — indicator が万一はみ出ても rounded shape で clip する
         overflow: 'hidden',
@@ -197,7 +198,9 @@ function SortTabItem({
       }}
     >
       {/* 2 つのテキストを重ねる (active = 白 / inactive = グレー)。
-          opacity で fade することで色補間を worklet free にする。 */}
+          opacity で fade することで色補間を worklet free にする。
+          iOS-native: SF Pro Text の自然な tracking (-0.08 at size 13) を採用。
+          旧 letterSpacing 0.3 は派手すぎたので落ち着いた負の値に。 */}
       <View>
         <Animated.Text
           style={[
@@ -205,7 +208,7 @@ function SortTabItem({
             {
               color: textColor,
               fontWeight: '700',
-              letterSpacing: 0.3,
+              letterSpacing: -0.08,
             },
             activeTextStyle,
           ]}
@@ -222,8 +225,8 @@ function SortTabItem({
               right: 0,
               textAlign: 'center',
               color: textColorInactive,
-              fontWeight: '500',
-              letterSpacing: 0,
+              fontWeight: '600',
+              letterSpacing: -0.08,
             },
             inactiveTextStyle,
           ]}

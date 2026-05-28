@@ -41,7 +41,11 @@ const COLOR_FADE_MS = 180;
 const WIGGLE_DEG = 8;
 const WIGGLE_HALF_MS = 110; // 110 + 110 + 100 = 320ms (戻り含む)
 const WIGGLE_RETURN_MS = 100;
-const FOCUSED_SCALE = 1.08;
+// iOS HIG: tab icon は press / select 時に大きく scale しない。
+// 控えめな 1.04 にして "ぐっと上がる" 感だけ残す。
+const FOCUSED_SCALE = 1.04;
+// iOS systemGray — inactive icon の標準色
+const INACTIVE_TINT = '#8E8E93';
 
 export function TabIcon({
   tab,
@@ -112,9 +116,10 @@ export function TabIcon({
         aTransform,
       ]}
     >
-      {/* unfocused: text2 色 — 上に focused (accent) を重ねる */}
+      {/* unfocused: iOS systemGray (#8E8E93) — 上に focused (accent) を重ねる
+           iOS HIG: inactive tab は dark/light に依らず systemGray が標準 */}
       <Animated.View style={[{ position: 'absolute' }, aInactive]}>
-        <I size={size} strokeWidth={TABBAR.iconStroke} color={C.text2} />
+        <I size={size} strokeWidth={TABBAR.iconStroke} color={INACTIVE_TINT} />
       </Animated.View>
       <Animated.View style={[{ position: 'absolute' }, aActive]}>
         <I size={size} strokeWidth={TABBAR.iconStroke} color={C.accent} />

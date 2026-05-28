@@ -232,7 +232,12 @@ export default function CreatePost() {
     return () => clearTimeout(t);
   }, [content, tags, sourceUrl, anonymous, visibility]);
 
+  // picker は OS のシステム dialog を呼ぶため、ボタン連打で 2 重起動すると
+  // 一方の callback が cancel 扱いになる事例があった。busy で再エントリ防止。
+  const [pickingImage, setPickingImage] = useState(false);
   const pickImage = async () => {
+    if (pickingImage) return;
+    setPickingImage(true);
     try {
       const r = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: 'images',
@@ -247,10 +252,15 @@ export default function CreatePost() {
     } catch (e) {
       console.warn('[post/create] pick image failed:', e);
       show('画像の取得に失敗しました', 'error');
+    } finally {
+      setPickingImage(false);
     }
   };
 
+  const [pickingVideo, setPickingVideo] = useState(false);
   const pickVideo = async () => {
+    if (pickingVideo) return;
+    setPickingVideo(true);
     try {
       const r = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: 'videos',
@@ -277,6 +287,8 @@ export default function CreatePost() {
     } catch (e) {
       console.warn('[post/create] pick video failed:', e);
       show('動画の取得に失敗しました', 'error');
+    } finally {
+      setPickingVideo(false);
     }
   };
 
@@ -322,6 +334,8 @@ export default function CreatePost() {
   };
 
   const onPost = async () => {
+    // ボタン disabled でも race で 2 連発するケースを防御 (loading との 1 frame ズレ対策)
+    if (posting) return;
     if (images.length === 0 && !video && !content.trim()) {
       show('画像・動画・テキストのいずれかを入力してください。', 'warn');
       return;
@@ -606,6 +620,7 @@ export default function CreatePost() {
                 <PressableScale
                   onPress={pickImage}
                   haptic="tap"
+                  disabled={pickingImage}
                   accessibilityLabel="画像を追加"
                   style={{
                     width: 80, height: 80, borderRadius: 12,
@@ -613,11 +628,12 @@ export default function CreatePost() {
                     alignItems: 'center', justifyContent: 'center',
                     borderWidth: 1, borderStyle: 'dashed', borderColor: C.border2,
                     gap: 2,
+                    opacity: pickingImage ? 0.5 : 1,
                   }}
                 >
                   <Cam size={22} color={C.text3} strokeWidth={2.2} />
                   <Text style={[T.caption, { color: C.text3, fontSize: 9 }]}>
-                    {images.length === 0 ? '画像 / 4' : `+${4 - images.length}`}
+                    {pickingImage ? '...' : images.length === 0 ? '画像 / 4' : `+${4 - images.length}`}
                   </Text>
                 </PressableScale>
               )}
@@ -670,6 +686,7 @@ export default function CreatePost() {
                 <PressableScale
                   onPress={pickVideo}
                   haptic="tap"
+                  disabled={pickingVideo}
                   accessibilityLabel="動画を追加 (1 本まで、最大 100MB)"
                   style={{
                     width: 80, height: 80, borderRadius: 12,
@@ -677,11 +694,12 @@ export default function CreatePost() {
                     alignItems: 'center', justifyContent: 'center',
                     borderWidth: 1, borderStyle: 'dashed', borderColor: C.border2,
                     gap: 2,
+                    opacity: pickingVideo ? 0.5 : 1,
                   }}
                 >
                   <Text style={{ fontSize: 22, color: C.text3 }}>🎬</Text>
                   <Text style={[T.caption, { color: C.text3, fontSize: 9 }]}>
-                    動画 / 1
+                    {pickingVideo ? '...' : '動画 / 1'}
                   </Text>
                 </PressableScale>
               )}

@@ -9,25 +9,28 @@ import { useRouter } from 'expo-router';
 import { useColors } from '../../hooks/useColors';
 import { PressableScale } from '../ui/PressableScale';
 import { Icon } from '../../constants/icons';
-import { R, SP } from '../../design/tokens';
+import { R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 
-// app/(tabs)/bbs.tsx と一致 (「すべて」は除外: フィルタ意図がないため検索動線として無意味)
-const CATEGORIES: ReadonlyArray<{ label: string; color: string; emoji: string }> = [
-  { label: '雑談',     color: '#22D3A4', emoji: '💬' },
-  { label: 'アニメ',   color: '#FF6B7A', emoji: '📺' },
-  { label: 'ゲーム',   color: '#7CB1FF', emoji: '🎮' },
-  { label: 'マンガ',   color: '#F472B6', emoji: '📚' },
-  { label: '音楽',     color: '#FCD34D', emoji: '🎵' },
-  { label: 'アイドル', color: '#FF8C30', emoji: '🌟' },
-  { label: 'Vtuber',   color: '#A78BFA', emoji: '🎤' },
-  { label: '推し活',   color: '#EC4899', emoji: '💖' },
-  { label: 'グルメ',   color: '#84CC16', emoji: '🍜' },
-  { label: 'コスプレ', color: '#06B6D4', emoji: '✨' },
-  { label: 'ニュース', color: '#94A3B8', emoji: '📰' },
+// iOS-native: 色付きの円形 glyph + ラベル (SF Symbols 風の hue spec).
+// glyph は SF Pro semibold の latin 1 文字。emoji ではなく純粋な text 描画で
+// レンダリングが platform 跨いで安定。bbs.tsx の色定義と完全に揃えている。
+const CATEGORIES: ReadonlyArray<{ label: string; color: string; glyph: string }> = [
+  { label: '雑談',     color: '#22D3A4', glyph: 'T' },
+  { label: 'アニメ',   color: '#FF6B7A', glyph: 'A' },
+  { label: 'ゲーム',   color: '#7CB1FF', glyph: 'G' },
+  { label: 'マンガ',   color: '#F472B6', glyph: 'M' },
+  { label: '音楽',     color: '#FCD34D', glyph: 'M' },
+  { label: 'アイドル', color: '#FF8C30', glyph: 'I' },
+  { label: 'Vtuber',   color: '#A78BFA', glyph: 'V' },
+  { label: '推し活',   color: '#EC4899', glyph: 'O' },
+  { label: 'グルメ',   color: '#84CC16', glyph: 'F' },
+  { label: 'コスプレ', color: '#06B6D4', glyph: 'C' },
+  { label: 'ニュース', color: '#94A3B8', glyph: 'N' },
 ];
 
 const COLUMNS = 2;
+const GLYPH_SIZE = 32;
 
 export function InterestCategories() {
   const C = useColors();
@@ -61,7 +64,7 @@ export function InterestCategories() {
           <CategoryChip
             key={cat.label}
             label={cat.label}
-            emoji={cat.emoji}
+            glyph={cat.glyph}
             color={cat.color}
             onPress={() => {
               const q = encodeURIComponent(`#${cat.label}`);
@@ -76,12 +79,12 @@ export function InterestCategories() {
 
 function CategoryChip({
   label,
-  emoji,
+  glyph,
   color,
   onPress,
 }: {
   label: string;
-  emoji: string;
+  glyph: string;
   color: string;
   onPress: () => void;
 }) {
@@ -103,24 +106,49 @@ function CategoryChip({
       accessibilityLabel={`カテゴリで検索: ${label}`}
     >
       <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: SP['2'],
-          paddingHorizontal: SP['3'],
-          paddingVertical: SP['3'],
-          borderRadius: R.md,
-          backgroundColor: C.bg2,
-          borderWidth: 1,
-          borderColor: C.border,
-          // 左の color stripe
-          borderLeftWidth: 3,
-          borderLeftColor: color,
-        }}
+        style={[
+          {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: SP['3'],
+            paddingHorizontal: SP['3'],
+            paddingVertical: SP['3'],
+            // iOS-native: list row 風の radius (14)
+            borderRadius: R.lg,
+            backgroundColor: C.bg2,
+            borderWidth: 1,
+            borderColor: C.border,
+          },
+          SHADOW.xs,
+        ]}
       >
-        <Text style={{ fontSize: 18 }}>{emoji}</Text>
+        {/* SF Symbols 風: 色付きの正方形 (radius 8) 内に glyph 1 文字 */}
+        <View
+          style={{
+            width: GLYPH_SIZE,
+            height: GLYPH_SIZE,
+            borderRadius: 8,
+            backgroundColor: color,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 16,
+              fontWeight: '700',
+              color: '#0a0a0a',
+              letterSpacing: -0.3,
+            }}
+          >
+            {glyph}
+          </Text>
+        </View>
         <Text
-          style={[T.bodyB, { color: C.text, flexShrink: 1 }]}
+          style={[
+            T.bodyB,
+            { color: C.text, flexShrink: 1, letterSpacing: -0.2 },
+          ]}
           numberOfLines={1}
         >
           {label}

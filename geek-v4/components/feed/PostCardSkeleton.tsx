@@ -1,61 +1,72 @@
-import { View } from 'react-native';
+import { View, Platform } from 'react-native';
 import { SkeletonBox } from '../ui/SkeletonBox';
 import { useColors } from '../../hooks/useColors';
 import { R, SP } from '../../design/tokens';
 
 // ============================================================
-// PostCardSkeleton — フィード投稿カードの読み込み中表示
+// PostCardSkeleton — iOS-native な読み込み中表示
 // ------------------------------------------------------------
-// shimmer 付き SkeletonBox で構築。layout は実カード (AnonPostCard) と
-// 視覚的に揃え、loading → mount で大きく gap が動かないようにする。
-//
-// 構成:
-//   1. header: 24 avatar + name + meta + 三点
-//   2. 本文 3 行 (90% / 70% / 50% 幅)
-//   3. 画像プレース (アスペクト 1.5:1, 220 高)
-//   4. tag pills 3 個 (60x22)
-//   5. action row (4 icon + counts)
-//
-// 既存 estimatedItemSize に大きく影響しないよう、合計高さは
-//   header(24) + gap + body(16*3 + gap*2) + image(220) + tags(22) + actions(20)
-//   ≈ 24 + 12 + 56 + 12 + 220 + 12 + 22 + 12 + 20 + padding(32) ≈ 422
-// 旧 (header + body 3 + actions ≈ 24 + 16*3 + 20 + padding+gap ≈ 150-180) より
-// 縦に長くなる。FlashList の estimatedItemSize は実カードベース (350-450) に
-// もともと合わせてあるので、こちらの方が visual jump が少ない。
+// shimmer は SkeletonBox 側で per-box に走る (1.4s, ease-in-out)。
+//   - 旧: 角 R.lg (14)、padding SP['4'] (16)、border 1px。
+//   - 新: AnonPostCard と同じ 14px 角・hairline border・18px padding。
+//         iOS 標準 shadow (opacity 0.04 / radius 12 / offset y:2) を Web/iOS にだけ、
+//         Android は elevation:1 で控えめに。
 // ============================================================
 
 export function PostCardSkeleton() {
   const C = useColors();
   return (
-    <View style={{
-      backgroundColor: C.bg2,
-      marginHorizontal: SP['3'],
-      marginBottom: SP['4'],
-      borderRadius: R.lg,
-      borderWidth: 1,
-      borderColor: C.border,
-      padding: SP['4'],
-      gap: SP['3'],
-    }}>
+    <View
+      style={[
+        {
+          backgroundColor: C.bg2,
+          marginHorizontal: SP['3'],
+          marginBottom: SP['3'],
+          borderRadius: 14,
+          borderWidth: 1,
+          borderColor: C.border,
+          paddingHorizontal: 18,
+          paddingTop: 18,
+          paddingBottom: 14,
+          gap: SP['3'],
+        },
+        Platform.select({
+          ios: {
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.04,
+            shadowRadius: 12,
+          },
+          web: {
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.04,
+            shadowRadius: 12,
+          },
+          android: { elevation: 1 },
+          default: {},
+        }),
+      ]}
+    >
       {/* 1. header — avatar + 2 line meta (name / meta) + 三点メニュー */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-        <SkeletonBox width={40} height={40} borderRadius={9999} />
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <SkeletonBox width={40} height={40} borderRadius={20} />
         <View style={{ flex: 1, gap: 6 }}>
-          <SkeletonBox width={120} height={14} borderRadius={R.sm} />
-          <SkeletonBox width={70} height={11} borderRadius={R.sm} />
+          <SkeletonBox width={120} height={13} borderRadius={R.sm} />
+          <SkeletonBox width={80} height={11} borderRadius={R.sm} />
         </View>
-        <SkeletonBox width={20} height={20} borderRadius={9999} />
+        <SkeletonBox width={20} height={20} borderRadius={10} />
       </View>
 
-      {/* 2. 本文 3 行 (90% / 70% / 50%) */}
-      <View style={{ gap: SP['2'] }}>
-        <SkeletonBox width="90%" height={14} borderRadius={R.sm} />
-        <SkeletonBox width="70%" height={14} borderRadius={R.sm} />
-        <SkeletonBox width="50%" height={14} borderRadius={R.sm} />
+      {/* 2. 本文 3 行 (92% / 78% / 54%) — iOS の読みやすさに寄せる */}
+      <View style={{ gap: 7 }}>
+        <SkeletonBox width="92%" height={14} borderRadius={R.sm} />
+        <SkeletonBox width="78%" height={14} borderRadius={R.sm} />
+        <SkeletonBox width="54%" height={14} borderRadius={R.sm} />
       </View>
 
-      {/* 3. 画像プレース (アスペクト 1.5:1 = 横長, 220 高) */}
-      <SkeletonBox width="100%" height={220} borderRadius={R.md} />
+      {/* 3. 画像プレース (アスペクト 1.5:1 = 横長, 220 高) — card と同じ 12px round */}
+      <SkeletonBox width="100%" height={220} borderRadius={12} />
 
       {/* 4. tag pills 3 個 (60x22) */}
       <View style={{ flexDirection: 'row', gap: SP['2'], marginTop: SP['1'] }}>
@@ -65,26 +76,28 @@ export function PostCardSkeleton() {
       </View>
 
       {/* 5. action row — 4 icon + counts */}
-      <View style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: SP['4'],
-        marginTop: SP['2'],
-      }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}>
-          <SkeletonBox width={18} height={18} borderRadius={9999} />
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: SP['5'],
+          marginTop: SP['2'],
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <SkeletonBox width={20} height={20} borderRadius={10} />
           <SkeletonBox width={20} height={12} borderRadius={R.sm} />
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}>
-          <SkeletonBox width={18} height={18} borderRadius={9999} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <SkeletonBox width={20} height={20} borderRadius={10} />
           <SkeletonBox width={20} height={12} borderRadius={R.sm} />
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'] }}>
-          <SkeletonBox width={18} height={18} borderRadius={9999} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <SkeletonBox width={20} height={20} borderRadius={10} />
           <SkeletonBox width={20} height={12} borderRadius={R.sm} />
         </View>
         <View style={{ flex: 1 }} />
-        <SkeletonBox width={18} height={18} borderRadius={9999} />
+        <SkeletonBox width={18} height={18} borderRadius={9} />
       </View>
     </View>
   );

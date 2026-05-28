@@ -21,7 +21,7 @@ import { useColors } from '../../hooks/useColors';
 import { useAuthStore } from '../../stores/authStore';
 import { PressableScale } from '../ui/PressableScale';
 import { Icon } from '../../constants/icons';
-import { R, SP } from '../../design/tokens';
+import { R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { fetchPosts } from '../../lib/api/posts';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
@@ -65,9 +65,34 @@ export function ForYouShelf() {
   if (!userId) return null;
 
   if (isLoading) {
+    // skeleton: 「For You」ヘッダー + grid 6 セル分の placeholder
     return (
-      <View style={{ paddingVertical: SP['6'], alignItems: 'center' }}>
-        <ActivityIndicator color={C.accent} />
+      <View style={{ gap: SP['3'] }}>
+        <ForYouHeader C={C} />
+        <View
+          style={{
+            paddingHorizontal: SP['4'],
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            gap: GAP,
+          }}
+        >
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <View
+              key={`sk-${i}`}
+              style={{
+                width: cardWidth,
+                height: Math.round((cardWidth * 5) / 4),
+                borderRadius: R.lg,
+                backgroundColor: C.bg2,
+                borderWidth: 1,
+                borderColor: C.border,
+                opacity: 0.6,
+              }}
+            />
+          ))}
+        </View>
+        <ActivityIndicator color={C.accent} style={{ position: 'absolute', top: 60, alignSelf: 'center' }} />
       </View>
     );
   }
@@ -76,21 +101,8 @@ export function ForYouShelf() {
   if (posts.length === 0) return null;
 
   return (
-    <View style={{ gap: SP['2'] }}>
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 6,
-          paddingHorizontal: SP['4'],
-        }}
-      >
-        <Icon.sparkles size={14} color={C.text3} strokeWidth={2.2} />
-        <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>
-          あなたへのおすすめ
-        </Text>
-      </View>
-
+    <View style={{ gap: SP['3'] }}>
+      <ForYouHeader C={C} />
       <View
         style={{
           paddingHorizontal: SP['4'],
@@ -108,6 +120,36 @@ export function ForYouShelf() {
           />
         ))}
       </View>
+    </View>
+  );
+}
+
+// ============================================================
+// ForYouHeader — iOS の large title 風 (semibold, 22pt, tracking -0.3)
+// ============================================================
+function ForYouHeader({ C }: { C: ReturnType<typeof useColors> }) {
+  return (
+    <View
+      style={{
+        paddingHorizontal: SP['4'],
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SP['2'],
+      }}
+    >
+      <Icon.sparkles size={18} color={C.accent} strokeWidth={2.2} />
+      <Text
+        style={[
+          T.h3,
+          {
+            color: C.text,
+            letterSpacing: -0.3,
+            fontWeight: '700',
+          },
+        ]}
+      >
+        For You
+      </Text>
     </View>
   );
 }
@@ -147,15 +189,18 @@ function ForYouCard({
       onPress={onPress}
       haptic="tap"
       scaleValue={0.96}
-      style={{
-        width,
-        height,
-        borderRadius: R.md,
-        backgroundColor: C.bg2,
-        borderWidth: 1,
-        borderColor: C.border,
-        overflow: 'hidden',
-      }}
+      style={[
+        {
+          width,
+          height,
+          borderRadius: R.lg,
+          backgroundColor: C.bg2,
+          borderWidth: 1,
+          borderColor: C.border,
+          overflow: 'hidden',
+        },
+        SHADOW.xs,
+      ]}
       accessibilityLabel={`投稿を開く: ${title}`}
     >
       {/* サムネ (あれば上半分) */}

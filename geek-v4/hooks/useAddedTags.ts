@@ -59,16 +59,22 @@ export function useAddedTags(postIds: string[]) {
 
 export function useAddTag() {
   const qc = useQueryClient();
-  const { mutateAsync } = useMutation({
-    mutationFn: ({ postId, tag }: { postId: string; tag: string }) => addPostTag(postId, tag),
+  const show = useToastStore((s) => s.show);
+  type Ctx = {
+    snapshot: Array<[readonly unknown[], Record<string, string[]> | undefined]>;
+  };
+  const { mutateAsync } = useMutation<unknown, Error, { postId: string; tag: string }, Ctx>({
+    mutationFn: ({ postId, tag }) => addPostTag(postId, tag),
     onMutate: async ({ postId, tag }) => {
-      await qc.cancelQueries({ queryKey: [KEY_PREFIX] });
+      await qc.cancelQueries({ queryKey: [KEY_PREFIX] }).catch(() => {});
       // ★ CLAUDE.md § 5.2 対策: partial-match `setQueriesData` 廃止 → exact-key 書き戻し。
       //   `[KEY_PREFIX, sortedIdsJoinString]` 派生キーが複数あるケースで
       //   一部だけ更新されない問題を回避する。
       const entries = qc.getQueriesData<Record<string, string[]> | undefined>({
         queryKey: [KEY_PREFIX],
       });
+      // snapshot は patch 前 (= mutation 適用前の真の値) で取る — onError で revert する
+      const snapshot: Ctx['snapshot'] = entries as Ctx['snapshot'];
       for (const [exactKey, old] of entries) {
         if (!old) continue;
         const next = { ...old };
@@ -79,6 +85,15 @@ export function useAddTag() {
       }
       // 個別 queryKey もある (post detail)
       qc.invalidateQueries({ queryKey: ['post-added-tags', postId] });
+      return { snapshot };
+    },
+    onError: (err, _vars, ctx) => {
+      // 楽観更新を snapshot から revert (失敗時に「タグが付いた状態」が UI に残るのを防ぐ)
+      if (ctx?.snapshot) {
+        for (const [key, data] of ctx.snapshot) qc.setQueryData(key, data);
+      }
+      const msg = err instanceof Error ? err.message : '';
+      show(msg ? `タグの追加に失敗しました: ${msg}` : 'タグの追加に失敗しました', 'error');
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
@@ -90,21 +105,45 @@ export function useAddTag() {
 }
 
 // ★ 2026-05 修正: 失敗を catch(() => {}) で握りつぶしていたのを onError 通知に変更。
+// ★ 2026-05-28 追加: optimistic remove + snapshot revert を追加 (useAddTag と対称化)。
+//   旧版は楽観更新なし → server RTT 後にだけ UI が更新されていて、削除ボタンを押しても
+//   しばらくタグが残って見える違和感があった。
 // onSettled は cache 整合性のため成功 / 失敗関わらず invalidate を継続。
 // 戻り値の signature (removeTag(postId, tag) → Promise) は変更しない。
 export function useRemoveTag() {
   const qc = useQueryClient();
   const show = useToastStore((s) => s.show);
-  const { mutateAsync } = useMutation({
-    mutationFn: ({ postId, tag }: { postId: string; tag: string }) => removePostTag(postId, tag),
+  type Ctx = {
+    snapshot: Array<[readonly unknown[], Record<string, string[]> | undefined]>;
+  };
+  const { mutateAsync } = useMutation<unknown, Error, { postId: string; tag: string }, Ctx>({
+    mutationFn: ({ postId, tag }) => removePostTag(postId, tag),
+    onMutate: async ({ postId, tag }) => {
+      await qc.cancelQueries({ queryKey: [KEY_PREFIX] }).catch(() => {});
+      const entries = qc.getQueriesData<Record<string, string[]> | undefined>({
+        queryKey: [KEY_PREFIX],
+      });
+      const snapshot: Ctx['snapshot'] = entries as Ctx['snapshot'];
+      for (const [exactKey, old] of entries) {
+        if (!old) continue;
+        const next = { ...old };
+        const arr = (next[postId] ?? []).filter((t) => t !== tag);
+        next[postId] = arr;
+        qc.setQueryData(exactKey, next);
+      }
+      return { snapshot };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.snapshot) {
+        for (const [key, data] of ctx.snapshot) qc.setQueryData(key, data);
+      }
+      console.warn('[removeTag] error:', err);
+      show('タグの削除に失敗しました', 'error');
+    },
     onSettled: () => {
       // invalidate は成功 / 失敗 関係なく走る (cache整合性のため)
       qc.invalidateQueries({ queryKey: [KEY_PREFIX] });
       qc.invalidateQueries({ queryKey: ['post-added-tags'] });
-    },
-    onError: (err) => {
-      console.warn('[removeTag] error:', err);
-      show('タグの削除に失敗しました', 'error');
     },
   });
   return {

@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchNotifications, markAllRead } from '../lib/api/notifications';
 import { useAuthStore } from '../stores/authStore';
+import { useToastStore } from '../stores/toastStore';
 import type { Notification } from '../types/models';
 
 const NOTIF_KEY = ['notifications'];
@@ -41,11 +42,37 @@ export function useNotifications() {
     notifications,
     unreadCount,
     loading: q.isLoading,
+    // ============================================================
+    // markAllRead — 楽観 update + snapshot/revert
+    // ============================================================
+    // 改訂理由 (2026-05-28):
+    //   旧版は server RTT 完了 (await markAllRead()) 後に setQueryData → UI 反映に
+    //   数百 ms〜数秒のラグがあった。さらに失敗時の revert がないため、ネットワーク
+    //   エラーで「既読化したつもりが未読のまま」という状態の食い違いが残っていた。
+    //   pattern を useReactionToggle 等に合わせる:
+    //     1) 即時 optimistic update (UI 反映 0ms)
+    //     2) snapshot を保持
+    //     3) server 失敗時は snapshot で revert + toast
+    //     4) realtime UPDATE で server-truth 確定
+    // ============================================================
     markAllRead: async () => {
-      await markAllRead();
+      const prev = qc.getQueryData<Notification[]>(NOTIF_KEY);
+      // 1) optimistic: 即時に全件 read=true 化
       qc.setQueryData<Notification[]>(NOTIF_KEY, (old) =>
         (old ?? []).map((n) => ({ ...n, read: true })),
       );
+      try {
+        await markAllRead();
+      } catch (e) {
+        // 2) revert
+        if (prev !== undefined) qc.setQueryData<Notification[]>(NOTIF_KEY, prev);
+        const msg = e instanceof Error ? e.message : '';
+        useToastStore.getState().show(
+          msg ? `既読化に失敗しました: ${msg}` : '既読化に失敗しました',
+          'error',
+        );
+        throw e;
+      }
     },
   };
 }

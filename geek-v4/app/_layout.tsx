@@ -1,3 +1,51 @@
+// ============================================================
+// ★ Reanimated 3 worklet runtime polyfill — must run BEFORE
+//   anything else loads.
+//   Reanimated 3.16 + Expo SDK 52 web build には以下の問題:
+//   1. babel-plugin が `_WORKLET` global への参照を埋め込むが
+//      Web build では定義されない → "_WORKLET is not defined"
+//   2. useSharedValue / useAnimatedStyle が `_getAnimationTimestamp`
+//      / `_chronoNow` 等の native bridge function を呼ぶが、Web の
+//      worklet runtime ではこれらが未定義 → TypeError
+//   いずれも起動時に ErrorBoundary を発火して white screen を起こす。
+//   JS-thread fallback として performance.now() を返す polyfill を
+//   global に注入する (UI thread では実 native runtime が上書きする
+//   ので native ビルドには影響しない)。
+// ============================================================
+declare global {
+  var _WORKLET: boolean | undefined;
+  var _getAnimationTimestamp: (() => number) | undefined;
+  var _chronoNow: (() => number) | undefined;
+  var _scheduleHostFunctionOnJS: ((fn: (...a: unknown[]) => unknown, args?: unknown[]) => void) | undefined;
+}
+if (typeof globalThis !== 'undefined') {
+  if (typeof globalThis._WORKLET === 'undefined') {
+    globalThis._WORKLET = false;
+  }
+  if (typeof globalThis._getAnimationTimestamp !== 'function') {
+    globalThis._getAnimationTimestamp = () =>
+      typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now();
+  }
+  if (typeof globalThis._chronoNow !== 'function') {
+    globalThis._chronoNow = () =>
+      typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now();
+  }
+  if (typeof globalThis._scheduleHostFunctionOnJS !== 'function') {
+    globalThis._scheduleHostFunctionOnJS = (fn, args) => {
+      try {
+        fn(...(args ?? []));
+      } catch {
+        // swallow — worklet -> JS scheduling fallback
+      }
+    };
+  }
+}
+import 'react-native-reanimated';
+
 import { useEffect, useCallback, useState, lazy, Suspense } from 'react';
 import { View, Platform } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';

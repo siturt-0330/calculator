@@ -70,3 +70,42 @@ export function select() {
 }
 
 export { Haptics };
+
+// ============================================================
+// hapticPresets — iOS-native 風の object-shape API
+// ============================================================
+//
+// `haptic(kind)` 関数版とは別に "named method" 形式で叩ける object。
+// Button / ActionSheet / Toggle など、変種に応じて意味別に
+// `hapticPresets.success()` のようにドット呼び出ししたい呼び出し側のため。
+// web では全 method が no-op (内部の impact/notify が enabled flag で gate)。
+// すべての Promise は内部で握り潰されるため await 不要。
+//
+export const hapticPresets = {
+  light: (): void => {
+    if (!enabled) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  },
+  medium: (): void => {
+    if (!enabled) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+  },
+  heavy: (): void => {
+    if (!enabled) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+  },
+  success: (): void => {
+    if (!enabled) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  },
+  warning: (): void => {
+    if (!enabled) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+  },
+  error: (): void => {
+    if (!enabled) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+  },
+} as const;
+
+export type HapticPresetKey = keyof typeof hapticPresets;

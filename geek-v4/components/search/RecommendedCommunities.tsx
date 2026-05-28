@@ -19,13 +19,14 @@ import { useQuery } from '@tanstack/react-query';
 import { useColors } from '../../hooks/useColors';
 import { PressableScale } from '../ui/PressableScale';
 import { Icon } from '../../constants/icons';
-import { R, SP } from '../../design/tokens';
+import { R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { discoverCommunities, type Community } from '../../lib/api/communities';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 
-const CARD_WIDTH = 120;
-const CARD_HEIGHT = 140;
+// iOS-native: 「もっと繋がっているように」 = カード枠を外して
+// 純粋な avatar + label 並びにする (Stories / Friends 行のような密度)
+const COLUMN_WIDTH = 76;
 const AVATAR_SIZE = 56;
 const LIMIT = 20;
 
@@ -47,9 +48,53 @@ export function RecommendedCommunities() {
   }, [data]);
 
   if (isLoading && sorted.length === 0) {
+    // skeleton: avatar + label の 4 個分
     return (
-      <View style={{ paddingVertical: SP['6'], alignItems: 'center' }}>
-        <ActivityIndicator color={C.accent} />
+      <View style={{ gap: SP['2'] }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            paddingHorizontal: SP['4'],
+          }}
+        >
+          <Icon.community size={14} color={C.text3} strokeWidth={2.2} />
+          <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>
+            おすすめコミュニティ
+          </Text>
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ gap: SP['3'], paddingHorizontal: SP['4'] }}
+        >
+          {[0, 1, 2, 3, 4].map((i) => (
+            <View key={`sk-${i}`} style={{ width: COLUMN_WIDTH, alignItems: 'center', gap: 8 }}>
+              <View
+                style={{
+                  width: AVATAR_SIZE,
+                  height: AVATAR_SIZE,
+                  borderRadius: AVATAR_SIZE / 2,
+                  backgroundColor: C.bg2,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  opacity: 0.6,
+                }}
+              />
+              <View
+                style={{
+                  width: 48,
+                  height: 10,
+                  borderRadius: R.sm,
+                  backgroundColor: C.bg2,
+                  opacity: 0.6,
+                }}
+              />
+            </View>
+          ))}
+        </ScrollView>
+        <ActivityIndicator color={C.accent} style={{ position: 'absolute', top: 36, alignSelf: 'center' }} />
       </View>
     );
   }
@@ -77,6 +122,7 @@ export function RecommendedCommunities() {
         contentContainerStyle={{
           gap: SP['3'],
           paddingHorizontal: SP['4'],
+          paddingVertical: 2,
         }}
       >
         {sorted.map((c) => (
@@ -109,32 +155,31 @@ function CommunityCard({
     <PressableScale
       onPress={onPress}
       haptic="tap"
-      scaleValue={0.96}
+      scaleValue={0.92}
       style={{
-        width: CARD_WIDTH,
-        height: CARD_HEIGHT,
-        borderRadius: R.md,
-        backgroundColor: C.bg2,
-        borderWidth: 1,
-        borderColor: C.border,
-        paddingTop: SP['3'],
-        paddingHorizontal: SP['2'],
+        width: COLUMN_WIDTH,
         alignItems: 'center',
-        gap: 6,
+        gap: 8,
       }}
       accessibilityLabel={`コミュニティを開く: ${community.name}`}
     >
-      {/* avatar */}
+      {/* 円アバター — 枠を外して "人と繋がっているような" 表現に */}
       <View
-        style={{
-          width: AVATAR_SIZE,
-          height: AVATAR_SIZE,
-          borderRadius: AVATAR_SIZE / 2,
-          backgroundColor: community.icon_url ? C.bg3 : community.icon_color,
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
-        }}
+        style={[
+          {
+            width: AVATAR_SIZE,
+            height: AVATAR_SIZE,
+            borderRadius: AVATAR_SIZE / 2,
+            backgroundColor: community.icon_url ? C.bg3 : community.icon_color,
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+            // iOS-native: 肌身の subtle ring (border) で「球体感」を出す
+            borderWidth: 1.5,
+            borderColor: C.border2,
+          },
+          SHADOW.xs,
+        ]}
       >
         {thumbSource ? (
           <ExpoImage
@@ -150,30 +195,33 @@ function CommunityCard({
         )}
       </View>
 
-      {/* name */}
+      {/* name — 11pt (iOS-native の section label と同密度) */}
       <Text
-        style={[T.smallB, { color: C.text, textAlign: 'center' }]}
+        style={[
+          T.caption,
+          {
+            color: C.text,
+            textAlign: 'center',
+            fontWeight: '600',
+            letterSpacing: -0.1,
+          },
+        ]}
         numberOfLines={2}
       >
         {community.name}
       </Text>
 
-      {/* member count chip */}
+      {/* member count — 軽量に (chip ではなく数字 + アイコン直書き) */}
       <View
         style={{
           flexDirection: 'row',
           alignItems: 'center',
           gap: 3,
-          paddingHorizontal: 6,
-          paddingVertical: 2,
-          borderRadius: R.sm,
-          backgroundColor: C.bg3,
-          marginTop: 'auto',
-          marginBottom: SP['2'],
+          marginTop: -4,
         }}
       >
-        <Icon.friends size={10} color={C.text3} strokeWidth={2.2} />
-        <Text style={[T.caption, { color: C.text3, fontWeight: '700' }]}>
+        <Icon.friends size={9} color={C.text3} strokeWidth={2.2} />
+        <Text style={{ fontSize: 10, color: C.text3, fontWeight: '700' }}>
           {community.member_count.toLocaleString('ja-JP')}
         </Text>
       </View>

@@ -134,7 +134,7 @@ export default function NotificationsOnboarding() {
       </View>
 
       <View style={{ gap: SP['3'] }}>
-        <Button label="通知を許可する" onPress={() => finish(true)} loading={saving} haptic="success" />
+        <Button label="通知を許可する" onPress={() => finish(true)} loading={saving} disabled={saving} haptic="success" />
         <Button label="あとで設定する" onPress={() => finish(false)} variant="ghost" disabled={saving} />
       </View>
     </View>

@@ -17,7 +17,7 @@
 // - 履歴行は GlassCard で row 表示 (code / status badge / 期限 / 削除)
 // ============================================================
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -353,59 +353,76 @@ export default function InviteScreen() {
 
   // ============================================================
   // コピー (expo-clipboard)
+  //   再エントリ防止 — system clipboard API の遅延中に連打されると、
+  //   toast が 2 連続で出て user が「コピー成功×2 = 2 回コピーされた?」と
+  //   混乱する事例があった。
   // ============================================================
+  const [copying, setCopying] = useState(false);
   const handleCopy = async (code: string) => {
+    if (copying) return;
+    setCopying(true);
     const url = inviteUrlFor(code);
     try {
       await Clipboard.setStringAsync(url);
       show('コピーしました', 'success');
     } catch {
       show('コピーに失敗しました', 'error');
+    } finally {
+      setCopying(false);
     }
   };
 
   // ============================================================
   // 共有 — Web は navigator.share、native は Share.share
+  //   再エントリ防止 — native の Share sheet 表示中に再 tap すると
+  //   2 枚目の sheet が立ち上がろうとして崩れる事例があった。
   // ============================================================
+  const [sharing, setSharing] = useState(false);
   const handleShare = async (code: string) => {
-    const url = inviteUrlFor(code);
-    const message = `GEEK で友達になろう！\n${url}`;
+    if (sharing) return;
+    setSharing(true);
+    try {
+      const url = inviteUrlFor(code);
+      const message = `GEEK で友達になろう！\n${url}`;
 
-    if (Platform.OS === 'web') {
-      const nav =
-        typeof navigator !== 'undefined'
-          ? (navigator as Navigator & {
-              share?: (data: ShareData) => Promise<void>;
-            })
-          : null;
-      if (nav && typeof nav.share === 'function') {
-        try {
-          await nav.share({
-            title: 'GEEK 友達招待',
-            text: message,
-            url,
-          });
-          return;
-        } catch (e) {
-          const err = e as { name?: string };
-          if (err?.name === 'AbortError') return;
+      if (Platform.OS === 'web') {
+        const nav =
+          typeof navigator !== 'undefined'
+            ? (navigator as Navigator & {
+                share?: (data: ShareData) => Promise<void>;
+              })
+            : null;
+        if (nav && typeof nav.share === 'function') {
+          try {
+            await nav.share({
+              title: 'GEEK 友達招待',
+              text: message,
+              url,
+            });
+            return;
+          } catch (e) {
+            const err = e as { name?: string };
+            if (err?.name === 'AbortError') return;
+          }
         }
+        try {
+          await Clipboard.setStringAsync(url);
+          show('リンクをコピーしました', 'success');
+        } catch {
+          show('共有に失敗しました', 'error');
+        }
+        return;
       }
+
       try {
-        await Clipboard.setStringAsync(url);
-        show('リンクをコピーしました', 'success');
-      } catch {
+        await Share.share({ message, url, title: 'GEEK 友達招待' });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : '';
+        if (msg.toLowerCase().includes('user did not share')) return;
         show('共有に失敗しました', 'error');
       }
-      return;
-    }
-
-    try {
-      await Share.share({ message, url, title: 'GEEK 友達招待' });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '';
-      if (msg.toLowerCase().includes('user did not share')) return;
-      show('共有に失敗しました', 'error');
+    } finally {
+      setSharing(false);
     }
   };
 

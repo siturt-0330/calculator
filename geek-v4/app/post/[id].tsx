@@ -325,8 +325,12 @@ export default function PostDetailScreen() {
     };
   }, [id, qc]);
 
+  // 再エントリ防止: 投稿後 invalidate が走るまでに 2 連打されると同 tag が
+  // 2 INSERT されて duplicate error トーストが先に user に見える事例があった。
+  const [addingTag, setAddingTag] = useState(false);
   const handleAddTag = async (tag: string) => {
-    if (!id) return;
+    if (!id || addingTag) return;
+    setAddingTag(true);
     try {
       await addPostTag(id, tag);
       qc.invalidateQueries({ queryKey: ['post-added-tags', id] });
@@ -335,6 +339,8 @@ export default function PostDetailScreen() {
       const msg = (e instanceof Error ? e.message : '') || '';
       if (msg.includes('duplicate')) show('そのタグは既に追加されています', 'warn');
       else show('追加に失敗しました', 'error');
+    } finally {
+      setAddingTag(false);
     }
   };
 

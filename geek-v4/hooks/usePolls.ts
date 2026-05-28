@@ -76,18 +76,132 @@ export function usePolls(postIds: string[]) {
   return { polls: (q.data ?? {}) as Record<string, Poll>, isLoading: q.isLoading };
 }
 
+// ============================================================
+// usePollVote — 楽観 toggle/select + snapshot/revert
+// ============================================================
+// 改訂理由 (リアルタイム反映バグ対応, 2026-05-28):
+//   旧版は optimistic update が無く、UI 反映が server RTT 後 (invalidate → refetch)
+//   になっていた。連投や複数選択 (multi_select) で「タップしてもしばらく反映されない」
+//   現象になっていたため、useReactionToggle / useLike と同じ pattern に揃える。
+//
+// 反映内容 (1 vote 操作で更新する cache):
+//   - my_vote_option_ids (Set of option_id)
+//   - poll.options[*].vote_count (±1)
+//   - poll.total_votes (±1 ただし multi_select の取り消し時のみ -1)
+//
+// 単一選択 (non multi_select):
+//   既存の vote があれば差し替え (前の option の count -1 + 新 option +1, total は不変)
+//   既存無しなら新規 (+1 / total +1)
+//
+// 複数選択 (multi_select):
+//   - 既に含まれている → 取り消し (option -1 / total -1)
+//   - 含まれていない   → 追加  (option +1 / total +1)
+// ============================================================
 export function usePollVote() {
   const qc = useQueryClient();
-  const { mutateAsync } = useMutation({
-    mutationFn: ({ pollId, optionId, multiSelect }: { pollId: string; optionId: string; multiSelect: boolean }) =>
+
+  type Vars = { pollId: string; optionId: string; multiSelect: boolean };
+  type Snapshot = Array<[readonly unknown[], Record<string, Poll> | undefined]>;
+
+  const { mutateAsync } = useMutation<void, Error, Vars, { snapshot: Snapshot }>({
+    mutationFn: ({ pollId, optionId, multiSelect }) =>
       voteApi(pollId, optionId, multiSelect),
-    onSettled: () => qc.invalidateQueries({ queryKey: [KEY_PREFIX] }),
+    onMutate: async ({ pollId, optionId, multiSelect }) => {
+      // ★ await でレース防止 (in-flight refetch が optimistic を上書きする現象の修正)
+      await qc.cancelQueries({ queryKey: [KEY_PREFIX] }).catch(() => {});
+
+      // snapshot は patch 前 (= mutation 適用前の真の値) で取る
+      const snapshot: Snapshot = qc.getQueriesData<Record<string, Poll> | undefined>({
+        queryKey: [KEY_PREFIX],
+      }) as Snapshot;
+
+      // 全 polls cache (post_id → Poll) を走査し、対象 pollId の poll を patch。
+      // ★ CLAUDE.md § 5.2 対策: partial-match `setQueriesData` 廃止 → exact-key 書き戻し。
+      const entries = qc.getQueriesData<Record<string, Poll> | undefined>({
+        queryKey: [KEY_PREFIX],
+      });
+      for (const [exactKey, old] of entries) {
+        if (!old) continue;
+        // 対象 poll を含む post key を探す (postId → Poll の Record)
+        let postKey: string | null = null;
+        for (const [pid, poll] of Object.entries(old)) {
+          if (poll.id === pollId) {
+            postKey = pid;
+            break;
+          }
+        }
+        if (!postKey) continue;
+        const target = old[postKey];
+        if (!target) continue;
+
+        const myVoteIds = new Set(target.my_vote_option_ids);
+        let newOptions = target.options.slice();
+        let newTotal = target.total_votes;
+        let newMyVotes: string[];
+
+        if (multiSelect) {
+          // toggle 動作
+          if (myVoteIds.has(optionId)) {
+            myVoteIds.delete(optionId);
+            newOptions = newOptions.map((o) =>
+              o.id === optionId ? { ...o, vote_count: Math.max(0, o.vote_count - 1) } : o,
+            );
+            newTotal = Math.max(0, newTotal - 1);
+          } else {
+            myVoteIds.add(optionId);
+            newOptions = newOptions.map((o) =>
+              o.id === optionId ? { ...o, vote_count: o.vote_count + 1 } : o,
+            );
+            newTotal = newTotal + 1;
+          }
+          newMyVotes = Array.from(myVoteIds);
+        } else {
+          // 単一選択: 既存があれば差替、無ければ新規
+          const prev = target.my_vote_option_ids[0];
+          if (prev === optionId) {
+            // 同じ option を再選択 — no-op として扱う (server も無変更)
+            continue;
+          }
+          newOptions = newOptions.map((o) => {
+            if (o.id === optionId) return { ...o, vote_count: o.vote_count + 1 };
+            if (prev && o.id === prev) return { ...o, vote_count: Math.max(0, o.vote_count - 1) };
+            return o;
+          });
+          if (!prev) newTotal = newTotal + 1; // 新規投票時のみ total +1
+          newMyVotes = [optionId];
+        }
+
+        const nextPoll: Poll = {
+          ...target,
+          options: newOptions,
+          total_votes: newTotal,
+          my_vote_option_ids: newMyVotes,
+        };
+        const next = { ...old, [postKey]: nextPoll };
+        qc.setQueryData(exactKey, next);
+      }
+
+      return { snapshot };
+    },
+    onError: (e, _vars, ctx) => {
+      // 楽観更新を snapshot で revert
+      if (ctx?.snapshot) {
+        for (const [key, data] of ctx.snapshot) qc.setQueryData(key, data);
+      }
+      // ログは残す (silent swallow しない)
+      console.warn('[usePollVote] vote failed:', e);
+    },
+    onSettled: () => {
+      // realtime invalidate との二重反映を server-truth で整合
+      qc.invalidateQueries({ queryKey: [KEY_PREFIX], refetchType: 'active' });
+    },
   });
   return {
     vote: (pollId: string, optionId: string, multiSelect: boolean) =>
       mutateAsync({ pollId, optionId, multiSelect }).catch((e) => {
-        // ログだけ残して silent swallow しない (UI は楽観更新済 → 失敗時は invalidate で revert)
-        console.warn('[usePollVote] vote failed:', e);
+        // mutateAsync の reject を呼び出し側に伝播させないが、内部の onError で
+        // snapshot revert + invalidate は既に走っているので UI 整合性は保たれる。
+        console.warn('[usePollVote] vote rejection:', e);
       }),
   };
 }

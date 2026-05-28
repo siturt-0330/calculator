@@ -167,15 +167,15 @@ const PARTICLE_DOT_STYLE = {
 // 評価されない)。factory にして component 内 useMemo で C 毎に再生成する。
 // 同テーマ render では useMemo が同一参照を返すので reconciliation コストは増えない。
 const makeStyles = (C: ColorPalette) => StyleSheet.create({
-  // 低信頼バナー
+  // 低信頼バナー — iOS-native: 角 12px に揃え、border を控えめに
   lowTrustBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SP['2'],
     paddingHorizontal: SP['3'],
-    paddingVertical: SP['2'],
+    paddingVertical: 10,
     backgroundColor: C.amberBg,
-    borderRadius: R.md,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: C.amber + '44',
     marginBottom: SP['2'],
@@ -205,8 +205,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     gap: 6,
     flexWrap: 'wrap',
   },
-  // 公式管理者の名前は少し太く. fontSize は smallM の 13 を引き継ぐ
-  officialName: { color: C.text, fontWeight: '700', letterSpacing: 0.2 },
+  // 公式管理者の名前は少し太く. fontSize は smallM の 13 を引き継ぐ。
+  // SF Pro Text の自然な tracking (size 13 で約 -0.08)
+  officialName: { color: C.text, fontWeight: '700', letterSpacing: -0.08 },
   officialSub: { color: C.text3 },
   anonRow: {
     flexDirection: 'column',
@@ -216,8 +217,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     gap: 1,
   },
   // 「匿」をやや強めに、relative time は subtle に — Twitter/Threads と同じ階層感
-  anonLabel: { color: C.text, fontWeight: '700', letterSpacing: 0.2 },
-  anonRelative: { color: C.text3, fontSize: 12, lineHeight: 15 },
+  // letterSpacing は iOS の SF Pro Text に倣う (size 13: 約 -0.08, size 12: 0)
+  anonLabel: { color: C.text, fontWeight: '700', letterSpacing: -0.08 },
+  anonRelative: { color: C.text3, fontSize: 12, lineHeight: 16 },
   morePress: { padding: 4 },
 
   // ヘッダー 2 行目に inline 配置する community 表示。
@@ -232,26 +234,31 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     maxWidth: '100%',
   },
   anonMetaDot: { color: C.text3, fontSize: 12, lineHeight: 15 },
+  // iOS-native: 黄色の派手なバッジから "上品な丸チップ" に。
+  // 背景 bg3 + hairline border + 角 full pill で、avatar + name を一塊として
+  // tap できる柔らかい chip にする。
   communityInline: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
     flexShrink: 1,
     minWidth: 0,
-    // tap target 確保: 視覚は 20px だが上下 padding で 28px 以上
-    paddingVertical: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: C.bg3,
+    borderRadius: R.full,
+    borderWidth: 1,
+    borderColor: C.divider,
   },
-  // 20px 円 ring (avatar 外枠). border 1px で BG から少し浮かせる
+  // 18px 円 ring (avatar 外枠). chip 内側なので border は外して shape だけ。
   communityInlineRingBase: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.bg3,
+    backgroundColor: C.bg4,
   },
   communityInlineImage: { width: '100%', height: '100%' },
   // icon_url が無い時の emoji fallback (CommunityAvatarBar と同じ思想)
@@ -270,15 +277,15 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     fontWeight: '600',
   },
 
-  // CW
+  // CW — iOS-native: 角 12px、amber border は少し透ける (44 = 27% alpha) と上品
   cwBox: {
     marginTop: SP['2'],
     paddingHorizontal: SP['4'],
     paddingVertical: SP['4'],
     backgroundColor: C.bg3,
-    borderRadius: R.lg,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: C.amber,
+    borderColor: C.amber + '88',
     alignItems: 'center',
     gap: SP['1'],
   },
@@ -287,27 +294,28 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   cwWarning: { color: C.text2, textAlign: 'center' },
   cwTap: { color: C.accent, marginTop: 4 },
 
-  // メディア
+  // メディア — iOS-native: 角 12px (card 14px の内側に少し小さい round で nested 階層感)
   mediaWrap: { gap: SP['2'], marginTop: SP['2'] },
   mediaItemBase: {
     width: '100%',
     backgroundColor: C.bg2,
-    borderRadius: R.md,
+    borderRadius: 12,
     overflow: 'hidden',
   },
 
-  // 本文 — Apple News 寄り: fontSize 15.5 / lineHeight 23 で密度を上げて scan しやすく
+  // 本文 — Apple News 寄り: fontSize 15 / lineHeight 22 (1.47, iOS 標準 1.4-1.5 域)
+  // letterSpacing -0.08 は SF Pro Text の自然な tracking
   bodyInner: { paddingTop: SP['3'], paddingBottom: SP['1'] },
-  bodyText: { color: C.text, fontSize: 15.5, lineHeight: 23 },
-  // 出典
+  bodyText: { color: C.text, fontSize: 15, lineHeight: 22, letterSpacing: -0.08 },
+  // 出典 — iOS-native: 角 12px, hairline divider, 軽い bg3
   sourceBtn: {
     marginTop: SP['2'],
     paddingHorizontal: SP['3'],
-    paddingVertical: SP['2'],
+    paddingVertical: 10,
     backgroundColor: C.bg3,
-    borderRadius: R.md,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: C.divider,
     flexDirection: 'row',
     alignItems: 'center',
     gap: SP['2'],
@@ -354,8 +362,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   reactionPillBase: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: SP['3'],
+    gap: 5,
+    paddingHorizontal: 10,
     // iOS の最小タップ領域 (44pt) に届くよう padding を確保。
     // 旧版 (vertical:4) は実効高さ ~24px → hitSlop:8 を足しても 40px で不足し、
     // スマホで「押しても反応しない」と感じるバグの主因だった。
@@ -364,12 +372,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1,
   },
   reactionOverflowPill: {
-    paddingHorizontal: SP['3'],
+    paddingHorizontal: 10,
     paddingVertical: 6,
     backgroundColor: C.bg3,
     borderRadius: R.full,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: C.divider,
   },
   reactionOverflowText: { fontSize: 12, color: C.text3, fontWeight: '700' },
 });
@@ -1138,35 +1146,38 @@ function AnonPostCardInner({
   );
 
   // ── 動的 style: props/state に依存するもののみ useMemo 化 ──
-  // ルート Container — modern glass card 風. 1 投稿 = 1 浮遊カード として扱う。
+  // ルート Container — iOS-native な「上品な elevated card」。
   //   - 背景: bg2 (elevated)
-  //   - 角: R.xl
-  //   - 細い 1px border (lowTrust 時は amber 強調)
-  //   - subtle shadow (SHADOW.sm) — press-in で SHADOW.md 相当まで拡張 (Reddit iOS 風)
+  //   - 角: 14px (iOS 標準の card radius. R.xl=20 はやや大袈裟だった)
+  //   - hairline border (theme.border で divider トークンに揃える)
+  //   - iOS-native shadow: opacity 0.04, radius 12, offset (0,2) — 重すぎない
+  //     low-trust 時は border を amber に強調するだけで shadow は同じ
   //   - 横 padding は feed.tsx 側 (FlashList contentContainer) で吸収するため
   //     card 自体には marginHorizontal を持たせない。
   //   - card 間 gap は marginBottom で確保。
+  //   - 横/縦 padding は 18 / 18 / 14 で iOS 標準の "上品な余白"
   const containerStyle = useMemo(
     () => ({
       backgroundColor: C.bg2,
       borderWidth: 1,
-      borderColor: lowTrust ? C.amber + '44' : 'rgba(255,255,255,0.06)',
-      borderRadius: R.xl,
-      paddingHorizontal: SP['4'],
-      paddingTop: SP['4'],
-      paddingBottom: SP['3'],
+      borderColor: lowTrust ? C.amber + '44' : C.border,
+      borderRadius: 14,
+      paddingHorizontal: 18,
+      paddingTop: 18,
+      paddingBottom: 14,
       marginBottom: SP['3'],
       maxWidth: 720,
       alignSelf: 'center' as const,
       width: '100%' as const,
       // shadowColor / shadowOffset / shadowRadius は静的 (worklet で扱う必要なし)。
       // shadowOpacity / elevation だけを worklet 経由で動的に変える (下記参照)。
+      // iOS 標準: subtle で散らない. radius 12 + offset y:2 が "上品な elevation"
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 2 } as const,
-      shadowRadius: 6,
+      shadowRadius: 12,
     }),
-    // C 全体ではなく実際使う 2 値のみ依存 — テーマ切替時のみ再計算
-    [C.bg2, C.amber, lowTrust],
+    // C 全体ではなく実際使う 3 値のみ依存 — テーマ切替時のみ再計算
+    [C.bg2, C.amber, C.border, lowTrust],
   );
 
   // ============================================================
@@ -1195,13 +1206,15 @@ function AnonPostCardInner({
   const animatedShadowStyle = useAnimatedStyle(() => {
     if (reduceMotionForCard) {
       // ReducedMotion: 固定 shadow / scale 1 (worklet からは触らない)
-      return { shadowOpacity: 0.08, elevation: 2, transform: [{ scale: 1 }] };
+      // iOS-native subtle shadow: opacity 0.04, elevation 1
+      return { shadowOpacity: 0.04, elevation: 1, transform: [{ scale: 1 }] };
     }
-    // 0 → 1 で scale 1 → 0.96 / shadowOpacity 0.08 → 0.18 / elevation 2 → 5
+    // 0 → 1 で scale 1 → 0.96 / shadowOpacity 0.04 → 0.10 / elevation 1 → 3
+    // iOS では shadow を主役にせず、軽い lift だけ感じさせる
     const liftScale = 1 - pressLift.value * 0.04;
     return {
-      shadowOpacity: 0.08 + pressLift.value * 0.1,
-      elevation: 2 + pressLift.value * 3,
+      shadowOpacity: 0.04 + pressLift.value * 0.06,
+      elevation: 1 + pressLift.value * 2,
       transform: [{ scale: liftScale }],
     };
   });

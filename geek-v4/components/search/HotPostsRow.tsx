@@ -20,7 +20,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useColors } from '../../hooks/useColors';
 import { PressableScale } from '../ui/PressableScale';
 import { Icon } from '../../constants/icons';
-import { R, SP } from '../../design/tokens';
+import { R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { fetchPosts } from '../../lib/api/posts';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
@@ -30,6 +30,8 @@ import type { Post } from '../../types/models';
 const CARD_WIDTH = 280;
 const CARD_HEIGHT = 200;
 const LIMIT = 10;
+// iOS-native: card 間 gap を含めた snap 単位
+const SNAP_INTERVAL = CARD_WIDTH + SP['3'];
 
 export function HotPostsRow() {
   const C = useColors();
@@ -53,9 +55,43 @@ export function HotPostsRow() {
   const posts = data ?? [];
 
   if (isLoading && posts.length === 0) {
+    // iOS-native skeleton: 2 枚分のグレー placeholder を横スクロールで
     return (
-      <View style={{ paddingVertical: SP['6'], alignItems: 'center' }}>
-        <ActivityIndicator color={C.accent} />
+      <View style={{ gap: SP['2'] }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            paddingHorizontal: SP['4'],
+          }}
+        >
+          <Icon.sparkles size={14} color={C.text3} strokeWidth={2.2} />
+          <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>
+            いま盛り上がっている
+          </Text>
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ gap: SP['3'], paddingHorizontal: SP['4'] }}
+        >
+          {[0, 1].map((i) => (
+            <View
+              key={`sk-${i}`}
+              style={{
+                width: CARD_WIDTH,
+                height: CARD_HEIGHT,
+                borderRadius: R.lg,
+                backgroundColor: C.bg2,
+                borderWidth: 1,
+                borderColor: C.border,
+                opacity: 0.6,
+              }}
+            />
+          ))}
+        </ScrollView>
+        <ActivityIndicator color={C.accent} style={{ position: 'absolute', top: 90, alignSelf: 'center' }} />
       </View>
     );
   }
@@ -80,9 +116,14 @@ export function HotPostsRow() {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        // iOS-native: card 1 枚毎に snap (Apple News / Reddit Apollo の挙動)
+        snapToInterval={SNAP_INTERVAL}
+        snapToAlignment="start"
+        decelerationRate="fast"
         contentContainerStyle={{
           gap: SP['3'],
           paddingHorizontal: SP['4'],
+          paddingVertical: 2, // shadow が clip されないように余白
         }}
       >
         {posts.map((p) => (
@@ -121,15 +162,19 @@ function HotPostCard({ post, onPress }: { post: Post; onPress: () => void }) {
       onPress={onPress}
       haptic="tap"
       scaleValue={0.97}
-      style={{
-        width: CARD_WIDTH,
-        height: CARD_HEIGHT,
-        borderRadius: R.md,
-        backgroundColor: C.bg2,
-        borderWidth: 1,
-        borderColor: C.border,
-        overflow: 'hidden',
-      }}
+      // iOS-native: radius を lg (14) に, subtle shadow (opacity 0.04 相当)
+      style={[
+        {
+          width: CARD_WIDTH,
+          height: CARD_HEIGHT,
+          borderRadius: R.lg,
+          backgroundColor: C.bg2,
+          borderWidth: 1,
+          borderColor: C.border,
+          overflow: 'hidden',
+        },
+        SHADOW.sm,
+      ]}
       accessibilityLabel={`投稿を開く: ${title ?? ''}`}
     >
       {/* タイトル */}

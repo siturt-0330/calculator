@@ -40,6 +40,8 @@ export default function NicknameScreen() {
   const canSubmit = charCount >= 2 && charCount <= 20 && !saving;
 
   const next = async () => {
+    // 連打防御 — onSubmitEditing と Button onPress が race するケースを 1 行で潰す
+    if (saving) return;
     if (!canSubmit) {
       setTouched(true);
       if (charCount < 2) {
