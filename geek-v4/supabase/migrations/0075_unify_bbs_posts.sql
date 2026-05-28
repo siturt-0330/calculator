@@ -79,6 +79,18 @@ alter table public.comments add constraint comments_content_check check (length(
 alter table public.posts add column if not exists community_id_legacy uuid;
 
 -- ============================================================
+-- Step 3.5: profiles guard trigger を一時 disable
+-- ============================================================
+-- posts/comments INSERT で trigger (update_post_count / update_comment_count) が
+-- profiles.post_count や comment_count を +1 する。 ただし guard_profile_update_trg
+-- (migration 0036) が「post_count is maintained by triggers」 で raise する仕様
+-- (= 直接 SQL update を防ぐため)。 migration 内の trigger 経由 update も結果的に
+-- block されるため、 一時 disable する。 Step 6.5 で集計 backfill で整合を取り、
+-- Step 6.6 で再 enable。
+-- ============================================================
+alter table public.profiles disable trigger guard_profile_update_trg;
+
+-- ============================================================
 -- Step 4: bbs_threads → posts 移行
 -- ============================================================
 -- - UUID 保持 (deep-link 互換)
@@ -138,6 +150,27 @@ update public.posts p
    set comments_count = sub.c
   from (select post_id, count(*) c from public.comments group by post_id) sub
  where sub.post_id = p.id and p.title is not null;
+
+-- ============================================================
+-- Step 6.5: profiles.post_count / comment_count を集計 backfill
+-- ============================================================
+-- guard が disable 中なので 直接 update できる。 BBS 移行で新たに追加された
+-- posts/comments の author 分について、 実際の集計に合わせて整える。
+-- (既存値が trigger で正しく維持されていた場合でも、 集計再計算は idempotent)
+update public.profiles p
+   set post_count = sub.cnt
+  from (select author_id, count(*) cnt from public.posts group by author_id) sub
+ where sub.author_id = p.id;
+
+update public.profiles p
+   set comment_count = sub.cnt
+  from (select author_id, count(*) cnt from public.comments group by author_id) sub
+ where sub.author_id = p.id;
+
+-- ============================================================
+-- Step 6.6: guard trigger を再 enable
+-- ============================================================
+alter table public.profiles enable trigger guard_profile_update_trg;
 
 -- ============================================================
 -- Step 7: community_id_legacy → post_communities 移行
