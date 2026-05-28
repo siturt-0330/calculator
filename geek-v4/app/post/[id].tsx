@@ -240,45 +240,37 @@ export default function PostDetailScreen() {
 
   // Realtime: 同じ投稿への新規コメント + 投稿カウンター更新 + リアクション
   //
-  // ★ 1 channel / 1 table パターン (旧版は 1 channel に 3 table を chain して
-  //   いたが、publication 未登録 table が混ざると CHANNEL_ERROR で全死する
-  //   既知不具合があるため分離する。詳細は hooks/useFeedRealtime.ts のコメント)。
+  // ★ Audit E#5 (2026-05-28):
+  //   旧版は 3 channel (comments / posts / post_reactions) に分離していたが、
+  //   3 テーブルとも publication 登録済 (0008) なので 1 channel + 3 `.on()` に統合。
+  //   CLAUDE.md § 5.3 「publication 未登録 table を chain しない」の cascade リスクが
+  //   無いケース。post 詳細画面の同時 channel 数を 3 → 1 に削減。
   //
   // 注: 旧 reactions invalidate は ['reactions'] (legacy cache key) を叩いて
   //     いたが、投稿詳細では useFeedPage 経由で [FEED_PAGE_KEY] cache を使う。
   //     正しい target は invalidateFeedPage(qc) (= [FEED_PAGE_KEY] 全 cache)。
   useEffect(() => {
     if (!id) return;
-    const detachers: Array<() => void> = [];
-    detachers.push(
-      attachChannel(`post-detail-comments:${id}`, (ch) =>
-        ch.on(
+    const detach = attachChannel(`post-detail-bundle:${id}`, (ch) =>
+      ch
+        .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'comments', filter: `post_id=eq.${id}` },
           () => qc.invalidateQueries({ queryKey: ['post-comments', id] }),
-        ),
-      ),
-    );
-    detachers.push(
-      attachChannel(`post-detail-post:${id}`, (ch) =>
-        ch.on(
+        )
+        .on(
           'postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'posts', filter: `id=eq.${id}` },
           () => qc.invalidateQueries({ queryKey: ['post', id] }),
-        ),
-      ),
-    );
-    detachers.push(
-      attachChannel(`post-detail-reactions:${id}`, (ch) =>
-        ch.on(
+        )
+        .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'post_reactions', filter: `post_id=eq.${id}` },
           () => invalidateFeedPage(qc),
         ),
-      ),
     );
     return () => {
-      for (const d of detachers) d();
+      try { detach(); } catch { /* ignore */ }
     };
   }, [id, qc]);
 
@@ -587,6 +579,9 @@ export default function PostDetailScreen() {
                           width={64}
                           height={64}
                           radius={R.sm}
+                          // 64px 表示 × 2x DPR = 128。 retina 余裕で 160。
+                          // 旧版 (default 720) は 11 倍過剰で帯域を浪費していた。
+                          thumbWidth={160}
                         />
                       </View>
                     )}

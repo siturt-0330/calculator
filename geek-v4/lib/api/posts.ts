@@ -13,6 +13,70 @@ export type SortMode = 'for-you' | 'hot' | 'new' | 'top' | 'rising';
 const POSTS_SELECT_COLS =
   'id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, qa_mode, created_at, author_id';
 
+// posts + post_communities + communities を 1 RTT で取得するための embed セット。
+// attachOfficialAuthor が必要としていた 2nd round-trip を畳み込み、
+// フィード描画の round-trip を半減させる。
+// 失敗時 (PostgREST schema cache 等) は legacy 2-step に自動 fallback。
+const POSTS_SELECT_COLS_WITH_COMM = `${POSTS_SELECT_COLS}, post_communities(community:communities(is_official, official_admin_user_id, official_admin_display_name, official_organization))`;
+
+// embed 結果 → official_author 派生フィールドを posts[] に書き戻すヘルパ。
+// (attachOfficialAuthor の純粋関数版 — supabase fetch なし)
+type EmbeddedCommunityRow = {
+  is_official?: boolean | null;
+  official_admin_user_id?: string | null;
+  official_admin_display_name?: string | null;
+  official_organization?: string | null;
+};
+type PostWithEmbeddedComm = Post & {
+  post_communities?:
+    | Array<{ community: EmbeddedCommunityRow | EmbeddedCommunityRow[] | null }>
+    | null;
+};
+
+function attachOfficialAuthorFromEmbed<T extends Post>(
+  rawPosts: PostWithEmbeddedComm[],
+): T[] {
+  return rawPosts.map((p) => {
+    // post_communities embed (RLS で見れない場合は null/[])
+    const pcs = Array.isArray(p.post_communities) ? p.post_communities : [];
+    let official: { name: string; organization: string } | undefined;
+    for (const pc of pcs) {
+      const raw = pc.community;
+      if (!raw) continue;
+      const c = Array.isArray(raw) ? raw[0] : raw;
+      if (!c || !c.is_official || !c.official_admin_user_id) continue;
+      if (!p.author_id || p.author_id !== c.official_admin_user_id) continue;
+      official = {
+        name: c.official_admin_display_name ?? '',
+        organization: c.official_organization ?? '',
+      };
+      break; // 最初に該当する公式コミュ管理者を採用
+    }
+    // embed フィールド (post_communities) を返却 shape から落として Post 型に揃える
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { post_communities: _ignored, ...rest } = p;
+    if (official) {
+      return { ...(rest as Post), official_author: official } as T;
+    }
+    return rest as T;
+  });
+}
+
+// PostgREST が embed をサポートしていない / RLS で permission denied 等で
+// fail した場合に true を返す判定。embed 文字列を含む / 'relationship' 系の
+// エラーは fallback で legacy パスに戻す。
+function isEmbedFailure(err: unknown): boolean {
+  if (!err) return false;
+  const msg = (err as { message?: string }).message ?? '';
+  if (/post_communities/i.test(msg) && /(could not|cache|relationship)/i.test(msg)) {
+    return true;
+  }
+  // PGRST200 = "could not find relationship"
+  const code = (err as { code?: string }).code ?? '';
+  if (code === 'PGRST200' || code === 'PGRST201') return true;
+  return false;
+}
+
 // UUID 形式チェック (壊れた URL や古い ID 対策) — fetchPostById と fetchCommunityPosts で使う
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -54,9 +118,12 @@ export async function fetchPosts({
       ? 'new'
       : sort;
 
+  // 1 RTT で post + 公式コミュ管理者情報を取得するため、post_communities embed を含む
+  // SELECT を使う。embed 失敗時のみ legacy パス (POSTS_SELECT_COLS + attachOfficialAuthor)
+  // にフォールバック。
   let query = supabase
     .from('posts')
-    .select(POSTS_SELECT_COLS)
+    .select(POSTS_SELECT_COLS_WITH_COMM)
     .eq('is_anonymous', true)
     .eq('is_public', true)
     .limit(effectiveLimit);
@@ -91,8 +158,23 @@ export async function fetchPosts({
   //   hot mode:        '<float>|<ISO timestamp>'     e.g. '4.213|2026-05-19T12:34:56.789Z'
   //                    (hot は hot_score = double precision なので浮動小数を受け付ける)
   const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   function parseTimestampCursor(c: string): string | null {
     return ISO_RE.test(c) ? c : null;
+  }
+  // new sort 用 composite cursor: '<ISO timestamp>|<uuid>'
+  // 同じ created_at の post が複数存在する場合 (高頻度投稿環境で発生) に
+  // 1 ページ目と 2 ページ目で同じ post が出る/欠落する境界バグを防ぐ (Audit D #6)。
+  // 旧 cursor (ISO timestamp 単体) は parseTimestampCursor で fallback 受付。
+  function parseNewCompositeCursor(c: string): { ts: string; id: string } | null {
+    const parts = c.split('|');
+    if (parts.length !== 2) return null;
+    const ts = parts[0];
+    const id = parts[1];
+    if (!ts || !id) return null;
+    if (!ISO_RE.test(ts)) return null;
+    if (!UUID_RE.test(id)) return null;
+    return { ts, id };
   }
   function parseCompositeCursor(c: string): { likes: number; ts: string } | null {
     const parts = c.split('|');
@@ -133,11 +215,24 @@ export async function fetchPosts({
   const isHot = effectiveSort === 'hot';
 
   if (effectiveSort === 'new') {
-    query = query.order('created_at', { ascending: false });
+    // 同 created_at の post の境界バグ防止: secondary key として id desc を入れる。
+    // PostgreSQL の order は決定的になるので、cursor の境界で post の重複/欠落が起きない。
+    query = query
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false });
     if (cursor) {
-      const validTs = parseTimestampCursor(cursor);
-      if (validTs) query = query.lt('created_at', validTs);
-      // 不正なら cursor を無視して先頭から (DoS 防止 — error throw だと無限リロード起こす)
+      // 1) 新形式 composite '<ts>|<id>': created_at の同値境界を id で tie-break
+      const parsedComposite = parseNewCompositeCursor(cursor);
+      if (parsedComposite) {
+        query = query.or(
+          `created_at.lt.${parsedComposite.ts},and(created_at.eq.${parsedComposite.ts},id.lt.${parsedComposite.id})`,
+        );
+      } else {
+        // 2) 旧形式 (ISO timestamp 単体) — 後方互換のため受け付ける
+        const validTs = parseTimestampCursor(cursor);
+        if (validTs) query = query.lt('created_at', validTs);
+        // 不正なら cursor を無視して先頭から (DoS 防止 — error throw だと無限リロード起こす)
+      }
     }
   } else if (effectiveSort === 'top') {
     query = query.order('likes_count', { ascending: false }).order('created_at', { ascending: false });
@@ -167,6 +262,73 @@ export async function fetchPosts({
   let { data, error } = await query;
 
   // ----------------------------------------------------------------
+  // embed fallback: post_communities embed が PostgREST schema cache 上で
+  // 解決できなかった場合 (古い Supabase / 権限不足) は POSTS_SELECT_COLS 単独で
+  // 再 fetch して、後段の attachOfficialAuthor を別 RTT で呼ぶ。
+  // ----------------------------------------------------------------
+  let usedEmbedFallback = false;
+  if (error && isEmbedFailure(error)) {
+    console.warn(
+      '[posts] post_communities embed failed — falling back to legacy 2-RTT path:',
+      (error as { message?: string }).message,
+    );
+    // 同じクエリを embed 抜きで組み直す
+    let fb = supabase
+      .from('posts')
+      .select(POSTS_SELECT_COLS)
+      .eq('is_anonymous', true)
+      .eq('is_public', true)
+      .limit(effectiveLimit);
+    if (home) fb = fb.in('visibility', ['public', 'community_public']);
+    if (blockedTags.length > 0) {
+      const SERVER_LIMIT = 80;
+      const serverSide = blockedTags.length > SERVER_LIMIT
+        ? blockedTags.slice(0, SERVER_LIMIT)
+        : blockedTags;
+      fb = fb.not('tag_names', 'cs', `{${serverSide.join(',')}}`);
+    }
+    if (filterTags && filterTags.length > 0) {
+      fb = fb.overlaps('tag_names', filterTags);
+    }
+    if (effectiveSort === 'new') {
+      fb = fb.order('created_at', { ascending: false }).order('id', { ascending: false });
+      if (cursor) {
+        const parsedComposite = parseNewCompositeCursor(cursor);
+        if (parsedComposite) {
+          fb = fb.or(
+            `created_at.lt.${parsedComposite.ts},and(created_at.eq.${parsedComposite.ts},id.lt.${parsedComposite.id})`,
+          );
+        } else {
+          const v = parseTimestampCursor(cursor);
+          if (v) fb = fb.lt('created_at', v);
+        }
+      }
+    } else if (effectiveSort === 'top') {
+      fb = fb.order('likes_count', { ascending: false }).order('created_at', { ascending: false });
+      if (cursor) {
+        const p = parseCompositeCursor(cursor);
+        if (p) {
+          fb = fb.or(`likes_count.lt.${p.likes},and(likes_count.eq.${p.likes},created_at.lt.${p.ts})`);
+        }
+      }
+    } else {
+      fb = fb.order('hot_score', { ascending: false }).order('created_at', { ascending: false });
+      if (cursor) {
+        const p = parseHotCursor(cursor);
+        if (p) {
+          fb = fb.or(`hot_score.lt.${p.hot},and(hot_score.eq.${p.hot},created_at.lt.${p.ts})`);
+        }
+      }
+    }
+    const r = await fb;
+    // legacy SELECT 結果を embed 型に注入する (post_communities 列が無いだけで
+    // 後段の usedEmbedFallback 分岐で素通しされるので安全)
+    data = r.data as unknown as typeof data;
+    error = r.error;
+    usedEmbedFallback = true;
+  }
+
+  // ----------------------------------------------------------------
   // hot fallback: hot_score column が無い環境 (PG: 42703 undefined_column)
   // の場合、旧 likes_count desc に戻して再 fetch する。
   // PostgREST は code='42703' を返してくる (Supabase JS で error.code が
@@ -182,36 +344,39 @@ export async function fetchPosts({
       /does not exist/i.test(msg);
     if (isMissingColumn) {
       // 旧 query を組み直して再実行 (likes_count desc, created_at desc)
-      let fb = supabase
-        .from('posts')
-        .select(POSTS_SELECT_COLS)
-        .eq('is_anonymous', true)
-        .eq('is_public', true)
-        .limit(effectiveLimit);
-      if (home) fb = fb.in('visibility', ['public', 'community_public']);
+      // embed が動く環境なら fallback でも embed 経路を維持する。
+      // PostgREST の TS 型は SELECT 文字列をリテラルで型解析するため、
+      // 共通フィルタの適用には any 経由で型再帰を回避する (結果は unknown cast で揃える)。
+      const baseFb = usedEmbedFallback
+        ? supabase.from('posts').select(POSTS_SELECT_COLS)
+        : supabase.from('posts').select(POSTS_SELECT_COLS_WITH_COMM);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let q: any = baseFb;
+      q = q.eq('is_anonymous', true).eq('is_public', true).limit(effectiveLimit);
+      if (home) q = q.in('visibility', ['public', 'community_public']);
       if (blockedTags.length > 0) {
         const SERVER_LIMIT = 80;
         const serverSide = blockedTags.length > SERVER_LIMIT
           ? blockedTags.slice(0, SERVER_LIMIT)
           : blockedTags;
-        fb = fb.not('tag_names', 'cs', `{${serverSide.join(',')}}`);
+        q = q.not('tag_names', 'cs', `{${serverSide.join(',')}}`);
       }
       if (filterTags && filterTags.length > 0) {
-        fb = fb.overlaps('tag_names', filterTags);
+        q = q.overlaps('tag_names', filterTags);
       }
-      fb = fb
+      q = q
         .order('likes_count', { ascending: false })
         .order('created_at', { ascending: false });
       if (cursor) {
         const parsed = parseCompositeCursor(cursor);
         if (parsed) {
-          fb = fb.or(
+          q = q.or(
             `likes_count.lt.${parsed.likes},and(likes_count.eq.${parsed.likes},created_at.lt.${parsed.ts})`,
           );
         }
       }
-      const fbResult = await fb;
-      data = fbResult.data;
+      const fbResult = await q;
+      data = fbResult.data as unknown as typeof data;
       error = fbResult.error;
       usedHotFallback = true;
       if (!error) {
@@ -222,7 +387,12 @@ export async function fetchPosts({
 
   if (error) throw error;
 
-  const posts = (data ?? []) as Post[];
+  // embed 経路 → 純粋関数で official_author を attach (RTT ゼロ)
+  // legacy 経路 (embed 失敗) → 別 RTT で attachOfficialAuthor を呼ぶ
+  const rawPosts = (data ?? []) as PostWithEmbeddedComm[];
+  const posts = usedEmbedFallback
+    ? (rawPosts as Post[])
+    : attachOfficialAuthorFromEmbed<Post>(rawPosts);
   let nextCursor: string | null = null;
   // rising モードは client side 再ランクで上位 30 件しか出さないため、
   // ページングしても意味がない (= 31 件目以下を server 側で fetch しても
@@ -230,8 +400,10 @@ export async function fetchPosts({
   if (!isRising && posts.length === effectiveLimit) {
     const last = posts[posts.length - 1];
     if (last) {
-      if (effectiveSort === 'new') nextCursor = last.created_at;
-      else if (isHot && !usedHotFallback) {
+      if (effectiveSort === 'new') {
+        // composite cursor: created_at + id で tie-break (Audit D #6)
+        nextCursor = `${last.created_at}|${last.id}`;
+      } else if (isHot && !usedHotFallback) {
         // hot 通常経路: hot_score|created_at の合成 cursor
         const hotVal = (last as { hot_score?: number | null }).hot_score;
         const hotStr = typeof hotVal === 'number' && Number.isFinite(hotVal) ? String(hotVal) : '0';
@@ -242,7 +414,9 @@ export async function fetchPosts({
       }
     }
   }
-  const decorated = await attachOfficialAuthor(posts);
+  // embed 経路で attach 済 → 2nd RTT を skip。
+  // legacy 経路 (embed 失敗時) のみ attachOfficialAuthor を呼ぶ。
+  const decorated = usedEmbedFallback ? await attachOfficialAuthor(posts) : posts;
   return { posts: decorated, nextCursor };
 }
 
@@ -474,9 +648,10 @@ export async function fetchCommunityPosts({
   if (rows.length === 0) return { posts: [], nextCursor: null };
 
   const postIds = rows.map((r) => r.post_id);
+  // post_communities embed を含む SELECT で 1 RTT 化。失敗時は legacy 2-RTT に fallback。
   let postsQuery = supabase
     .from('posts')
-    .select(POSTS_SELECT_COLS)
+    .select(POSTS_SELECT_COLS_WITH_COMM)
     .in('id', postIds);
 
   if (sort === 'top') {
@@ -493,12 +668,33 @@ export async function fetchCommunityPosts({
     postsQuery = postsQuery.order('created_at', { ascending: false });
   }
 
-  const { data, error } = await postsQuery;
+  let { data, error } = await postsQuery;
+  let usedFallback = false;
+  if (error && isEmbedFailure(error)) {
+    console.warn(
+      '[fetchCommunityPosts] embed failed — fallback to legacy path:',
+      (error as { message?: string }).message,
+    );
+    let fb = supabase.from('posts').select(POSTS_SELECT_COLS).in('id', postIds);
+    if (sort === 'top' || sort === 'hot') {
+      fb = fb.order('likes_count', { ascending: false }).order('created_at', { ascending: false });
+    } else {
+      fb = fb.order('created_at', { ascending: false });
+    }
+    const r = await fb;
+    // legacy SELECT 結果を embed 型に注入する (後段 usedFallback=true で素通し)
+    data = r.data as unknown as typeof data;
+    error = r.error;
+    usedFallback = true;
+  }
   if (error) {
     console.warn('[fetchCommunityPosts] posts fetch failed:', error.message);
     return { posts: [], nextCursor: null };
   }
-  const posts = (data ?? []) as Post[];
+  const rawPosts = (data ?? []) as PostWithEmbeddedComm[];
+  const posts: Post[] = usedFallback
+    ? (rawPosts as Post[])
+    : attachOfficialAuthorFromEmbed<Post>(rawPosts);
 
   // nextCursor: new sort 時のみ attach 時刻ベースで返す
   let nextCursor: string | null = null;
@@ -507,24 +703,45 @@ export async function fetchCommunityPosts({
     if (last) nextCursor = last.created_at;
   }
 
-  const decorated = await attachOfficialAuthor(posts);
+  // embed 経路で attach 済 → 2nd RTT を skip。
+  const decorated = usedFallback ? await attachOfficialAuthor(posts) : posts;
   return { posts: decorated, nextCursor };
 }
 
 export async function fetchPostById(id: string): Promise<Post | null> {
   if (!id || !UUID_RE.test(id)) return null;
+  // 1 RTT で post + 公式コミュ管理者情報を取得 (post_communities embed)。
+  // embed 失敗時は legacy 2-RTT に fallback。
   const { data, error } = await supabase
     .from('posts')
-    .select(POSTS_SELECT_COLS)
+    .select(POSTS_SELECT_COLS_WITH_COMM)
     .eq('id', id)
     .maybeSingle();
+  if (error && isEmbedFailure(error)) {
+    console.warn(
+      '[fetchPostById] embed failed — fallback to legacy:',
+      (error as { message?: string }).message,
+    );
+    const fb = await supabase
+      .from('posts')
+      .select(POSTS_SELECT_COLS)
+      .eq('id', id)
+      .maybeSingle();
+    if (fb.error) {
+      console.warn('[fetchPostById] error:', fb.error.message);
+      return null;
+    }
+    if (!fb.data) return null;
+    const [decoratedFb] = await attachOfficialAuthor([fb.data as Post]);
+    return decoratedFb ?? null;
+  }
   if (error) {
     // RLS で読めない場合や fetch エラー — 致命的ではないので null を返す
     console.warn('[fetchPostById] error:', error.message);
     return null;
   }
   if (!data) return null;
-  const [decorated] = await attachOfficialAuthor([data as Post]);
+  const [decorated] = attachOfficialAuthorFromEmbed<Post>([data as PostWithEmbeddedComm]);
   return decorated ?? null;
 }
 

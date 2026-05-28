@@ -32,7 +32,6 @@ import { useToastStore } from '../../stores/toastStore';
 import { useFeedStore } from '../../stores/feedStore';
 import { AnonPostCard } from '../../components/feed/AnonPostCard';
 import { AdCard } from '../../components/feed/AdCard';
-import { SortTabs } from '../../components/feed/SortTabs';
 import type { Ad } from '../../lib/api/ads';
 
 // フィード上の item — 通常 post か広告アイテム (__ad マーカー付き)
@@ -171,21 +170,19 @@ export default function FeedScreen() {
   useFeedRealtime(postIds);
 
   // fallback 判定:
-  //   - ENV flag で RPC が無効 (= isDisabled)
-  //   - RPC は走ったが空集合 (= isEmpty かつ postIds は非空)
-  //   - **RPC 起動中も並列で legacy を起動**しておく (2026-05-26 修正)
+  //   - ENV flag で RPC が無効 (= isDisabled)  → legacy fire
+  //   - それ以外は RPC のみで完結 (legacy hooks は disable)
   //
-  // 旧版は「RPC が empty 確定後に legacy fetch を起動」だったため、user 視点で:
-  //   - 起動 → posts 表示 (~500ms)
-  //   - RPC 完了して空判明 (~500ms 追加)
-  //   - legacy fetch 起動 (~500ms 追加)
-  //   - リアクション chip ようやく表示
-  // 合計 1.5-2 秒のラグで「テキストスタンプが最初は出ず、別タブから戻ると出る」
-  // (= 戻る頃には全 fetch が完了している) という UX 不具合を産んでいた。
-  // 並列 fire に変えると RPC 成功時に legacy も走るが、各 query は staleTime
-  // 30-60s でキャッシュされ二重 fetch にならない。renderItem 側は full?.reactions
-  // ?? legacy[id] の順なので RPC 結果が優先される。
-  const useLegacy = rpcDisabled || postIds.length > 0;
+  // ★ パフォーマンス最適化 (2026-05-28):
+  //   旧版は「RPC が active でも legacy hooks を常時起動」する設計だった。
+  //   これは「最初のチップ表示が遅延する」UX バグを治すための過渡対応だったが、
+  //   結果として 6 個の並列 fetch (likes/concerns/saves/reactions/added_tags/polls)
+  //   が毎回走り、初回ロード時の HTTP round-trip が 7+1 = 8 個に膨れていた。
+  //   RPC は同等データを 1 RTT で返すので、本来 legacy は ENV flag fallback 時のみで十分。
+  //   レイテンシ短縮 + Supabase row 引きの圧縮 (4-6x の query 数削減) を狙う。
+  //   renderItem 側で full?.X ?? legacy[id] ?? EMPTY の順 — RPC 経路なら legacy は
+  //   常に空 map になるが、依然として fallback 経路で安全。
+  const useLegacy = rpcDisabled;
   const legacyIds = useLegacy ? postIds : EMPTY_LEGACY_IDS;
 
   const { data: legacyMyLikes = EMPTY_BOOL_MAP } = useLikes(legacyIds);
@@ -312,7 +309,9 @@ export default function FeedScreen() {
         if (isAdItem(item)) continue;
         const urls = item.media_urls ?? [];
         for (const u of urls) {
-          try { ExpoImage.prefetch(thumbedUrl(u, 720)); } catch { /* ignore */ }
+          // 480 で AnonPostCard 側の ProgressiveImage thumbWidth と揃える
+          // (URL が完全一致しないと cache hit しない — 揃えれば prefetch が活きる)
+          try { ExpoImage.prefetch(thumbedUrl(u, 480)); } catch { /* ignore */ }
         }
       }
     },
@@ -544,12 +543,8 @@ export default function FeedScreen() {
         </View>
       </View>
 
-      {/* SortTabs: for-you / new / rising 🚀 / hot / top の 5 軸 */}
-      <View style={{ alignItems: 'center' }}>
-        <View style={{ width: '100%', maxWidth: 720, paddingHorizontal: SP['4'], paddingBottom: SP['2'] }}>
-          <SortTabs value={sort} onChange={setSort} />
-        </View>
-      </View>
+      {/* SortTabs UI は除去 (内部 sort logic は維持)
+          — useFeedStore.sort / setSort は他箇所で参照されるため selector は残す */}
 
       <View style={{ alignItems: 'center' }}>
         <View style={{ width: '100%', maxWidth: 720, paddingHorizontal: SP['4'], paddingBottom: SP['3'] }}>

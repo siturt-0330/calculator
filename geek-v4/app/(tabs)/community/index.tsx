@@ -264,7 +264,9 @@ export default function CommunityScreen() {
       for (const item of lookahead) {
         const urls = item.post.media_urls ?? [];
         for (const u of urls) {
-          try { ExpoImage.prefetch(thumbedUrl(u, 720)); } catch { /* ignore */ }
+          // 480 で AnonPostCard 側 ProgressiveImage の thumbWidth と完全一致させて
+          // prefetch を cache hit させる (URL ミスマッチだと無意味になる)
+          try { ExpoImage.prefetch(thumbedUrl(u, 480)); } catch { /* ignore */ }
         }
       }
     },

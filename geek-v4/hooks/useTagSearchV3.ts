@@ -20,23 +20,19 @@ async function fetchAllTagNames(): Promise<string[]> {
   return (data ?? []).map((t: { name: string }) => t.name);
 }
 
+// Audit G#7 (2026-05): mv_trending_tags の 5 分毎 refresh (0071_trending_cron.sql)
+// を入れたので、posts table の per-session 集計から MV 経由読み込みに切り替え。
+// MV は内部で order by recent_count desc されているが、降順の保証のため改めて order 指定。
 async function fetchTrendingTagNames(): Promise<string[]> {
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data } = await supabase
-    .from('posts')
-    .select('tag_names')
-    .gte('created_at', since)
-    .order('created_at', { ascending: false })
-    .limit(200);
-  const counts: Record<string, number> = {};
-  for (const row of (data ?? []) as Array<{ tag_names: string[] }>) {
-    for (const t of row.tag_names ?? []) counts[t] = (counts[t] ?? 0) + 1;
-  }
-  return Object.entries(counts)
-    .filter(([, c]) => c >= 2)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 30)
-    .map(([t]) => t);
+    .from('mv_trending_tags')
+    .select('tag, recent_count')
+    .gte('recent_count', 2) // 元実装と同じ閾値 (1 回しか出てないタグは除外)
+    .order('recent_count', { ascending: false })
+    .limit(30);
+  return (data ?? [])
+    .map((r: { tag: string | null }) => r.tag)
+    .filter((t): t is string => !!t);
 }
 
 export function useTagSearchV3() {

@@ -4,9 +4,8 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming, interpolateColo
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { attachChannel } from '../lib/realtime';
 import { fetchTrendingTags } from '../lib/api/trending';
 import { TopBar } from '../components/nav/TopBar';
 import { BackButton } from '../components/nav/BackButton';
@@ -142,7 +141,6 @@ const CATEGORY_LABELS: Record<Category, { label: string; emoji: string }> = {
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const qc = useQueryClient();
   const [q, setQ] = useState('');
   const [debounced, setDebounced] = useState('');
   const [category, setCategory] = useState<Category>('all');
@@ -634,43 +632,11 @@ export default function SearchScreen() {
     ),
   }));
 
-  // Realtime: subscribe to new posts whose tag_names intersect the current query.
-  // Cap = 1 channel per screen — we detach the previous channel before attaching the next.
-  useEffect(() => {
-    if (!debounced) return;
-    // 比較用に小文字化したキーワード/タグ set
-    const matchTerms = new Set<string>();
-    for (const k of parsedQuery.keywords) if (k) matchTerms.add(k.toLowerCase());
-    for (const t of parsedQuery.tags) if (t) matchTerms.add(t.toLowerCase());
-    if (matchTerms.size === 0) return;
-
-    // Channel 名は query で一意化 (前 channel は cleanup で detach されるので常に最大1)
-    const safeKey = debounced.slice(0, 64).replace(/[^a-zA-Z0-9_-]/g, '_');
-    const channelName = `search-live:${safeKey}`;
-
-    const detach = attachChannel(channelName, (ch) =>
-      ch.on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'posts' },
-        (payload) => {
-          const row = payload.new as { tag_names?: string[] | null } | undefined;
-          const tags = row?.tag_names ?? [];
-          let hit = false;
-          for (const tag of tags) {
-            if (!tag) continue;
-            if (matchTerms.has(tag.toLowerCase())) { hit = true; break; }
-          }
-          if (hit) {
-            // 現在の検索キャッシュを無効化 — 次回 render で再フェッチされる
-            qc.invalidateQueries({ queryKey: ['search-posts-v3'] });
-          }
-        },
-      ),
-    );
-    return () => {
-      detach();
-    };
-  }, [debounced, parsedQuery, qc]);
+  // Audit E#5 (2026-05-28): 旧版は `search-live:*` channel で `posts INSERT`
+  // (filter 不可) を購読していたが、検索画面に滞在中の人が新規投稿の到来を
+  // ライブで見たい頻度は極めて低い。INSERT 全件 fanout は全クライアントに
+  // 刺さって痛いため撤去。再 fetch は pull-to-refresh + query 変更時の
+  // staleTime 内 cache 経由で十分。
 
   // ハイライト用のターム
   const highlightTerms = useMemo(

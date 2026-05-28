@@ -35,6 +35,11 @@ type RawCommentWithAuthor = {
 
 type RawCommentNoAuthor = Omit<RawCommentWithAuthor, 'author'>;
 
+// DoS 防止: 1 post に対する comment は上限 500 件で打ち切り (fetchReplies と同じ方針)。
+// 巨大スレッドでも client 側 OOM / UI フリーズを防ぐ。
+// pagination は将来 cursor (created_at, id) で追加予定 (Audit G #1)。
+const FETCH_COMMENTS_LIMIT = 500;
+
 // 投稿へのコメント取得 (FK 明示 + author join 失敗時 fallback)
 // fetchReplies と同じ PGRST201 リスクがあるため 2 段構え:
 //   1) profiles join で trust_score も付与
@@ -46,7 +51,8 @@ export async function fetchComments(postId: string): Promise<Comment[]> {
       `${COMMENT_SELECT_COLS}, author:profiles!comments_author_id_fkey(trust_score)`,
     )
     .eq('post_id', postId)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true })
+    .limit(FETCH_COMMENTS_LIMIT);
 
   if (!withAuthor.error) {
     return (withAuthor.data ?? []).map((c: RawCommentWithAuthor) => {
@@ -73,7 +79,8 @@ export async function fetchComments(postId: string): Promise<Comment[]> {
     .from('comments')
     .select(COMMENT_SELECT_COLS)
     .eq('post_id', postId)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true })
+    .limit(FETCH_COMMENTS_LIMIT);
   if (fallback.error) throw fallback.error;
   return (fallback.data ?? []).map((c: RawCommentNoAuthor) => ({
     id: c.id,

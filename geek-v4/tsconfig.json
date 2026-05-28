@@ -9,6 +9,11 @@
     "noUnusedParameters": false,
     "exactOptionalPropertyTypes": false,
     "baseUrl": ".",
+    // dynamic import() を許可するため module=esnext を明示。
+    // (expo の base は module 未設定 → target=ESNext の暗黙挙動で commonjs 扱いとなり
+    //  app/_layout.tsx の React.lazy(() => import(...)) で TS1323 が出る。)
+    // Metro bundler の挙動は変わらない (元から ESM dynamic import を解釈する)。
+    "module": "esnext",
     "paths": {
       "@/*": ["./*"]
     }

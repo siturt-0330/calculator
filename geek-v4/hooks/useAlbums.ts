@@ -10,7 +10,7 @@
 // mutation の onSuccess で関連 queryKey を invalidate。
 // ============================================================
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
   fetchMyAlbums,
   fetchSharedAlbums,
@@ -87,6 +87,9 @@ export function useAlbumPhotos(albumId?: string): {
 
 // マイページの 3 タブ (all / mine / shared) で使う。
 // scope ごとに query を分けて切替時の点滅を防ぐ。
+// ★ パフォーマンス改善 (2026-05-28):
+//   scope 切替時に空配列 → 再 fetch で「写真一覧が一瞬空になる」flicker を
+//   keepPreviousData で抑止。データが揃ったら自動で差し替わる。
 export function useMyPhotos(scope: 'all' | 'mine' | 'shared'): {
   photos: AlbumPhoto[];
   isLoading: boolean;
@@ -97,6 +100,7 @@ export function useMyPhotos(scope: 'all' | 'mine' | 'shared'): {
     queryFn: () => fetchMyPhotos(scope),
     staleTime: 30_000,
     enabled: !!userId,
+    placeholderData: keepPreviousData,
   });
   return { photos: q.data ?? [], isLoading: q.isLoading };
 }

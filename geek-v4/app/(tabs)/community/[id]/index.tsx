@@ -171,6 +171,8 @@ export default function CommunityDetailScreen() {
   const id = typeof params.id === 'string' ? params.id : '';
   const { show } = useToastStore();
   const qc = useQueryClient();
+  // current user id — AdminBanner の owner fallback (created_by === user.id) で使う
+  const currentUserId = useAuthStore((s) => s.user?.id) ?? null;
 
   const [activeTab, setActiveTab] = useState<TabKey>('feed');
   // タブを開いたかの sticky フラグ。一度開いたタブは display:none でも mount を維持し、
@@ -401,87 +403,109 @@ export default function CommunityDetailScreen() {
         </View>
 
         {/* ============================================================
-            Channel header — premium centered layout
-            avatar → name → @handle → tag pills → stats →
-            description → subscribe CTA
+            Reddit 風 hero header — 横並びレイアウト
+            avatar (small, left) → name + stats (middle) → join CTA (right)
+            その下に説明文 + tags + ジャンル chip を compact に出す。
+            旧版の中央集権 (avatar 大 + 中央寄せ name + 中央 stats) は廃止。
             ============================================================ */}
         <View
           style={{
             backgroundColor: C.bg2,
             paddingHorizontal: SP['4'],
             paddingTop: SP['3'],
-            paddingBottom: SP['4'],
-            alignItems: 'center',
+            paddingBottom: SP['3'],
             gap: SP['3'],
           }}
         >
-          {/* Avatar with subtle accent ring */}
+          {/* Row: avatar | name+stats | join button */}
           <View
             style={{
-              borderRadius: 9999,
-              borderWidth: 2,
-              borderColor: C.accent + '40',
-              padding: 3,
-              ...SHADOW.card,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: SP['3'],
             }}
           >
             <CommunityAvatar
               icon_url={community.icon_url}
               icon_emoji={community.icon_emoji}
               icon_color={community.icon_color}
-              size={96}
+              size={56}
+            />
+            <View style={{ flex: 1, gap: 2 }}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <Text
+                  style={[T.h3, { color: C.text, fontWeight: '700' }]}
+                  numberOfLines={1}
+                >
+                  {community.name}
+                </Text>
+                {community.is_official && <OfficialBadge size="sm" />}
+              </View>
+              <Text
+                style={[T.caption, { color: C.text3 }]}
+                numberOfLines={1}
+              >
+                {handle ? `@${handle} · ` : ''}
+                {community.member_count.toLocaleString('ja-JP')} メンバー · {community.post_count.toLocaleString('ja-JP')} 投稿
+              </Text>
+            </View>
+            <CompactSubscribeButton
+              isMember={community.is_member}
+              isRequestVisibility={community.visibility === 'request'}
+              loading={joining}
+              onPress={onJoinLeave}
             />
           </View>
 
-          {/* Name */}
-          <View style={{ alignItems: 'center', gap: 4 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
-              <Text
-                style={[
-                  T.h2,
-                  { color: C.text, textAlign: 'center', fontSize: 24, lineHeight: 30 },
-                ]}
-                numberOfLines={2}
-              >
-                {community.name}
-              </Text>
-              {community.is_official && <OfficialBadge size="md" />}
-            </View>
-            {handle && (
-              <Text style={{ color: C.text3, fontSize: 12, lineHeight: 16 }}>
-                @{handle}
-              </Text>
-            )}
-            {community.is_official && community.official_admin_display_name && (
-              <Text style={[T.small, { color: C.text2, textAlign: 'center', marginTop: 2 }]}>
-                管理者: {community.official_admin_display_name}
-                {community.official_organization ? ` · ${community.official_organization}` : ''}
-              </Text>
-            )}
-            {community.is_member && (
-              <View
-                style={{
-                  marginTop: 4,
-                  paddingHorizontal: SP['2'],
-                  paddingVertical: 3,
-                  backgroundColor: C.accentBg,
-                  borderRadius: R.full,
-                }}
-              >
-                <Text style={{ color: C.accent, fontSize: 11, fontWeight: '700' }}>
-                  ✓ 参加中
-                </Text>
-              </View>
-            )}
-          </View>
+          {/* 公式コミュの管理者名 (旧版から保留) */}
+          {community.is_official && community.official_admin_display_name && (
+            <Text style={[T.small, { color: C.text2 }]}>
+              管理者: {community.official_admin_display_name}
+              {community.official_organization ? ` · ${community.official_organization}` : ''}
+            </Text>
+          )}
 
-          {/* Tag pills */}
-          {community.tags.length > 0 && (
+          {/* Description — 3 行 clamp, タップで展開 */}
+          {safeDesc.length > 0 && (
+            <Pressable
+              onPress={() => safeDesc.length > 80 && setDescExpanded((v) => !v)}
+              style={{ alignSelf: 'stretch' }}
+              hitSlop={6}
+            >
+              <Text
+                style={[T.body, { color: C.text2 }]}
+                numberOfLines={descExpanded ? undefined : 3}
+              >
+                {safeDesc}
+              </Text>
+              {safeDesc.length > 80 && (
+                <Text
+                  style={{
+                    color: C.accent,
+                    fontSize: 12,
+                    fontWeight: '700',
+                    marginTop: 4,
+                  }}
+                >
+                  {descExpanded ? '閉じる' : '表示を増やす ↓'}
+                </Text>
+              )}
+            </Pressable>
+          )}
+
+          {/* Tags + genre chip (1 行 wrap, compact) */}
+          {(community.tags.length > 0 || !community.is_official) && (
             <View
               style={{
                 flexDirection: 'row',
                 flexWrap: 'wrap',
-                justifyContent: 'center',
                 gap: 6,
               }}
             >
@@ -500,13 +524,8 @@ export default function CommunityDetailScreen() {
                   </Text>
                 </View>
               ))}
-            </View>
-          )}
-
-          {/* ジャンル badge (tap で変更モーダル) と「コミュニティを編集」ボタンを横並び */}
-          {!community.is_official && (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6 }}>
-              {(() => {
+              {/* ジャンル chip — 残置 (推奨どおり compact) */}
+              {!community.is_official && (() => {
                 const currentGenre = effectiveGenre(id, community.genre);
                 const meta = COMMUNITY_GENRE_META[currentGenre];
                 return (
@@ -518,223 +537,52 @@ export default function CommunityDetailScreen() {
                       flexDirection: 'row',
                       alignItems: 'center',
                       gap: 4,
-                      paddingHorizontal: SP['3'],
-                      paddingVertical: 4,
+                      paddingHorizontal: SP['2'],
+                      paddingVertical: 3,
                       backgroundColor: C.bg3,
                       borderRadius: R.full,
                       borderWidth: 1,
                       borderColor: C.border,
                     }}
                   >
-                    <Text style={{ fontSize: 13 }}>{meta.emoji}</Text>
-                    <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>
+                    <Text style={{ fontSize: 11 }}>{meta.emoji}</Text>
+                    <Text style={{ color: C.text2, fontSize: 11, fontWeight: '700' }}>
                       {meta.label}
                     </Text>
-                    <Icon.edit size={10} color={C.text3} strokeWidth={2.2} />
                   </PressableScale>
                 );
               })()}
-              {/* 編集 (wiki edit, migration 0048) — member 全員可 */}
-              {community.is_member && (
-                <PressableScale
-                  onPress={() => router.push(`/community/${id}/edit` as never)}
-                  haptic="tap"
-                  accessibilityLabel="コミュニティを編集"
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 4,
-                    paddingHorizontal: SP['3'],
-                    paddingVertical: 4,
-                    backgroundColor: C.bg3,
-                    borderRadius: R.full,
-                    borderWidth: 1,
-                    borderColor: C.border,
-                  }}
-                >
-                  <Icon.edit size={11} color={C.text2} strokeWidth={2.4} />
-                  <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>
-                    編集
-                  </Text>
-                </PressableScale>
-              )}
             </View>
           )}
-
-          {/* Compact stats */}
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: SP['2'],
-            }}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Icon.community size={12} color={C.text3} strokeWidth={2.2} />
-              <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>
-                {community.member_count.toLocaleString('ja-JP')}
-              </Text>
-              <Text style={{ color: C.text3, fontSize: 12 }}>メンバー</Text>
-            </View>
-            <Text style={{ color: C.text4, fontSize: 12 }}>·</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Icon.bbs size={12} color={C.text3} strokeWidth={2.2} />
-              <Text style={{ color: C.text2, fontSize: 12, fontWeight: '700' }}>
-                {community.post_count.toLocaleString('ja-JP')}
-              </Text>
-              <Text style={{ color: C.text3, fontSize: 12 }}>投稿</Text>
-            </View>
-          </View>
-
-          {/* Description (collapsible) */}
-          {safeDesc.length > 0 && (
-            <Pressable
-              // 説明が短ければ tap しても何も起きないので、Press 領域は変えるが
-              // 「タップで展開」アフォーダンスは "もっと見る" が見えるときだけ。
-              onPress={() => safeDesc.length > 80 && setDescExpanded((v) => !v)}
-              style={{ alignSelf: 'stretch', paddingVertical: 2 }}
-              hitSlop={6}
-            >
-              <Text
-                style={[T.body, { color: C.text2, textAlign: 'center' }]}
-                numberOfLines={descExpanded ? undefined : 3}
-              >
-                {safeDesc}
-              </Text>
-              {safeDesc.length > 80 && (
-                <Text
-                  style={{
-                    color: C.accent,
-                    fontSize: 12,
-                    fontWeight: '700',
-                    marginTop: 4,
-                    textAlign: 'center',
-                  }}
-                >
-                  {descExpanded ? '閉じる' : 'もっと見る ↓'}
-                </Text>
-              )}
-            </Pressable>
-          )}
-
-          {/* Subscribe CTA (full width) */}
-          <View style={{ alignSelf: 'stretch', marginTop: SP['1'] }}>
-            <SubscribeButton
-              isMember={community.is_member}
-              isRequestVisibility={community.visibility === 'request'}
-              loading={joining}
-              onPress={onJoinLeave}
-            />
-          </View>
-
-          {/* 公式登録の申請機能は廃止 (2026-05)。
-              Geek 公式アカウント (migration 0033 で seed 済) 以外には公式バッジを
-              付与しない方針へ転換。詳細は HYPOTHESIS_LOG.md 参照。 */}
         </View>
 
-        {/* 公式機能ピル (Q&A / カレンダー / 地図) は廃止 —
-            タブ自体に統合されたので、上部のチップ navigation は表示しない */}
-
         {/* ============================================================
-            新サブタブ navigation — ホーム / 掲示板 / マップ / カレンダー / (管理人)
-            ------------------------------------------------------------
-            UI 統一の一環で 4 サブタブに「正規化」した chip 行。
-            home = この index.tsx 画面 (= 現在ページ), それ以外は
-            standalone route に push する。
-            admin chip は mod (owner / admin) のみ表示。
+            Admin Banner (mod 限定) — header 直下に strip で出す。
+            「あなたはこのコミュニティの管理人です」+ 管理 / 編集 CTA。
+            isModerator = community.role === 'owner' | 'admin'
+            (= useIsCommunityMod と同じロジック; community 取得時に
+             既に role が一緒に取れているので追加 RTT 不要)。
+            Fallback: role が null でも created_by === user.id なら mod 扱い。
             ============================================================ */}
-        <CommunitySubTabs
-          value="home"
-          showAdmin={community.role === 'owner' || community.role === 'admin'}
-          onChange={(k: CommunitySubTabKey) => {
-            if (k === 'home') return;
-            const dest =
-              k === 'bbs' ? `/community/${id}/bbs`
-              : k === 'map' ? `/community/${id}/map`
-              : k === 'calendar' ? `/community/${id}/calendar`
-              : `/community/${id}/admin`;
-            router.push(dest as never);
-          }}
+        <AdminBanner
+          communityId={id}
+          isModerator={
+            community.role === 'owner' ||
+            community.role === 'admin' ||
+            community.created_by === currentUserId
+          }
         />
 
         {/* ============================================================
-            Tab bar — 旧 inner tab (feed/threads/spots/events など)。
-            genre 別の細かい切替はここで吸収する。
-            公式コミュニティでは「掲示板→Q&A」「投稿→コメント」にラベル差し替え
+            Tab content — ホーム (= みんなの投稿集 feed) のみを表示。
+            旧版にあった
+              - CommunitySubTabs (chip 行: ホーム/掲示板/マップ/カレンダー/管理人)
+              - CommunityTabBar (underline tab: feed/threads/spots/events)
+            は重複していたため両方撤去。
+            掲示板 / マップ / カレンダー / 管理 は URL 直打ち or AdminBanner CTA から
+            引き続きアクセス可能 (route は残存)。
             ============================================================ */}
-        <CommunityTabBar
-          activeTab={activeTab}
-          onChange={setActiveTab}
-          isOfficial={!!community.is_official}
-          genre={effectiveGenre(id, community.genre)}
-        />
-
-        {/* ============================================================
-            Tab content — lazy mount: 一度開いたタブだけ mount、以降は
-            display:none で keep-alive (再 fetch を避ける)。
-            初期表示時は feed タブだけが mount され、threads / spots /
-            events の query は触られないので first paint が軽い。
-            ============================================================ */}
-        <View style={{ display: activeTab === 'feed' ? 'flex' : 'none' }}>
-          <FeedTab communityId={id} />
-        </View>
-        {visitedTabs.threads && (
-          <View style={{ display: activeTab === 'threads' ? 'flex' : 'none' }}>
-            {/* 公式コミュも一般と同じ ThreadsTab を使用。
-                Q&A (AI 自動回答) 機能は廃止 (コスト × ハルシネーション問題)。
-                公式 = 「Q&A タブ」だった旧 UX は、CommunityTabBar 側で
-                ラベルを "Q&A" のまま残すか "掲示板" に揃えるかを別途決める。 */}
-            <ThreadsTab communityId={id} />
-          </View>
-        )}
-        {visitedTabs.spots && (
-          <View style={{ display: activeTab === 'spots' ? 'flex' : 'none' }}>
-            <SpotsTab
-              communityId={id}
-              canCreate={community.is_member}
-              community={community}
-              onGoToEvents={() => {
-                setVisitedTabs((prev) => ({ ...prev, events: true }));
-                setActiveTab('events');
-              }}
-            />
-          </View>
-        )}
-        {visitedTabs.events && (
-          <View style={{ display: activeTab === 'events' ? 'flex' : 'none' }}>
-            <EventsTab communityId={id} canCreate={community.is_member} />
-          </View>
-        )}
-        {/* 公式コミュニティの「コメント」タブ — 一般ユーザーが唯一書き込める BBS スレッド一覧。
-            掲示板タブと同じ ThreadsTab を流用 (UX 統一) */}
-        {community.is_official && visitedTabs.comments && (
-          <View style={{ display: activeTab === 'comments' ? 'flex' : 'none' }}>
-            <ThreadsTab communityId={id} />
-          </View>
-        )}
-        {/* compose tab navigates away in the effect above (一般コミュニティのみ) */}
-
-        {/* === migration 0044 で追加された新タブ (本 PR では stub) === */}
-        {visitedTabs.search && (
-          <View style={{ display: activeTab === 'search' ? 'flex' : 'none' }}>
-            <ComingSoonTab
-              emoji="🔍"
-              title="検索 (準備中)"
-              body={
-                'Instagram の発見タブのように、投稿された写真・動画を' +
-                'グリッドで一覧できる画面を予定しています。'
-              }
-            />
-          </View>
-        )}
-        {visitedTabs.profile && (
-          <View style={{ display: activeTab === 'profile' ? 'flex' : 'none' }}>
-            <CommunityMyProfileTab
-              communityId={id}
-              isMember={community.is_member}
-            />
-          </View>
-        )}
+        <FeedTab communityId={id} />
       </ScrollView>
 
       {/* === 新ジャンル用の「投稿」FAB ===
@@ -992,6 +840,145 @@ function SubscribeButton({
         {loading ? '処理中…' : isRequestVisibility ? '参加を申請する' : 'コミュニティに参加する'}
       </Text>
     </PressableScale>
+  );
+}
+
+// ============================================================
+// CompactSubscribeButton — Reddit 風 hero の右上に置く小さい参加ボタン
+// ------------------------------------------------------------
+// 旧版 SubscribeButton はフル幅 (alignSelf:'stretch') で hero 全幅を占めていた。
+// 横並びレイアウトに合わせて auto-width / 高さ控えめ / icon なしの compact 版。
+// 参加中なら「参加中 ▾」 (chevronDown 付き — 通知設定等の dropdown ヒント)、
+// 未参加なら「参加」 (request visibility なら「申請」)。
+// ============================================================
+function CompactSubscribeButton({
+  isMember,
+  isRequestVisibility,
+  loading,
+  onPress,
+}: {
+  isMember: boolean;
+  isRequestVisibility: boolean;
+  loading: boolean;
+  onPress: () => void;
+}) {
+  if (isMember) {
+    return (
+      <PressableScale
+        onPress={onPress}
+        haptic="tap"
+        disabled={loading}
+        accessibilityLabel="参加中 — タップで脱退 / 通知設定"
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 4,
+          backgroundColor: 'transparent',
+          borderRadius: R.full,
+          borderWidth: 1.5,
+          borderColor: C.border2,
+          paddingHorizontal: SP['3'],
+          paddingVertical: 6,
+          opacity: loading ? 0.6 : 1,
+        }}
+      >
+        {loading ? (
+          <ActivityIndicator size="small" color={C.text2} />
+        ) : (
+          <>
+            <Text style={[T.smallM, { color: C.text2, fontWeight: '700' }]}>参加中</Text>
+            <Icon.chevronD size={12} color={C.text3} strokeWidth={2.4} />
+          </>
+        )}
+      </PressableScale>
+    );
+  }
+  return (
+    <PressableScale
+      onPress={onPress}
+      haptic="confirm"
+      disabled={loading}
+      accessibilityLabel={isRequestVisibility ? '参加申請を送る' : 'コミュニティに参加する'}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: C.accent,
+        borderRadius: R.full,
+        paddingHorizontal: SP['4'],
+        paddingVertical: 6,
+        opacity: loading ? 0.7 : 1,
+      }}
+    >
+      {loading && <ActivityIndicator size="small" color="#fff" />}
+      <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>
+        {loading ? '…' : isRequestVisibility ? '申請' : '参加'}
+      </Text>
+    </PressableScale>
+  );
+}
+
+// ============================================================
+// AdminBanner — mod 限定で hero 直下に出す strip
+// ------------------------------------------------------------
+// 「あなたはこのコミュニティの管理人です」+ 管理画面への CTA。
+// `/community/[id]/admin` (= 管理者専用画面) に遷移する。
+// 編集 (member 全員可) もここから併設しておくことで、 hero から chip 群を
+// 撤去した穴を埋める。
+// ============================================================
+function AdminBanner({
+  communityId,
+  isModerator,
+}: {
+  communityId: string;
+  isModerator: boolean;
+}) {
+  const router = useRouter();
+  if (!isModerator) return null;
+  return (
+    <View
+      style={{
+        backgroundColor: C.accentBg,
+        paddingHorizontal: SP['4'],
+        paddingVertical: SP['3'],
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SP['2'],
+        borderTopWidth: 1,
+        borderBottomWidth: 1,
+        borderColor: C.accent + '40',
+      }}
+    >
+      <Icon.shield size={18} color={C.accent} strokeWidth={2.4} />
+      <Text style={[T.smallM, { color: C.text, flex: 1, fontWeight: '700' }]} numberOfLines={1}>
+        あなたはこのコミュニティの管理人です
+      </Text>
+      <PressableScale
+        onPress={() => router.push(`/community/${communityId}/edit` as never)}
+        haptic="tap"
+        hitSlop={8}
+        accessibilityLabel="コミュニティを編集"
+        style={{ paddingHorizontal: SP['2'], paddingVertical: 4 }}
+      >
+        <Text style={[T.smallM, { color: C.text2, fontWeight: '700' }]}>編集</Text>
+      </PressableScale>
+      <PressableScale
+        onPress={() => router.push(`/community/${communityId}/admin` as never)}
+        haptic="tap"
+        hitSlop={8}
+        accessibilityLabel="管理画面へ移動"
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 2,
+          paddingHorizontal: SP['2'],
+          paddingVertical: 4,
+        }}
+      >
+        <Text style={[T.smallM, { color: C.accent, fontWeight: '800' }]}>管理</Text>
+        <Icon.chevronR size={14} color={C.accent} strokeWidth={2.6} />
+      </PressableScale>
+    </View>
   );
 }
 

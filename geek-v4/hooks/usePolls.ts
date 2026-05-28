@@ -35,39 +35,39 @@ export function usePolls(postIds: string[]) {
     const serverPollIds = [...myPollIds].slice(0, 30);
     const serverPostIds = postIds.slice(0, 30);
 
-    // ★ CLAUDE.md § 5.3 / § 14: 1 channel に異なる table を chain しない。
-    //   poll_votes / poll_options / polls を別 channel に分離。現状全テーブル
-    //   publication 登録済 (0013) で動作しているが、将来 1 つでも漏れたら
-    //   channel 全死する地雷を防ぐ。
+    // ★ Audit E#5 (2026-05-28):
+    //   旧版は poll_votes / poll_options / polls を別 channel に分離していた (3 channel)。
+    //   全 3 テーブルとも publication 登録済 (migration 0013) で確認済のため、
+    //   CLAUDE.md § 5.3 の「publication 未登録 table が混ざると CHANNEL_ERROR
+    //   cascade」リスクが無く、1 channel + 3 `.on()` に集約しても安全。
+    //   feed 描画時の同時 channel 数を 14 → 5-7 に絞るための統合 (3 → 1)。
+    //   将来 poll 系に publication 未登録 table を追加するなら、その際に分離する。
     const invalidate = () => qc.invalidateQueries({ queryKey: [KEY_PREFIX, sortedKey] });
-    const detachVotes = attachChannel(`poll-votes:${sortedKey.slice(0, 64)}`, (ch) =>
-      ch.on('postgres_changes', {
-        event: '*', schema: 'public', table: 'poll_votes',
-        filter: `poll_id=in.(${serverPollIds.join(',')})`,
-      }, (payload) => {
-        const row = (payload.new ?? payload.old) as { poll_id?: string } | null;
-        if (row?.poll_id && myPollIds.has(row.poll_id)) invalidate();
-      }),
+    const detach = attachChannel(`polls-bundle:${sortedKey.slice(0, 64)}`, (ch) =>
+      ch
+        .on('postgres_changes', {
+          event: '*', schema: 'public', table: 'poll_votes',
+          filter: `poll_id=in.(${serverPollIds.join(',')})`,
+        }, (payload) => {
+          const row = (payload.new ?? payload.old) as { poll_id?: string } | null;
+          if (row?.poll_id && myPollIds.has(row.poll_id)) invalidate();
+        })
+        .on('postgres_changes', {
+          event: '*', schema: 'public', table: 'poll_options',
+          filter: `poll_id=in.(${serverPollIds.join(',')})`,
+        }, (payload) => {
+          const row = (payload.new ?? payload.old) as { poll_id?: string } | null;
+          if (row?.poll_id && myPollIds.has(row.poll_id)) invalidate();
+        })
+        .on('postgres_changes', {
+          event: '*', schema: 'public', table: 'polls',
+          filter: `post_id=in.(${serverPostIds.join(',')})`,
+        }, (payload) => {
+          const row = (payload.new ?? payload.old) as { post_id?: string } | null;
+          if (row?.post_id && myPostIds.has(row.post_id)) invalidate();
+        }),
     );
-    const detachOptions = attachChannel(`poll-options:${sortedKey.slice(0, 64)}`, (ch) =>
-      ch.on('postgres_changes', {
-        event: '*', schema: 'public', table: 'poll_options',
-        filter: `poll_id=in.(${serverPollIds.join(',')})`,
-      }, (payload) => {
-        const row = (payload.new ?? payload.old) as { poll_id?: string } | null;
-        if (row?.poll_id && myPollIds.has(row.poll_id)) invalidate();
-      }),
-    );
-    const detachPolls = attachChannel(`polls:${sortedKey.slice(0, 64)}`, (ch) =>
-      ch.on('postgres_changes', {
-        event: '*', schema: 'public', table: 'polls',
-        filter: `post_id=in.(${serverPostIds.join(',')})`,
-      }, (payload) => {
-        const row = (payload.new ?? payload.old) as { post_id?: string } | null;
-        if (row?.post_id && myPostIds.has(row.post_id)) invalidate();
-      }),
-    );
-    return () => { detachVotes(); detachOptions(); detachPolls(); };
+    return () => { detach(); };
     // ★ postIds は配列参照で毎 render 変わるため deps から外す (sortedKey に
     //   中身は含意済). q.data も参照変化を pollIdsKey に置換して churn を防ぐ.
     // eslint-disable-next-line react-hooks/exhaustive-deps

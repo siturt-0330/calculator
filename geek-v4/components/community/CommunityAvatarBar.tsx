@@ -243,9 +243,15 @@ function AvatarItem({
               />
             ) : iconUrl ? (
               <ExpoImage
+                // 50px 内枠 @3x ≒ 150 → 160 で retina 余裕。
                 source={{ uri: thumbedUrl(iconUrl, 160) }}
                 style={{ width: '100%', height: '100%' }}
                 contentFit="cover"
+                // 監査 (2026-05): memory-disk 未指定だと横スクロールで戻った際に
+                // 再 download が走り、ネット slot を食い潰す。memory-disk + recyclingKey
+                // で 2 回目以降は instant.
+                cachePolicy="memory-disk"
+                recyclingKey={iconUrl}
                 transition={120}
               />
             ) : (

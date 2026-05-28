@@ -10,6 +10,11 @@ export type BookmarkCollection = {
   created_at: string;
 };
 
+// DoS 防止: 1 ユーザーが作れるコレクション数の現実上限は 100 程度なので、
+// それを超えた場合は古いものを切り捨てる。仮にそれ以上必要になったら
+// cursor pagination に切り替えるか、UI 側で「もっと読む」を出す方針。
+const FETCH_MY_COLLECTIONS_LIMIT = 100;
+
 export async function fetchMyCollections(): Promise<BookmarkCollection[]> {
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
@@ -18,7 +23,8 @@ export async function fetchMyCollections(): Promise<BookmarkCollection[]> {
     .from('bookmark_collections')
     .select('id, user_id, name, emoji, is_public, bookmark_count, created_at')
     .eq('user_id', userId)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(FETCH_MY_COLLECTIONS_LIMIT);
   if (error) return [];
   return (data ?? []) as BookmarkCollection[];
 }
@@ -57,19 +63,35 @@ export async function saveToCollection(postId: string, collectionId: string | nu
   if (error) throw error;
 }
 
-export async function fetchPostsInCollection(collectionId: string | 'uncategorized'): Promise<string[]> {
+// DoS 防止: 巨大コレクション (数千件 bookmark) で UI フリーズ防止のため 200 件で打ち切り。
+// 200 件で足りないユーザーには cursor (beforeCreatedAt) でページ送りを提供。
+const FETCH_POSTS_IN_COLLECTION_LIMIT = 200;
+
+export async function fetchPostsInCollection(
+  collectionId: string | 'uncategorized',
+  opts: { beforeCreatedAt?: string; limit?: number } = {},
+): Promise<string[]> {
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) return [];
+  const limit = Math.max(1, Math.min(opts.limit ?? FETCH_POSTS_IN_COLLECTION_LIMIT, FETCH_POSTS_IN_COLLECTION_LIMIT));
   let q = supabase
     .from('saves')
     .select('post_id, created_at')
     .eq('user_id', userId)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(limit);
   if (collectionId === 'uncategorized') {
     q = q.is('collection_id', null);
   } else {
     q = q.eq('collection_id', collectionId);
+  }
+  // cursor: ISO timestamp で「これより古い」saves を取得 (created_at desc 前提)
+  if (opts.beforeCreatedAt) {
+    const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+    if (ISO_RE.test(opts.beforeCreatedAt)) {
+      q = q.lt('created_at', opts.beforeCreatedAt);
+    }
   }
   const { data } = await q;
   return ((data ?? []) as Array<{ post_id: string }>).map((r) => r.post_id);

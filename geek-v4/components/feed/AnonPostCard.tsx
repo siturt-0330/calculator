@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react-native';
 import { View, Text, Platform, Image as RNImage, StyleSheet, Pressable, type TextStyle } from 'react-native';
 import Animated, {
@@ -49,6 +49,7 @@ import { OfficialBadge } from '../community/OfficialBadge';
 import { ModActionMenu } from '../community/ModActionMenu';
 import { MediaWithCWGuard } from '../post/MediaWithCWGuard';
 import { getDisplayLikes } from '../../lib/utils/voteFuzz';
+import { ImageLightbox } from '../ui/ImageLightbox';
 
 // 画像アスペクト比のモジュールレベルキャッシュ。
 // パフォーマンス監査: 旧版は無制限キャッシュで長時間スクロール後にメモリ蓄積。
@@ -738,6 +739,18 @@ function AnonPostCardInner({
   const [cwRevealed, setCwRevealed] = useState(false);
   const isCwHidden = !!cwCategory && !cwRevealed;
 
+  // 画像ライトボックス (tap で開く全画面ビューア)
+  // 開いている画像 URL を保持 — null なら閉じている状態
+  const [lightboxUri, setLightboxUri] = useState<string | null>(null);
+  const openLightbox = useCallback((url: string) => {
+    hap.tap();
+    // 元画像 (フィードでは 480px サムネだが、ライトボックスでは大きく
+    // 表示するため 1280px に格上げする。Supabase の transform endpoint
+    // は元画像が小さければ自動でクランプしてくれるので過剰サイズは無問題)
+    setLightboxUri(thumbedUrl(url, 1280));
+  }, []);
+  const closeLightbox = useCallback(() => setLightboxUri(null), []);
+
   // Feature flags
   const useMarkdown = useFeatureFlag('markdown_render');
   const useOgPreview = useFeatureFlag('og_preview');
@@ -782,7 +795,9 @@ function AnonPostCardInner({
   // 重要: getSize はオリジナル URL を渡すと**フル画像をダウンロードして**寸法を測る。
   // フィードでは数 MB の画像を 4 枚並べると合計 10MB 超 → モバイル/3G で
   // 「画像が出るまで真っ暗 (= 親 View の C.bg しか見えない)」現象が起きる。
-  // → thumbedUrl 経由の 720px サムネで getSize を呼ぶ。アスペクト比は同じ。
+  // → thumbedUrl 経由の 240px サムネで getSize を呼ぶ (比率計算なので最小幅で十分)。
+  //   旧版は 720px で measure していたが、表示用は ProgressiveImage が別途 fetch する
+  //   ので measure 専用ならもっと小さくて良い。240 にして帯域 1/9 + decode コスト削減。
   // モジュールレベルキャッシュからシード — 同 URL を一度測れば後はゼロコスト
   const [imgAspects, setImgAspects] = useState<Record<string, number>>(() => {
     const seed: Record<string, number> = {};
@@ -804,7 +819,7 @@ function AnonPostCardInner({
         setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: r.ratio }));
         continue;
       }
-      const measureUri = thumbedUrl(url, 720);
+      const measureUri = thumbedUrl(url, 240);
       measureAspect(url, measureUri, (ratio) => {
         if (!alive) return;
         setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: ratio }));
@@ -1027,14 +1042,32 @@ function AnonPostCardInner({
                   style={[STYLES.mediaItemBase, mediaItemAspect(aspect)]}
                 >
                   <MediaWithCWGuard cwCategory={cwCategory} blurhash={blurhash}>
-                    <ProgressiveImage
-                      uri={url}
-                      blurhash={blurhash}
-                      width="100%"
-                      height="100%"
-                      radius={R.md}
-                      lazy
-                    />
+                    {/* Pressable で wrap — single-tap で全画面ライトボックスを開く。
+                        DoubleTapHeart は numberOfTaps(2) なので single-tap は
+                        ここを通過する。長押し / scroll は React Native の
+                        Pressable が自前で gesture system と協調するので無問題。 */}
+                    <Pressable
+                      onPress={() => openLightbox(url)}
+                      style={{ flex: 1 }}
+                      accessibilityRole="imagebutton"
+                      accessibilityLabel="画像を拡大表示"
+                    >
+                      <ProgressiveImage
+                        uri={url}
+                        blurhash={blurhash}
+                        width="100%"
+                        height="100%"
+                        radius={R.md}
+                        lazy
+                        // フィード 1 列幅 (max 720) の 1x DPR で 480 が綺麗 + 軽い。
+                        // 旧 720 default は retina 換算でも過剰だった (1 枚 ~120KB 多い)。
+                        thumbWidth={480}
+                        // フィード本体画像は「上にスクロールしてある」前提で
+                        // 並行 fetch queue 内で優先される。avatars/community icons 等
+                        // (priority='normal') よりネット slot を先取り。
+                        priority="high"
+                      />
+                    </Pressable>
                   </MediaWithCWGuard>
                 </View>
               );
@@ -1225,6 +1258,15 @@ function AnonPostCardInner({
         onClose={() => setMemePickerOpen(false)}
         onPick={(meme) => onReact(meme)}
         picked={myReactionsForPost}
+      />
+
+      {/* 画像ライトボックス — tap 時に開く全画面ビューア。
+          Modal は visible=false の間 lazy-render なので feed の全 card に
+          1 つ持たせてもコストは無い。 */}
+      <ImageLightbox
+        visible={!!lightboxUri}
+        uri={lightboxUri}
+        onClose={closeLightbox}
       />
     </View>
   );

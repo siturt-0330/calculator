@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, lazy, Suspense } from 'react';
 import { View, Platform } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -11,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { useAppFonts } from '../hooks/useAppFonts';
+import { useUserChannel } from '../hooks/useUserChannel';
 import { useAuthStore } from '../stores/authStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useLanguageStore } from '../stores/languageStore';
@@ -18,10 +19,22 @@ import { useTagFilterStore } from '../stores/tagFilterStore';
 import { useAdPreferencesStore } from '../stores/adPreferencesStore';
 import { ToastHost } from '../components/ui/ToastHost';
 import { ErrorBoundary } from '../components/ui/ErrorBoundary';
-import { IntroAnimation, markIntroShown } from '../components/ui/IntroAnimation';
+// ★ パフォーマンス: IntroAnimation / FeedbackFAB は first paint 直後に必須ではない。
+//   - IntroAnimation: 同セッション 2 回目以降は sessionStorage で skip
+//   - FeedbackFAB:    feedback_fab feature flag + ログイン要 (初期描画時点で render しない)
+//   起動チャンクから外して dynamic import に逃がす — 初回バンドル size を ~30-50KB 削減。
+//   markIntroShown は元から no-op の旧 API 互換 stub のためここで inline 化し、
+//   IntroAnimation モジュール本体を起動チャンクから完全に切り離す
+//   (static import を残すと lazy しても module は initial bundle に乗ってしまう)。
+const markIntroShown = () => {};
+const IntroAnimation = lazy(() =>
+  import('../components/ui/IntroAnimation').then((m) => ({ default: m.IntroAnimation })),
+);
+const FeedbackFAB = lazy(() =>
+  import('../components/feedback/FeedbackFAB').then((m) => ({ default: m.FeedbackFAB })),
+);
 import { useIntroStore } from '../stores/introStore';
 import { OfflineBanner } from '../components/ui/OfflineBanner';
-import { FeedbackFAB } from '../components/feedback/FeedbackFAB';
 // useOfflineQueue は legacy useOfflineQueueProcessor を内部で wrap し、
 // 新規 lib/offline/queue.ts の flush + networkMonitor 購読も一括で起動する。
 // OfflineBanner が内部で useOfflineQueue を呼ぶので、root では別途 runner を
@@ -367,6 +380,10 @@ export default function RootLayout() {
             <BottomSheetModalProvider>
               <View style={{ flex: 1, backgroundColor: C.bg }}>
                 <StatusBar style={resolvedTheme === 'light' ? 'dark' : 'light'} />
+                {/* User-scoped realtime channel — notifications / feature_flags /
+                    bookmark_collections / saved_searches / user_stamps を 1 channel に集約。
+                    Audit E#3 + E#5 対策 (旧構成は 5 channel + parallel singleton 1 で計 6 個)。 */}
+                <RealtimeRoot />
                 <OfflineBanner />
                 <Stack
                   screenOptions={{
@@ -390,7 +407,17 @@ export default function RootLayout() {
                       animation: 'slide_from_bottom',
                     }}
                   />
-                  <Stack.Screen name="post/[id]" />
+                  {/* post 詳細は iOS-native の modal slide-up で表示 (別ページ感を解消)。
+                      タップした投稿カードが画面下から「上に来る」演出 + 戻ると feed そのまま。
+                      gestureDirection: 'vertical' で下スワイプ close 有効。 */}
+                  <Stack.Screen
+                    name="post/[id]"
+                    options={{
+                      presentation: 'modal',
+                      animation: 'slide_from_bottom',
+                      gestureDirection: 'vertical',
+                    }}
+                  />
                   <Stack.Screen name="tag/[name]" />
                   <Stack.Screen
                     name="filter/index"
@@ -416,7 +443,15 @@ export default function RootLayout() {
                   <Stack.Screen name="corners/map" />
                   <Stack.Screen name="corners/goods" />
                   <Stack.Screen name="corners/friends" />
-                  <Stack.Screen name="bbs/[id]" />
+                  {/* BBS スレ詳細も同じく modal slide-up (投稿詳細と挙動を統一) */}
+                  <Stack.Screen
+                    name="bbs/[id]"
+                    options={{
+                      presentation: 'modal',
+                      animation: 'slide_from_bottom',
+                      gestureDirection: 'vertical',
+                    }}
+                  />
                   <Stack.Screen name="bbs/create" />
                   <Stack.Screen name="search" />
                   <Stack.Screen name="mypage/saved" />
@@ -452,23 +487,34 @@ export default function RootLayout() {
                   <Stack.Screen name="settings/license" />
                 </Stack>
                 <ToastHost />
-                <FeedbackFAB />
-                {/* 初回起動時のイントロ */}
+                {/* FeedbackFAB は lazy で起動チャンクから外す — feature flag 経由でしか
+                    rendered されない上、初期描画クリティカルパスに不要。Suspense fallback
+                    は何も描画しない (FAB なので空でも UX 影響なし)。 */}
+                <Suspense fallback={null}>
+                  <FeedbackFAB />
+                </Suspense>
+                {/* 初回起動時のイントロ — lazy 経由でロード。
+                    Suspense fallback は null (intro が表示されるまでの 1-2 フレームは
+                    GestureHandlerRootView の C.bg がベースで黒画面なので違和感なし。) */}
                 {!introDone && !introReplaying && (
-                  <IntroAnimation
-                    onComplete={() => {
-                      markIntroShown();
-                      markIntroSeenForSession();  // 同セッション内の再表示を抑制
-                      setIntroDone(true);
-                    }}
-                  />
+                  <Suspense fallback={null}>
+                    <IntroAnimation
+                      onComplete={() => {
+                        markIntroShown();
+                        markIntroSeenForSession();  // 同セッション内の再表示を抑制
+                        setIntroDone(true);
+                      }}
+                    />
+                  </Suspense>
                 )}
                 {/* 設定からの「再生」リクエスト — key を変えて強制リマウント */}
                 {introReplaying && (
-                  <IntroAnimation
-                    key={introReplayKey}
-                    onComplete={finishIntroReplay}
-                  />
+                  <Suspense fallback={null}>
+                    <IntroAnimation
+                      key={introReplayKey}
+                      onComplete={finishIntroReplay}
+                    />
+                  </Suspense>
                 )}
               </View>
             </BottomSheetModalProvider>
@@ -484,3 +530,14 @@ export default function RootLayout() {
 // ここに専用 Runner を置く必要は無い。OfflineBanner は SafeAreaProvider /
 // PersistQueryClientProvider の中に配置されているので useQueryClient() の
 // 制約も満たしている。
+
+// ============================================================
+// RealtimeRoot — user-scoped realtime を 1 channel に集約する子コンポーネント
+// ============================================================
+// useQueryClient を呼ぶため PersistQueryClientProvider の中に置く必要がある。
+// RootLayout に直接 useUserChannel() を書くと QueryClient が未公開な段階で
+// hook が走るので、tiny child に分離する。
+function RealtimeRoot(): null {
+  useUserChannel();
+  return null;
+}

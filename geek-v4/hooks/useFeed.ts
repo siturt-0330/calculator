@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { fetchPosts, fetchCommunitiesForPosts } from '../lib/api/posts';
 import { supabase } from '../lib/supabase';
 import { attachChannel } from '../lib/realtime';
@@ -22,15 +22,17 @@ import { rankByRising } from '../lib/utils/risingScore';
 
 // React Query の persist cache は JSON 経由なので Set を直接保存できない (空の {} になる)。
 // 配列で返して使い側で Set に包む。
+//
+// Audit G#7 (2026-05): 以前は posts table を per-session で 24h 集計していたが、
+// 0071_trending_cron.sql で mv_trending_tags の 5 分毎 refresh を登録したので、
+// MV から直接読む経路に切り替え。クライアント CPU + DB read を大幅削減。
+// MV columns: tag (text, unique), recent_count (bigint), last_seen (timestamptz)
 async function fetchTrendingTagList(): Promise<string[]> {
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data } = await supabase
-    .from('posts')
-    .select('tag_names')
-    .gte('created_at', since)
-    .order('created_at', { ascending: false })
+    .from('mv_trending_tags')
+    .select('tag, recent_count')
+    .order('recent_count', { ascending: false })
     .limit(200);
-  const counts: Record<string, number> = {};
   // ゴシップ/事件報道系のキーワード — 部分一致でもブロック
   const gossipTriggers = ['炎上', '逮捕', '訃報', '不倫', '浮気', '熱愛', 'スキャンダル', 'スクープ', '事件', '殺人', '死亡', '訴訟', '謝罪'];
   const isGossip = (tag: string) => {
@@ -38,13 +40,15 @@ async function fetchTrendingTagList(): Promise<string[]> {
     for (const trig of gossipTriggers) if (tag.includes(trig)) return true;
     return false;
   };
-  for (const row of (data ?? []) as Array<{ tag_names: string[] }>) {
-    for (const t of row.tag_names ?? []) {
-      if (isGossip(t)) continue;
-      counts[t] = (counts[t] ?? 0) + 1;
-    }
+  const result: string[] = [];
+  for (const row of (data ?? []) as Array<{ tag: string; recent_count: number }>) {
+    if (!row.tag) continue;
+    if (isGossip(row.tag)) continue;
+    // 元実装は count >= 2 を閾値にしていたので踏襲 (1 回しか出てないタグは trending と呼ばない)
+    if ((row.recent_count ?? 0) < 2) continue;
+    result.push(row.tag);
   }
-  return Object.entries(counts).filter(([, c]) => c >= 2).map(([t]) => t);
+  return result;
 }
 
 export function useFeed() {
@@ -68,6 +72,10 @@ export function useFeed() {
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 30_000,
+    // ★ パフォーマンス改善: sort / scope / liked/blocked タグ切替時に
+    //   前回 page を表示しながら裏 fetch — 空 list flicker を回避。
+    //   v5 では keepPreviousData を placeholderData に渡すのが標準。
+    placeholderData: keepPreviousData,
   });
 
   // data.pages は React Query が変更時のみ新参照を返すが、flatMap は毎回新配列を作る。
@@ -88,6 +96,9 @@ export function useFeed() {
     queryFn: () => fetchCommunitiesForPosts(postIds),
     enabled: postIds.length > 0,
     staleTime: 60_000,
+    // postIds 集合が変わるたびに community メタを 1 round-trip で取り直すが、
+    // 前回 hash の結果を表示し続けて UI から community badge が消えないように。
+    placeholderData: keepPreviousData,
   });
   const communitiesByPost = communitiesQ.data ?? {};
 
@@ -323,14 +334,16 @@ export function useFeed() {
     setRefreshing(false);
   }, [refetch]);
 
-  // Realtime: posts UPDATE (likes/comments/concern カウント変動) と INSERT (新規投稿)
+  // Realtime: posts UPDATE (likes/comments/concern カウント変動) のみ subscribe。
+  // INSERT (新規投稿) は filter 不可で全 fanout が痛いため撤去 (Audit E#5)。
+  // 新規投稿の取り込みは pull-to-refresh + tab focus invalidate + staleTime に委譲。
+  //
   // フィードに見えてる post だけを server-side filter で絞る — 全 post の UPDATE を
   // 受け取ると fanout が O(全ユーザー × 全 post 更新) になりサーバーが死ぬ。
   //
   // postIds の変化で頻繁に再 subscribe するのは避けたい (channel teardown コストが高い)
   // ので、firstPageIds (上位 30 件 = 最も活発な投稿) を deps にして安定化する。
   // 下に scroll しても再 subscribe しない — fetch 経由の値が staleTime 後に更新される。
-  const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // UPDATE event coalescing — multiple postgres_changes UPDATE events within
   // 250ms are merged into a single setQueriesData call.  Previously each
   // UPDATE re-allocated the entire pages/posts tree which thrashed React
@@ -353,6 +366,12 @@ export function useFeed() {
     // 何も表示してない時は subscribe しない
     if (firstPageIds.length === 0) return;
     const channelName = `feed-posts:${firstPageKey.slice(0, 64)}`;
+    // ★ Audit E#5 (2026-05-28):
+    //   旧版は同 channel で UPDATE (filter あり) + INSERT (filter なし) を chain。
+    //   posts INSERT は全クライアントに fanout され重いので realtime 撤去。
+    //   新規投稿の取り込みは pull-to-refresh + staleTime + tab focus invalidate に委譲
+    //   (feed.tsx の useFocusEffect で `qc.invalidateQueries({ queryKey: ['feed'] })`)。
+    //   UPDATE (filter 付き) は active な反応カウント変動を見せる主要 UX なので残す。
     const detach = attachChannel(channelName, (ch) =>
       ch.on(
         'postgres_changes',
@@ -398,24 +417,10 @@ export function useFeed() {
             });
           }, 250);
         },
-      ).on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'posts' },
-        () => {
-          // 新規投稿は debounce で再フェッチ (連投時の連続再取得を回避)
-          // INSERT は filter 不可 (新規 id は事前に知り得ない) のため、サーバー filter を
-          // かけられないが、debounce で fetch を集約することで実害は最小化される。
-          if (pendingTimer.current) clearTimeout(pendingTimer.current);
-          // パフォーマンス監査: 1500ms → 3000ms に延長してバースト時の refetch を半減
-          pendingTimer.current = setTimeout(() => {
-            qc.invalidateQueries({ queryKey: ['feed'] });
-          }, 3000);
-        },
       ),
     );
     return () => {
       detach();
-      if (pendingTimer.current) clearTimeout(pendingTimer.current);
       if (updateFlushTimer.current) clearTimeout(updateFlushTimer.current);
       updateBuffer.current.clear();
     };
