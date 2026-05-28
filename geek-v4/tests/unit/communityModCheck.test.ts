@@ -14,6 +14,8 @@ import {
   canDeleteBBSReply,
   canKickMember,
   canBanMember,
+  canPromoteMember,
+  canDemoteMember,
 } from '../../lib/utils/communityModCheck';
 
 describe('isModRole', () => {
@@ -181,5 +183,54 @@ describe('canBanMember', () => {
     expect(canBanMember('admin', 'member')).toBe(true);
     expect(canBanMember('admin', 'owner')).toBe(false);
     expect(canBanMember('member', 'member')).toBe(false);
+  });
+});
+
+// ============================================================
+// 0069: promote / demote 権限
+// ============================================================
+describe('canPromoteMember (owner → member→admin)', () => {
+  it('owner は member を昇格可', () => {
+    expect(canPromoteMember('owner', 'member')).toBe(true);
+  });
+
+  it('owner であっても owner / admin は昇格不可', () => {
+    expect(canPromoteMember('owner', 'owner')).toBe(false);
+    expect(canPromoteMember('owner', 'admin')).toBe(false);
+  });
+
+  it('admin / member / null は昇格を発動できない (owner 限定)', () => {
+    expect(canPromoteMember('admin', 'member')).toBe(false);
+    expect(canPromoteMember('member', 'member')).toBe(false);
+    expect(canPromoteMember(null, 'member')).toBe(false);
+    expect(canPromoteMember(undefined, 'member')).toBe(false);
+  });
+
+  it('想定外 role は member 扱いにはしない (= 文字列一致のみ)', () => {
+    expect(canPromoteMember('owner', 'unknown')).toBe(false);
+    expect(canPromoteMember('superowner', 'member')).toBe(false);
+  });
+});
+
+describe('canDemoteMember (owner → admin→member)', () => {
+  it('owner は admin を降格可', () => {
+    expect(canDemoteMember('owner', 'admin')).toBe(true);
+  });
+
+  it('owner であっても owner / member は降格不可', () => {
+    expect(canDemoteMember('owner', 'owner')).toBe(false);
+    expect(canDemoteMember('owner', 'member')).toBe(false);
+  });
+
+  it('admin / member / null は降格を発動できない', () => {
+    expect(canDemoteMember('admin', 'admin')).toBe(false);
+    expect(canDemoteMember('member', 'admin')).toBe(false);
+    expect(canDemoteMember(null, 'admin')).toBe(false);
+    expect(canDemoteMember(undefined, 'admin')).toBe(false);
+  });
+
+  it('想定外 role は admin 扱いにはしない', () => {
+    expect(canDemoteMember('owner', 'unknown')).toBe(false);
+    expect(canDemoteMember('owner', null)).toBe(false);
   });
 });

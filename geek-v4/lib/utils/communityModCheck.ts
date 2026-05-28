@@ -105,3 +105,38 @@ export function canBanMember(
 ): boolean {
   return canKickMember(actor, target);
 }
+
+// ============================================================
+// 昇格 / 降格 権限 (migration 0069 で追加)
+// ============================================================
+// 設計:
+//   - owner だけが role 変更可能 (admin は admin を作れない)
+//   - promote: 対象が member → admin
+//   - demote: 対象が admin → member
+//   - owner 自身 / 非メンバー / 既に同 role の場合は false
+//
+// 本番側 (RPC) で security definer + owner 判定があるため、ここはあくまで
+// UI 表示用 guard。バイパスできても RPC が拒否する。
+// ============================================================
+
+// 昇格可否: actor が owner かつ target が member のみ true。
+// 自分自身の判定は呼び出し側 (UI) で別途行う想定 (actor / target は role のみ受ける)。
+export function canPromoteMember(
+  actor: Role | string | null | undefined,
+  target: Role | string | null | undefined,
+): boolean {
+  if (actor !== 'owner') return false;
+  if (target !== 'member') return false;
+  return true;
+}
+
+// 降格可否: actor が owner かつ target が admin のみ true。
+// owner は降格不可 (community に owner が居なくなるため)。
+export function canDemoteMember(
+  actor: Role | string | null | undefined,
+  target: Role | string | null | undefined,
+): boolean {
+  if (actor !== 'owner') return false;
+  if (target !== 'admin') return false;
+  return true;
+}

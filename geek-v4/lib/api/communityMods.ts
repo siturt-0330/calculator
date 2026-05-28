@@ -296,6 +296,50 @@ export async function unbanMember(
   }
 }
 
+// 昇格 (member → admin)。owner だけが呼び出せる (RPC 内で owner 判定)。
+// 自分自身 / owner / 非メンバー は RPC が exception を返す。
+export async function promoteMember(
+  communityId: string,
+  userId: string,
+): Promise<void> {
+  assertUuid(communityId, 'communityId');
+  assertUuid(userId, 'userId');
+
+  const { error } = await withApiTimeout(
+    supabase.rpc('mod_promote_member', {
+      target_community_id: communityId,
+      target_user_id: userId,
+    }),
+    'communityMods.promoteMember',
+    8000,
+  );
+  if (error) {
+    throw new Error(`管理人への昇格に失敗しました: ${error.message}`);
+  }
+}
+
+// 降格 (admin → member)。owner だけが呼び出せる (RPC 内で owner 判定)。
+// 自分自身 / owner / 非メンバー / 既に member は RPC が exception を返す。
+export async function demoteMember(
+  communityId: string,
+  userId: string,
+): Promise<void> {
+  assertUuid(communityId, 'communityId');
+  assertUuid(userId, 'userId');
+
+  const { error } = await withApiTimeout(
+    supabase.rpc('mod_demote_member', {
+      target_community_id: communityId,
+      target_user_id: userId,
+    }),
+    'communityMods.demoteMember',
+    8000,
+  );
+  if (error) {
+    throw new Error(`member への降格に失敗しました: ${error.message}`);
+  }
+}
+
 // ============================================================
 // 投稿 / コメント / 返信 の mod 削除
 // ============================================================

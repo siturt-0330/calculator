@@ -1,9 +1,11 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { View, Text, Platform, Image as RNImage, StyleSheet } from 'react-native';
+import { useQueryClient } from '@tanstack/react-query';
 import { safeOpenUrl } from '../../lib/openUrl';
 import { Icon } from '../../constants/icons';
 import type { Post } from '../../types/models';
 import { useLanguageStore } from '../../stores/languageStore';
+import { useAuthStore } from '../../stores/authStore';
 import { translateDynamic, useT } from '../../lib/i18n';
 import { MemeReactionPicker } from './MemeReactionPicker';
 import type { ReactionAgg } from '../../lib/api/reactions';
@@ -20,6 +22,7 @@ import { MarkdownText } from '../ui/MarkdownText';
 import { LinkPreviewCard } from './LinkPreviewCard';
 import { PollCard } from './PollCard';
 import { useFeatureFlag } from '../../hooks/useFeatureFlag';
+import { useIsCommunityMod } from '../../hooks/useIsCommunityMod';
 import type { Poll } from '../../lib/api/polls';
 import { Avatar } from '../ui/Avatar';
 import { formatRelative } from '../../lib/utils/date';
@@ -29,6 +32,7 @@ import { ObsidianSaveButton } from '../ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
 import type { PostCommunityRef } from '../../lib/api/posts';
 import { OfficialBadge } from '../community/OfficialBadge';
+import { ModActionMenu } from '../community/ModActionMenu';
 import { MediaWithCWGuard } from '../post/MediaWithCWGuard';
 import { getDisplayLikes } from '../../lib/utils/voteFuzz';
 
@@ -366,6 +370,16 @@ function AnonPostCardInner({
   const More = Icon.more;
   const Warn = Icon.warn;
   const t = useT();
+  const qc = useQueryClient();
+
+  // ★ ModActionMenu 配線 (mod だけに見える 3-dot)
+  // post.community_id は型に無いが post_communities junction で 1 件以上紐付く。
+  // 先頭の community を「主担当 community」と見做し、その mod 権限で判定。
+  // (共通的に 1 post = 1 primary community なので衝突は実質起きない)
+  const primaryCommunityId = communities[0]?.community_id;
+  const isMod = useIsCommunityMod(primaryCommunityId);
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const isOwnPost = !!post.author_id && post.author_id === currentUserId;
 
   // ミームリアクション (props 経由で DB から取得済み)
   const [memePickerOpen, setMemePickerOpen] = useState(false);
@@ -579,6 +593,25 @@ function AnonPostCardInner({
         <PressableScale onPress={onMore} hitSlop={10} style={STYLES.morePress}>
           <More size={20} color={C.text3} strokeWidth={2.2} />
         </PressableScale>
+        {/* mod 専用 3-dot menu — mod でない / 自分の投稿のときは null render */}
+        {primaryCommunityId && post.author_id && (
+          <ModActionMenu
+            target={{
+              kind: 'post',
+              postId: post.id,
+              authorId: post.author_id,
+            }}
+            communityId={primaryCommunityId}
+            isMod={isMod}
+            isOwn={isOwnPost}
+            onActionComplete={() => {
+              // 削除 / kick / ban のいずれも feed を再 fetch (RPC 経路) させる
+              qc.invalidateQueries({ queryKey: ['feed-page'] });
+              qc.invalidateQueries({ queryKey: ['feed'] });
+              qc.invalidateQueries({ queryKey: ['community-feed'] });
+            }}
+          />
+        )}
       </View>
 
       {/* コミュニティピル — レコメンド理由 chip は UI 雑味の元なので非表示

@@ -39,6 +39,8 @@ import {
   useKickMember,
   useBanMember,
   useUnbanMember,
+  usePromoteMember,
+  useDemoteMember,
 } from '../../../../hooks/useCommunityMods';
 import type {
   MemberWithProfile,
@@ -52,6 +54,8 @@ type PendingAction =
   | { kind: 'kick'; member: MemberRowItem }
   | { kind: 'ban'; member: MemberRowItem }
   | { kind: 'unban'; ban: BanWithProfile }
+  | { kind: 'promote'; member: MemberRowItem }
+  | { kind: 'demote'; member: MemberRowItem }
   | null;
 
 export default function CommunityAdminScreen() {
@@ -88,6 +92,8 @@ export default function CommunityAdminScreen() {
   const kick = useKickMember(id);
   const ban = useBanMember(id);
   const unban = useUnbanMember(id);
+  const promote = usePromoteMember(id);
+  const demote = useDemoteMember(id);
 
   const [filter, setFilter] = useState<MembersFilter>('all');
   const [pending, setPending] = useState<PendingAction>(null);
@@ -150,6 +156,8 @@ export default function CommunityAdminScreen() {
     pending?.kind === 'kick' ? 'メンバーをキック'
     : pending?.kind === 'ban' ? 'メンバーを BAN'
     : pending?.kind === 'unban' ? 'BAN を解除'
+    : pending?.kind === 'promote' ? '管理人に昇格'
+    : pending?.kind === 'demote' ? 'member に降格'
     : '';
   const dialogMessage = (() => {
     if (!pending) return '';
@@ -159,8 +167,31 @@ export default function CommunityAdminScreen() {
     if (pending.kind === 'ban') {
       return `「${pending.member.nickname}」を BAN します。再加入できなくなります。`;
     }
-    return `「${pending.ban.profile?.nickname ?? '匿名'}」の BAN を解除します。`;
+    if (pending.kind === 'unban') {
+      return `「${pending.ban.profile?.nickname ?? '匿名'}」の BAN を解除します。`;
+    }
+    if (pending.kind === 'promote') {
+      return `「${pending.member.nickname}」さんを管理人に昇格しますか?\n\n投稿削除 / キック / BAN の権限を持ちます。`;
+    }
+    // demote
+    return `「${pending.member.nickname}」さんを member に降格しますか?\n\n管理権限はすべて失われます。`;
   })();
+
+  // Confirm 後の処理ボタンラベル
+  const confirmLabel =
+    pending?.kind === 'kick' ? 'キックする'
+    : pending?.kind === 'ban' ? 'BAN する'
+    : pending?.kind === 'unban' ? '解除する'
+    : pending?.kind === 'promote' ? '昇格する'
+    : pending?.kind === 'demote' ? '降格する'
+    : '確認';
+
+  // destructive 表示 (赤系) は kick / ban / demote。
+  // promote / unban は positive (accent) として扱う。
+  const isDestructive =
+    pending?.kind === 'kick' ||
+    pending?.kind === 'ban' ||
+    pending?.kind === 'demote';
 
   const onConfirm = () => {
     if (!pending) return;
@@ -168,8 +199,12 @@ export default function CommunityAdminScreen() {
       kick.mutate({ communityId: id, userId: pending.member.user_id });
     } else if (pending.kind === 'ban') {
       ban.mutate({ communityId: id, userId: pending.member.user_id });
-    } else {
+    } else if (pending.kind === 'unban') {
       unban.mutate({ communityId: id, userId: pending.ban.user_id });
+    } else if (pending.kind === 'promote') {
+      promote.mutate({ communityId: id, userId: pending.member.user_id });
+    } else {
+      demote.mutate({ communityId: id, userId: pending.member.user_id });
     }
     setPending(null);
   };
@@ -254,9 +289,8 @@ export default function CommunityAdminScreen() {
                     isSelf={m.user_id === userId}
                     onKick={(target) => setPending({ kind: 'kick', member: target })}
                     onBan={(target) => setPending({ kind: 'ban', member: target })}
-                    // TODO: promote は別 agent C で配線 (useCommunityMods に promote mutation
-                    // が追加されたら setPending({kind:'promote',...}) を追加)
-                    onPromote={undefined}
+                    onPromote={(target) => setPending({ kind: 'promote', member: target })}
+                    onDemote={(target) => setPending({ kind: 'demote', member: target })}
                   />
                 );
               })}
@@ -326,13 +360,8 @@ export default function CommunityAdminScreen() {
         visible={pending !== null}
         title={dialogTitle}
         message={dialogMessage}
-        confirmLabel={
-          pending?.kind === 'kick' ? 'キックする'
-          : pending?.kind === 'ban' ? 'BAN する'
-          : pending?.kind === 'unban' ? '解除する'
-          : '確認'
-        }
-        destructive={pending?.kind !== 'unban'}
+        confirmLabel={confirmLabel}
+        destructive={isDestructive}
         onConfirm={onConfirm}
         onCancel={() => setPending(null)}
       />

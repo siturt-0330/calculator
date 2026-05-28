@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { View, Text } from 'react-native';
+import { useQueryClient } from '@tanstack/react-query';
 import { Avatar } from '../ui/Avatar';
 import { PressableScale } from '../ui/PressableScale';
 import { C, R, SP } from '../../design/tokens';
@@ -10,6 +11,9 @@ import { ObsidianSaveButton } from '../ui/ObsidianSaveButton';
 import { commentToObsidianNote } from '../../hooks/useObsidian';
 import { Icon } from '../../constants/icons';
 import { COMMENT_MAX_DEPTH } from '../../lib/utils/commentTree';
+import { ModActionMenu } from '../community/ModActionMenu';
+import { useIsCommunityMod } from '../../hooks/useIsCommunityMod';
+import { useAuthStore } from '../../stores/authStore';
 import type { Comment } from '../../types/models';
 
 // ============================================================
@@ -43,6 +47,10 @@ export type CommentThreadItemProps = {
   unread?: boolean;
   postContent?: string;
   postId?: string;
+  // 親 post の community_id — 渡されると mod 用の 3-dot menu を出す。
+  // post 詳細画面側 (app/post/[id].tsx) で postCommunities[0]?.community_id
+  // を渡してくる想定。null なら ModActionMenu は出ない。
+  parentCommunityId?: string | null;
   onReply?: (comment: Comment) => void;
 };
 
@@ -52,8 +60,15 @@ export function CommentThreadItem({
   unread = false,
   postContent,
   postId,
+  parentCommunityId,
   onReply,
 }: CommentThreadItemProps) {
+  const qc = useQueryClient();
+  // mod 判定 (parentCommunityId が無ければ false で何も出さない)
+  const isMod = useIsCommunityMod(parentCommunityId);
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const commentAuthorId = (comment as Comment & { author_id?: string }).author_id;
+  const isOwnComment = !!commentAuthorId && commentAuthorId === currentUserId;
   const depth = Math.min(COMMENT_MAX_DEPTH, comment.depth ?? 0);
   const children = comment.children ?? [];
   const indent = depth * INDENT_PX;
@@ -168,6 +183,24 @@ export function CommentThreadItem({
                   size={14}
                 />
               )}
+              {/* mod 専用 3-dot menu — parentCommunityId が無い / mod でない / 自分の
+                  コメント のときは ModActionMenu 側で null render される */}
+              {parentCommunityId && commentAuthorId && (
+                <ModActionMenu
+                  target={{
+                    kind: 'comment',
+                    commentId: comment.id,
+                    authorId: commentAuthorId,
+                    postId: comment.post_id,
+                  }}
+                  communityId={parentCommunityId}
+                  isMod={isMod}
+                  isOwn={isOwnComment}
+                  onActionComplete={() => {
+                    qc.invalidateQueries({ queryKey: ['comments', comment.post_id] });
+                  }}
+                />
+              )}
             </View>
             <Text style={[T.body, { color: C.text, lineHeight: 22 }]}>
               {comment.content}
@@ -258,6 +291,7 @@ export function CommentThreadItem({
               rootIndex={rootIndex}
               postContent={postContent}
               postId={postId}
+              parentCommunityId={parentCommunityId}
               onReply={onReply}
             />
           ))}

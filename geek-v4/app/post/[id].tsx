@@ -690,6 +690,7 @@ export default function PostDetailScreen() {
                         unread={unreadIds.has(root.id)}
                         postContent={post.content}
                         postId={post.id}
+                        parentCommunityId={postCommunities[0]?.community_id ?? null}
                         onReply={handleReply}
                       />
                     );
@@ -705,6 +706,7 @@ export default function PostDetailScreen() {
                           unread={unreadIds.has(root.id)}
                           postContent={post.content}
                           postId={post.id}
+                          parentCommunityId={postCommunities[0]?.community_id ?? null}
                           onReply={handleReply}
                         />
                       ))}

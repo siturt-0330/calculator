@@ -19,6 +19,8 @@ import {
   kickMember,
   banMember,
   unbanMember,
+  promoteMember,
+  demoteMember,
   fetchCommunityMembers,
   fetchCommunityBans,
   fetchModActionLogs,
@@ -206,6 +208,80 @@ export function useUnbanMember(communityId: string | undefined) {
     },
     onSuccess: () => {
       useToastStore.getState().show('BAN を解除しました', 'success');
+    },
+    onSettled: () => invalidate(),
+  });
+}
+
+// ============================================================
+// mutation: 昇格 / 降格 (owner 専用 — 0069)
+// ============================================================
+// optimistic update: members cache 内で対象行の role だけを差し替える。
+// 失敗時は revert + toast。成功時は invalidate でサーバー真値に同期。
+type PromoteInput = { communityId: string; userId: string };
+type DemoteInput = { communityId: string; userId: string };
+
+export function usePromoteMember(communityId: string | undefined) {
+  const qc = useQueryClient();
+  const invalidate = useInvalidateMods(communityId);
+  const membersKey = ['community-mods', 'members', communityId ?? 'none'];
+
+  return useMutation({
+    mutationFn: (input: PromoteInput) =>
+      promoteMember(input.communityId, input.userId),
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: membersKey });
+      const prev = qc.getQueryData<MemberWithProfile[]>(membersKey);
+      if (prev) {
+        qc.setQueryData<MemberWithProfile[]>(
+          membersKey,
+          prev.map((m) =>
+            m.user_id === input.userId ? { ...m, role: 'admin' as const } : m,
+          ),
+        );
+      }
+      return { prev };
+    },
+    onError: (err, _input, ctx) => {
+      if (ctx?.prev) qc.setQueryData(membersKey, ctx.prev);
+      const message = err instanceof Error ? err.message : '管理人への昇格に失敗しました';
+      showErrorToast(message);
+    },
+    onSuccess: () => {
+      useToastStore.getState().show('管理人に昇格しました', 'success');
+    },
+    onSettled: () => invalidate(),
+  });
+}
+
+export function useDemoteMember(communityId: string | undefined) {
+  const qc = useQueryClient();
+  const invalidate = useInvalidateMods(communityId);
+  const membersKey = ['community-mods', 'members', communityId ?? 'none'];
+
+  return useMutation({
+    mutationFn: (input: DemoteInput) =>
+      demoteMember(input.communityId, input.userId),
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: membersKey });
+      const prev = qc.getQueryData<MemberWithProfile[]>(membersKey);
+      if (prev) {
+        qc.setQueryData<MemberWithProfile[]>(
+          membersKey,
+          prev.map((m) =>
+            m.user_id === input.userId ? { ...m, role: 'member' as const } : m,
+          ),
+        );
+      }
+      return { prev };
+    },
+    onError: (err, _input, ctx) => {
+      if (ctx?.prev) qc.setQueryData(membersKey, ctx.prev);
+      const message = err instanceof Error ? err.message : 'member への降格に失敗しました';
+      showErrorToast(message);
+    },
+    onSuccess: () => {
+      useToastStore.getState().show('member に降格しました', 'success');
     },
     onSettled: () => invalidate(),
   });
