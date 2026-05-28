@@ -175,9 +175,17 @@ export function useLike() {
     pending.current.set(postId, 1);
     const wasLiked = readLikedFromCache(postId);
     mutation.mutate({ postId, wasLiked }, {
-      onSettled: () => {
+      onSettled: (_data, error) => {
         const total = pending.current.get(postId) ?? 1;
         pending.current.delete(postId);
+        // ★ Audit D#8: error 時は再 fire しない。
+        //   失敗時は per-call onError が既に「いいねに失敗しました」 toast を表示し、
+        //   mutation の onError が cache を revert 済み。ここで fire(postId) を再呼出すと
+        //   revert 後の state に対してユーザー意図を二重計上し、再 mutation が
+        //   同じ理由で失敗 → 重複トースト ("いいねに失敗しました" ×2) を生む。
+        //   失敗時はサーバが intent を消化していないので parity を追いつかせる必要もない
+        //   (UI は revert で消費前 state に戻っているため "次の tap が再開する" 動作が正)。
+        if (error) return;
         const extra = total - 1;
         if (extra % 2 === 1) fire(postId); // 余剰が奇数 → もう一度 toggle
       },

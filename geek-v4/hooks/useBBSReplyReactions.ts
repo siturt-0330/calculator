@@ -142,9 +142,16 @@ export function useBBSReplyReactionToggle() {
     const k = `${vars.replyId}:${vars.meme}`;
     pending.current.set(k, 1);
     mutation.mutate(vars, {
-      onSettled: () => {
+      onSettled: (_data, error) => {
         const total = pending.current.get(k) ?? 1;
         pending.current.delete(k);
+        // ★ Audit D#8: error 時は再 fire しない。
+        //   mutation の onError が既に snapshot revert + 「リアクションに失敗しました」
+        //   toast を表示済み。ここで fire(vars) を再呼出すと revert 後の state に
+        //   対してユーザー意図を二重計上し、再 mutation が同じ理由で失敗 → 重複
+        //   トースト ("リアクションに失敗しました" ×2) を生む。失敗時はサーバが
+        //   intent を消化していないので parity を追いつかせる必要もない。
+        if (error) return;
         const extra = total - 1;
         if (extra % 2 === 1) fire(vars);
       },

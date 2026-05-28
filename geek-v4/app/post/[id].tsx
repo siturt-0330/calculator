@@ -466,11 +466,14 @@ export default function PostDetailScreen() {
               {reactions.slice(0, 12).map((r) => {
                 const mine = r.mine;
                 return (
+                  // クリック応答監査: 旧版は hitSlop={6} + paddingVertical:5 で
+                  // 実タップ高 ~32px。スマホ親指タップで隣の pill を踏むケース多発。
+                  // 見た目を維持しつつ hitSlop を 10 に拡張し ~40px を確保。
                   <PressableScale
                     key={r.meme}
                     onPress={() => toggleReact(id, r.meme)}
                     haptic="tap"
-                    hitSlop={6}
+                    hitSlop={10}
                     accessibilityLabel={`${r.meme} ${r.count} 件 ${mine ? '(押下済み)' : ''}`}
                     style={{
                       flexDirection: 'row',
@@ -508,7 +511,7 @@ export default function PostDetailScreen() {
               <PressableScale
                 onPress={() => setMemePickerOpen(true)}
                 haptic="tap"
-                hitSlop={6}
+                hitSlop={10}
                 accessibilityLabel="テキストスタンプを追加"
                 style={{
                   flexDirection: 'row',

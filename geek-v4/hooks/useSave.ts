@@ -142,9 +142,16 @@ export function useSave() {
     pending.current.set(postId, 1);
     const wasSaved = readSavedFromCache(postId);
     mutation.mutate({ postId, wasSaved }, {
-      onSettled: () => {
+      onSettled: (_data, error) => {
         const total = pending.current.get(postId) ?? 1;
         pending.current.delete(postId);
+        // ★ Audit D#8: error 時は再 fire しない。
+        //   mutation の onError が既に snapshot revert + 「保存に失敗しました」 toast
+        //   を表示済み。ここで fire(postId) を再呼出すと revert 後の state に対して
+        //   ユーザー意図を二重計上し、再 mutation が同じ理由で失敗 → 重複トースト
+        //   ("保存に失敗しました" ×2) を生む。失敗時はサーバが intent を消化して
+        //   いないので parity を追いつかせる必要もない (UI は revert で消費前 state)。
+        if (error) return;
         const extra = total - 1;
         if (extra % 2 === 1) fire(postId);
       },

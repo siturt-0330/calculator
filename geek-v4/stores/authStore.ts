@@ -141,7 +141,11 @@ function registerAuthListener(set: (partial: Partial<AuthState>) => void) {
     }
     if (event === 'TOKEN_REFRESHED') {
       console.log('[authStore] token refreshed');
-      // 何もしない (session の token は内部で更新済み)
+      // Audit E#4: realtime client は token rotation を自動追従しない。
+      // 旧 token を保持し続けた結果、期限切れ後に RLS-gated postgres_changes が
+      // silent に配信停止し、UI が古いデータのまま固まる事故が起きる。
+      // 新 access_token を全 open channel に再注入する必要がある。
+      supabase.realtime.setAuth(session?.access_token ?? null);
       return;
     }
     // SIGNED_IN or USER_UPDATED

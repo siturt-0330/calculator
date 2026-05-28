@@ -1829,10 +1829,14 @@ const SpotsTab = memo(function SpotsTab({
             </Text>
           )}
           {upcomingCount > 0 && (
+            // クリック応答監査: 旧版は hitSlop={4} + paddingVertical:2 で実効
+            // タップ領域 ~22px しかなく iOS HIG (44pt) を大きく下回っていた。
+            // pill の見た目はそのまま (paddingVertical:2)、hitSlop を 12 へ拡張して
+            // ~38px の実タップ範囲を確保する。
             <PressableScale
               onPress={onGoToEvents}
               haptic="tap"
-              hitSlop={4}
+              hitSlop={12}
               accessibilityLabel={`この聖地の直近イベント ${upcomingCount} 件を見る`}
               style={{
                 alignSelf: 'flex-start',
