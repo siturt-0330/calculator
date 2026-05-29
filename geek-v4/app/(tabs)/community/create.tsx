@@ -39,6 +39,14 @@ type VisibilityOption = {
 import { prepareImageUpload } from '../../../lib/image';
 import { openCropper } from '../../../lib/imageCropper';
 
+// ============================================================
+// 2026-05: コミュニティ作成画面の「ジャンル」ピッカーを UI から非表示にする。
+// 推し系 / 作品系 / 体験系 / 議論系 の表記をユーザーに見せない方針。
+// false の間は genre が 'discussion' 固定 (= 最小タブ構成) で作成される。
+// ピッカーを復活させたいときは true に戻すだけ (作成ロジックは温存)。
+// ============================================================
+const SHOW_GENRE_PICKER = false;
+
 export default function CreateCommunityScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -683,7 +691,9 @@ export default function CreateCommunityScreen() {
               - 体験系     ホーム / 掲示板 / 検索 / マップ / カレンダー / マイプロフ
               - 議論系     ホーム / 掲示板
             "何をするか" と同じく "何をやらないか" を意識した引き算設計。
-            後から変更可。 */}
+            後から変更可。
+            ※ 2026-05: SHOW_GENRE_PICKER=false でこのブロックごと非表示。 */}
+        {SHOW_GENRE_PICKER && (
         <View style={{ gap: SP['2'] }}>
           <Text style={[T.smallB, { color: C.text2 }]}>ジャンル</Text>
           <Text style={[T.caption, { color: C.text3 }]}>
@@ -738,6 +748,7 @@ export default function CreateCommunityScreen() {
             );
           })}
         </View>
+        )}
 
         {/* 公開設定 */}
         <View style={{ gap: SP['2'] }}>
