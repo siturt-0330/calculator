@@ -223,6 +223,58 @@ export async function fetchMyUpcomingEvents(opts: {
 // 100 件で打ち切る。それを超える場合は将来 cursor を追加する。
 const FETCH_MY_COMMUNITIES_LIMIT = 100;
 
+// ============================================================
+// 自分の所属コミュニティを role 付きで取得 (HomeDrawer / admin filter 用)
+// ------------------------------------------------------------
+// `fetchMyCommunities` は community 配列のみで role を捨てるため、
+// HomeDrawer の「管理コミュ / 参加コミュ」分割には不向き。
+// 本関数は community_members の role を一緒に取得して呼び出し側で
+// owner/admin/moderator を分離できるようにする。
+//
+// 注意:
+//   - community_members.role の DB 値は 'owner' | 'admin' | 'member' のみ。
+//     'moderator' は将来拡張用に MemberRole 型と並べて受け取る (現状未使用)。
+//   - `communities.created_by === user.id` の owner も保険として role='owner' 扱い。
+// ============================================================
+export type CommunityWithRole = Community & {
+  /** community_members.role (自分の役割) */
+  role: MemberRole | 'moderator' | null;
+};
+
+export async function fetchMyCommunitiesWithRole(): Promise<CommunityWithRole[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data, error } = await supabase
+    .from('community_members')
+    .select('role, community_id, communities!inner(*)')
+    .eq('user_id', user.id)
+    .order('joined_at', { ascending: false })
+    .limit(FETCH_MY_COMMUNITIES_LIMIT);
+
+  if (error) {
+    console.warn('[communities] fetchMyCommunitiesWithRole failed:', error.message);
+    return [];
+  }
+  // Supabase embed の型 narrowing が one-to-many と判定するので unknown 経由で正規化
+  const rows = (data ?? []) as unknown as Array<{
+    role: MemberRole | 'moderator' | null;
+    community_id: string;
+    communities: Community | Community[] | null;
+  }>;
+  const out: CommunityWithRole[] = [];
+  for (const r of rows) {
+    if (!r.communities) continue;
+    const community = Array.isArray(r.communities) ? r.communities[0] : r.communities;
+    if (!community) continue;
+    // created_by が自分なら role='owner' で上書き (RLS の race / 古い insert 漏れ保険)
+    const effectiveRole: CommunityWithRole['role'] =
+      community.created_by === user.id ? 'owner' : (r.role ?? null);
+    out.push({ ...community, role: effectiveRole });
+  }
+  return out;
+}
+
 export async function fetchMyCommunities(): Promise<Community[]> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];

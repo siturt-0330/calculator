@@ -22,7 +22,7 @@ import { Icon } from '../../constants/icons';
 import { R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { discoverCommunities, type Community } from '../../lib/api/communities';
-import { thumbedUrl } from '../../lib/utils/imageUrl';
+import { squareThumbedUrl } from '../../lib/utils/imageUrl';
 
 // iOS-native: 「もっと繋がっているように」 = カード枠を外して
 // 純粋な avatar + label 並びにする (Stories / Friends 行のような密度)
@@ -145,8 +145,10 @@ function CommunityCard({
   onPress: () => void;
 }) {
   const C = useColors();
+  // squareThumbedUrl: width=240&height=240&resize=cover で正方形 center-crop。
+  // width-only だと横長集合写真が円に詰め込まれて拡大されて見える。
   const thumb = useMemo(
-    () => (community.icon_url ? thumbedUrl(community.icon_url, 240) : null),
+    () => (community.icon_url ? squareThumbedUrl(community.icon_url, 240) : null),
     [community.icon_url],
   );
   const thumbSource = useMemo(() => (thumb ? { uri: thumb } : null), [thumb]);

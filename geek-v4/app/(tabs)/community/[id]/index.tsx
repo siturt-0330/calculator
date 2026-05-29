@@ -18,22 +18,14 @@ import {
   Pressable,
   FlatList,
   ActivityIndicator,
-  TextInput,
-  Modal,
   type ListRenderItem,
 } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-} from 'react-native-reanimated';
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { C, R, SP, SHADOW } from '../../../../design/tokens';
 import { T } from '../../../../design/typography';
-import { SPRING_TIGHT } from '../../../../design/motion';
 import { Spinner } from '../../../../components/ui/Spinner';
 import { TABBAR } from '../../../../design/tabbar';
 import { PressableScale } from '../../../../components/ui/PressableScale';
@@ -41,12 +33,6 @@ import { EmptyState } from '../../../../components/ui/EmptyState';
 import { BackButton } from '../../../../components/nav/BackButton';
 import { Icon } from '../../../../constants/icons';
 import { AnonPostCard } from '../../../../components/feed/AnonPostCard';
-import { CommunityStampRow } from '../../../../components/feed/CommunityStampRow';
-import {
-  useCommunityStamps,
-  useCommunityStampReactions,
-  useCommunityStampReactionToggle,
-} from '../../../../hooks/useCommunityStamps';
 import { OfficialBadge } from '../../../../components/community/OfficialBadge';
 import { EventRow } from '../../../../components/community/EventRow';
 import { OfficialFeatureNav } from '../../../../components/community/OfficialFeatureNav';
@@ -65,21 +51,14 @@ import {
   fetchCommunitySpots,
   fetchCommunityEvents,
   toggleSpotCertified,
-  updateCommunity,
   SPOT_CATEGORY_META,
-  COMMUNITY_GENRE_META,
-  SELECTABLE_GENRES,
   type CommunityWithMembership,
   type CommunitySpot,
   type CommunityEvent,
-  type CommunityGenre,
   type SpotCategory,
 } from '../../../../lib/api/communities';
-import {
-  getTabsFor,
-  type CommunityTabKey,
-} from '../../../../lib/community/tabSets';
-import { effectiveGenre, setGenreOverride } from '../../../../lib/community/genreOverride';
+import type { CommunityTabKey } from '../../../../lib/community/tabSets';
+import { effectiveGenre } from '../../../../lib/community/genreOverride';
 import { fetchCommunityPosts } from '../../../../lib/api/posts';
 import { fetchCommunityThreads } from '../../../../lib/api/bbs';
 // Q&A 関連 import は廃止 (2026-05) — QnaTabInline 撤去に伴い
@@ -200,8 +179,6 @@ export default function CommunityDetailScreen() {
   const [descExpanded, setDescExpanded] = useState(false);
   const [joining, setJoining] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  // ジャンル変更モーダル (migration 0044 未適用環境でも local override で変更可)
-  const [genreModalOpen, setGenreModalOpen] = useState(false);
 
   // -----------------------------------------------------------
   // Community core fetch (header)
@@ -504,60 +481,9 @@ export default function CommunityDetailScreen() {
             </Pressable>
           )}
 
-          {/* Tags + genre chip (1 行 wrap, compact) */}
-          {(community.tags.length > 0 || !community.is_official) && (
-            <View
-              style={{
-                flexDirection: 'row',
-                flexWrap: 'wrap',
-                gap: 6,
-              }}
-            >
-              {community.tags.map((tg) => (
-                <View
-                  key={tg}
-                  style={{
-                    paddingHorizontal: SP['2'],
-                    paddingVertical: 3,
-                    backgroundColor: C.accentBg,
-                    borderRadius: R.full,
-                  }}
-                >
-                  <Text style={{ color: C.accent, fontSize: 11, fontWeight: '600' }}>
-                    #{tg}
-                  </Text>
-                </View>
-              ))}
-              {/* ジャンル chip — 残置 (推奨どおり compact) */}
-              {!community.is_official && (() => {
-                const currentGenre = effectiveGenre(id, community.genre);
-                const meta = COMMUNITY_GENRE_META[currentGenre];
-                return (
-                  <PressableScale
-                    onPress={() => setGenreModalOpen(true)}
-                    haptic="tap"
-                    accessibilityLabel={`ジャンル ${meta.label} — タップして変更`}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 4,
-                      paddingHorizontal: SP['2'],
-                      paddingVertical: 3,
-                      backgroundColor: C.bg3,
-                      borderRadius: R.full,
-                      borderWidth: 1,
-                      borderColor: C.border,
-                    }}
-                  >
-                    <Text style={{ fontSize: 11 }}>{meta.emoji}</Text>
-                    <Text style={{ color: C.text2, fontSize: 11, fontWeight: '700' }}>
-                      {meta.label}
-                    </Text>
-                  </PressableScale>
-                );
-              })()}
-            </View>
-          )}
+          {/* Hashtag chip (community.tags) は 2026-05 撤去 — hero を「名前 + 説明文 + 参加 CTA」だけに
+              絞り視覚 noise を減らす。DB の community.tags は検索インデックス用に残置。
+              ジャンル chip は F6 で既に撤去済。 */}
         </View>
 
         {/* ============================================================
@@ -622,122 +548,7 @@ export default function CommunityDetailScreen() {
           </PressableScale>
         )}
 
-      {/* === ジャンル変更モーダル (local override + server 試行) === */}
-      <GenreChangeModal
-        visible={genreModalOpen}
-        currentGenre={effectiveGenre(id, community.genre)}
-        onClose={() => setGenreModalOpen(false)}
-        onPick={async (g) => {
-          setGenreOverride(id, g);
-          setGenreModalOpen(false);
-          // server にも書きにいく — migration 適用済なら更新、未適用なら
-          // updateCommunity 内の defensive で genre が外されるが、local override は残る
-          await updateCommunity(id, { genre: g });
-          // community キャッシュを invalidate して tab が再描画されるように
-          void qc.invalidateQueries({ queryKey: ['community', id] });
-          show(`ジャンルを「${COMMUNITY_GENRE_META[g].label}」に変更しました`, 'success');
-        }}
-      />
     </View>
-  );
-}
-
-// ============================================================
-// GenreChangeModal — community 詳細のジャンル変更モーダル
-// ------------------------------------------------------------
-// migration 0044 未適用環境でも UI 操作だけでタブ構成を切り替えられる
-// (local override に保存)。migration 適用済なら updateCommunity が server も更新。
-// ============================================================
-function GenreChangeModal({
-  visible,
-  currentGenre,
-  onClose,
-  onPick,
-}: {
-  visible: boolean;
-  currentGenre: CommunityGenre;
-  onClose: () => void;
-  onPick: (g: CommunityGenre) => void;
-}) {
-  const insets = useSafeAreaInsets();
-  return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' }}>
-        <View
-          style={{
-            backgroundColor: C.bg2,
-            borderTopLeftRadius: R['2xl'],
-            borderTopRightRadius: R['2xl'],
-            padding: SP['4'],
-            paddingBottom: insets.bottom + SP['4'],
-            gap: SP['3'],
-          }}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-            <Text style={[T.h3, { color: C.text, flex: 1 }]}>ジャンルを変更</Text>
-            <PressableScale
-              onPress={onClose}
-              haptic="tap"
-              hitSlop={12}
-              accessibilityLabel="閉じる"
-              style={{ padding: SP['2'] }}
-            >
-              <Icon.close size={20} color={C.text2} strokeWidth={2.4} />
-            </PressableScale>
-          </View>
-          <Text style={[T.caption, { color: C.text3 }]}>
-            タブ構成がジャンルに合わせて変わります
-          </Text>
-          <View style={{ gap: SP['2'] }}>
-            {SELECTABLE_GENRES.map((g) => {
-              const meta = COMMUNITY_GENRE_META[g];
-              const isActive = g === currentGenre;
-              return (
-                <PressableScale
-                  key={g}
-                  onPress={() => onPick(g)}
-                  haptic="select"
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: SP['3'],
-                    padding: SP['3'],
-                    backgroundColor: isActive ? C.accent + '22' : C.bg3,
-                    borderRadius: R.md,
-                    borderWidth: 1.5,
-                    borderColor: isActive ? C.accent : 'transparent',
-                  }}
-                >
-                  <View
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 20,
-                      backgroundColor: C.bg2,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Text style={{ fontSize: 22 }}>{meta.emoji}</Text>
-                  </View>
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <Text style={[T.bodyB, { color: C.text, fontWeight: '700' }]}>
-                      {meta.label}
-                    </Text>
-                    <Text style={[T.caption, { color: C.text3 }]} numberOfLines={2}>
-                      {meta.description}
-                    </Text>
-                  </View>
-                  {isActive && (
-                    <Icon.check size={18} color={C.accent} strokeWidth={2.6} />
-                  )}
-                </PressableScale>
-              );
-            })}
-          </View>
-        </View>
-      </View>
-    </Modal>
   );
 }
 
@@ -987,93 +798,11 @@ function AdminBanner({
 }
 
 // ============================================================
-// Community tab bar — 5 等分 + sliding underline
+// ジャンル別タブバー (CommunityTabBar) は撤去 (2026-05)。
+// #95 feat/community-genre-tabs の underline タブは dead code 化していた
+// ため削除。詳細画面は FeedTab (ホーム) のみを描画し、掲示板 / 聖地 /
+// カレンダー / 管理は個別 route からアクセスする。
 // ============================================================
-function CommunityTabBar({
-  activeTab,
-  onChange,
-  isOfficial = false,
-  genre,
-}: {
-  activeTab: TabKey;
-  onChange: (k: TabKey) => void;
-  isOfficial?: boolean;
-  genre: CommunityGenre | undefined;
-}) {
-  const tabs = getTabsFor(genre, isOfficial);
-  const [barW, setBarW] = useState(0);
-  const segW = barW / tabs.length;
-  const idx = tabs.findIndex((t) => t.key === activeTab);
-  const x = useSharedValue(0);
-
-  useEffect(() => {
-    if (segW > 0) x.value = withSpring(idx * segW, SPRING_TIGHT);
-  }, [idx, segW, x]);
-
-  const underlineStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: x.value + segW * 0.2 }],
-    width: segW * 0.6,
-  }));
-
-  return (
-    <View
-      onLayout={(e) => setBarW(e.nativeEvent.layout.width)}
-      style={{
-        flexDirection: 'row',
-        borderBottomWidth: 1,
-        borderBottomColor: C.border,
-        backgroundColor: C.bg,
-        position: 'relative',
-      }}
-    >
-      {tabs.map((t) => {
-        const active = activeTab === t.key;
-        return (
-          <Pressable
-            key={t.key}
-            onPress={() => onChange(t.key)}
-            style={{
-              flex: 1,
-              alignItems: 'center',
-              paddingTop: SP['3'],
-              paddingBottom: SP['3'] + 3, // underline 分の余白
-            }}
-          >
-            <Text
-              style={[
-                T.smallM,
-                {
-                  color: active ? C.text : C.text2,
-                  fontWeight: active ? '700' : '600',
-                },
-              ]}
-              numberOfLines={1}
-            >
-              {t.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-      {/* sliding underline — 全 tab に対する絶対配置で animate */}
-      {segW > 0 && (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            {
-              position: 'absolute',
-              bottom: 0,
-              left: 0,
-              height: 3,
-              borderRadius: 1.5,
-              backgroundColor: C.accent,
-            },
-            underlineStyle,
-          ]}
-        />
-      )}
-    </View>
-  );
-}
 
 // ============================================================
 // Tab: みんなの投稿集 (community posts feed)
@@ -1121,22 +850,8 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
   const { data: addedTagsByPost = {} } = useAddedTags(postIds);
   const { polls } = usePolls(postIds);
 
-  // ===== コミュ専用スタンプ =====
-  // このコミュで作成されたスタンプ一覧 + 各 post の集計を取得
-  const { data: communityStamps = [] } = useCommunityStamps(communityId);
-  const { data: stampReactionsByPost = {} } = useCommunityStampReactions(postIds);
-  const stampToggle = useCommunityStampReactionToggle();
-  // ★ mutate() ではなく toggle() を使う:
-  // toggle() は hook 内部で (postId+stampId) ごとの in-flight Set を握り、
-  // server roundtrip 中の連打を無視する。pending state が parent に伝わる前に
-  // 再 tap されると DELETE×2 が並走して use_count が二重消費される critical bug
-  // を防ぐための最後の defense。
-  const handleStampReact = useCallback(
-    (postId: string, stampId: string) => {
-      stampToggle.toggle({ postId, stampId });
-    },
-    [stampToggle],
-  );
+  // コミュニティスタンプ機能 (community stamp reactions) は UI から撤去 (2026-05)。
+  // DB 側の table / RPC は残置 — rollback の容易性のため。
 
   const handleAddTag = useCallback(
     async (postId: string, tag: string) => {
@@ -1223,37 +938,23 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
       ) : (
         <View>
           {posts.map((p) => (
-            <View key={p.id}>
-              <FeedPostRow
-                post={p}
-                liked={!!myLikes[p.id]}
-                concerned={!!myConcerns[p.id]}
-                saved={!!mySaves[p.id]}
-                reactions={reactionsByPost[p.id] ?? []}
-                addedTags={addedTagsByPost[p.id] ?? []}
-                poll={polls[p.id]}
-                toggleLike={toggleLike}
-                toggleConcern={toggleConcern}
-                toggleSave={toggleSave}
-                toggleReact={toggleReact}
-                share={share}
-                router={router}
-                handleAddTag={handleAddTag}
-              />
-              {/* コミュ専用スタンプ行 (投稿カードの直下に出す)
-                  バグ修正: 旧版は `onReact={(stampId) => handleStampReact(p.id, ...)}`
-                  と毎回新規 arrow を渡しており、CommunityStampRow の memo / React
-                  reconciliation 経由で post.id の closure が別 post の id に
-                  入れ替わるバグが発生。postId を props で渡して handler は
-                  useCallback で安定化したものを直接渡す形に変更。 */}
-              <CommunityStampRow
-                postId={p.id}
-                communityId={communityId}
-                stamps={communityStamps}
-                reactions={stampReactionsByPost[p.id] ?? []}
-                onReact={handleStampReact}
-              />
-            </View>
+            <FeedPostRow
+              key={p.id}
+              post={p}
+              liked={!!myLikes[p.id]}
+              concerned={!!myConcerns[p.id]}
+              saved={!!mySaves[p.id]}
+              reactions={reactionsByPost[p.id] ?? []}
+              addedTags={addedTagsByPost[p.id] ?? []}
+              poll={polls[p.id]}
+              toggleLike={toggleLike}
+              toggleConcern={toggleConcern}
+              toggleSave={toggleSave}
+              toggleReact={toggleReact}
+              share={share}
+              router={router}
+              handleAddTag={handleAddTag}
+            />
           ))}
         </View>
       )}

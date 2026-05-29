@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase } from '../lib/supabase';
+import { supabase, readPersistedSession } from '../lib/supabase';
 import type { User } from '@supabase/supabase-js';
 import { detachAllChannels } from '../lib/realtime';
 import { setUnauthorizedHandler } from '../lib/resilient';
@@ -207,16 +207,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     }, 7000);
     try {
-      const { data, error } = await supabase.auth.getSession();
-      if (error) console.warn('getSession error:', error.message);
-      const authUser = data?.session?.user ?? null;
+      // ★ getSession() は web で稀に内部 lock/refresh が stall して永遠に返らない
+      //   ことがある (backend 健全・token 有効でも発生)。3 秒で race し、stall 時は
+      //   永続化済み session を直接読んで起動を継続する (login 画面への張り付き防止)。
+      const sessionRes = await withTimeout(supabase.auth.getSession(), 3000);
+      if (sessionRes && sessionRes.error) console.warn('getSession error:', sessionRes.error.message);
+      let session = sessionRes?.data?.session ?? null;
+      if (!sessionRes) {
+        console.warn('[authStore] getSession stalled — falling back to persisted session');
+        session = await readPersistedSession();
+      }
+      const authUser = session?.user ?? null;
       let user: AppUser | null = null;
       if (authUser) {
         // session の token expiry を check — 期限切れなら強制 signOut
-        const expiresAt = data?.session?.expires_at;
+        const expiresAt = session?.expires_at;
         if (expiresAt && expiresAt * 1000 < Date.now()) {
           console.warn('[authStore] hydrate: token expired, forcing signOut');
-          try { await supabase.auth.signOut(); } catch (e) { swallow('auth.signOut.hydrate', e); }
+          // signOut も auth client 経由で stall し得るため timeout を付ける
+          try { await withTimeout(supabase.auth.signOut(), 2000); } catch (e) { swallow('auth.signOut.hydrate', e); }
         } else {
           try {
             user = await buildUser(authUser);

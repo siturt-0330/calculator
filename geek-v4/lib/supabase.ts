@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type Session } from '@supabase/supabase-js';
 import { ENV } from './env';
 
 // react-native-url-polyfill は iOS/Android の Hermes / JSC で必要
@@ -179,6 +179,10 @@ const nativeSecureStorage = {
 // - Native: SecureStore (Keychain/Keystore で暗号化)
 const storage = Platform.OS === 'web' ? webStorage : nativeSecureStorage;
 
+// supabase auth の永続化キー。createClient の storageKey と
+// readPersistedSession() の fallback 読み出しで同一キーを共有する。
+export const AUTH_STORAGE_KEY = 'geek-v4-auth';
+
 // ============================================================
 // Native 限定: 旧 AsyncStorage に残った session を起動時に破棄
 // ============================================================
@@ -202,7 +206,7 @@ if (Platform.OS !== 'web') {
 export const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY, {
   auth: {
     storage,
-    storageKey: 'geek-v4-auth',
+    storageKey: AUTH_STORAGE_KEY,
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
@@ -221,3 +225,31 @@ export const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY, {
     headers: { 'x-client-info': 'geek-v4' },
   },
 });
+
+// ============================================================
+// getSession() stall 対策: 永続化された session を直接読む fallback
+// ------------------------------------------------------------
+// supabase-js の auth.getSession() は web で稀に内部の lock / refresh
+// 機構が stall し、有効な session が localStorage にあっても永遠に
+// 返らないことがある (バックエンド健全・token 有効でも発生)。
+// 結果 authStore.hydrate の safety timeout に落ちて user:null となり、
+// ログイン画面に張り付く事故が起きる。
+//   → hydrate 側で getSession を timeout させ、stall 時はこの helper で
+//     永続 session を直接復元して起動を継続する。
+// storage / storageKey は createClient に渡したものと同一を使うので、
+// web (localStorage) / native (SecureStore) のどちらでも整合する。
+// ============================================================
+export async function readPersistedSession(): Promise<Session | null> {
+  try {
+    const raw = await storage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    // supabase-js v2 は session を直接保存。旧 v1 形式 (currentSession ラップ) も許容。
+    const wrapped = parsed as { currentSession?: unknown };
+    const session = (wrapped?.currentSession ?? parsed) as Session | null;
+    if (!session || !session.user || !session.access_token) return null;
+    return session;
+  } catch {
+    return null;
+  }
+}

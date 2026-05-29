@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, useWindowDimensions, ScrollView,
+  View, Text, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, useWindowDimensions, ScrollView, Pressable, Image as RNImage,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,20 +18,24 @@ import { getLastViewed, setLastViewed } from '../../lib/utils/lastViewed';
 import { fetchPostById, fetchCommunitiesForPosts } from '../../lib/api/posts';
 import { fetchSimilarPosts } from '../../lib/api/similarPosts';
 import { fetchComments, createComment } from '../../lib/api/comments';
-import { fetchPostAddedTags, addPostTag } from '../../lib/api/tags';
 import { attachChannel } from '../../lib/realtime';
 import { useFeedPage } from '../../hooks/useFeedPage';
 import { useReactionToggle } from '../../hooks/useReactions';
+import { useFeatureFlag } from '../../hooks/useFeatureFlag';
 import { invalidateFeedPage } from '../../lib/cacheUpdates/feedPagePatcher';
 import { MemeReactionPicker } from '../../components/feed/MemeReactionPicker';
+import { LinkPreviewCard } from '../../components/feed/LinkPreviewCard';
 import { SP, R } from '../../design/tokens';
 import { useColors } from '../../hooks/useColors';
 import { T } from '../../design/typography';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { Avatar } from '../../components/ui/Avatar';
-import { TagPill } from '../../components/tag/TagPill';
-import { AddTagInline } from '../../components/tag/AddTagInline';
 import { ProgressiveImage } from '../../components/ui/ProgressiveImage';
+import { VideoPlayer } from '../../components/ui/VideoPlayer';
+import { MediaWithCWGuard } from '../../components/post/MediaWithCWGuard';
+import { ImageLightbox } from '../../components/ui/ImageLightbox';
+import { thumbedUrl } from '../../lib/utils/imageUrl';
+import { extractFirstUrl } from '../../lib/utils/extractUrl';
 import { Spinner } from '../../components/ui/Spinner';
 import { useToastStore } from '../../stores/toastStore';
 import { formatRelative } from '../../lib/utils/date';
@@ -167,14 +171,6 @@ export default function PostDetailScreen() {
     staleTime: 30_000,
   });
 
-  const { data: addedTags = [] } = useQuery({
-    queryKey: ['post-added-tags', id],
-    queryFn: () => fetchPostAddedTags(id!),
-    enabled: !!id,
-    // タグ追加は明示 invalidate される — それ以外は 2 分信用
-    staleTime: 2 * 60_000,
-  });
-
   // 似た投稿
   const { data: similarPosts = [] } = useQuery({
     queryKey: ['similar-posts', id, post?.tag_names ?? []],
@@ -194,6 +190,57 @@ export default function PostDetailScreen() {
     staleTime: 60_000,
   });
   const postCommunities = id ? (communitiesByPost[id] ?? []) : [];
+
+  // ============================================================
+  // メディア (写真 / 動画) — クリック先の投稿詳細でも表示する
+  // ------------------------------------------------------------
+  // フィードカード (AnonPostCard) と同じ描画方針:
+  //   - 画像は自然なアスペクト比 (0.5〜2.0 クランプ) で全体表示。
+  //     タップで ImageLightbox (全画面ズーム) を開く。
+  //   - 動画は VideoPlayer (16:9)。
+  //   - CW (spoiler/nsfw/violence) は MediaWithCWGuard で per-item gate。
+  // post は fetchPostById 由来 (media_urls/blurhashes/video_urls/posters を
+  // SELECT 済) なので RPC (fullPost) 経路 off でも確実に出る。
+  // ============================================================
+  const mediaUrls = post?.media_urls ?? [];
+  const mediaBlurhashes = post?.media_blurhashes ?? [];
+  const videoUrls = post?.video_urls ?? [];
+  const videoPosters = post?.video_posters ?? [];
+  const hasMedia = mediaUrls.length > 0 || videoUrls.length > 0;
+
+  // OG リンクプレビュー対象 URL: 明示的な source_url を優先し、
+  // 無ければ本文中の最初の URL を拾って OG カード化する (フィードカードと同方針)。
+  const useOgPreview = useFeatureFlag('og_preview');
+  const previewUrl = useMemo(
+    () => post?.source_url || extractFirstUrl(post?.content),
+    [post?.source_url, post?.content],
+  );
+
+  // 画像アスペクト比 — 240px サムネで getSize し比率だけ測る (帯域節約)。
+  // 解決前は 4:3 (1.333) 仮置き。失敗時もそのまま。
+  const [imgAspects, setImgAspects] = useState<Record<string, number>>({});
+  const mediaUrlsKey = mediaUrls.join('|');
+  useEffect(() => {
+    if (mediaUrls.length === 0) return undefined;
+    let alive = true;
+    for (const url of mediaUrls) {
+      if (!url) continue;
+      RNImage.getSize(
+        thumbedUrl(url, 240),
+        (w, h) => {
+          if (!alive || !(w > 0) || !(h > 0)) return;
+          const ratio = Math.max(0.5, Math.min(2.0, w / h));
+          setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: ratio }));
+        },
+        () => { /* measure 失敗 → default 1.333 のまま */ },
+      );
+    }
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaUrlsKey]);
+
+  // 画像ライトボックス (全画面表示) の対象 URL
+  const [lightboxUri, setLightboxUri] = useState<string | null>(null);
 
   const { show } = useToastStore();
 
@@ -325,25 +372,6 @@ export default function PostDetailScreen() {
     };
   }, [id, qc]);
 
-  // 再エントリ防止: 投稿後 invalidate が走るまでに 2 連打されると同 tag が
-  // 2 INSERT されて duplicate error トーストが先に user に見える事例があった。
-  const [addingTag, setAddingTag] = useState(false);
-  const handleAddTag = async (tag: string) => {
-    if (!id || addingTag) return;
-    setAddingTag(true);
-    try {
-      await addPostTag(id, tag);
-      qc.invalidateQueries({ queryKey: ['post-added-tags', id] });
-      show(`#${tag} を追加しました`, 'success');
-    } catch (e: unknown) {
-      const msg = (e instanceof Error ? e.message : '') || '';
-      if (msg.includes('duplicate')) show('そのタグは既に追加されています', 'warn');
-      else show('追加に失敗しました', 'error');
-    } finally {
-      setAddingTag(false);
-    }
-  };
-
   const handleSend = async () => {
     if (!text.trim() || isPending) return;
     // 返信モードなら parent_comment_id / reply_to_comment_id を attach
@@ -432,7 +460,7 @@ export default function PostDetailScreen() {
           >
             <BackIcon size={22} color={C.text} strokeWidth={2.2} />
           </PressableScale>
-          <Text style={[T.smallM, { color: C.text3, marginLeft: SP['2'] }]}>📝 投稿</Text>
+          <Text style={[T.smallM, { color: C.text3, marginLeft: SP['2'] }]}>投稿</Text>
         </View>
         {/* 投稿本体カード */}
         <View style={{ paddingHorizontal: SP['4'], paddingBottom: SP['3'] }}>
@@ -443,21 +471,10 @@ export default function PostDetailScreen() {
             borderWidth: 1, borderColor: C.border,
             gap: SP['3'],
           }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-              <Avatar size={36} anonymous />
-              <Text style={[T.caption, { color: C.text3, flex: 1 }]}>{formatRelative(post.created_at)}</Text>
-              <ObsidianSaveButton note={postToObsidianNote(post)} size={18} />
-            </View>
-            {post.title && (
-              <Text style={[T.h2, { color: C.text, fontWeight: '800', marginBottom: SP['2'] }]} numberOfLines={4}>
-                {post.title}
-              </Text>
-            )}
-            <Text style={[T.body, { color: C.text, lineHeight: 24 }]}>{post.content}</Text>
-            {/* コミュニティピル (cross-post / community_*) — タップで該当コミュへ */}
+            {/* 投稿先コミュニティ — カード上部に表示 (📍 アイコンは廃止) */}
             {postCommunities.length > 0 && (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                <Text style={[T.caption, { color: C.text3 }]}>📍 投稿先:</Text>
+                <Text style={[T.caption, { color: C.text3 }]}>投稿先:</Text>
                 {postCommunities.map((c) => (
                   <PressableScale
                     key={c.community_id}
@@ -488,21 +505,79 @@ export default function PostDetailScreen() {
                 ))}
               </View>
             )}
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'], alignItems: 'center' }}>
-              {Array.from(new Set(post.tag_names)).map((tag) => (
-                <TagPill key={tag} name={tag} state="normal" onPress={() => router.push(`/tag/${encodeURIComponent(tag)}` as never)} />
-              ))}
-              {addedTags.map((t) => (
-                <TagPill key={t.id} name={t.tag_name} state="added" onPress={() => router.push(`/tag/${encodeURIComponent(t.tag_name)}` as never)} />
-              ))}
-              <AddTagInline onSubmit={handleAddTag} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+              <Avatar size={36} anonymous />
+              <Text style={[T.caption, { color: C.text3, flex: 1 }]}>{formatRelative(post.created_at)}</Text>
+              <ObsidianSaveButton note={postToObsidianNote(post)} size={18} />
             </View>
-            {addedTags.length > 0 && (
-              <Text style={[T.caption, { color: C.sameGenre }]}>
-                オレンジ色のタグは他のユーザーが追加したタグです
+            {post.title && (
+              <Text style={[T.h2, { color: C.text, fontWeight: '800', marginBottom: SP['2'] }]} numberOfLines={4}>
+                {post.title}
               </Text>
             )}
-
+            <Text style={[T.body, { color: C.text, lineHeight: 24 }]}>{post.content}</Text>
+            {/* ============================================================
+                メディア (写真 / 動画) — フィードカードと同じ表示方針。
+                画像タップで全画面ライトボックス、動画は VideoPlayer。
+                ============================================================ */}
+            {hasMedia && (
+              <View style={{ gap: SP['2'] }}>
+                {mediaUrls.map((url, i) => {
+                  const aspect = imgAspects[url] ?? 1.333;
+                  const blurhash = mediaBlurhashes[i];
+                  return (
+                    <View
+                      key={url}
+                      style={{
+                        width: '100%',
+                        aspectRatio: aspect,
+                        borderRadius: R.md,
+                        overflow: 'hidden',
+                        backgroundColor: C.bg3,
+                      }}
+                    >
+                      <MediaWithCWGuard cwCategory={post.cw_category} blurhash={blurhash}>
+                        <Pressable
+                          onPress={() => setLightboxUri(thumbedUrl(url, 1280))}
+                          style={{ flex: 1 }}
+                          accessibilityRole="imagebutton"
+                          accessibilityLabel="画像を拡大表示"
+                        >
+                          <ProgressiveImage
+                            uri={url}
+                            blurhash={blurhash ?? undefined}
+                            width="100%"
+                            height="100%"
+                            radius={R.md}
+                            thumbWidth={720}
+                          />
+                        </Pressable>
+                      </MediaWithCWGuard>
+                    </View>
+                  );
+                })}
+                {videoUrls.map((vurl, i) => (
+                  <View
+                    key={`v-${vurl}`}
+                    style={{
+                      width: '100%',
+                      aspectRatio: 16 / 9,
+                      borderRadius: R.md,
+                      overflow: 'hidden',
+                      backgroundColor: '#000',
+                    }}
+                  >
+                    <MediaWithCWGuard cwCategory={post.cw_category}>
+                      <VideoPlayer uri={vurl} poster={videoPosters[i]} />
+                    </MediaWithCWGuard>
+                  </View>
+                ))}
+              </View>
+            )}
+            {/* リンクプレビュー — source_url か本文中の URL を OG カード化。
+                画像タップで該当 URL を開く (LinkPreviewCard 内で処理)。 */}
+            {previewUrl && useOgPreview && <LinkPreviewCard url={previewUrl} />}
+            {/* 投稿先はカード上部に移動 (📍 アイコン廃止) */}
             {/* ============================================================
                 リアクション (テキストスタンプ)
                 ------------------------------------------------------------
@@ -591,91 +666,7 @@ export default function PostDetailScreen() {
           </View>
         </View>
 
-        {/* 似たような投稿 (V4 タグマッチング) */}
-        {similarPosts.length > 0 && (
-          <View style={{ paddingHorizontal: SP['4'], paddingBottom: SP['3'], gap: SP['2'] }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ fontSize: 14 }}>🔗</Text>
-              <Text style={[T.smallM, { color: C.text, fontWeight: '700', flex: 1 }]}>
-                似たような投稿
-              </Text>
-              <Text style={[T.caption, { color: C.text3 }]}>
-                {similarPosts.length}件
-              </Text>
-            </View>
-            <View style={{ gap: SP['2'] }}>
-              {similarPosts.map((p) => {
-                // 写真付きの投稿は先頭の media_urls[0] を 64px サムネで表示。
-                // (ユーザー要望: 似た投稿に写真が載っていても見れない問題の修正)
-                const thumb = p.media_urls?.[0];
-                const thumbBh = p.media_blurhashes?.[0];
-                return (
-                  <PressableScale
-                    key={p.id}
-                    onPress={() => router.push(`/post/${p.id}` as never)}
-                    haptic="tap"
-                    hitSlop={6}
-                    accessibilityLabel={`似た投稿: ${p.content?.slice(0, 30) ?? ''} を開く`}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: SP['3'],
-                      padding: SP['3'],
-                      backgroundColor: C.bg3,
-                      borderRadius: R.md,
-                      borderWidth: 1, borderColor: C.border,
-                    }}
-                  >
-                    {thumb && (
-                      <View
-                        style={{
-                          width: 64,
-                          height: 64,
-                          borderRadius: R.sm,
-                          overflow: 'hidden',
-                          backgroundColor: C.bg2,
-                          flexShrink: 0,
-                        }}
-                      >
-                        <ProgressiveImage
-                          uri={thumb}
-                          blurhash={thumbBh ?? undefined}
-                          width={64}
-                          height={64}
-                          radius={R.sm}
-                          // 64px 表示 × 2x DPR = 128。 retina 余裕で 160。
-                          // 旧版 (default 720) は 11 倍過剰で帯域を浪費していた。
-                          thumbWidth={160}
-                        />
-                      </View>
-                    )}
-                    <View style={{ flex: 1, gap: 4 }}>
-                      <Text style={[T.small, { color: C.text, lineHeight: 18 }]} numberOfLines={2}>
-                        {p.content}
-                      </Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], flexWrap: 'wrap' }}>
-                        <Text style={[T.caption, { color: C.accent }]}>
-                          #{p.tag_names[0] ?? '雑談'}
-                        </Text>
-                        <Text style={[T.caption, { color: C.text3 }]}>
-                          · 💛 {p.likes_count ?? 0}
-                        </Text>
-                        <Text style={[T.caption, { color: C.text3 }]}>
-                          · {formatRelative(p.created_at)}
-                        </Text>
-                        {p.media_urls && p.media_urls.length > 1 && (
-                          <Text style={[T.caption, { color: C.text3 }]}>
-                            · 📷 {p.media_urls.length}
-                          </Text>
-                        )}
-                      </View>
-                    </View>
-                  </PressableScale>
-                );
-              })}
-            </View>
-          </View>
-        )}
+        {/* 似たような投稿はコメントの下 (一番下) に移動した — ScrollView 末尾を参照 */}
 
         {replies.length > 0 && (
           <Text style={[T.smallM, { color: C.text2, paddingHorizontal: SP['4'], paddingTop: SP['2'], paddingBottom: SP['1'], fontWeight: '700' }]}>
@@ -782,6 +773,86 @@ export default function PostDetailScreen() {
                   );
                 });
               })()}
+            </View>
+          </View>
+        )}
+
+        {/* 似たような投稿 — コメントの下 (一番下) に表示。最大3件、🔗アイコンなし。 */}
+        {similarPosts.length > 0 && (
+          <View style={{ alignItems: 'center' }}>
+            <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: SP['4'], paddingBottom: SP['3'], paddingTop: SP['4'], gap: SP['2'] }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={[T.smallM, { color: C.text, fontWeight: '700', flex: 1 }]}>
+                  似たような投稿
+                </Text>
+                <Text style={[T.caption, { color: C.text3 }]}>
+                  {Math.min(similarPosts.length, 3)}件
+                </Text>
+              </View>
+              <View style={{ gap: SP['2'] }}>
+                {similarPosts.slice(0, 3).map((p) => {
+                  const thumb = p.media_urls?.[0];
+                  const thumbBh = p.media_blurhashes?.[0];
+                  return (
+                    <PressableScale
+                      key={p.id}
+                      onPress={() => router.push(`/post/${p.id}` as never)}
+                      haptic="tap"
+                      hitSlop={6}
+                      accessibilityLabel={`似た投稿: ${p.content?.slice(0, 30) ?? ''} を開く`}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: SP['3'],
+                        padding: SP['3'],
+                        backgroundColor: C.bg3,
+                        borderRadius: R.md,
+                        borderWidth: 1, borderColor: C.border,
+                      }}
+                    >
+                      {thumb && (
+                        <View
+                          style={{
+                            width: 64,
+                            height: 64,
+                            borderRadius: R.sm,
+                            overflow: 'hidden',
+                            backgroundColor: C.bg2,
+                            flexShrink: 0,
+                          }}
+                        >
+                          <ProgressiveImage
+                            uri={thumb}
+                            blurhash={thumbBh ?? undefined}
+                            width={64}
+                            height={64}
+                            radius={R.sm}
+                            thumbWidth={160}
+                          />
+                        </View>
+                      )}
+                      <View style={{ flex: 1, gap: 4 }}>
+                        <Text style={[T.small, { color: C.text, lineHeight: 18 }]} numberOfLines={2}>
+                          {p.content}
+                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'], flexWrap: 'wrap' }}>
+                          <Text style={[T.caption, { color: C.text3 }]}>
+                            💛 {p.likes_count ?? 0}
+                          </Text>
+                          <Text style={[T.caption, { color: C.text3 }]}>
+                            · {formatRelative(p.created_at)}
+                          </Text>
+                          {p.media_urls && p.media_urls.length > 1 && (
+                            <Text style={[T.caption, { color: C.text3 }]}>
+                              · 📷 {p.media_urls.length}
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    </PressableScale>
+                  );
+                })}
+              </View>
             </View>
           </View>
         )}
@@ -941,6 +1012,13 @@ export default function PostDetailScreen() {
         onClose={() => setMemePickerOpen(false)}
         onPick={(meme) => toggleReact(id, meme)}
         picked={myMemes}
+      />
+
+      {/* 画像ライトボックス — 本文の画像タップで拡大表示 (AnonPostCard と同じ component) */}
+      <ImageLightbox
+        visible={!!lightboxUri}
+        uri={lightboxUri}
+        onClose={() => setLightboxUri(null)}
       />
     </KeyboardAvoidingView>
     </Animated.View>

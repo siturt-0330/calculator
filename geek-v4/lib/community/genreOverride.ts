@@ -7,7 +7,8 @@
 // 設計:
 //   - Map<communityId, CommunityGenre> を JSON で MMKV / localStorage に保存
 //   - createCommunity / updateCommunity が成功時に setGenreOverride を呼ぶ
-//   - getTabsFor の呼び出し側で effectiveGenre(id, server.genre) を使う
+//   - 詳細画面で effectiveGenre(id, server.genre) を使い、投稿 FAB の表示判定に使う
+//     (legacy 以外なら投稿可能。#95 ジャンル別タブバー撤去後もこの用途で生存)
 //   - migration 適用後は server 側の値が信頼できるので、override は補助に
 //
 // per-device な fallback なので、別 device から見た時は legacy 扱いに戻る

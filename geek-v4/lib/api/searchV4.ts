@@ -248,21 +248,126 @@ function parseExplanation(raw: unknown): ResultExplanation {
 // ----------------------------------------------------------------
 
 /**
+ * token sanitize:
+ * supabase の `or()` クエリビルダに渡す ilike pattern は
+ * `,` `)` `(` で構文が壊れる (filter 列挙の区切り)。`%` は ilike の
+ * wildcard なので token 中に残っていると意図しないマッチを生む。
+ * 加えて URL encoding を入れる前段で危険文字を全て落とす。
+ *
+ * 許容文字:
+ *   - 英数字 (alphabet / digit)
+ *   - 日本語 (ひらがな / カタカナ / 漢字 / 全角/半角カナ)
+ *   - 空白以外の sane 記号は許容しない (壊れる方が痛い)
+ *
+ * 結果が空文字なら null を返して呼び出し側で skip させる。
+ */
+function sanitizeSearchToken(raw: string): string | null {
+  // Allow ASCII alnum + JP scripts (hiragana / katakana / CJK)
+  // Drop: %, ,, ), (, *, ", ', \\, /, =, ;, :, [, ], {, }, <, >, |, &, control chars
+  const cleaned = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9぀-ゟ゠-ヿ㐀-䶿一-鿿ｦ-ﾟ]/g, '');
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+/**
+ * fallback ilike 検索:
+ * 0085-0097 の migration が本番 Supabase に未適用な状況でも検索 UI を動かす
+ * ためのクライアント側 fallback。posts table に対して直接 ilike OR 検索を
+ * 走らせ、SearchV4Result shape に揃えて返す。
+ *
+ * 制約:
+ *   - title もしくは content への部分一致のみ (BM25 / FTS は使わない)
+ *   - ranking は created_at desc の simple な逆数スコア
+ *   - community_id は posts に直接 column が無いため無視
+ *     (community scope 検索は migration 適用後にしか正しく動かない)
+ *   - 結果は最大 (offset + limit) 件まで取って残りは捨てる
+ */
+async function fallbackIlikeSearch(
+  query: string,
+  limit: number,
+  offset: number,
+): Promise<SearchV4Result[]> {
+  const tokens = query
+    .trim()
+    .split(/\s+/)
+    .map((t) => sanitizeSearchToken(t))
+    .filter((t): t is string => t !== null && t.length > 0);
+
+  if (tokens.length === 0) return [];
+
+  // OR clause: title.ilike.%t1%,content.ilike.%t1%,title.ilike.%t2%,...
+  const orClauses = tokens
+    .flatMap((t) => [`title.ilike.%${t}%`, `content.ilike.%${t}%`])
+    .join(',');
+
+  try {
+    const builder = supabase
+      .from('posts')
+      .select('id, created_at')
+      .or(orClauses)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    const { data, error } = await withApiTimeout(
+      builder,
+      'searchV4.fallbackIlike',
+      8000,
+    );
+
+    if (error) {
+      swallow('searchV4.fallbackIlike', error);
+      return [];
+    }
+
+    const rows: unknown[] = Array.isArray(data) ? data : [];
+    const results: SearchV4Result[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (!isRecord(row)) continue;
+      const post_id = asString(row.id);
+      if (!post_id) continue;
+      results.push({
+        post_id,
+        final_score: 1 / (i + 1),
+        contributions: {},
+        intent: 'general',
+        diversity_factor: 1,
+        matched_terms: tokens,
+      });
+    }
+    return results;
+  } catch (e) {
+    swallow('searchV4.fallbackIlike.timeout', e);
+    return [];
+  }
+}
+
+/**
  * search_posts_v4 RPC を呼んで多 signal ランキング結果を返す。
  *
- * 空クエリ / 失敗時は `[]` を返す (search は best-effort)。
+ * 二段構え:
+ *   1) `search_posts_v4` RPC (migration 0097) を試す
+ *   2) RPC が未デプロイ (function does not exist / 404 / 401) や
+ *      空配列を返した場合 → fallbackIlikeSearch で posts table 直接検索
+ *
+ * 空クエリ / 全失敗時は `[]` を返す (search は best-effort)。
  * timeout は 8s 固定 (UI 応答性最優先)。
  */
 export async function searchPostsV4(args: SearchV4Args): Promise<SearchV4Result[]> {
   const trimmed = args.query.trim();
   if (!trimmed) return [];
 
+  const limit = args.limit ?? 20;
+  const offset = args.offset ?? 0;
+
+  // 1) v4 RPC を試す
   try {
     const { data, error } = await withApiTimeout(
       supabase.rpc('search_posts_v4', {
         p_query: trimmed,
-        p_limit: args.limit ?? 20,
-        p_offset: args.offset ?? 0,
+        p_limit: limit,
+        p_offset: offset,
         p_community_id: args.community_id ?? null,
         p_use_diversify: args.use_diversify ?? true,
         p_use_sign_election: args.use_sign_election ?? true,
@@ -270,21 +375,25 @@ export async function searchPostsV4(args: SearchV4Args): Promise<SearchV4Result[
       'searchV4.searchPostsV4',
       8000,
     );
-    if (error) {
+    if (!error && Array.isArray(data) && data.length > 0) {
+      const parsed: SearchV4Result[] = [];
+      for (const r of data) {
+        const row = parseSearchV4Row(r);
+        if (row) parsed.push(row);
+      }
+      if (parsed.length > 0) return parsed;
+      // RPC が返したが parse 後に全部捨てられた → fallback に進む
+    } else if (error) {
+      // RPC 自体が失敗 (function does not exist / 401 / 404 等) → fallback
       swallow('searchV4.searchPostsV4', error);
-      return [];
     }
-    const rows: unknown[] = Array.isArray(data) ? data : [];
-    const parsed: SearchV4Result[] = [];
-    for (const r of rows) {
-      const row = parseSearchV4Row(r);
-      if (row) parsed.push(row);
-    }
-    return parsed;
+    // error が無くて data が空配列の場合も fallback に進む
   } catch (e) {
-    swallow('searchV4.searchPostsV4.timeout', e);
-    return [];
+    swallow('searchV4.searchPostsV4.rpc', e);
   }
+
+  // 2) fallback: posts 直接 ilike 検索
+  return await fallbackIlikeSearch(trimmed, limit, offset);
 }
 
 // ----------------------------------------------------------------

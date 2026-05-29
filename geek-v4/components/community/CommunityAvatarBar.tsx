@@ -24,7 +24,7 @@ import { T } from '../../design/typography';
 import { Icon } from '../../constants/icons';
 import { PressableScale } from '../ui/PressableScale';
 import { OfficialBadge } from './OfficialBadge';
-import { thumbedUrl } from '../../lib/utils/imageUrl';
+import { squareThumbedUrl } from '../../lib/utils/imageUrl';
 
 // ------------------------------------------------------------
 // 受け取れる community 形状 — CommunityMetaLite と Community の
@@ -43,13 +43,17 @@ type CommunityForAvatar = {
 // ------------------------------------------------------------
 // 視覚定数
 // ------------------------------------------------------------
+// iOS native (Stories / Following row) 風の比率:
+//   - AVATAR_SIZE 56, INNER 52 (= 2pt ring), gap が見えるよう INNER は 4px 内に
+//   - 未選択は 1pt subtle border、選択は 2pt accent ring
+//   - shadow は SHADOW.xs で「浮かせ過ぎない」(派手な glow は避ける)
 const AVATAR_SIZE = 56;
-const INNER_SIZE = 50;        // ring (2px x2) 内側
+const INNER_SIZE = 52;        // ring (2pt) 内側 — 細めの "framed" 感
 const ITEM_WIDTH = 68;        // chip 1 つ分の幅 — 72 → 68 で隣との距離を縮め "繋がり" 感
 const LABEL_MAX_CHARS = 8;
 // 選択中 chip の下に出す "tab 指示棒" — 共有 dock line と一体化して "現在地" を示す
-const SELECTED_INDICATOR_WIDTH = 28;
-const SELECTED_INDICATOR_HEIGHT = 2.5;
+const SELECTED_INDICATOR_WIDTH = 24;
+const SELECTED_INDICATOR_HEIGHT = 2;
 
 // ------------------------------------------------------------
 // props
@@ -194,7 +198,7 @@ function AvatarItem({
   isAllVariant = false,
 }: AvatarItemProps) {
   const truncated = truncateLabel(label, LABEL_MAX_CHARS);
-  const { C, GRAD, SHADOW } = useTheme();
+  const { C, SHADOW } = useTheme();
 
   return (
     <PressableScale
@@ -208,9 +212,12 @@ function AvatarItem({
       style={{ alignItems: 'center', width: ITEM_WIDTH }}
     >
       <View style={{ position: 'relative' }}>
-        {/* ───────── ring (selected = gradient, unselected = border) ─────────
-           全 avatar に同じ SHADOW.sm を入れて "同じ棚に立っている" 統一感を出す。
-           選択中は SHADOW.glow に上書き (紫 glow) — selected 状態は据置。 */}
+        {/* ───────── ring (selected = 2pt accent ring, unselected = 1pt border) ─────────
+           Apple Stories / Following row 風:
+             - 選択時: AVATAR_SIZE = 56 の外円を accent 単色塗り → INNER 52 で 2pt accent ring
+             - 未選択: bg2 塗り + 1pt subtle border (C.border) — クッキリ枠を出す
+           shadow は全 avatar 共通の SHADOW.xs に抑え、選択時のみ accentGlow を薄く重ねる。
+           太い gradient ring + SHADOW.glow は派手すぎ "ぼやけ" の原因だったため廃止。 */}
         <View
           style={{
             width: AVATAR_SIZE,
@@ -219,36 +226,14 @@ function AvatarItem({
             alignItems: 'center',
             justifyContent: 'center',
             overflow: 'hidden',
-            ...(isSelected ? SHADOW.glow : SHADOW.sm),
+            backgroundColor: isSelected ? C.accent : C.bg2,
+            ...(isSelected ? SHADOW.accentGlow : SHADOW.xs),
           }}
         >
-          {isSelected ? (
-            <LinearGradient
-              colors={GRAD.primary}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                top: 0,
-                bottom: 0,
-              }}
-            />
-          ) : (
-            <View
-              style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                top: 0,
-                bottom: 0,
-                backgroundColor: C.border,
-              }}
-            />
-          )}
-
-          {/* ───────── 内側 (avatar 本体) ───────── */}
+          {/* ───────── 内側 (avatar 本体) ─────────
+             未選択でも 1pt の subtle border を inner 円に持たせて、画像が無い state
+             でも「縁のあるアイコン」に見せる。選択時は外円 (accent) が ring 役なので
+             inner border は無し。 */}
           <View
             style={{
               width: INNER_SIZE,
@@ -257,6 +242,8 @@ function AvatarItem({
               alignItems: 'center',
               justifyContent: 'center',
               overflow: 'hidden',
+              borderWidth: isSelected ? 0 : 1,
+              borderColor: C.border,
               backgroundColor: isAllVariant
                 ? C.bg3
                 : iconUrl
@@ -268,13 +255,18 @@ function AvatarItem({
               // 「すべて」: community icon (Users2)
               <Icon.community
                 size={26}
-                color={isSelected ? C.accentLight : C.text2}
+                color={isSelected ? C.accent : C.text2}
                 strokeWidth={2.2}
               />
             ) : iconUrl ? (
               <ExpoImage
-                // 50px 内枠 @3x ≒ 150 → 160 で retina 余裕。
-                source={{ uri: thumbedUrl(iconUrl, 160) }}
+                // 52px 内枠 @3x ≒ 156 → 160 で retina 余裕。
+                // squareThumbedUrl: width=160&height=160&resize=cover で
+                // **サーバ側で正方形に center-crop** された画像を取得する。
+                // 旧 thumbedUrl(_, 160) は width だけ指定 → 横長集合写真は
+                // 縦が短いまま降ってきて、expo-image が contentFit="cover"
+                // で大幅拡大して円に詰め込む = 「顔が押し込まれて拡大」状態に。
+                source={{ uri: squareThumbedUrl(iconUrl, 160) }}
                 style={{ width: '100%', height: '100%' }}
                 contentFit="cover"
                 // 監査 (2026-05): memory-disk 未指定だと横スクロールで戻った際に
@@ -308,17 +300,19 @@ function AvatarItem({
       </View>
 
       {/* ───────── label (max 8 char + …) ─────────
+         iOS native: caption (11pt) を base に固定 → サイズ揺れによる "ぼやけ" を防ぐ。
+         選択中だけ weight を上げて accent color、未選択は text2 (subtle)。
          全 chip 共通の letterSpacing で "横並びリズム" を整える。 */}
       <Text
         numberOfLines={1}
         style={[
-          isSelected ? T.smallM : T.caption,
+          T.caption,
           {
             marginTop: 6,
             textAlign: 'center',
-            color: isSelected ? C.accentLight : C.text2,
+            color: isSelected ? C.accent : C.text2,
             fontWeight: isSelected ? '700' : '600',
-            letterSpacing: 0.2,
+            letterSpacing: 0.1,
           },
         ]}
       >

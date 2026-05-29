@@ -1,4 +1,6 @@
-import { View, Text, ScrollView, RefreshControl, KeyboardAvoidingView, Platform, Image } from 'react-native';
+import { View, Text, ScrollView, RefreshControl, KeyboardAvoidingView, Platform } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
+import { squareThumbedUrl } from '../../../lib/utils/imageUrl';
 import { useState, useMemo } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -290,7 +292,18 @@ export default function DiscoverCommunitiesScreen() {
                       }}
                     >
                       {c.icon_url ? (
-                        <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                        // 44px @4x ≒ 176 → 180 で retina 余裕.
+                        // squareThumbedUrl: width=height=180 でサーバ側 center-crop。
+                        // 旧コードは raw icon_url を直接読んで RN Image が
+                        // cover で円に押し込むため、横長写真が極端に拡大されていた。
+                        <ExpoImage
+                          source={{ uri: squareThumbedUrl(c.icon_url, 180) }}
+                          style={{ width: '100%', height: '100%' }}
+                          contentFit="cover"
+                          cachePolicy="memory-disk"
+                          recyclingKey={c.icon_url}
+                          transition={120}
+                        />
                       ) : (
                         <Text style={{ fontSize: 22 }}>{c.icon_emoji}</Text>
                       )}
@@ -458,7 +471,16 @@ export default function DiscoverCommunitiesScreen() {
                   }}
                 >
                   {c.icon_url ? (
-                    <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                    // 52px @4x ≒ 208 → 220 で retina 余裕。サーバ側 center-crop で
+                    // 横長集合写真が拡大されて見える問題を回避。
+                    <ExpoImage
+                      source={{ uri: squareThumbedUrl(c.icon_url, 220) }}
+                      style={{ width: '100%', height: '100%' }}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                      recyclingKey={c.icon_url}
+                      transition={120}
+                    />
                   ) : (
                     <Text style={{ fontSize: 26 }}>{c.icon_emoji}</Text>
                   )}

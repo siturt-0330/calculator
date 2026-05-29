@@ -155,7 +155,8 @@ export const PALETTE_DARK: ColorPalette = {
 // 設計指針:
 //   - bg は純白 (#fff) ではなく僅かに灰色寄り (#fafafa) — 純白は眩しすぎ
 //   - text は #1a1a1a (純黒 #000 はコントラスト過剰)
-//   - accent は dark と同じ紫 #7C6AF7 を維持 — ブランド identity 保持
+//   - accent は light 専用で「青 + 水色」系。F5 で blue+cyan に統一済み。
+//     白背景に同じ #3B82F6 だとコントラスト不足のため light は深め (#2563EB)。
 //   - 警告色 (red/amber/green) は WCAG AA を満たす濃いめの色を選択
 //   - glass は黒 base に変更 (白背景に rgba(255,255,255,*) は見えない)
 // ============================================================
@@ -181,12 +182,12 @@ export const PALETTE_LIGHT: ColorPalette = {
   border2: '#d4d4d8',
   divider: '#ececef',
 
-  accent: '#6B5BE8',   // dark より気持ち濃い (白背景でも見えるように)
-  accentDeep: '#4F3FCC',
-  accentLight: '#8C7FF0',
-  accentSoft: '#EEE8FF',
-  accentGlow: 'rgba(107,91,232,0.25)',
-  accentBg: '#F5F2FF',
+  accent: '#2563EB',   // blue-600 — 白背景でコントラスト十分かつ過剰でない
+  accentDeep: '#1D4ED8', // blue-700
+  accentLight: '#60A5FA', // blue-400
+  accentSoft: '#E0F2FE',  // sky-100 — 水色寄りの薄い背景
+  accentGlow: 'rgba(37,99,235,0.25)',
+  accentBg: '#EFF6FF',    // blue-50
 
   green: '#059669',
   greenBg: '#ECFDF5',
@@ -203,8 +204,8 @@ export const PALETTE_LIGHT: ColorPalette = {
   blockBg: '#FEE2E2',
   blockBorder: '#FECACA',
 
-  liked: '#6B5BE8',
-  likedBg: '#F5F2FF',
+  liked: '#2563EB',
+  likedBg: '#EFF6FF',
 
   related: '#15803D',
   relatedBg: '#ECFDF5',
@@ -266,12 +267,14 @@ export const GRAD_LIGHT: GradientPalette = {
   fadeBottom: ['rgba(255,255,255,0)', PALETTE_LIGHT.bg] as const,
   fadeTop: [PALETTE_LIGHT.bg, 'rgba(255,255,255,0)'] as const,
   fadeBottomDark: ['rgba(255,255,255,0)', 'rgba(255,255,255,0.95)'] as const,
-  // brand grad はテーマ問わず同一色 — Geek の identity を保持
-  primary: ['#6B5BE8', '#A66AE0', '#E55BA0'] as const,
-  primarySoft: ['#6B5BE8', '#5A6CD8'] as const,
-  warm: ['#E55BA0', '#E89B5C'] as const,
+  // light 専用 brand grad は「青 → 水色」(dark は紫→桃)。
+  // 白背景で紫+ピンクは違和感があるため、爽やかな blue-cyan に統一。
+  primary: ['#2563EB', '#0EA5E9', '#22D3EE'] as const, // blue-600 → sky-500 → cyan-400
+  primarySoft: ['#2563EB', '#06B6D4'] as const,        // blue-600 → cyan-500
+  // CTA 強調も「青系」で統一 (dark の warm はピンク→オレンジだが light は scrap)
+  warm: ['#0EA5E9', '#22D3EE'] as const,               // sky-500 → cyan-400
   success: ['#3DBE88', '#3DAEBA'] as const,
-  glass: ['rgba(107,91,232,0.10)', 'rgba(166,106,224,0.06)', 'rgba(0,0,0,0)'] as const,
+  glass: ['rgba(37,99,235,0.10)', 'rgba(14,165,233,0.06)', 'rgba(0,0,0,0)'] as const,
   destructive: ['#E55B5B', '#E0533F'] as const,
 };
 
@@ -383,14 +386,14 @@ export const SHADOW_LIGHT: ShadowSet = {
     elevation: 6,
   },
   accentGlow: {
-    shadowColor: '#6B5BE8',
+    shadowColor: '#2563EB',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.20,
     shadowRadius: 14,
     elevation: 3,
   },
   glow: {
-    shadowColor: '#6B5BE8',
+    shadowColor: '#2563EB',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.18,
     shadowRadius: 16,

@@ -68,12 +68,7 @@ export function PostCardSkeleton() {
       {/* 3. 画像プレース (アスペクト 1.5:1 = 横長, 220 高) — card と同じ 12px round */}
       <SkeletonBox width="100%" height={220} borderRadius={12} />
 
-      {/* 4. tag pills 3 個 (60x22) */}
-      <View style={{ flexDirection: 'row', gap: SP['2'], marginTop: SP['1'] }}>
-        <SkeletonBox width={60} height={22} borderRadius={9999} />
-        <SkeletonBox width={72} height={22} borderRadius={9999} />
-        <SkeletonBox width={56} height={22} borderRadius={9999} />
-      </View>
+      {/* (4. tag pills skeleton は撤去 — feed カードで tag chip を表示しなくなったため) */}
 
       {/* 5. action row — 4 icon + counts */}
       <View

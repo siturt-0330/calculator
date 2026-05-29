@@ -70,10 +70,13 @@ export function HapticTab({ focused, onPress, onPressAgain, children, ...rest }:
       }}
       accessibilityRole="tab"
       accessibilityState={{ selected: focused }}
-      // iOS HIG: tab の tappable area は最小 44pt。flex: 1 で水平に伸ばし、
+      // iOS HIG: tab の tappable area は最小 44pt。flex で水平に伸ばし、
       // 高さは親 (TabBar) が決める bar 高 + label を含めて十分確保される。
+      // active tab は label 付き chip になり横幅が要るので flex:2 (inactive は 1) を
+      // 与え、chip が cell からはみ出して pill の外に飛び出すのを防ぐ
+      // (= 「ホームだけはみ出る」問題の対策)。
       style={[
-        { flex: 1, alignItems: 'center', justifyContent: 'center' },
+        { flex: focused ? 2 : 1, alignItems: 'center', justifyContent: 'center' },
         aScale,
         webStyle as object,
       ]}
