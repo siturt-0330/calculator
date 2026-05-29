@@ -2,7 +2,9 @@
 // geek-official — コミュニティ管理ダッシュボード
 // ============================================================
 import { useMemo } from 'react';
-import { View, Text, ScrollView, Image } from 'react-native';
+import { View, Text, ScrollView } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
+import { squareThumbedUrl } from '../../../lib/utils/imageUrl';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -146,7 +148,15 @@ export default function OfficialDashboardScreen() {
           }}
         >
           {safeIcon ? (
-            <Image source={{ uri: safeIcon }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+            // 32px @4x = 128 → 140 で retina 余裕。サーバ側 center-crop。
+            <ExpoImage
+              source={{ uri: squareThumbedUrl(safeIcon, 140) }}
+              style={{ width: '100%', height: '100%' }}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              recyclingKey={safeIcon}
+              transition={120}
+            />
           ) : (
             <Text style={{ fontSize: 16 }}>{community.icon_emoji}</Text>
           )}

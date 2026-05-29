@@ -8,17 +8,7 @@
 
 import { TIERS, tierForScore, computeTrustBreakdown } from '../../lib/trust/score';
 
-describe('TIERS — 肩書 + 境界', () => {
-  it('5 階層: 新参者 / 常連 / 多分良い人 / 絶対良い人 / 神', () => {
-    expect(TIERS.map((t) => t.name)).toEqual([
-      '新参者',
-      '常連',
-      '多分良い人',
-      '絶対良い人',
-      '神',
-    ]);
-  });
-
+describe('TIERS — 境界', () => {
   it('boundary が連続している (隙間なし、重複なし)', () => {
     for (let i = 0; i < TIERS.length - 1; i++) {
       const cur = TIERS[i]!;
@@ -40,11 +30,9 @@ describe('TIERS — 肩書 + 境界', () => {
     expect(god.max).toBe(100);
   });
 
-  it('各ティアに絵文字と色が定義されている', () => {
+  it('各ティアに色が定義されている', () => {
     for (const tier of TIERS) {
-      expect(tier.emoji).toBeTruthy();
       expect(tier.color).toMatch(/^#[0-9a-fA-F]{6}$/);
-      expect(tier.perks.length).toBeGreaterThan(0);
     }
   });
 });

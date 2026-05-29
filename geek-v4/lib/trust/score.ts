@@ -3,97 +3,28 @@
 // DB に新しいトリガーや列を足さず、profile 行だけで動く。
 
 // ============================================================
-// 信頼ティアの肩書 — ユーザー仕様 2026-05 改修
+// 信頼ティアの境界 — 2026-05 改修
 // ------------------------------------------------------------
-// 匿名アプリでありながら「この人信頼できそう」を直感的に伝えるため、
-// 機械的な「Trusted / Verified / Elite」ではなく、より人間味のある
-// 肩書に変更:
-//   - 0-29   新参者     登録したて、まだ何も知らない
-//   - 30-69  常連       普段から見かける、見覚えのある人
-//   - 70-89  多分良い人 たぶん信用しても大丈夫そう
-//   - 90-99  絶対良い人 ほぼ間違いなく信頼できる
-//   - 100    神         完全無欠の特別枠 (実質ほぼ到達不可)
-//
-// boundary の意図:
-//   - 30 がっつり活動して常連入り
-//   - 70 / 90 のステップで「肯定的評価」と「絶対評価」を二段階にする
-//   - 100 だけは別格 (perks も他より特別、到達した人へのご褒美)
+// #96 (feat/trust-score-friendly-labels) の「肩書」(新参者 / 常連 / 多分良い人 /
+// 絶対良い人 / 神) と emoji / perks は UI に一度も描画されないまま休眠コード化
+// していたため撤去。表示は数値スコア (0-100) のみ (app/settings/trust-score.tsx)。
+// tier は内部の境界判定 (key / min / max / color) としてのみ残す:
+//   - 0-29 / 30-69 / 70-89 / 90-99 / 100 の 5 段階
+//   - color は将来の内部利用 (バッジ色など) 用に保持
 // ============================================================
 export type TrustTier = {
   key: 'newcomer' | 'regular' | 'probably_nice' | 'definitely_nice' | 'god';
-  name: string;
-  emoji: string;
   min: number;
   max: number;
   color: string;
-  perks: string[];
 };
 
 export const TIERS: TrustTier[] = [
-  {
-    key: 'newcomer',
-    name: '新参者',
-    emoji: '🌱',
-    min: 0,
-    max: 29,
-    color: '#94a3b8',
-    perks: [
-      'コミュニティに参加できる',
-      '投稿・コメントできる',
-    ],
-  },
-  {
-    key: 'regular',
-    name: '常連',
-    emoji: '💎',
-    min: 30,
-    max: 69,
-    color: '#60a5fa',
-    perks: [
-      'プロフィールに 💎 バッジが付く',
-      '毎日の継続でスコアが伸びる',
-      'コミュニティ作成上限 ↑',
-    ],
-  },
-  {
-    key: 'probably_nice',
-    name: '多分良い人',
-    emoji: '✨',
-    min: 70,
-    max: 89,
-    color: '#34d399',
-    perks: [
-      'フィードで投稿が優先表示',
-      '信頼バッジでアンカー回答者に',
-      '投稿に独自タグ作成可',
-    ],
-  },
-  {
-    key: 'definitely_nice',
-    name: '絶対良い人',
-    emoji: '🏆',
-    min: 90,
-    max: 99,
-    color: '#f59e0b',
-    perks: [
-      '月間ランキング掲載対象',
-      '✨ バッジ + プロフィール装飾',
-      '全機能解放',
-    ],
-  },
-  {
-    key: 'god',
-    name: '神',
-    emoji: '👑',
-    min: 100,
-    max: 100,
-    color: '#a855f7',
-    perks: [
-      '神バッジ (実質到達者ほぼゼロの最終称号)',
-      '全コミュ運営から尊敬される',
-      'プロフィール画面に虹色グラデーション',
-    ],
-  },
+  { key: 'newcomer', min: 0, max: 29, color: '#94a3b8' },
+  { key: 'regular', min: 30, max: 69, color: '#60a5fa' },
+  { key: 'probably_nice', min: 70, max: 89, color: '#34d399' },
+  { key: 'definitely_nice', min: 90, max: 99, color: '#f59e0b' },
+  { key: 'god', min: 100, max: 100, color: '#a855f7' },
 ];
 
 export type TrustComponent = {

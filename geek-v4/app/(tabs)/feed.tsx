@@ -4,6 +4,7 @@ import {
   Text,
   RefreshControl,
   Platform,
+  useWindowDimensions,
   type NativeSyntheticEvent,
   type NativeScrollEvent,
 } from 'react-native';
@@ -14,11 +15,25 @@ import { useAuthStore } from '../../stores/authStore';
 import { supabase } from '../../lib/supabase';
 import { fetchNotifications } from '../../lib/api/notifications';
 import Animated, {
+  Extrapolation,
+  interpolate,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
+  withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import {
+  HomeDrawer,
+  HOME_DRAWER_SPRING,
+  HOME_DRAWER_DIST_THRESHOLD,
+  HOME_DRAWER_VEL_THRESHOLD,
+  HOME_DRAWER_EDGE_GRAB,
+  getHomeDrawerWidth,
+} from '../../components/nav/HomeDrawer';
+import { haptic as triggerHaptic } from '../../lib/haptics';
 import { EASE_OUT_QUART } from '../../design/motion';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
@@ -127,11 +142,98 @@ import { TABBAR } from '../../design/tabbar';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { Post } from '../../types/models';
 
+// 右スワイプ中の `progress` 更新を worklet で行うためのヘルパー。
+// dx (右方向への絶対距離) と drawer 幅から 0..1 へ写像してクランプ。
+// useMemo 内で worklet 化される使い方なので 'worklet' 指定。
+function progressFromDx(
+  dx: number,
+  width: number,
+  progress: { value: number },
+): void {
+  'worklet';
+  const next = dx / Math.max(1, width);
+  progress.value = Math.max(0, Math.min(1, next));
+}
+
 export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   // テーマ購読 — light/dark 切替で feed 画面が自動再 render される
-  const { C, GRAD, SHADOW } = useTheme();
+  const { C, GRAD } = useTheme();
+
+  // ============================================================
+  // ★ HomeDrawer (X 風の左ドロワー) — 右スワイプで open / 左スワイプで close
+  // ------------------------------------------------------------
+  //   - progress: 0=closed, 1=open の shared value (Reanimated worklet)
+  //   - drawerOpen: 同期 boolean (FlashList の scroll lock 用)
+  //   - openSwipe gesture: 画面左端 24pt 以内から開始した右ドラッグだけ active
+  //     (左端 grab 以外は FlashList の縦 scroll を邪魔しない)
+  // ============================================================
+  const { width: WW } = useWindowDimensions();
+  const DRAWER_WIDTH = getHomeDrawerWidth(WW);
+  const drawerProgress = useSharedValue(0);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // 画面左端 24pt 以内から右にスワイプで open。drawerOpen=true のときは無効化
+  // (HomeDrawer 内部の close gesture が担当)。
+  const openGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-9999, 10]) // 右方向に 10pt 以上動いたら active
+        .failOffsetY([-15, 15])       // 縦に 15pt 以上動いたら fail (scroll に道を譲る)
+        // 左端 grab 範囲外で開始した swipe は onChange / onEnd の startX 判定で無視。
+        // Gesture API には onBegin から fail させる手段が無いため、効果的には no-op。
+        .onChange((e) => {
+          'worklet';
+          // 開いてる状態は close gesture 側に任せて何もしない
+          if (drawerProgress.value > 0.99) return;
+          // 左端 grab 範囲: x の出発点が DRAWER_EDGE_GRAB 内
+          // gesture e.x は currently absolute X of the active touch
+          // 出発点は (e.x - e.translationX) で復元できる
+          const startX = e.x - e.translationX;
+          if (startX > HOME_DRAWER_EDGE_GRAB) return;
+
+          // 右へのドラッグだけ追従。負値 (左) は 0 でクランプ
+          const dx = Math.max(0, e.translationX);
+          progressFromDx(dx, DRAWER_WIDTH, drawerProgress);
+        })
+        .onEnd((e) => {
+          'worklet';
+          if (drawerProgress.value > 0.99) return;
+          const startX = e.x - e.translationX;
+          // 左端 grab 範囲外で始まった場合は何もせず spring で戻す
+          if (startX > HOME_DRAWER_EDGE_GRAB) {
+            drawerProgress.value = withSpring(0, HOME_DRAWER_SPRING);
+            return;
+          }
+          const shouldOpen =
+            e.translationX > HOME_DRAWER_DIST_THRESHOLD ||
+            e.velocityX > HOME_DRAWER_VEL_THRESHOLD;
+          if (shouldOpen) {
+            drawerProgress.value = withSpring(1, HOME_DRAWER_SPRING, (fin) => {
+              if (fin) runOnJS(setDrawerOpen)(true);
+            });
+            runOnJS(triggerHaptic)('tap');
+          } else {
+            drawerProgress.value = withSpring(0, HOME_DRAWER_SPRING);
+          }
+        }),
+    [DRAWER_WIDTH, drawerProgress],
+  );
+
+  // feed content を drawer width 分 右に push する animated style
+  const feedContentStyle = useAnimatedStyle(() => ({
+    transform: [
+      {
+        translateX: interpolate(
+          drawerProgress.value,
+          [0, 1],
+          [0, DRAWER_WIDTH],
+          Extrapolation.CLAMP,
+        ),
+      },
+    ],
+  }));
   const { posts, reasonsMap, communitiesByPost, ads, interestTags, loading, refreshing, refresh, loadMore } = useFeed();
   // Smart skeleton timing — skeleton only after 200ms of continuous loading.
   // <200ms loads (cache hits / fast network) skip skeleton entirely to avoid flash.
@@ -540,10 +642,11 @@ export default function FeedScreen() {
 
   const Bell = Icon.bell;
   const Search = Icon.search;
-  const Plus = Icon.plus;
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <GestureDetector gesture={openGesture}>
+        <Animated.View style={[{ flex: 1, backgroundColor: C.bg }, feedContentStyle]}>
       {/* 上部 hero エリア — bg は flat だと無機質なので、ごく弱い紫 → 透明のグラデを
           被せてブランド色のニュアンスを忍ばせる。コンテンツ自体は読みやすさ重視で
           subtle に留める (opacity も低め)。 */}
@@ -569,35 +672,8 @@ export default function FeedScreen() {
           flexDirection: 'row',
           alignItems: 'center',
         }}>
-          <PressableScale
-            onPress={() => router.push('/post/create' as never)}
-            haptic="confirm"
-            hitSlop={8}
-            accessibilityLabel="新規投稿"
-            style={{
-              width: 38, height: 38, borderRadius: 19,
-              alignItems: 'center', justifyContent: 'center',
-              marginRight: SP['3'],
-              overflow: 'hidden',
-              // primary CTA halo を付けて「最も主要な action」をひと目で示す
-              ...SHADOW.accentGlow,
-            }}
-          >
-            {/* gradient ベースの新規投稿 FAB — 単色 accent より brand 感が出る */}
-            <LinearGradient
-              colors={GRAD.primary}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                top: 0,
-                bottom: 0,
-              }}
-            />
-            <Plus size={20} color="#fff" strokeWidth={2.6} />
-          </PressableScale>
+          {/* 新規投稿 FAB はグローバル TabBar の「+」に一本化したため削除 (2026-05-29)。
+              投稿作成導線は画面下の TabBar 右隣「+」円ボタンへ集約。 */}
           {/* Geek brand wordmark — Orbitron Black + accent gradient (web) + glow */}
           <Text
             allowFontScaling={false}
@@ -702,6 +778,9 @@ export default function FeedScreen() {
         ref={listRef}
         data={feedItems}
         drawDistance={250}
+        // drawer open 中は scroll を lock — drawer の左 swipe close と FlashList の
+        // 垂直 scroll が両方走ると親 GestureDetector との競合が出るため。
+        scrollEnabled={!drawerOpen}
         // ★ Viewport prewarm: スクロール中に次の 5 セル分の画像を先読み
         //   Instagram 風に「下に出てくる画像が常に既にメモリにある」状態を作る。
         viewabilityConfig={VIEWABILITY_CONFIG}
@@ -766,6 +845,15 @@ export default function FeedScreen() {
           if (reportPostId) report({ postId: reportPostId, reason: 'other' });
           setReportPostId(null);
         }}
+      />
+        </Animated.View>
+      </GestureDetector>
+
+      {/* ★ HomeDrawer — overlay (absolute fill)。progress 共有で feed と同期動作。
+          drawerOpen は backdrop タップ / 左スワイプ閉操作後の同期 boolean state。 */}
+      <HomeDrawer
+        progress={drawerProgress}
+        onOpenChange={setDrawerOpen}
       />
     </View>
   );

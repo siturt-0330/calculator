@@ -42,6 +42,7 @@ import Animated, {
   withTiming,
   interpolateColor,
 } from 'react-native-reanimated';
+import { Image as ExpoImage } from 'expo-image';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1066,6 +1067,19 @@ function CompactPostCard({
     return rest.length > 0 ? rest.slice(0, 160) : '';
   }, [post.title, post.content]);
 
+  // 画像 thumbnail — media_urls[0] があれば横長 row の左側に小さく表示。
+  // 拡大せず objectFit cover で中央 crop (情報密度を保つ)。
+  // 動画/blurhash は AnonPostCard の重い経路に任せ、検索結果は静止画 URL のみ。
+  const thumbUrl = useMemo(() => {
+    const urls = post.media_urls;
+    if (!Array.isArray(urls) || urls.length === 0) return null;
+    const first = urls[0];
+    if (typeof first !== 'string' || first.length === 0) return null;
+    // ローカル URI が混ざることはない契約 (createPost で弾く) だが念のため http(s) のみ通す
+    if (!/^https?:\/\//i.test(first)) return null;
+    return first;
+  }, [post.media_urls]);
+
   return (
     <PressableScale
       onPress={onPress}
@@ -1121,39 +1135,67 @@ function CompactPostCard({
         </PressableScale>
       </View>
 
-      {/* title — 大きく */}
-      {title && (
-        <HighlightedText
-          text={title}
-          terms={highlightTerms}
-          style={[T.bodyB, { color: C.text }]}
-          numberOfLines={2}
-        />
-      )}
+      {/* 本文ブロック — 画像があれば horizontal layout (image left, text right)、
+          無ければ素の縦並び。iOS-native な「Mail の添付プレビュー」感を狙う。 */}
+      <View
+        style={{
+          flexDirection: thumbUrl ? 'row' : 'column',
+          alignItems: thumbUrl ? 'flex-start' : 'stretch',
+          gap: thumbUrl ? SP['3'] : SP['2'],
+        }}
+      >
+        {thumbUrl && (
+          <ExpoImage
+            source={{ uri: thumbUrl }}
+            style={{
+              width: 72,
+              height: 72,
+              borderRadius: 10,
+              backgroundColor: C.bg3,
+            }}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={120}
+            recyclingKey={post.id}
+            accessibilityIgnoresInvertColors
+          />
+        )}
+        <View style={{ flex: 1, gap: SP['2'] }}>
+          {/* title — 大きく */}
+          {title && (
+            <HighlightedText
+              text={title}
+              terms={highlightTerms}
+              style={[T.bodyB, { color: C.text }]}
+              numberOfLines={2}
+            />
+          )}
 
-      {/* 本文 preview */}
-      {preview.length > 0 && (
-        <HighlightedText
-          text={preview}
-          terms={highlightTerms}
-          style={[T.small, { color: C.text2 }]}
-          numberOfLines={2}
-        />
-      )}
+          {/* 本文 preview */}
+          {preview.length > 0 && (
+            <HighlightedText
+              text={preview}
+              terms={highlightTerms}
+              style={[T.small, { color: C.text2 }]}
+              numberOfLines={2}
+            />
+          )}
 
-      {/* tag chips (上位 3 件まで) */}
-      {post.tag_names && post.tag_names.length > 0 && (
-        <View style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
-          {Array.from(new Set(post.tag_names)).slice(0, 3).map((tg) => (
-            <Text
-              key={tg}
-              style={[T.caption, { color: C.accent, fontWeight: '700' }]}
-            >
-              #{tg}
-            </Text>
-          ))}
+          {/* tag chips (上位 3 件まで) */}
+          {post.tag_names && post.tag_names.length > 0 && (
+            <View style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
+              {Array.from(new Set(post.tag_names)).slice(0, 3).map((tg) => (
+                <Text
+                  key={tg}
+                  style={[T.caption, { color: C.accent, fontWeight: '700' }]}
+                >
+                  #{tg}
+                </Text>
+              ))}
+            </View>
+          )}
         </View>
-      )}
+      </View>
     </PressableScale>
   );
 }

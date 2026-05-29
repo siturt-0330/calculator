@@ -4,7 +4,9 @@
 // 自分が official_admin の community を一覧表示し、選ぶと
 // /official/[communityId] のダッシュボードに遷移する。
 // ============================================================
-import { View, Text, ScrollView, Image } from 'react-native';
+import { View, Text, ScrollView } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
+import { squareThumbedUrl } from '../../lib/utils/imageUrl';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -168,7 +170,16 @@ function CommunityCard({ community, onPress }: { community: Community; onPress: 
           }}
         >
           {safeIconUrl ? (
-            <Image source={{ uri: safeIconUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+            // 56px @4x = 224 → 240 で retina 余裕。サーバ側 center-crop で
+            // 横長集合写真でも正方形に切り出される。
+            <ExpoImage
+              source={{ uri: squareThumbedUrl(safeIconUrl, 240) }}
+              style={{ width: '100%', height: '100%' }}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              recyclingKey={safeIconUrl}
+              transition={120}
+            />
           ) : (
             <Text style={{ fontSize: 32 }}>{community.icon_emoji}</Text>
           )}

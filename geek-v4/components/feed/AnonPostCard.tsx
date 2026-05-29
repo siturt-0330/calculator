@@ -29,10 +29,13 @@ import { hap } from '../../design/haptics';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { ProgressiveImage } from '../ui/ProgressiveImage';
 import { VideoPlayer } from '../ui/VideoPlayer';
-import { thumbedUrl } from '../../lib/utils/imageUrl';
+import { thumbedUrl, squareThumbedUrl } from '../../lib/utils/imageUrl';
+import { extractFirstUrl } from '../../lib/utils/extractUrl';
 import { DoubleTapHeart } from '../ui/DoubleTapHeart';
-import { TagPill } from '../tag/TagPill';
-import { AddTagInline } from '../tag/AddTagInline';
+// NOTE: tag chip と「+ タグ追加」 UI は撤去 (周りの人が他人投稿に tag を付与
+// できないようにする方針 + ハッシュタグは feed カード上に表示しない方針)。
+// DB 側の tag_names / added_tags は検索 index 用に残るが、ここでは render しない。
+// TagPill / AddTagInline import は使わなくなったので削除。
 import { MarkdownText } from '../ui/MarkdownText';
 import { LinkPreviewCard } from './LinkPreviewCard';
 import { PollCard } from './PollCard';
@@ -323,14 +326,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   sourceEmoji: { fontSize: 14 },
   sourceText: { color: C.text2, flex: 1 },
 
-  // タグ群 — 本文との距離を 8px に詰めて Threads/Apple News 風の密度に
-  tagsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingTop: SP['2'],
-    gap: SP['2'],
-    alignItems: 'center',
-  },
+  // (tagsRow style は削除 — tag chip は feed カードに表示しない方針)
 
   // アクション行 — 上 padding を 10px に詰めて action 強調を低く、 scan しやすく
   actionsRow: {
@@ -751,8 +747,10 @@ function CommunityInlineIndicatorInner({
   STYLES,
 }: CommunityInlineIndicatorProps) {
   // 80 = 20px @4x retina (CommunityAvatarBar が 56px → 160px と同比率)
+  // squareThumbedUrl で width=height=80 を渡し、サーバ側で正方形に
+  // center-crop された画像を取得する (横長集合写真の「拡大されて見える」防止).
   // thumb URL は icon_url 変化時のみ再計算
-  const thumb = useMemo(() => (c.icon_url ? thumbedUrl(c.icon_url, 80) : null), [c.icon_url]);
+  const thumb = useMemo(() => (c.icon_url ? squareThumbedUrl(c.icon_url, 80) : null), [c.icon_url]);
   // ExpoImage 用 source object — icon_url 変化時のみ更新
   const thumbSource = useMemo(() => (thumb ? { uri: thumb } : null), [thumb]);
   // a11y label は name 変化時のみ
@@ -796,22 +794,11 @@ function CommunityInlineIndicatorInner({
 const CommunityInlineIndicator = memo(CommunityInlineIndicatorInner);
 
 // ============================================================
-// MediaItem / ReactionPill / TagPillRow — list 内 mapped 要素は専用 sub-component に
+// MediaItem / ReactionPill — list 内 mapped 要素は専用 sub-component に
 // 切り出して memo 化する。これで親 card 再 render 時も各 item は (prop ref が
-// 同じなら) skip される。インライン arrow `() => onTagPress(tag)` を回避する
-// ためにも有効。
+// 同じなら) skip される。
+// ※ かつての MemoTagPill は tag chip の表示廃止に伴い削除。
 // ============================================================
-
-type MemoTagPillProps = {
-  name: string;
-  state: 'normal' | 'added';
-  onTagPress: (name: string) => void;
-};
-function MemoTagPillInner({ name, state, onTagPress }: MemoTagPillProps) {
-  const handlePress = useCallback(() => onTagPress(name), [onTagPress, name]);
-  return <TagPill name={name} state={state} onPress={handlePress} />;
-}
-const MemoTagPill = memo(MemoTagPillInner);
 
 type MemoImagePressableProps = {
   url: string;
@@ -1008,6 +995,12 @@ function AnonPostCardInner({
   const useOgPreview = useFeatureFlag('og_preview');
   const useQuickReaction = useFeatureFlag('quick_reaction');
 
+  // OG カード対象 URL: 明示的な source_url を優先し、無ければ本文中の最初の URL を拾う。
+  const previewUrl = useMemo(
+    () => post.source_url || extractFirstUrl(post.content),
+    [post.source_url, post.content],
+  );
+
   // 翻訳 (自動翻訳のみ — UI ボタン/バッジは表示しない)
   // selector: AnonPostCard は feed の全 post で大量にマウントされるので
   // languageStore の他フィールド変更で全 card が再 render されないように selector 化
@@ -1040,16 +1033,10 @@ function AnonPostCardInner({
   // 動画 (migration 0043 後の投稿のみ存在)。古い投稿は undefined → 空配列で安全
   const videoUrls = useMemo(() => post.video_urls ?? [], [post.video_urls]);
   const videoPosters = useMemo(() => post.video_posters ?? [], [post.video_posters]);
-  const tagNames = useMemo(() => Array.from(new Set(post.tag_names ?? [])), [post.tag_names]);
-  // tag 行: 1 件目以降をリスト表示する。slice の結果も memoize して
-  // TagPill の re-mount を抑制する。
-  const restTagNames = useMemo(() => tagNames.slice(1), [tagNames]);
-  // 「追加されたタグで、本タグに含まれていないもの」 — addedTags か tagNames の
-  // どちらかが変化したときだけ計算する。
-  const filteredAddedTags = useMemo(
-    () => addedTags.filter((tg) => !tagNames.includes(tg)),
-    [addedTags, tagNames],
-  );
+  // tag_names / addedTags は検索 index 用に props で受け取り続けるが、
+  //   - feed カード UI には render しない (ハッシュタグ非表示方針)
+  //   - 「+ タグ追加」 UI も廃止 (周りの人が他人投稿に tag を付与できない)
+  // 旧コードの tagNames / restTagNames / filteredAddedTags useMemo は撤去。
 
   // 画像の自然なアスペクト比を解決 — Image.getSize は web/native 両対応
   // tall portrait や wide landscape を square に潰さないよう、各 URI ごとに記録
@@ -1104,9 +1091,9 @@ function AnonPostCardInner({
   const lowTrust = likesCount > 0 && concernCount > likesCount;
 
   const openSource = useCallback(() => {
-    if (!post.source_url) return;
+    if (!previewUrl) return;
     // sanitizeUrl は http/https 以外を null にする — javascript:/data:/vbscript: XSS 防止
-    const safe = sanitizeUrl(post.source_url);
+    const safe = sanitizeUrl(previewUrl);
     if (!safe) return;
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       window.open(safe, '_blank', 'noopener,noreferrer');
@@ -1114,7 +1101,7 @@ function AnonPostCardInner({
       // 旧: silent fail。新: safeOpenUrl で失敗時 toast を表示
       void safeOpenUrl(safe);
     }
-  }, [post.source_url]);
+  }, [previewUrl]);
 
   // CW 開示 — `() => setCwRevealed(true)` を JSX inline で書くと毎 render 新 ref
   const revealCw = useCallback(() => setCwRevealed(true), []);
@@ -1413,7 +1400,63 @@ function AnonPostCardInner({
         </PressableScale>
       )}
 
-      {/* メディア — 自然なアスペクト比で表示 (square crop しない)
+      {/* ★ BBS 統合 (migration 0075) — title あれば content の上に大きく表示。
+          スレ形式 post (旧 BBS thread) は title が main contentで、 content は ''。
+          tap で post detail へ遷移 (本文 PressableScale と同じ behavior)。 */}
+      {post.title && !isCwHidden ? (
+        <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'], paddingBottom: post.content ? SP['1'] : SP['3'] }}>
+          <PressableScale onPress={onComment} haptic="tap" scaleValue={0.97}>
+            <Text
+              style={[T.h4, { color: C.text, fontWeight: '700' }]}
+              numberOfLines={3}
+            >
+              {post.title}
+            </Text>
+          </PressableScale>
+        </View>
+      ) : null}
+
+      {/* 本文 — 外側カードの paddingHorizontal を流用 (double-padding 回避)
+          ★ Reddit iOS 風 press feedback:
+            - scaleValue=0.94 (default 0.96 より dramatic に「凹む」)
+            - onPressIn で pressLift 0 → 1 (Animated.View の shadow が拡張)
+            - onPressOut で spring で戻す
+          tap → 即詳細遷移なので、scale + shadow expand の 1 瞬で「カードが lift up」体感。 */}
+      {post.content && !isCwHidden ? (
+        <View>
+          <PressableScale
+            onPress={onComment}
+            onLongPress={useQuickReaction ? () => setMemePickerOpen(true) : undefined}
+            haptic="tap"
+            scaleValue={0.94}
+            onPressIn={() => {
+              if (reduceMotionForCard) return;
+              pressLift.value = withTiming(1, { duration: 120, easing: Easing.out(Easing.cubic) });
+            }}
+            onPressOut={() => {
+              if (reduceMotionForCard) return;
+              pressLift.value = withSpring(0, SPRING_SNAPPY);
+            }}
+          >
+            <View style={STYLES.bodyInner}>
+              {useMarkdown ? (
+                <MarkdownText
+                  text={displayContent}
+                  style={bodyTextStyle}
+                  numberOfLines={hasMedia ? 3 : 8}
+                />
+              ) : (
+                <Text style={bodyTextStyle} numberOfLines={hasMedia ? 3 : 8}>
+                  {displayContent}
+                </Text>
+              )}
+            </View>
+          </PressableScale>
+        </View>
+      ) : null}
+
+      {/* メディア — 文章の下に表示 (文章 → 写真/動画 の順)。
+          自然なアスペクト比で表示 (square crop しない)
           tall portrait (5:6 等) や wide landscape も切れず全体が見える
           複数枚は縦に積む (各画像が自身のアスペクト比を保持)
           外側カードの paddingHorizontal に揃え、premium feel の rounded corners
@@ -1482,70 +1525,17 @@ function AnonPostCardInner({
         </DoubleTapHeart>
       )}
 
-      {/* ★ BBS 統合 (migration 0075) — title あれば content の上に大きく表示。
-          スレ形式 post (旧 BBS thread) は title が main contentで、 content は ''。
-          tap で post detail へ遷移 (本文 PressableScale と同じ behavior)。 */}
-      {post.title && !isCwHidden ? (
-        <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'], paddingBottom: post.content ? SP['1'] : SP['3'] }}>
-          <PressableScale onPress={onComment} haptic="tap" scaleValue={0.97}>
-            <Text
-              style={[T.h4, { color: C.text, fontWeight: '700' }]}
-              numberOfLines={3}
-            >
-              {post.title}
-            </Text>
-          </PressableScale>
-        </View>
-      ) : null}
-
-      {/* 本文 — 外側カードの paddingHorizontal を流用 (double-padding 回避)
-          ★ Reddit iOS 風 press feedback:
-            - scaleValue=0.94 (default 0.96 より dramatic に「凹む」)
-            - onPressIn で pressLift 0 → 1 (Animated.View の shadow が拡張)
-            - onPressOut で spring で戻す
-          tap → 即詳細遷移なので、scale + shadow expand の 1 瞬で「カードが lift up」体感。 */}
-      {post.content && !isCwHidden ? (
-        <View>
-          <PressableScale
-            onPress={onComment}
-            onLongPress={useQuickReaction ? () => setMemePickerOpen(true) : undefined}
-            haptic="tap"
-            scaleValue={0.94}
-            onPressIn={() => {
-              if (reduceMotionForCard) return;
-              pressLift.value = withTiming(1, { duration: 120, easing: Easing.out(Easing.cubic) });
-            }}
-            onPressOut={() => {
-              if (reduceMotionForCard) return;
-              pressLift.value = withSpring(0, SPRING_SNAPPY);
-            }}
-          >
-            <View style={STYLES.bodyInner}>
-              {useMarkdown ? (
-                <MarkdownText
-                  text={displayContent}
-                  style={bodyTextStyle}
-                  numberOfLines={hasMedia ? 3 : 8}
-                />
-              ) : (
-                <Text style={bodyTextStyle} numberOfLines={hasMedia ? 3 : 8}>
-                  {displayContent}
-                </Text>
-              )}
-            </View>
-          </PressableScale>
-        </View>
-      ) : null}
-
-      {/* 出典 — OG preview flag が ON なら LinkPreviewCard、OFF なら従来 */}
-      {post.source_url && (
+      {/* リンクプレビュー — source_url か本文中の URL を OG カード化。
+          flag ON: LinkPreviewCard (サーバーが取得した og:title/description/image)。
+          flag OFF: 従来の出典バー。 */}
+      {previewUrl && (
         useOgPreview ? (
-          <LinkPreviewCard url={post.source_url} />
+          <LinkPreviewCard url={previewUrl} />
         ) : (
           <PressableScale onPress={openSource} haptic="tap" style={STYLES.sourceBtn}>
             <Text style={STYLES.sourceEmoji}>🔗</Text>
             <Text style={[T.caption, STYLES.sourceText]} numberOfLines={1}>
-              出典: {shortHost(post.source_url)}
+              出典: {shortHost(previewUrl)}
             </Text>
           </PressableScale>
         )
@@ -1554,18 +1544,10 @@ function AnonPostCardInner({
       {/* 投票 */}
       {poll && !isCwHidden && <PollCard poll={poll} />}
 
-      {/* タグ群（2つ目以降 + 他人が追加したタグ + 追加ボタン） */}
-      <View style={STYLES.tagsRow}>
-        {tagNames.slice(1).map((tag) => (
-          <TagPill key={tag} name={tag} state="normal" onPress={() => onTagPress(tag)} />
-        ))}
-        {addedTags.filter((t) => !tagNames.includes(t)).map((tag) => (
-          <TagPill key={`added-${tag}`} name={tag} state="added" onPress={() => onTagPress(tag)} />
-        ))}
-        {onAddTag && (
-          <AddTagInline onSubmit={async (tag) => { await onAddTag(tag); }} />
-        )}
-      </View>
+      {/* タグ群は feed カードでは非表示
+          - ハッシュタグは見せない方針 (UI 雑音 + 押し付け感を排除)
+          - 「+ タグ追加」UI も削除 (周りの人が他人投稿に tag を付与できないようにする)
+          - DB の tag_names / added_tags は検索 index 用に残る */}
 
       {/* アクション行 — icon を 20px に統一. hitSlop:10 で 44pt 以上の tap target を確保
           (icon 自体は 20 だが押下範囲を上下左右 +10 で誤タップ防止)。

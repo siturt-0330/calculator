@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { View } from 'react-native';
+import { View, Text } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -24,68 +24,85 @@ const TAB_TO_ICON: Record<TabKey, IconName> = {
   mypage: 'mypage',
 };
 
+const TAB_TO_LABEL: Record<TabKey, string> = {
+  home: 'ホーム',
+  search: '検索',
+  game: 'ゲーム',
+  community: 'コミュ',
+  mypage: 'マイ',
+};
+
 // ============================================================
-// TabIcon — bottom tab の「ぐっと響く」 active アニメ
+// TabIcon — floating-pill tab bar 内のアイコン (+ optional label)
 // ------------------------------------------------------------
-// 設計:
-//   - color: text2 ↔ accent を 180ms ease-out で crossfade
-//     (lucide-react-native の color prop は animated でないので、
-//      focused / unfocused 2 枚を opacity で重ねる方式に)
-//   - scale: 1.0 → 1.08 を SPRING_BOUNCY (damping 12, stiffness 280) で弾ませる
-//   - wiggle: 親 (TabBar) から `wiggleSignal` を変えると -8deg → +8deg → 0 を 320ms
-//             同 tab 再タップ時の "上スクロール feedback" として使う
-//   - reduceMotion: scale / wiggle は無効化、color は即時切替
+// 設計 (2026-05-29 「昔の TabBar」リバイバル):
+//   - active (focused): scale 1.0 + accent カラー
+//     inactive:         scale 0.95 + text2 (gray) で subtle
+//   - color は active / inactive を opacity で重ねて crossfade
+//     (lucide-react-native の color prop は animated 不可)
+//   - showLabel=true の場合のみ右側に label を inline 表示
+//     (現状の floating-pill 設計では label は親 TabBar の chip 側で
+//      レンダリングするため showLabel は基本 false 運用、本コンポーネント
+//      は再利用性のため引数自体は受け取る)
+//   - wiggleSignal: 値が変わるたびに 1 回 -8deg → +8deg → 0 の wiggle
+//   - reduceMotion: scale / wiggle 無効、color は即時切替
 // ============================================================
 
 const COLOR_FADE_MS = 180;
 const WIGGLE_DEG = 8;
-const WIGGLE_HALF_MS = 110; // 110 + 110 + 100 = 320ms (戻り含む)
+const WIGGLE_HALF_MS = 110;
 const WIGGLE_RETURN_MS = 100;
-// iOS HIG: tab icon は press / select 時に大きく scale しない。
-// 控えめな 1.04 にして "ぐっと上がる" 感だけ残す。
-const FOCUSED_SCALE = 1.04;
-// iOS systemGray — inactive icon の標準色
-const INACTIVE_TINT = '#8E8E93';
+// 仕様: focused = 1.0 / inactive = 0.95 で subtle に
+const FOCUSED_SCALE = 1.0;
+const INACTIVE_SCALE = 0.95;
 
 export function TabIcon({
   tab,
   focused,
   size = TABBAR.iconSize,
+  showLabel = false,
+  label,
   wiggleSignal,
 }: {
   tab: TabKey;
   focused: boolean;
   size?: number;
-  // 親 (TabBar) が値を変えるたびに wiggle を 1 回再生 (active tab 再タップ feedback)
+  // true なら icon の右隣に label を inline 表示する。
+  // floating-pill TabBar 側で label をレンダリングしている場合は false (default)。
+  showLabel?: boolean;
+  // 明示的に label テキストを指定したいとき (省略時は TAB_TO_LABEL を使用)。
+  label?: string;
+  // 親が値を変えるたびに wiggle を 1 回再生 (active tab 再タップ feedback)
   wiggleSignal?: number;
 }) {
   const C = useColors();
   const reduceMotion = useReducedMotion();
   const I: LucideIcon = Icon[TAB_TO_ICON[tab]];
+  const resolvedLabel = label ?? TAB_TO_LABEL[tab];
 
   // focused: 0 (unfocused) ↔ 1 (focused)
   const focusedSV = useSharedValue(focused ? 1 : 0);
-  // scale (1.0 → 1.08)
-  const scaleSV = useSharedValue(focused ? FOCUSED_SCALE : 1);
+  // scale (inactive 0.95 ↔ focused 1.0)
+  const scaleSV = useSharedValue(focused ? FOCUSED_SCALE : INACTIVE_SCALE);
   // wiggle 用 rotation (deg)
   const rotSV = useSharedValue(0);
 
-  // focused 変化に追従
   useEffect(() => {
     if (reduceMotion) {
-      // reduceMotion 時は即時切替 (jump-cut)
       focusedSV.value = focused ? 1 : 0;
-      scaleSV.value = focused ? FOCUSED_SCALE : 1;
+      scaleSV.value = focused ? FOCUSED_SCALE : INACTIVE_SCALE;
       return;
     }
     focusedSV.value = withTiming(focused ? 1 : 0, { duration: COLOR_FADE_MS });
-    scaleSV.value = withSpring(focused ? FOCUSED_SCALE : 1, SPRING_BOUNCY);
+    scaleSV.value = withSpring(
+      focused ? FOCUSED_SCALE : INACTIVE_SCALE,
+      SPRING_BOUNCY,
+    );
   }, [focused, reduceMotion, focusedSV, scaleSV]);
 
-  // wiggleSignal が変わったら 1 回 wiggle
   useEffect(() => {
     if (wiggleSignal === undefined) return;
-    if (reduceMotion) return; // 無効化
+    if (reduceMotion) return;
     rotSV.value = withSequence(
       withTiming(-WIGGLE_DEG, { duration: WIGGLE_HALF_MS }),
       withTiming(WIGGLE_DEG, { duration: WIGGLE_HALF_MS }),
@@ -109,23 +126,43 @@ export function TabIcon({
     ],
   }));
 
-  return (
+  const iconNode = (
     <Animated.View
       style={[
         { width: size, height: size, alignItems: 'center', justifyContent: 'center' },
         aTransform,
       ]}
     >
-      {/* unfocused: iOS systemGray (#8E8E93) — 上に focused (accent) を重ねる
-           iOS HIG: inactive tab は dark/light に依らず systemGray が標準 */}
       <Animated.View style={[{ position: 'absolute' }, aInactive]}>
-        <I size={size} strokeWidth={TABBAR.iconStroke} color={INACTIVE_TINT} />
+        <I size={size} strokeWidth={TABBAR.iconStroke} color={C.text2} />
       </Animated.View>
       <Animated.View style={[{ position: 'absolute' }, aActive]}>
         <I size={size} strokeWidth={TABBAR.iconStroke} color={C.accent} />
       </Animated.View>
-      {/* 固有 size を保つための placeholder (transparent) */}
+      {/* size 確保用 placeholder (transparent) */}
       <View style={{ width: size, height: size }} />
     </Animated.View>
+  );
+
+  if (!showLabel) return iconNode;
+
+  // showLabel=true のときは icon + label を横並びに
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      {iconNode}
+      <Text
+        numberOfLines={1}
+        style={{
+          marginLeft: 6,
+          fontSize: 13,
+          lineHeight: 16,
+          fontWeight: '700',
+          color: focused ? C.accent : C.text2,
+          letterSpacing: 0.1,
+        }}
+      >
+        {resolvedLabel}
+      </Text>
+    </View>
   );
 }

@@ -20,9 +20,48 @@ export async function fetchCachedPreview(url: string): Promise<LinkPreview | nul
   return data as LinkPreview | null;
 }
 
-// Public な無料 OG プロキシ経由でメタを取得 + DB にキャッシュ
-// (Supabase Edge Function 等を立てる前の暫定対応)
+// Public な無料 OG プロキシ経由でメタを取得 (Edge Function 未 deploy 時の fallback)
+// (Supabase Edge Function 'og-fetch' が deploy されればそちらが優先)
 const META_PROXY = 'https://api.microlink.io';
+
+// ------------------------------------------------------------
+// edge function 'og-fetch' のレスポンス型 (server 側で truncate / cache 済)
+// ------------------------------------------------------------
+type OgFetchResponse = {
+  url?: string;
+  title?: string | null;
+  description?: string | null;
+  image_url?: string | null;
+  site_name?: string | null;
+  fetched_at?: string | null;
+};
+
+// edge function 経由でサーバーサイド取得 (PRIMARY path)。
+// title か image_url のどちらかが取れたときのみ LinkPreview を返す。
+// 取得できなければ null (= caller 側で fallback へ)。
+async function fetchViaEdge(url: string): Promise<LinkPreview | null> {
+  try {
+    const { data, error } = await supabase.functions.invoke('og-fetch', {
+      body: { url },
+    });
+    if (error || !data || typeof data !== 'object') return null;
+    const d = data as OgFetchResponse;
+    const title = d.title ?? null;
+    const imageUrl = d.image_url ?? null;
+    // 最低でも title か image が無ければ「取得失敗」扱いにして fallback させる
+    if (!title && !imageUrl) return null;
+    return {
+      url,
+      title,
+      description: d.description ?? null,
+      image_url: imageUrl,
+      site_name: d.site_name ?? null,
+      fetched_at: d.fetched_at ?? new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
 
 export async function fetchAndCachePreview(url: string): Promise<LinkPreview | null> {
   if (!/^https?:\/\//.test(url)) return null;
@@ -34,7 +73,13 @@ export async function fetchAndCachePreview(url: string): Promise<LinkPreview | n
     if (ageDays < 7) return cached;
   }
 
-  // microlink.io で取得 (匿名で月50req/secのフリー枠)
+  // PRIMARY: GEEK サーバー (Edge Function) がページを fetch して OG メタを返す。
+  // edge function 側で post_link_previews に upsert 済みなので、ここでは upsert しない。
+  const fromEdge = await fetchViaEdge(url);
+  if (fromEdge) return fromEdge;
+
+  // FALLBACK: edge function が未 deploy / エラー / 空のとき。
+  // microlink.io で取得 (匿名で月50req/secのフリー枠) + client から upsert。
   try {
     const r = await fetch(`${META_PROXY}/?url=${encodeURIComponent(url)}`);
     if (!r.ok) return cached;

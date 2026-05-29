@@ -25,11 +25,17 @@ const SUPABASE_PUBLIC_RENDER = '/storage/v1/render/image/public/';
  *
  * 既に render endpoint や width クエリが付いている、または Supabase 以外の URL は
  * そのまま返す (二重変換 / 壊れた URL 防止)。
+ *
+ * 注意 (2026-05 修正): `resize=cover` で **正方形** に center-crop したい場合は
+ *   `opts.height` を `width` と同じ値で指定する。height を省くと Supabase は
+ *   width だけで等倍スケールするため、横長画像は縦が短いまま帰ってきて、
+ *   円形 avatar 内で expo-image が `contentFit="cover"` で拡大表示 → 「顔が
+ *   押し込まれて拡大されすぎ」に見える原因になる。
  */
 export function thumbedUrl(
   url: string | null | undefined,
   width = 720,
-  opts: { quality?: number; format?: 'webp' | 'avif' | 'origin' } = {},
+  opts: { quality?: number; format?: 'webp' | 'avif' | 'origin'; height?: number } = {},
 ): string {
   if (!url) return '';
   if (!url.includes(SUPABASE_PUBLIC_OBJECT)) return url;
@@ -38,7 +44,23 @@ export function thumbedUrl(
   const quality = opts.quality ?? 75;
   const format = opts.format ?? 'webp';   // ★ デフォルトを WebP に (JPEG 比 25-30% 軽量)
   const sep = rendered.includes('?') ? '&' : '?';
-  return `${rendered}${sep}width=${width}&quality=${quality}&resize=cover&format=${format}`;
+  const heightPart = opts.height ? `&height=${opts.height}` : '';
+  return `${rendered}${sep}width=${width}${heightPart}&quality=${quality}&resize=cover&format=${format}`;
+}
+
+/**
+ * 円形 avatar (community icon / user avatar) 用に **正方形** に center-crop した
+ * サムネ URL を返す。width = height = size で Supabase render endpoint に投げる。
+ *
+ * これを使うと、ソース画像が横長 (集合写真など) でも、サーバ側で正方形に
+ * 切り出された画像が降ってくるので、円形 ViewBox での「異常な拡大」が消える。
+ */
+export function squareThumbedUrl(
+  url: string | null | undefined,
+  size: number,
+  opts: { quality?: number; format?: 'webp' | 'avif' | 'origin' } = {},
+): string {
+  return thumbedUrl(url, size, { ...opts, height: size });
 }
 
 /**

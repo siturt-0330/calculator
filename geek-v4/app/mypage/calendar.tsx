@@ -7,7 +7,9 @@
 // パス: /mypage/calendar
 // ============================================================
 
-import { View, Text, ScrollView, Modal, Image } from 'react-native';
+import { View, Text, ScrollView, Modal } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
+import { squareThumbedUrl } from '../../lib/utils/imageUrl';
 import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -228,7 +230,15 @@ export default function MyCalendarScreen() {
                         }}
                       >
                         {safeIconUrl ? (
-                          <Image source={{ uri: safeIconUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                          // 36px @4x = 144 → 160 で retina 余裕。サーバ側 center-crop。
+                          <ExpoImage
+                            source={{ uri: squareThumbedUrl(safeIconUrl, 160) }}
+                            style={{ width: '100%', height: '100%' }}
+                            contentFit="cover"
+                            cachePolicy="memory-disk"
+                            recyclingKey={safeIconUrl}
+                            transition={120}
+                          />
                         ) : (
                           <Text style={{ fontSize: 20 }}>{c.icon_emoji}</Text>
                         )}
@@ -350,7 +360,15 @@ function MyCalendarEventRow({
             }}
           >
             {safeIconUrl ? (
-              <Image source={{ uri: safeIconUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+              // 18px @4x = 72 → 80 で retina 余裕。サーバ側 center-crop。
+              <ExpoImage
+                source={{ uri: squareThumbedUrl(safeIconUrl, 80) }}
+                style={{ width: '100%', height: '100%' }}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                recyclingKey={safeIconUrl}
+                transition={120}
+              />
             ) : (
               <Text style={{ fontSize: 10 }}>{event.community.icon_emoji}</Text>
             )}

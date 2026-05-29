@@ -11,7 +11,7 @@ export type SortMode = 'for-you' | 'hot' | 'new' | 'top' | 'rising';
 // posts SELECT で取得するカラム一覧 (一箇所でメンテ可能)
 // author_id は公式コミュ管理者投稿を de-anonymize する判定に使う (RLS で誰でも読める)
 const POSTS_SELECT_COLS =
-  'id, content, title, last_activity_at, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, qa_mode, created_at, author_id';
+  'id, content, title, last_activity_at, media_urls, media_blurhashes, video_urls, video_posters, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, qa_mode, created_at, author_id';
 
 // posts + post_communities + communities を 1 RTT で取得するための embed セット。
 // attachOfficialAuthor が必要としていた 2nd round-trip を畳み込み、

@@ -1,4 +1,4 @@
-import { View, Text, RefreshControl, Image } from 'react-native';
+import { View, Text, RefreshControl } from 'react-native';
 import { useEffect, useCallback, useMemo, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import { Image as ExpoImage } from 'expo-image';
@@ -14,7 +14,7 @@ import { Icon } from '../../../constants/icons';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { CommunityAvatarBar } from '../../../components/community/CommunityAvatarBar';
 import { AnonPostCard } from '../../../components/feed/AnonPostCard';
-import { thumbedUrl } from '../../../lib/utils/imageUrl';
+import { thumbedUrl, squareThumbedUrl } from '../../../lib/utils/imageUrl';
 import { filterPostsByCommunity } from '../../../lib/utils/communityFilter';
 import {
   fetchMyCommunities,
@@ -305,10 +305,16 @@ export default function CommunityScreen() {
               }}
             >
               {community.icon_url ? (
-                <Image
-                  source={{ uri: community.icon_url }}
+                // 14px @4x = 56 → 64 で retina 余裕。
+                // squareThumbedUrl でサーバ側 center-crop され、
+                // 横長集合写真でも顔が押し込まれて拡大されない。
+                <ExpoImage
+                  source={{ uri: squareThumbedUrl(community.icon_url, 64) }}
                   style={{ width: 14, height: 14, borderRadius: 7 }}
-                  resizeMode="cover"
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  recyclingKey={community.icon_url}
+                  transition={120}
                 />
               ) : (
                 <Text style={{ fontSize: 11 }}>{community.icon_emoji}</Text>
@@ -594,9 +600,15 @@ type GoToCommunityChipProps = {
 };
 
 function GoToCommunityChip({ community, onPress }: GoToCommunityChipProps) {
-  const { GRAD, SHADOW } = useTheme();
+  const { C } = useTheme();
+  // 旧版は紫 gradient + glow shadow の大きな pill だったが、avatar bar の
+  // 真下に強い視覚要素を 2 段重ねると "ぼやけ + 喧噪" の原因になっていた。
+  // iOS native の "aside chip" 風に変更:
+  //   - height 28, 細い border + 薄い accent bg
+  //   - icon (14px) + 小さい label + chevron で「補助導線」に控える
+  //   - alignSelf: flex-start のまま、bar との距離を SP['1'] に詰める
   return (
-    <View style={{ paddingHorizontal: SP['4'], paddingVertical: SP['2'] }}>
+    <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['2'], paddingBottom: SP['1'] }}>
       <PressableScale
         onPress={onPress}
         haptic="tap"
@@ -604,40 +616,40 @@ function GoToCommunityChip({ community, onPress }: GoToCommunityChipProps) {
         style={{
           flexDirection: 'row',
           alignItems: 'center',
-          gap: SP['2'],
-          paddingHorizontal: SP['4'],
-          paddingVertical: SP['2'],
+          gap: 6,
+          paddingLeft: SP['2'],
+          paddingRight: SP['3'],
+          height: 28,
           borderRadius: R.full,
-          overflow: 'hidden',
           alignSelf: 'flex-start',
-          ...SHADOW.glow,
+          backgroundColor: C.accentBg,
+          borderWidth: 1,
+          borderColor: C.accent,
         }}
       >
-        <LinearGradient
-          colors={GRAD.primary}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
-        />
         {community.icon_url ? (
-          <Image
-            source={{ uri: community.icon_url }}
+          // 18px @4x = 72 → 80 で retina 余裕。サーバ側で正方形 center-crop。
+          <ExpoImage
+            source={{ uri: squareThumbedUrl(community.icon_url, 80) }}
             style={{ width: 18, height: 18, borderRadius: 9 }}
-            resizeMode="cover"
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            recyclingKey={community.icon_url}
+            transition={120}
           />
         ) : (
-          <Text style={{ fontSize: 14 }}>{community.icon_emoji}</Text>
+          <Text style={{ fontSize: 12 }}>{community.icon_emoji}</Text>
         )}
         <Text
           numberOfLines={1}
           style={[
-            T.smallM,
-            { color: '#fff', fontWeight: '700', maxWidth: 180 },
+            T.caption,
+            { color: C.accent, fontWeight: '700', maxWidth: 160, letterSpacing: 0.1 },
           ]}
         >
-          {community.name} に移動
+          {community.name} のページ
         </Text>
-        <Icon.chevronR size={16} color="#fff" strokeWidth={2.6} />
+        <Icon.chevronR size={12} color={C.accent} strokeWidth={2.6} />
       </PressableScale>
     </View>
   );
