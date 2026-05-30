@@ -139,7 +139,7 @@ import { logEvent } from '../../lib/personalize';
 import { PostCardSkeleton } from '../../components/feed/PostCardSkeleton';
 import { TrendingRow } from '../../components/feed/TrendingRow';
 import { PressableScale } from '../../components/ui/PressableScale';
-import { Avatar } from '../../components/ui/Avatar';
+import { Menu as MenuIcon } from 'lucide-react-native';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Icon } from '../../constants/icons';
@@ -280,9 +280,10 @@ export default function FeedScreen() {
   const qc = useQueryClient();
   const userId = useAuthStore((s) => s.user?.id);
 
-  // ヘッダー左上アバター (= ドロワーを開くボタン) 用プロフィール。
-  // queryKey / queryFn / staleTime は mypage / HomeDrawer と完全一致させ cache を共有する。
-  const { data: meProfile } = useQuery<MeProfileLite | null>({
+  // mypage / HomeDrawer 用プロフィールの cache 温め (queryKey 共有)。
+  // 左上が hamburger アイコンに変わってアバター表示が不要になった後も、
+  // ドロワー / マイページの初回 mount を待たせないため、ここで warm up は継続する。
+  useQuery<MeProfileLite | null>({
     queryKey: ['mypage-stats', userId],
     queryFn: async () => {
       if (!userId) return null;
@@ -714,23 +715,26 @@ export default function FeedScreen() {
           flexDirection: 'row',
           alignItems: 'center',
         }}>
-          {/* ★ 左上アバター = ドロワーを開くボタン。
-              右スワイプできない環境 (デスクトップ Web など) の主要導線。
-              タップで HomeDrawer を開く (X と同じ操作感)。 */}
+          {/* ★ 左上ハンバーガー = ドロワーを開くボタン。
+              アバター表示だと「メニュー」と分かりにくいフィードバックを受け
+              三本横棒の見慣れた menu アイコンに変更 (2026-05-31)。
+              右スワイプできない環境 (デスクトップ Web 等) の主要導線。 */}
           <PressableScale
             onPress={openDrawer}
             hitSlop={10}
             haptic="tap"
             accessibilityRole="button"
             accessibilityLabel="メニューを開く"
-            style={{ marginRight: SP['3'] }}
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 19,
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginRight: SP['2'],
+            }}
           >
-            <Avatar
-              size={32}
-              uri={meProfile?.avatar_url ?? undefined}
-              emoji={meProfile?.avatar_emoji ?? undefined}
-              name={meProfile?.nickname ?? 'メニュー'}
-            />
+            <MenuIcon size={24} color={C.text} strokeWidth={2.2} />
           </PressableScale>
           {/* 新規投稿 FAB はグローバル TabBar の「+」に一本化したため削除 (2026-05-29)。
               投稿作成導線は画面下の TabBar 右隣「+」円ボタンへ集約。 */}

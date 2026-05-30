@@ -42,7 +42,7 @@ export function TabVisibilityToggle({
         haptic="select"
         accessibilityRole="switch"
         accessibilityState={{ checked: visible }}
-        accessibilityLabel={`${tabName}を${visible ? '非表示' : '表示'}にする`}
+        accessibilityLabel={`${tabName}を${visible ? '非公開' : '公開'}にする`}
         style={{
           flexDirection: 'row',
           alignItems: 'center',
@@ -66,14 +66,14 @@ export function TabVisibilityToggle({
             { color: visible ? C.accent : C.text2, fontSize: 12 },
           ]}
         >
-          {visible ? '表示中' : '非表示'}
+          {visible ? '公開中' : '非公開'}
         </Text>
       </PressableScale>
 
       <Text style={[T.caption, { color: C.text3, flex: 1 }]} numberOfLines={1}>
         {visible
           ? '他の人にもこのタブが見えます'
-          : '他の人にはこのタブが見えません'}
+          : '他の人には見えません (あなたには表示されています)'}
       </Text>
     </View>
   );
