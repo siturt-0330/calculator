@@ -24,7 +24,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAuthStore } from '../../stores/authStore';
-import { useToastStore } from '../../stores/toastStore';
 import { useProfileVisibilityStore } from '../../stores/profileVisibilityStore';
 import { supabase } from '../../lib/supabase';
 import { fetchMyPhotos } from '../../lib/api/albums';
@@ -50,7 +49,6 @@ type MypageStats = {
 export default function MypageScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const show = useToastStore((s) => s.show);
   const user = useAuthStore((s) => s.user);
   const qc = useQueryClient();
 
@@ -152,7 +150,7 @@ export default function MypageScreen() {
           avatarEmoji={stats?.avatar_emoji}
           coverUri={coverUri}
           topInset={insets.top}
-          onSharePress={() => show('プロフィールの共有 (準備中)', 'info')}
+          onEditProfilePress={() => router.push('/settings/profile-edit' as never)}
           onMorePress={() => router.push('/settings' as never)}
           onAddPress={() => router.push('/post/create' as never)}
           onSearchPress={() => router.push('/(tabs)/search' as never)}

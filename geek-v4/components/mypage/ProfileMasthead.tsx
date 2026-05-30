@@ -16,7 +16,7 @@ import { View, Text, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
 import {
-  Share2,
+  UserCog,
   MoreHorizontal,
   ArrowLeft,
   Plus,
@@ -39,7 +39,8 @@ export type ProfileMastheadProps = {
   coverUri: string | null;
   /** SafeArea top inset (アクションpillをstatus barの下に配置するため) */
   topInset: number;
-  onSharePress: () => void;
+  /** ヘッダー右上 3 番目のピル: プロフィール編集 (UserCog アイコン) */
+  onEditProfilePress: () => void;
   onMorePress: () => void;
   onAddPress: () => void; // 投稿/写真追加
   onSearchPress: () => void;
@@ -58,7 +59,7 @@ export function ProfileMasthead(props: ProfileMastheadProps) {
     avatarEmoji,
     coverUri,
     topInset,
-    onSharePress,
+    onEditProfilePress,
     onMorePress,
     onAddPress,
     onSearchPress,
@@ -176,8 +177,8 @@ export function ProfileMasthead(props: ProfileMastheadProps) {
             <PillIcon onPress={onSearchPress} accessibilityLabel="検索">
               <SearchIcon size={18} color="#fff" strokeWidth={2.4} />
             </PillIcon>
-            <PillIcon onPress={onSharePress} accessibilityLabel="共有">
-              <Share2 size={18} color="#fff" strokeWidth={2.4} />
+            <PillIcon onPress={onEditProfilePress} accessibilityLabel="プロフィールを編集">
+              <UserCog size={18} color="#fff" strokeWidth={2.4} />
             </PillIcon>
             <PillIcon onPress={onMorePress} accessibilityLabel="もっと">
               <MoreHorizontal size={20} color="#fff" strokeWidth={2.4} />
