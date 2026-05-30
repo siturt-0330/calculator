@@ -506,36 +506,10 @@ export default function CommunityDetailScreen() {
         <FeedTab communityId={id} />
       </ScrollView>
 
-      {/* === 「投稿」FAB ===
-          非公式コミュニティの詳細画面の右下に投稿作成 FAB を出す。
-          公式コミュニティは管理者投稿フロー (tab 経由) のため FAB は出さない。 */}
-      {!community.is_official && (
-          <PressableScale
-            onPress={() =>
-              router.push(`/post/create?community_id=${encodeURIComponent(id)}` as never)
-            }
-            haptic="confirm"
-            accessibilityLabel="このコミュニティに投稿する"
-            style={{
-              position: 'absolute',
-              right: SP['5'],
-              bottom: insets.bottom + TABBAR.height + SP['4'],
-              width: 56,
-              height: 56,
-              borderRadius: 28,
-              backgroundColor: C.accent,
-              alignItems: 'center',
-              justifyContent: 'center',
-              shadowColor: C.accent,
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.45,
-              shadowRadius: 12,
-              elevation: 6,
-            }}
-          >
-            <Icon.plus size={26} color="#fff" strokeWidth={2.8} />
-          </PressableScale>
-        )}
+      {/* 投稿作成 FAB は TabBar 側 (components/nav/TabBar.tsx) に一本化済み。
+          TabBar の「+」は usePathname で現在のルートが /community/<id> なら
+          自動で ?community_id=<id> を付けて遷移するため、ここでは独自 FAB を
+          描画しない (2 つの紫「+」が重なる重複を解消)。 */}
 
     </View>
   );

@@ -18,11 +18,10 @@
 // =============================================================================
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, RefreshControl, Pressable } from 'react-native';
+import { View, ScrollView, RefreshControl, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { EyeOff } from 'lucide-react-native';
 
 import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
@@ -38,8 +37,7 @@ import { ProfileTabsBar, type ProfileTabKey } from '../../components/mypage/Prof
 import { TabVisibilityToggle } from '../../components/mypage/TabVisibilityToggle';
 import { UserPostsList } from '../../components/mypage/UserPostsList';
 import { SavedPostsList } from '../../components/mypage/SavedPostsList';
-import { C, R, SP } from '../../design/tokens';
-import { T } from '../../design/typography';
+import { C, SP } from '../../design/tokens';
 import { TABBAR } from '../../design/tabbar';
 import type { AlbumPhoto } from '../../types/models';
 
@@ -146,7 +144,7 @@ export default function MypageScreen() {
           />
         }
       >
-        {/* ===== カバー + アバター + 名前 ===== */}
+        {/* ===== カバー + アバター + 名前 (アバター/カバー編集バッジ付き) ===== */}
         <ProfileMasthead
           nickname={nickname}
           handle={handle}
@@ -158,6 +156,10 @@ export default function MypageScreen() {
           onMorePress={() => router.push('/settings' as never)}
           onAddPress={() => router.push('/post/create' as never)}
           onSearchPress={() => router.push('/(tabs)/search' as never)}
+          // 本人視点なので編集導線を渡す。プロフィール編集画面でアバター/カバーを
+          // 直接差し替えられる (タップで画像 picker が開く)。
+          onEditAvatar={() => router.push('/settings/profile-edit' as never)}
+          onEditCover={() => router.push('/settings/profile-edit' as never)}
         />
 
         {/* ===== AccountState (制限時のみ表示) ===== */}
@@ -171,6 +173,8 @@ export default function MypageScreen() {
         </View>
 
         {/* ===== タブごとのコンテンツ ===== */}
+        {/* 公開/非公開トグルは「他人に見せるか」のスイッチ。本人視点では
+            非公開時でも常に中身が見えるよう、中身の描画は分岐しない (UX 改善)。 */}
         {tab === 'shared' ? (
           <>
             <TabVisibilityToggle
@@ -178,39 +182,31 @@ export default function MypageScreen() {
               onChange={setShowShared}
               tabName="共有"
             />
-            {showShared ? (
-              <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['1'] }}>
-                {sharedPhotos.length === 0 && !sharedLoading ? (
-                  <EmptyAlbums scope="shared" />
-                ) : (
-                  <Pressable accessibilityRole="button">
-                    <AlbumPhotoGrid
-                      photos={sharedPhotos}
-                      isLoading={sharedLoading}
-                      onPhotoPress={(id) => router.push(`/mypage/photo/${id}` as never)}
-                      horizontalPadding={SP['4']}
-                    />
-                  </Pressable>
-                )}
-              </View>
-            ) : (
-              <HiddenTabPlaceholder label="共有を非表示にしています" />
-            )}
+            <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['1'] }}>
+              {sharedPhotos.length === 0 && !sharedLoading ? (
+                <EmptyAlbums scope="shared" />
+              ) : (
+                <Pressable accessibilityRole="button">
+                  <AlbumPhotoGrid
+                    photos={sharedPhotos}
+                    isLoading={sharedLoading}
+                    onPhotoPress={(id) => router.push(`/mypage/photo/${id}` as never)}
+                    horizontalPadding={SP['4']}
+                  />
+                </Pressable>
+              )}
+            </View>
           </>
         ) : null}
 
         {tab === 'posts' ? (
           <>
             <TabVisibilityToggle value={showPosts} onChange={setShowPosts} tabName="投稿" />
-            {showPosts ? (
-              <UserPostsList
-                authorId={user?.id}
-                emptyHint="あなたの投稿はここに表示されます"
-                onCompose={() => router.push('/post/create' as never)}
-              />
-            ) : (
-              <HiddenTabPlaceholder label="投稿を非表示にしています" />
-            )}
+            <UserPostsList
+              authorId={user?.id}
+              emptyHint="あなたの投稿はここに表示されます"
+              onCompose={() => router.push('/post/create' as never)}
+            />
           </>
         ) : null}
 
@@ -218,36 +214,6 @@ export default function MypageScreen() {
           <SavedPostsList onBrowseFeed={() => router.push('/(tabs)/feed' as never)} />
         ) : null}
       </ScrollView>
-    </View>
-  );
-}
-
-// =============================================================================
-// HiddenTabPlaceholder — 本人が「非表示」にしているタブの中身
-// -----------------------------------------------------------------------------
-// 内容は伏せつつ、「これは非公開設定だから他人には見えない」という安心感を伝える。
-// =============================================================================
-function HiddenTabPlaceholder({ label }: { label: string }) {
-  return (
-    <View
-      style={{
-        marginHorizontal: SP['4'],
-        marginTop: SP['3'],
-        paddingVertical: SP['8'],
-        paddingHorizontal: SP['5'],
-        borderRadius: R.lg,
-        backgroundColor: C.bg2,
-        borderWidth: 1,
-        borderColor: C.divider,
-        alignItems: 'center',
-        gap: SP['2'],
-      }}
-    >
-      <EyeOff size={28} color={C.text3} strokeWidth={1.8} />
-      <Text style={[T.bodyB, { color: C.text }]}>{label}</Text>
-      <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
-        上の「表示中」ボタンをタップすると公開に切り替わります。
-      </Text>
     </View>
   );
 }

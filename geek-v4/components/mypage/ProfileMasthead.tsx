@@ -15,7 +15,15 @@
 import { View, Text, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
-import { Share2, MoreHorizontal, ArrowLeft, Plus, Search as SearchIcon } from 'lucide-react-native';
+import {
+  Share2,
+  MoreHorizontal,
+  ArrowLeft,
+  Plus,
+  Search as SearchIcon,
+  Camera,
+  Pencil,
+} from 'lucide-react-native';
 
 import { HeroAvatar } from './HeroAvatar';
 import { PressableScale } from '../ui/PressableScale';
@@ -36,6 +44,10 @@ export type ProfileMastheadProps = {
   onAddPress: () => void; // 投稿/写真追加
   onSearchPress: () => void;
   onBackPress?: () => void; // 任意 (PC 3 カラムでは不要)
+  /** 本人視点のときだけ渡す: カバー編集ボタン (右下のカメラ pill) */
+  onEditCover?: () => void;
+  /** 本人視点のときだけ渡す: アバター編集ボタン (アバター右下の鉛筆バッジ) */
+  onEditAvatar?: () => void;
 };
 
 export function ProfileMasthead(props: ProfileMastheadProps) {
@@ -51,6 +63,8 @@ export function ProfileMasthead(props: ProfileMastheadProps) {
     onAddPress,
     onSearchPress,
     onBackPress,
+    onEditCover,
+    onEditAvatar,
   } = props;
 
   return (
@@ -85,6 +99,38 @@ export function ProfileMasthead(props: ProfileMastheadProps) {
           style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
           pointerEvents="none"
         />
+
+        {/* カバー編集 pill (本人視点のみ・右下に半透明の「カメラ」ボタン) */}
+        {onEditCover ? (
+          <PressableScale
+            onPress={onEditCover}
+            haptic="tap"
+            accessibilityRole="button"
+            accessibilityLabel="カバー画像を変更"
+            style={{
+              position: 'absolute',
+              right: SP['4'],
+              bottom: SP['4'],
+              paddingHorizontal: SP['3'],
+              paddingVertical: 6,
+              borderRadius: R.full,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              backgroundColor: 'rgba(0,0,0,0.55)',
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.18)',
+              ...(Platform.OS === 'web'
+                ? ({ backdropFilter: 'blur(8px)' } as object)
+                : null),
+            }}
+          >
+            <Camera size={14} color="#fff" strokeWidth={2.2} />
+            <Text style={[T.smallB, { color: '#fff', fontSize: 12 }]}>
+              カバーを変更
+            </Text>
+          </PressableScale>
+        ) : null}
 
         {/* ===== 上端ピル群 (戻る + 追加 + 検索 + 共有 + もっと) ===== */}
         <View
@@ -142,13 +188,14 @@ export function ProfileMasthead(props: ProfileMastheadProps) {
 
       {/* ===== アバター + 名前 (bio/統計/フォローボタンは仕様により削除) ===== */}
       <View style={{ paddingHorizontal: SP['4'], marginTop: -55 }}>
-        {/* アバター (110px / accent ring) */}
+        {/* アバター (110px / accent ring) + 編集バッジ (本人視点のみ) */}
         <View
           style={{
             borderRadius: 60,
             backgroundColor: C.bg,
             padding: 4, // ring 用の隙間
             alignSelf: 'flex-start',
+            position: 'relative',
           }}
         >
           <HeroAvatar
@@ -157,6 +204,29 @@ export function ProfileMasthead(props: ProfileMastheadProps) {
             avatarEmoji={avatarEmoji}
             nickname={nickname}
           />
+          {onEditAvatar ? (
+            <PressableScale
+              onPress={onEditAvatar}
+              haptic="tap"
+              accessibilityRole="button"
+              accessibilityLabel="プロフィール画像を変更"
+              style={{
+                position: 'absolute',
+                right: 2,
+                bottom: 2,
+                width: 34,
+                height: 34,
+                borderRadius: 17,
+                backgroundColor: C.accent,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 2,
+                borderColor: C.bg,
+              }}
+            >
+              <Pencil size={14} color="#fff" strokeWidth={2.4} />
+            </PressableScale>
+          ) : null}
         </View>
 
         {/* 名前 + handle */}

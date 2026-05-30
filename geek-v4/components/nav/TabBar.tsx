@@ -1,7 +1,7 @@
 import { View, Platform, Text } from 'react-native';
 import { memo } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { TabIcon, type TabKey } from './TabIcon';
 import { HapticTab } from './HapticTab';
@@ -59,9 +59,18 @@ const CHIP_HEIGHT = 40;
 const CHIP_RADIUS = 20;
 const CHIP_PADDING_H = 14;
 
+// 現在のルートが「コミュニティ詳細」配下なら community_id を抽出する。
+// /community/<id> や /community/<id>/admin など sub-route も拾う。
+// マッチしなければ undefined を返す。
+function extractCommunityIdFromPath(pathname: string): string | undefined {
+  const m = pathname.match(/^\/community\/([^/?#]+)(?:[/?#]|$)/);
+  return m && m[1] ? decodeURIComponent(m[1]) : undefined;
+}
+
 export function TabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const pathname = usePathname();
   const { unreadCount } = useNotifications();
   const theme = useResolvedTheme();
   const C = useColors();
@@ -166,9 +175,17 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
         </View>
 
         {/* 投稿追加ボタン (丸 FAB) — Slack mobile の「検索丸」位置に
-            投稿作成導線を配置 (検索はタブ側に残す)。 */}
+            投稿作成導線を配置 (検索はタブ側に残す)。
+            現在のルートが /community/<id> 配下なら、そのコミュニティを
+            自動でプリ選択するため community_id を query に乗せて遷移する。 */}
         <PressableScale
-          onPress={() => router.push('/post/create' as never)}
+          onPress={() => {
+            const cid = extractCommunityIdFromPath(pathname);
+            const href = cid
+              ? `/post/create?community_id=${encodeURIComponent(cid)}`
+              : '/post/create';
+            router.push(href as never);
+          }}
           haptic="tap"
           accessibilityLabel="投稿を作成"
           style={[
