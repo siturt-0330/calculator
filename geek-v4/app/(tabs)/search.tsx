@@ -42,6 +42,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { Icon } from '../../constants/icons';
 import { C, R, SP } from '../../design/tokens';
+import { TABBAR } from '../../design/tabbar';
 import { T } from '../../design/typography';
 import { fetchPostById } from '../../lib/api/posts';
 // EDITORIAL「特集」検索 UI コンポーネント群
@@ -611,7 +612,9 @@ export default function SearchScreen() {
       <ScrollView
         contentContainerStyle={{
           paddingTop: SP['2'],
-          paddingBottom: insets.bottom + SP['10'],
+          // (tabs) 配下なので下部の floating TabBar + 投稿 FAB に
+          // リスト末尾が隠れないよう TABBAR.height ぶん余白を確保。
+          paddingBottom: TABBAR.height + insets.bottom + SP['10'],
           gap: SP['4'],
         }}
         keyboardShouldPersistTaps="handled"
