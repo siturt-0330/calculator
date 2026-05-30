@@ -1,5 +1,5 @@
 import { View, Text, ScrollView, KeyboardAvoidingView, Platform, Image, ActivityIndicator } from 'react-native';
-import Animated, { FadeIn, FadeInDown, Layout } from 'react-native-reanimated';
+import Animated, { FadeInDown, Layout } from 'react-native-reanimated';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,11 +17,8 @@ import {
   searchByName,
   uploadCommunityIcon,
   updateCommunity,
-  COMMUNITY_GENRE_META,
-  SELECTABLE_GENRES,
   type Visibility,
   type Community,
-  type CommunityGenre,
 } from '../../../lib/api/communities';
 import { useToastStore } from '../../../stores/toastStore';
 import { TABBAR } from '../../../design/tabbar';
@@ -54,9 +51,6 @@ export default function CreateCommunityScreen() {
   const [iconLoading, setIconLoading] = useState(false);
   const [visibility, setVisibility] = useState<Visibility>('open');
   const [closedMode, setClosedMode] = useState<'request' | 'invite'>('request');
-  // ジャンル — タブ構成を決める (migration 0044)。デフォルト discussion は
-  // "最小タブ構成 (ホーム + 掲示板) で開始" の意。ユーザーは作成 UI で必須選択する。
-  const [genre, setGenre] = useState<CommunityGenre>('discussion');
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -271,7 +265,6 @@ export default function CreateCommunityScreen() {
         icon_emoji: '👥', // placeholder
         icon_color: '#7C6AF7', // placeholder
         visibility: v,
-        genre,
         tags,
       });
       if (error || !created) {
@@ -674,69 +667,6 @@ export default function CreateCommunityScreen() {
               )}
             </Animated.View>
           )}
-        </View>
-
-        {/* ジャンル選択 (migration 0044)
-            ジャンルによってコミュニティ詳細画面のタブ構成が変わる:
-              - 推し系     ホーム / 検索 / マップ / カレンダー / マイプロフ
-              - 作品系     ホーム / 掲示板 / マップ
-              - 体験系     ホーム / 掲示板 / 検索 / マップ / カレンダー / マイプロフ
-              - 議論系     ホーム / 掲示板
-            "何をするか" と同じく "何をやらないか" を意識した引き算設計。
-            後から変更可。 */}
-        <View style={{ gap: SP['2'] }}>
-          <Text style={[T.smallB, { color: C.text2 }]}>ジャンル</Text>
-          <Text style={[T.caption, { color: C.text3 }]}>
-            タブ構成を最適化するためにジャンルを選んでください
-          </Text>
-          {SELECTABLE_GENRES.map((g) => {
-            const meta = COMMUNITY_GENRE_META[g];
-            const isSelected = genre === g;
-            return (
-              <PressableScale
-                key={g}
-                onPress={() => setGenre(g)}
-                haptic="select"
-                hitSlop={4}
-                accessibilityLabel={`${meta.label} (${meta.description}) を選択`}
-                style={{
-                  flexDirection: 'row',
-                  gap: SP['3'],
-                  padding: SP['3'],
-                  backgroundColor: isSelected ? C.accentBg : C.bg2,
-                  borderRadius: R.md,
-                  borderWidth: 1.5,
-                  borderColor: isSelected ? C.accent : C.border,
-                  alignItems: 'center',
-                }}
-              >
-                {/* 旧版は 36x36 円の中に genre 絵文字 (✨ / 📚 / 🍜 / 💬) を載せていたが
-                    AI 装飾感を抑えるため削除。selected 状態は border/bg/✓ で十分伝わる。 */}
-                <View style={{ flex: 1 }}>
-                  <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
-                    {meta.label}
-                  </Text>
-                  <Text style={[T.caption, { color: C.text3, marginTop: 2 }]} numberOfLines={2}>
-                    {meta.description}
-                  </Text>
-                </View>
-                {isSelected && (
-                  <View
-                    style={{
-                      width: 20,
-                      height: 20,
-                      borderRadius: 10,
-                      backgroundColor: C.accent,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Text style={{ fontSize: 11, color: '#fff', fontWeight: '800' }}>✓</Text>
-                  </View>
-                )}
-              </PressableScale>
-            );
-          })}
         </View>
 
         {/* 公開設定 */}

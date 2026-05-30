@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TextInput, Modal } from 'react-native';
-import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TopBar } from '../../components/nav/TopBar';
 import { BackButton } from '../../components/nav/BackButton';
@@ -38,7 +37,6 @@ type MoveTarget = { nodeId: string; nodeLabel: string };
 
 export default function TagGraphScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const {
     nodes, rootIds, hydrated, hydrate,
     addNode, removeNode, renameNode,

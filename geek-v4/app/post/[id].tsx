@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, useWindowDimensions, ScrollView, Pressable, Image as RNImage,
+  View, Text, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, ScrollView, Pressable, Image as RNImage,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -68,7 +68,6 @@ export default function PostDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
-  const { width } = useWindowDimensions();
   const [text, setText] = useState('');
   const SendIcon = Icon.send;
   const BackIcon = Icon.arrowL;
@@ -155,7 +154,7 @@ export default function PostDetailScreen() {
   const postIdsForFeedPage = useMemo(() => (id ? [id] : []), [id]);
   const { fullPosts } = useFeedPage(postIdsForFeedPage);
   const fullPost = id ? fullPosts.get(id) : undefined;
-  const reactions = fullPost?.reactions ?? [];
+  const reactions = useMemo(() => fullPost?.reactions ?? [], [fullPost]);
   const myMemes = useMemo(
     () => reactions.filter((r) => r.mine).map((r) => r.meme),
     [reactions],

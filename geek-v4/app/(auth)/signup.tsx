@@ -2,7 +2,7 @@ import { View, Text, KeyboardAvoidingView, Platform, ScrollView, Keyboard, TextI
 import { useState, useRef } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, R, SP } from '../../design/tokens';
+import { C, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';

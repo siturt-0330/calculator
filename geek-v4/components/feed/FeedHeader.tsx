@@ -1,7 +1,6 @@
 import { ScrollView, View, Text } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { PressableScale } from '../ui/PressableScale';
-import { R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { useColors, useGradients } from '../../hooks/useColors';
 

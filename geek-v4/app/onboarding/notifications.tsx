@@ -32,7 +32,7 @@ export default function NotificationsOnboarding() {
     try {
       if (allow && Platform.OS !== 'web') {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
           const Notifications = require('expo-notifications') as typeof import('expo-notifications');
           const perm = await Notifications.requestPermissionsAsync();
           // ★ Critical: permission granted な時だけ Expo Push Token を取得して

@@ -37,7 +37,7 @@ function redactObject<T>(v: T): T {
 export function initSentry() {
   if (!ENV.SENTRY_DSN) return;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     const Sentry = require('@sentry/react-native') as typeof import('@sentry/react-native');
     // ErrorBoundary / resilient breadcrumb は globalThis.Sentry を遅延参照する
     // ので init 完了後に晒しておく (lib/resilient.ts, components/ui/ErrorBoundary.tsx)
@@ -108,7 +108,7 @@ export function initSentry() {
             const { id } = event.user;
             event.user = id ? { id } : undefined;
           }
-        } catch {}
+        } catch { /* PII redact 中の想定外エラー — event はそのまま通す */ }
         return event;
       },
     });

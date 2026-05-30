@@ -1,7 +1,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { View, Text, Platform, type ViewStyle } from 'react-native';
 import { PressableScale } from './PressableScale';
-import { C, R } from '../../design/tokens';
+import { R } from '../../design/tokens';
 import { T } from '../../design/typography';
 
 // ============================================================
@@ -42,7 +42,7 @@ export function VideoPlayer({ uri, poster, style, shouldPlay = false }: Props) {
           createElement 経由で型ガードを回避し、Web 専用 DOM 要素として描画。
         */}
         {(() => {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
           const React = require('react') as typeof import('react');
           return React.createElement('video', {
             src: uri,
@@ -79,7 +79,7 @@ function NativeVideo({ uri, poster, style, shouldPlay }: Required<Pick<Props, 'u
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ResizeMode: any = null;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     const av = require('expo-av') as typeof import('expo-av');
     VideoCmp = av.Video;
     ResizeMode = av.ResizeMode;

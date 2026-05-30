@@ -56,8 +56,16 @@ import { T } from '../../design/typography';
 import { TIMING_FAST } from '../../design/motion';
 import { formatRelative } from '../../lib/utils/date';
 import { fetchPostById } from '../../lib/api/posts';
-import { searchCommunities, type CommunityHit } from '../../lib/api/communities';
+import {
+  searchCommunities,
+  discoverCommunities,
+  fetchRisingCommunities,
+  fetchOfficialCommunities,
+  type CommunityHit,
+} from '../../lib/api/communities';
 import { useSearchHistory } from '../../hooks/useSearchHistory';
+import { useMyCommunityIds } from '../../hooks/useMyCommunityIds';
+import { useJoinCommunity } from '../../hooks/useJoinCommunity';
 import {
   useSearchV4,
   useQueryIntent,
@@ -71,7 +79,7 @@ import { useTagGraphStore } from '../../stores/tagGraphStore';
 import type { Post } from '../../types/models';
 // Discovery セクション (C3 担当 — props で連携)
 import { HotPostsRow } from '../../components/search/HotPostsRow';
-import { RecommendedCommunities } from '../../components/search/RecommendedCommunities';
+import { CommunityShelf } from '../../components/search/CommunityShelf';
 import { InterestCategories } from '../../components/search/InterestCategories';
 import { ForYouShelf } from '../../components/search/ForYouShelf';
 import { RankingExplainer } from '@/components/search/RankingExplainer';
@@ -381,7 +389,9 @@ export default function SearchScreen() {
         // Discovery 全 section の query を invalidate
         await Promise.allSettled([
           qc.invalidateQueries({ queryKey: ['hot-posts-row'] }),
-          qc.invalidateQueries({ queryKey: ['recommended-communities'] }),
+          qc.invalidateQueries({ queryKey: ['discover-recommended'] }),
+          qc.invalidateQueries({ queryKey: ['discover-rising'] }),
+          qc.invalidateQueries({ queryKey: ['discover-official'] }),
           qc.invalidateQueries({ queryKey: ['for-you-shelf'] }),
           qc.invalidateQueries({ queryKey: ['trendingTopics'] }),
           qc.invalidateQueries({ queryKey: ['trending-tags'] }),
@@ -839,21 +849,86 @@ export default function SearchScreen() {
 // (= 親 ScrollView は左右 padding を持たない)。
 // ============================================================
 function DiscoveryView() {
+  // メンバーシップ判定 (参加済みか) — 3 shelf 共通で使い回す
+  const { idSet: memberIdSet } = useMyCommunityIds();
+  // 参加ボタン / カードタップの共通ハンドラ
+  //   - open      → その場で join_community + 楽観表示 + invalidate
+  //   - request/invite → 詳細画面へ遷移 (申請フローはそこに居る)
+  //   - 二重タップは joiningIds の Set で O(1) ガード
+  const { joiningIds, onJoin, onPressCommunity } = useJoinCommunity();
+
+  // おすすめ — query 無し discoverCommunities = 人気順 (member_count desc)
+  const recommended = useQuery({
+    queryKey: ['discover-recommended'],
+    queryFn: () => discoverCommunities({ limit: 8 }),
+    staleTime: 60_000,
+  });
+
+  // 急上昇 — last_post_at の新しい順 (最近投稿が活発)
+  const rising = useQuery({
+    queryKey: ['discover-rising'],
+    queryFn: () => fetchRisingCommunities(10),
+    staleTime: 60_000,
+  });
+
+  // 公式 — is_official のみ (member_count desc)
+  const official = useQuery({
+    queryKey: ['discover-official'],
+    queryFn: () => fetchOfficialCommunities(10),
+    staleTime: 60_000,
+  });
+
   return (
     <View style={{ gap: SP['5'] }}>
       {/* 1) Trending — topic chip 行 (server-side acceleration) */}
       <TrendingTopicsRow />
 
-      {/* 2) 今日のホット — 横スクロールカード */}
+      {/* 2) 今日のホット — 横スクロールカード (動画サムネ対応) */}
       <HotPostsRow />
 
       {/* 3) あなたへのおすすめ — パーソナライズ (未ログインで non-render) */}
       <ForYouShelf />
 
-      {/* 4) コミュニティを探す */}
-      <RecommendedCommunities />
+      {/* 4) おすすめコミュニティ — 人気順の大カード */}
+      <CommunityShelf
+        title="おすすめ"
+        iconName="sparkles"
+        communities={recommended.data ?? []}
+        memberIdSet={memberIdSet}
+        joiningIds={joiningIds}
+        onJoin={onJoin}
+        onPressCommunity={onPressCommunity}
+        isLoading={recommended.isLoading}
+        emptyText="まだコミュニティがありません"
+      />
 
-      {/* 5) ジャンル別 */}
+      {/* 5) 急上昇 — 最近の投稿で勢いのあるコミュ */}
+      <CommunityShelf
+        title="急上昇"
+        iconName="trendingUp"
+        communities={rising.data ?? []}
+        memberIdSet={memberIdSet}
+        joiningIds={joiningIds}
+        onJoin={onJoin}
+        onPressCommunity={onPressCommunity}
+        isLoading={rising.isLoading}
+        emptyText="まだ急上昇コミュニティがありません"
+      />
+
+      {/* 6) 公式 — 運営/ブランド公式コミュ */}
+      <CommunityShelf
+        title="公式"
+        iconName="award"
+        communities={official.data ?? []}
+        memberIdSet={memberIdSet}
+        joiningIds={joiningIds}
+        onJoin={onJoin}
+        onPressCommunity={onPressCommunity}
+        isLoading={official.isLoading}
+        emptyText="公式コミュニティはまだありません"
+      />
+
+      {/* 7) ジャンル別 */}
       <InterestCategories />
     </View>
   );

@@ -82,12 +82,11 @@ function sleep(ms: number) {
 function breadcrumb(category: string, message: string, level: 'info' | 'warning' | 'error' = 'info', data?: Record<string, unknown>) {
   if (typeof window === 'undefined') return;
   try {
-    // @ts-ignore - Sentry がロードされてれば使う、なければ無視
     const Sentry = (globalThis as { Sentry?: { addBreadcrumb?: (b: unknown) => void } }).Sentry;
     if (Sentry?.addBreadcrumb) {
       Sentry.addBreadcrumb({ category, message, level, data, timestamp: Date.now() / 1000 });
     }
-  } catch {}
+  } catch { /* Sentry 未ロード / 呼び出し失敗はサイレントに無視 */ }
 }
 
 export async function resilient<T>(

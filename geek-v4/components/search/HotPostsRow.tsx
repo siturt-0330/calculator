@@ -140,7 +140,10 @@ export function HotPostsRow() {
 
 function HotPostCard({ post, onPress }: { post: Post; onPress: () => void }) {
   const C = useColors();
-  const firstMedia = post.media_urls?.[0];
+  // 動画のみ投稿は media_urls が空でも video_posters にサムネがある → fallback
+  const firstMedia = post.media_urls?.[0] ?? post.video_posters?.[0] ?? null;
+  const fromVideoPoster =
+    !post.media_urls?.[0] && !!post.video_posters?.[0];
   const safeUrl = useMemo(
     () => (firstMedia ? sanitizeUrl(firstMedia) : null),
     [firstMedia],
@@ -150,6 +153,9 @@ function HotPostCard({ post, onPress }: { post: Post; onPress: () => void }) {
     [safeUrl],
   );
   const thumbSource = useMemo(() => (thumb ? { uri: thumb } : null), [thumb]);
+
+  // 動画判定: video_urls があるか、サムネが video_posters 由来
+  const isVideo = (post.video_urls?.length ?? 0) > 0 || fromVideoPoster;
 
   // title = content 1 行目を 60 文字までで作成
   const title = useMemo(() => {
@@ -207,6 +213,24 @@ function HotPostCard({ post, onPress }: { post: Post; onPress: () => void }) {
             cachePolicy="memory-disk"
             transition={120}
           />
+          {/* 動画なら ▶ 再生バッジを重ねる */}
+          {isVideo ? (
+            <View
+              style={{
+                position: 'absolute',
+                bottom: 6,
+                left: 6,
+                width: 26,
+                height: 26,
+                borderRadius: 13,
+                backgroundColor: 'rgba(0,0,0,0.55)',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Icon.play size={14} color="#fff" />
+            </View>
+          ) : null}
         </View>
       ) : null}
 

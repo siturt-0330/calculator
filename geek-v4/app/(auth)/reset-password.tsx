@@ -123,7 +123,7 @@ export default function ResetPasswordScreen() {
           // URL の query を綺麗にする (シェアされた時に code が漏れない)
           try {
             window.history.replaceState({}, '', window.location.pathname);
-          } catch {}
+          } catch { /* history API が使えない環境では URL クリーンアップをスキップ */ }
           setPhase('ready');
           return;
         }
@@ -145,7 +145,7 @@ export default function ResetPasswordScreen() {
           }
           try {
             window.history.replaceState({}, '', window.location.pathname);
-          } catch {}
+          } catch { /* history API が使えない環境ではスキップ */ }
           // type が recovery 以外 (例: signup confirm) でも、ここに来てるなら
           // とりあえずパスワード変更フローを通す
           void fragType;
@@ -169,7 +169,7 @@ export default function ResetPasswordScreen() {
           }
           try {
             window.history.replaceState({}, '', window.location.pathname);
-          } catch {}
+          } catch { /* history API が使えない環境ではスキップ */ }
           setPhase('ready');
           return;
         }
@@ -230,7 +230,7 @@ export default function ResetPasswordScreen() {
     // local の auth store もクリアして、_layout の auto-redirect に乗せる
     try {
       await supabase.auth.signOut();
-    } catch {}
+    } catch { /* signOut 失敗はセッション期限切れ等。ローカル状態のみクリアして続行 */ }
     setUser(null);
     // user email が分かれば prefill して login に飛ばす
     const email = data?.user?.email;

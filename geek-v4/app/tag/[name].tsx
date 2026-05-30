@@ -78,7 +78,7 @@ export default function TagDetailScreen() {
     staleTime: 30_000,
   });
 
-  const rawPostsT: Post[] = data?.pages.flatMap((p) => p.posts) ?? [];
+  const rawPostsT = useMemo<Post[]>(() => data?.pages.flatMap((p) => p.posts) ?? [], [data]);
   // V4 smart-rank: タグページの投稿も個人化スコアで並べ替え
   const aggregateT = useSearchSignalsStore((s) => s.aggregate);
   const signalsT = useMemo(() => aggregateT(), [aggregateT]);

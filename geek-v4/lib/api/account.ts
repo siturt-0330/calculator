@@ -149,16 +149,16 @@ export async function downloadUserDataAsJson(): Promise<{ ok: boolean; bytes: nu
   }
   // RN (mobile): expo-sharing で共有
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     const { Platform } = require('react-native') as typeof import('react-native');
     if (Platform.OS === 'web') {
       // Web で window/document が無かったケース (SSR 中など) — 何もしない
       return { ok: false, bytes };
     }
     // 動的 require: web バンドルにモバイル専用モジュールを含めない
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     const FS = require('expo-file-system') as typeof import('expo-file-system');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     const Sharing = require('expo-sharing') as typeof import('expo-sharing');
     const path = `${FS.cacheDirectory}geek-export-${Date.now()}.json`;
     await FS.writeAsStringAsync(path, json, { encoding: 'utf8' });

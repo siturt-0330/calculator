@@ -82,7 +82,7 @@ export default function OfficialDashboardScreen() {
     staleTime: 30_000,
   });
 
-  const posts = postsResult?.posts ?? [];
+  const posts = useMemo(() => postsResult?.posts ?? [], [postsResult]);
 
   const thisWeekPosts = useMemo(() => {
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;

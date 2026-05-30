@@ -126,10 +126,6 @@ type RpcExplanationRow = {
   description: string;
 };
 
-type RpcWeightRow = {
-  signal_key: string;
-  effective_lambda: number | string;
-};
 
 type RpcIntentRow = {
   intent: string;

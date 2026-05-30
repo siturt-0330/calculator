@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, Platform, ActivityIndicator } from 'react-native';
+import { Text, TextInput, Platform, ActivityIndicator } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { PressableScale } from '../ui/PressableScale';
 import { C, R, SP } from '../../design/tokens';

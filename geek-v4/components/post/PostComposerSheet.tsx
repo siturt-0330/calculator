@@ -76,7 +76,7 @@ export function PostComposerSheet({
   onAiSuggestPress,
 }: PostComposerSheetProps) {
   const C = useColors();
-  const [focused, setFocused] = useState(false);
+  const [, setFocused] = useState(false);
   // TextInput の実測高さ。content に応じて伸びる。
   const [contentHeight, setContentHeight] = useState<number>(minHeight);
 

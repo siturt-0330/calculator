@@ -242,5 +242,5 @@ function NativeMapPicker({
 }
 
 // Web iframe を React.createElement で出すために React を named import
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
 const React = require('react') as typeof import('react');

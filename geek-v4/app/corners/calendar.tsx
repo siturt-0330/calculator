@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react';
-import { View, Text, ScrollView, ActivityIndicator, Modal, TextInput, Platform } from 'react-native';
+import { View, Text, ScrollView, ActivityIndicator, Modal } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
 import { C, SP, R } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { BackButton } from '../../components/nav/BackButton';
@@ -26,7 +25,6 @@ function fmt(d: Date) {
 
 export default function CalendarScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   // selector化: 必要 field の likedTags のみ subscribe — blockedTags 更新時に
   // calendar 全体が re-render するのを防ぐ。
   const likedTags = useTagFilterStore((s) => s.likedTags);

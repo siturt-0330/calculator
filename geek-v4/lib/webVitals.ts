@@ -77,7 +77,7 @@ export function initWebVitals(): () => void {
     });
     lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true });
     observers.push(lcpObserver);
-  } catch {}
+  } catch { /* PerformanceObserver 未対応ブラウザ */ }
 
   // ---- FID ----
   try {
@@ -91,7 +91,7 @@ export function initWebVitals(): () => void {
     });
     fidObserver.observe({ type: 'first-input', buffered: true });
     observers.push(fidObserver);
-  } catch {}
+  } catch { /* PerformanceObserver 未対応ブラウザ */ }
 
   // ---- CLS (累積なので unload まで監視) ----
   let clsValue = 0;
@@ -122,7 +122,7 @@ export function initWebVitals(): () => void {
       window.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('pagehide', flushCls);
     });
-  } catch {}
+  } catch { /* PerformanceObserver 未対応ブラウザ */ }
 
   // ---- FCP ----
   try {
@@ -135,7 +135,7 @@ export function initWebVitals(): () => void {
     });
     fcpObserver.observe({ type: 'paint', buffered: true });
     observers.push(fcpObserver);
-  } catch {}
+  } catch { /* PerformanceObserver 未対応ブラウザ */ }
 
   // ---- TTFB ----
   try {
@@ -144,14 +144,14 @@ export function initWebVitals(): () => void {
     if (entry) {
       reportOnce('TTFB', Math.max(0, entry.responseStart - entry.startTime));
     }
-  } catch {}
+  } catch { /* getEntriesByType 未対応ブラウザ */ }
 
   return () => {
     for (const o of observers) {
-      try { o.disconnect(); } catch {}
+      try { o.disconnect(); } catch { /* ignore */ }
     }
     for (const c of cleanupCallbacks) {
-      try { c(); } catch {}
+      try { c(); } catch { /* ignore */ }
     }
   };
 }

@@ -128,7 +128,7 @@ type ExpoAddressRow = {
 
 function loadExpoLocation(): ExpoLocationModule {
   // require は Web では呼ばれない (Platform.OS 判定で gated)
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
   return require('expo-location') as ExpoLocationModule;
 }
 

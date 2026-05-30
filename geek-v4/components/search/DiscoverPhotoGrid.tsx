@@ -11,11 +11,10 @@ import { useState } from 'react';
 import {
   View,
   Text,
-  Image,
   useWindowDimensions,
-  ScrollView,
   ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { C, R, SP } from '../../design/tokens';
@@ -163,7 +162,10 @@ function PhotoCell({
         <Image
           source={{ uri: safeUrl }}
           style={{ width: '100%', height: '100%' }}
-          resizeMode="cover"
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          recyclingKey={safeUrl}
+          transition={120}
         />
       ) : (
         <View

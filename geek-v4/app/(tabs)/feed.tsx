@@ -137,7 +137,7 @@ import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Icon } from '../../constants/icons';
 import { SP } from '../../design/tokens';
 import { useTheme } from '../../hooks/useColors';
-import { FONT, LOGO_FONT, LOGO_FONT_WEIGHT } from '../../design/typography';
+import { LOGO_FONT, LOGO_FONT_WEIGHT } from '../../design/typography';
 import { TABBAR } from '../../design/tabbar';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { Post } from '../../types/models';
@@ -242,11 +242,6 @@ export default function FeedScreen() {
   const likedTags = useTagFilterStore((s) => s.likedTags);
   const scope = useFeedStore((s) => s.scope);
   const setScope = useFeedStore((s) => s.setScope);
-  // 並び替え: for-you/new/rising/hot/top の 5 軸。default は for-you。
-  // - 'rising' = Reddit 風「直近 3h の likes/分」(client-side 再ランク)
-  // - 既存 (for-you/hot/new/top) の挙動は変更なし
-  const sort = useFeedStore((s) => s.sort);
-  const setSort = useFeedStore((s) => s.setSort);
   const hydrateFeed = useFeedStore((s) => s.hydrate);
   const hasLikedTags = likedTags.length > 0;
   // ★ Background prefetch — feed first paint 後に隣接タブのデータを idle 時間で先読み。
@@ -431,7 +426,7 @@ export default function FeedScreen() {
       };
     }
     return dict;
-  }, [posts, toggleLike, toggleConcern, toggleSave, toggleReact, share, router, handleAddTag, fullPosts, legacyMyConcerns]);
+  }, [posts, toggleLike, toggleConcern, toggleSave, toggleReact, share, router, handleAddTag]);
 
   // -------------------------------------------------------------------
   // posts + ads を 1 つの混在配列にマージ

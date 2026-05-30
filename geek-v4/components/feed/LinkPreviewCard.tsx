@@ -50,50 +50,66 @@ export function LinkPreviewCard({ url }: { url: string }) {
     );
   }
 
+  // X (Twitter) 風リンクカード:
+  //   ・大きな OG 画像 (バナー)
+  //   ・画像下部にタイトルを半透明の暗いキャプションバーで重ねる
+  //   ・画像の下に「場所: <ドメイン>」を控えめに表示
+  // タップで URL を開く挙動 (open) は従来通り維持。
   return (
     <PressableScale onPress={open} haptic="tap" style={{
       marginHorizontal: SP['4'], marginTop: SP['2'],
       backgroundColor: C.bg3,
-      borderRadius: R.md,
+      borderRadius: R.lg,
       borderWidth: 1,
       borderColor: C.border,
       overflow: 'hidden',
     }}>
-      {data.image_url && (
-        // LinkPreviewCard は外部 CDN URL を扱うことが多いので thumbedUrl は no-op になる
-        // ことが多いが、Supabase 起源の場合に備えて 480 指定。OG image は元から最大幅
-        // 1200 程度なので 480 で表示 (140px 高 × ~720 幅) には十分。
-        <ProgressiveImage
-          uri={data.image_url}
-          width={'100%' as unknown as number}
-          height={140}
-          radius={0}
-          lazy
-          thumbWidth={480}
-        />
-      )}
-      <View style={{ padding: SP['3'], gap: 2 }}>
-        {data.site_name && (
-          <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
-            {data.site_name}
-          </Text>
-        )}
-        {data.title && (
-          <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]} numberOfLines={2}>
+      {data.image_url ? (
+        // 画像あり: バナー + タイトルのキャプションバーを重ねる。
+        // (ProgressiveImage は width/height を取り内部 contentFit=cover。
+        //  外側 PressableScale の overflow:hidden + R.lg で角が丸まる)
+        <View style={{ position: 'relative' }}>
+          <ProgressiveImage
+            uri={data.image_url}
+            width={'100%'}
+            height={190}
+            radius={0}
+            lazy
+            thumbWidth={720}
+          />
+          {data.title ? (
+            <View
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                left: SP['2'],
+                right: SP['2'],
+                bottom: SP['2'],
+                backgroundColor: C.scrim,
+                borderRadius: R.sm,
+                paddingHorizontal: SP['2'],
+                paddingVertical: SP['1'],
+              }}
+            >
+              <Text style={[T.smallB, { color: '#fff' }]} numberOfLines={2}>
+                {data.title}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      ) : data.title ? (
+        // 画像なし OG: タイトルはテキストで (キャプションバーは画像前提のため)
+        <View style={{ paddingHorizontal: SP['3'], paddingTop: SP['3'] }}>
+          <Text style={[T.smallB, { color: C.text }]} numberOfLines={2}>
             {data.title}
           </Text>
-        )}
-        {data.description && (
-          <Text style={[T.caption, { color: C.text2, marginTop: 2 }]} numberOfLines={2}>
-            {data.description}
-          </Text>
-        )}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
-          <Text style={{ fontSize: 11 }}>🔗</Text>
-          <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
-            {shortHost(url)}
-          </Text>
         </View>
+      ) : null}
+      {/* 出典ドメイン — 参考 UI の「場所: example.com」に合わせる */}
+      <View style={{ paddingHorizontal: SP['3'], paddingVertical: SP['2'] }}>
+        <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
+          場所: {shortHost(url)}
+        </Text>
       </View>
     </PressableScale>
   );

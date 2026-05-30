@@ -154,7 +154,7 @@ export const isVapidConfigured = (): boolean => VAPID_PUBLIC_KEY.length > 0;
 // ============================================================
 export async function registerNativePushToken(): Promise<{ ok: boolean; error?: string }> {
   // Platform は呼び出し側 (RN only) で限定する想定だが安全のためここでもガード。
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
   const { Platform } = require('react-native') as typeof import('react-native');
   if (Platform.OS === 'web') return { ok: false, error: 'web は別経路 (pushSubscribe) を使う' };
 
@@ -162,7 +162,7 @@ export async function registerNativePushToken(): Promise<{ ok: boolean; error?: 
   // を含めないため (lib/api/account.ts と同じパターン)。
   let Notifications: typeof import('expo-notifications');
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     Notifications = require('expo-notifications') as typeof import('expo-notifications');
   } catch (e) {
     return { ok: false, error: `expo-notifications load failed: ${String(e)}` };

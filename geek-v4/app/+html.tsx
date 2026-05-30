@@ -51,14 +51,17 @@ function resolveFontUri(mod: unknown): string | null {
 
 const PRELOAD_FONTS: { uri: string | null; family: string }[] = [
   {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     uri: resolveFontUri(require('@expo-google-fonts/inter/Inter_700Bold.ttf')),
     family: 'Inter_700Bold',
   },
   {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     uri: resolveFontUri(require('@expo-google-fonts/noto-sans-jp/NotoSansJP_400Regular.ttf')),
     family: 'NotoSansJP_400Regular',
   },
   {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     uri: resolveFontUri(require('@expo-google-fonts/noto-sans-jp/NotoSansJP_700Bold.ttf')),
     family: 'NotoSansJP_700Bold',
   },
@@ -83,6 +86,7 @@ export default function Root({ children }: PropsWithChildren) {
           content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover"
         />
 
+        {/* eslint-disable-next-line react-native/no-raw-text */}
         <title>{APP_NAME} — 推し活の匿名 SNS</title>
         <meta name="description" content={APP_DESC} />
         <meta name="theme-color" content={THEME} />

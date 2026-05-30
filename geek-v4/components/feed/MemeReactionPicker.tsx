@@ -71,7 +71,7 @@ export function MemeReactionPicker({
   useEffect(() => {
     if (!visible || memes.length > 0) return;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
       const mod = require('../../lib/memes') as { MEMES: MemeCategory[] };
       setMemes(mod.MEMES);
     } catch { /* noop */ }

@@ -89,7 +89,7 @@ export function AddressSearch({ onSelect, onMapFallback, initialQuery = '' }: Pr
         });
       } else {
         // Native: expo-location (位置情報権限が必要)
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
         const Location = require('expo-location');
         const perm = await Location.requestForegroundPermissionsAsync();
         if (!perm.granted) {

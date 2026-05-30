@@ -26,7 +26,7 @@
 
 import type { TagNode } from '../../stores/tagGraphStore';
 import { generateVariants } from './variants';
-import { normalize, fullToHalf } from './tokenize';
+import { normalize } from './tokenize';
 import { tagSimilarity } from './tagVector';
 import { similarity as damerauSimilarity } from './typoCorrect';
 
@@ -59,7 +59,7 @@ function acronym(s: string): string {
 
 // マルチトークン分解
 function tokenize(query: string): string[] {
-  return query.trim().split(/\s+|　/).filter((t) => t.length > 0);
+  return query.trim().split(/\s+/).filter((t) => t.length > 0);
 }
 
 // グラフ距離: liked タグから候補タグへの最短距離 (BFS, 上限 3 hop)
