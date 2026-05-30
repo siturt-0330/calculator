@@ -6,7 +6,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { Icon, type IconName } from '../../constants/icons';
-import { R, SP } from '../../design/tokens';
+import { SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { useColors } from '../../hooks/useColors';
 import { hapticPresets } from '../../lib/haptics';

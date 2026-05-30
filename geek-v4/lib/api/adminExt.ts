@@ -274,8 +274,8 @@ export async function sendAdminMessage(opts: {
     .single();
   if (error) throw error;
 
-  // 監査ログ
-  await supabase.from('moderation_log').insert({
+  // 監査ログ — best-effort (失敗しても送信自体は成功扱い)
+  const { error: logErr } = await supabase.from('moderation_log').insert({
     admin_id: auth.user.id,
     action: 'send_message',
     target_type: 'user',
@@ -283,6 +283,10 @@ export async function sendAdminMessage(opts: {
     reason: opts.title,
     metadata: { message_id: (data as { id: string }).id },
   });
+  if (logErr && __DEV__) {
+    // eslint-disable-next-line no-console
+    console.warn('[adminExt] audit log insert failed', logErr.message);
+  }
 
   return { id: (data as { id: string }).id };
 }

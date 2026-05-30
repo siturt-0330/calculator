@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { View, Text, ScrollView, TextInput, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, TextInput, ActivityIndicator, Platform } from 'react-native';
 import Animated, {
   FadeIn,
   FadeInDown,

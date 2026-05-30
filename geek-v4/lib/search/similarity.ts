@@ -9,7 +9,7 @@
 // "==LOVE" "≒LOVE" "イコールラブ" 等を寄せたいので前処理で記号も読みに展開する。
 
 import {
-  normalize, ngrams, fullToHalf, katakanaToHiragana,
+  ngrams, fullToHalf, katakanaToHiragana,
 } from './tokenize';
 
 const SIM_THRESHOLD = 0.65;
@@ -20,7 +20,7 @@ const SIM_THRESHOLD = 0.65;
 // 3) カタカナ→ひらがな (検索ゆらぎ吸収)
 // 4) 空白・記号除去
 function deepNormalize(s: string): string {
-  return katakanaToHiragana(fullToHalf(s).toLowerCase()).replace(/[\s　,.、。!?！？「」『』()（）\[\]\/\\#&|·・]+/g, '');
+  return katakanaToHiragana(fullToHalf(s).toLowerCase()).replace(/[\s,.、。!?！？「」『』()（）[\]/\\#&|·・]+/g, '');
 }
 
 // レーベンシュタイン距離 (短い文字列に強い、O(m*n))

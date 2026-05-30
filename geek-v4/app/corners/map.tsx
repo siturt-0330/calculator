@@ -253,6 +253,7 @@ export default function MapScreen() {
     } catch { show('位置情報の取得に失敗しました', 'warn'); setLoadingLoc(false); }
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { getMyLocation(); }, []);
 
   const isLoading = events.isLoading || spots.isLoading;
@@ -314,7 +315,6 @@ export default function MapScreen() {
           borderWidth: 1,
           borderColor: C.border,
         }}>
-          {/* @ts-ignore iframe srcDoc */}
           <iframe
             key={`${center?.lat ?? 0}-${center?.lng ?? 0}-${mode}-${sortedItems.length}`}
             srcDoc={mapHTML}

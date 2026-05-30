@@ -109,7 +109,7 @@ const TYPE_LABEL: Record<ObsidianNote['type'], string> = {
 // YAML escape — frontmatter の値で `: ` や `#` を含む場合 quote で囲む
 function yamlVal(v: string): string {
   if (v.length === 0) return '""';
-  if (/[:#\[\]&*!|>'"%@`]/.test(v) || /^\s|\s$/.test(v)) {
+  if (/[:#[\]&*!|>'"%@`]/.test(v) || /^\s|\s$/.test(v)) {
     // ダブルクォート escape: " → \"
     return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
   }
@@ -170,7 +170,7 @@ export function formatNoteName(note: ObsidianNote): string {
   const date = note.createdAt ? new Date(note.createdAt).toISOString().slice(0, 10) : '';
   const baseTitle = note.title || note.content.split('\n')[0] || note.id.slice(0, 8);
   // Obsidian ファイル名に使えない文字を除去
-  const safe = baseTitle.replace(/[\\\/:*?"<>|#\[\]^]/g, '').slice(0, 40).trim();
+  const safe = baseTitle.replace(/[\\/:*?"<>|#[\]^]/g, '').slice(0, 40).trim();
   const label = TYPE_LABEL[note.type];
   return `${date} ${label} - ${safe || note.id.slice(0, 8)}`;
 }

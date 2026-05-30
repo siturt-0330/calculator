@@ -227,7 +227,7 @@ export function searchTagsV3(
   if (trimmed.length < 1) return [];
 
   // クエリトークン化 (空白あり + 複合語分割を試す)
-  const wsTokens = trimmed.split(/\s+|　/).filter((t) => t.length > 0);
+  const wsTokens = trimmed.split(/\s+/).filter((t) => t.length > 0);
   let allTokens: string[] = wsTokens;
   // 複合語分割: 単一トークンの場合のみ
   if (wsTokens.length === 1) {
@@ -520,7 +520,7 @@ export function recommendForTags(
           if (child) push(child.label, 55, '下位', 'graph');
         }
         // parent + sibling
-        for (const [id, n] of Object.entries(ctx.nodes)) {
+        for (const [, n] of Object.entries(ctx.nodes)) {
           if (n.children.includes(seedId)) {
             push(n.label, 30, '上位', 'graph');
             for (const sid of n.children) {

@@ -1,22 +1,19 @@
 import { supabase } from '../supabase';
 import { generateVariants } from '../search/variants';
 import { findSimilar } from '../search/similarity';
-import { sanitizeContent, sanitizeText } from '../sanitize';
-import { setGenreOverride } from '../community/genreOverride';
+import { sanitizeText } from '../sanitize';
 
 export type Visibility = 'open' | 'request' | 'invite';
 export type MemberRole = 'owner' | 'admin' | 'member';
 
 // ============================================================
-// コミュニティ ジャンル (migration 0044)
+// コミュニティ ジャンル (migration 0044) — 機能撤去済み
 // ------------------------------------------------------------
-// ジャンルごとに詳細画面のタブ構成を切替える。
-// - oshi       推し系     ホーム / 検索 / マップ / カレンダー / マイプロフ
-// - creative   作品系     ホーム / 掲示板 / マップ
-// - experience 体験系     ホーム / 掲示板 / 検索 / マップ / カレンダー / マイプロフ
-// - discussion 議論系     ホーム / 掲示板
-// - legacy     旧コミュ用 ホーム / 掲示板 / 聖地 / カレンダー / 投稿 (現状維持)
-//              既存 community は default 'legacy' で migrate される
+// 当初はジャンルごとに詳細画面のタブ構成を切替える設計だったが、
+// ジャンル別タブ / 作成時のジャンル選択 UI は撤去 (ユーザー要望)。
+// DB column communities.genre は migration 0044 で追加済み・
+// default 'legacy' で残置 (既存データ保持のため drop はしない)。
+// 型は Community.genre が DB を反映するためだけに保持する。
 // ============================================================
 export type CommunityGenre =
   | 'oshi'
@@ -24,45 +21,6 @@ export type CommunityGenre =
   | 'experience'
   | 'discussion'
   | 'legacy';
-
-export const COMMUNITY_GENRE_META: Record<
-  CommunityGenre,
-  { label: string; emoji: string; description: string }
-> = {
-  oshi: {
-    label: '推し系',
-    emoji: '✨',
-    description: 'アイドル / VTuber / 声優 / アーティスト',
-  },
-  creative: {
-    label: '作品系',
-    emoji: '📚',
-    description: '漫画 / 小説 / アニメ / 映画 / ドラマ / ゲーム',
-  },
-  experience: {
-    label: '体験系',
-    emoji: '🍜',
-    description: 'サウナ / ラーメン / 旅行 / グルメ / カフェ巡り',
-  },
-  discussion: {
-    label: '議論系',
-    emoji: '💬',
-    description: '政治 / 学問 / ニュース / 雑談',
-  },
-  legacy: {
-    label: '従来',
-    emoji: '🕸',
-    description: '旧コミュニティ (ジャンル設定前のもの)',
-  },
-};
-
-// ユーザーが作成時に選べる genre (legacy は新規作成不可 — backward compat 用)
-export const SELECTABLE_GENRES: CommunityGenre[] = [
-  'oshi',
-  'creative',
-  'experience',
-  'discussion',
-];
 
 export type Community = {
   id: string;
@@ -211,7 +169,8 @@ export async function fetchMyUpcomingEvents(opts: {
     const community = Array.isArray(r.communities) ? r.communities[0] : r.communities;
     if (!community) continue;
     // communities フィールドを外して community で正規化
-    const { communities: _ignored, ...rest } = r;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { communities: _communities, ...rest } = r;
     out.push({ ...(rest as CommunityEvent), community });
   }
   return out;
@@ -460,8 +419,6 @@ export async function createCommunity(input: {
   icon_color: string;
   icon_url?: string | null;
   visibility: Visibility;
-  // migration 0044 — タブ構成を決める。新規作成では必須 (SELECTABLE_GENRES のいずれか)。
-  genre: CommunityGenre;
   tags: string[];
 }): Promise<{ data: Community | null; error: string | null }> {
   const { data: { user } } = await supabase.auth.getUser();
@@ -478,24 +435,8 @@ export async function createCommunity(input: {
   if (safeName.length < 2) {
     return { data: null, error: 'コミュニティ名は 2 文字以上にしてください' };
   }
-  // genre が allowlist 外 (legacy 含む) なら fail-safe で discussion に倒す。
-  // legacy は migration の backward compat 用で、新規作成では使わせない。
-  const safeGenre: CommunityGenre = SELECTABLE_GENRES.includes(input.genre)
-    ? input.genre
-    : 'discussion';
-
-  // ============================================================
-  // Defensive: migration 0044 (communities.genre) が production の
-  // Supabase に未適用な環境でも壊れないように、genre column が
-  // PostgREST schema cache に無ければ genre 抜きで再試行する。
-  //
-  // エラーメッセージ例:
-  //   "Could not find the 'genre' column of 'communities' in the schema cache"
-  // ------------------------------------------------------------
-  // 根本解決は `supabase db push --linked` で migration を流すこと。
-  // 本 fallback はあくまで一時しのぎ (genre 未設定 = DB 側で NULL or
-  // default 'legacy' になる)。
-  // ============================================================
+  // genre は insert payload に含めない (ジャンル機能撤去)。DB column は
+  // default 'legacy' なので未指定でも NOT NULL 制約を満たす。
   const basePayload = {
     name: safeName,
     description: safeDesc,
@@ -506,26 +447,11 @@ export async function createCommunity(input: {
     created_by: user.id,
   };
 
-  // schema cache に missing column を判定する正規表現
-  const SCHEMA_CACHE_MISSING = /Could not find the .* column .* in the schema cache/i;
-
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('communities')
-    .insert({ ...basePayload, genre: safeGenre })
+    .insert(basePayload)
     .select()
     .single();
-
-  // genre が schema cache に無い → migration 0044 未適用環境 → genre 抜きで retry
-  if (error && SCHEMA_CACHE_MISSING.test(error.message) && /genre/i.test(error.message)) {
-    console.warn('[communities] genre column missing in schema cache — retrying without genre (migration 0044 未適用の可能性)');
-    const retry = await supabase
-      .from('communities')
-      .insert(basePayload)
-      .select()
-      .single();
-    data = retry.data;
-    error = retry.error;
-  }
 
   if (error || !data) {
     const msg = error?.message ?? '';
@@ -534,12 +460,6 @@ export async function createCommunity(input: {
     }
     return { data: null, error: msg || 'コミュニティ作成に失敗しました' };
   }
-
-  // ユーザーが選んだ genre を local override にも保存。
-  // - migration 0044 未適用なら DB に genre 行が無い → effectiveGenre() で
-  //   override を引いて oshi/creative 等のタブ構成を正しく出せる
-  // - migration 適用後でも保険として残す (どちらかが効けば OK)
-  setGenreOverride(data.id, safeGenre);
 
   // タグを登録 (失敗しても community 自体は出来ているのでログだけ)
   if (input.tags.length > 0) {
@@ -564,12 +484,12 @@ export async function createCommunity(input: {
 // / created_by / official_*) も書き換え可能だった。RLS / trigger が後段で守るが
 // defense-in-depth として API レイヤでもホワイトリスト化。
 const COMMUNITY_UPDATE_ALLOWED = [
-  'name', 'description', 'icon_emoji', 'icon_color', 'icon_url', 'visibility', 'genre',
+  'name', 'description', 'icon_emoji', 'icon_color', 'icon_url', 'visibility',
 ] as const;
 
 export async function updateCommunity(
   id: string,
-  patch: Partial<Pick<Community, 'name' | 'description' | 'icon_emoji' | 'icon_color' | 'icon_url' | 'visibility' | 'genre'>>,
+  patch: Partial<Pick<Community, 'name' | 'description' | 'icon_emoji' | 'icon_color' | 'icon_url' | 'visibility'>>,
 ): Promise<{ error: string | null }> {
   if (!UUID_RE.test(id)) return { error: '不正なコミュニティ ID です' };
 
@@ -600,20 +520,7 @@ export async function updateCommunity(
     return { error: '不正な公開設定です' };
   }
 
-  // Defensive: migration 0044 (communities.genre) 未適用環境では genre 抜きで retry
-  // (createCommunity と同じ理由 — schema cache に column が無いと PostgREST が拒否)
-  const SCHEMA_CACHE_MISSING = /Could not find the .* column .* in the schema cache/i;
-  let { error } = await supabase.from('communities').update(safePatch).eq('id', id);
-  if (error && 'genre' in safePatch && SCHEMA_CACHE_MISSING.test(error.message) && /genre/i.test(error.message)) {
-    console.warn('[communities] update: genre column missing in schema cache — retrying without genre');
-    const { genre: _ignored, ...withoutGenre } = safePatch as { genre?: unknown; [k: string]: unknown };
-    if (Object.keys(withoutGenre).length === 0) {
-      // genre だけだった → no-op で成功扱い (warn 済)
-      return { error: null };
-    }
-    const retry = await supabase.from('communities').update(withoutGenre).eq('id', id);
-    error = retry.error;
-  }
+  const { error } = await supabase.from('communities').update(safePatch).eq('id', id);
   if (error) return { error: mapJoinError(error.message) };
   return { error: null };
 }
@@ -751,6 +658,30 @@ export async function fetchOfficialCommunities(limit = 10): Promise<Community[]>
     .limit(limit);
   if (error) {
     console.warn('[communities] fetchOfficialCommunities failed:', error.message);
+    return [];
+  }
+  return (data ?? []) as Community[];
+}
+
+// ============================================================
+// 急上昇コミュニティ — 直近に投稿があったコミュを last_post_at 降順で
+// ------------------------------------------------------------
+// 「いま盛り上がっている」= 直近にアクティビティがあるコミュの近似。
+// GEEK には閲覧者数や時系列の成長率が無いため、last_post_at (最終投稿時刻)
+// を活性度の proxy として使う。投稿ゼロ (last_post_at が null) は除外。
+// member_count 順の「おすすめ」とは別軸で、新しめ・活発なコミュが上に来る。
+// invite (完全招待制) は探索面に出さない (open / request のみ)。
+// ============================================================
+export async function fetchRisingCommunities(limit = 20): Promise<Community[]> {
+  const { data, error } = await supabase
+    .from('communities')
+    .select('*')
+    .in('visibility', ['open', 'request'])
+    .not('last_post_at', 'is', null)
+    .order('last_post_at', { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.warn('[communities] fetchRisingCommunities failed:', error.message);
     return [];
   }
   return (data ?? []) as Community[];

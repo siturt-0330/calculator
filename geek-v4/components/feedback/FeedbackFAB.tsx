@@ -5,7 +5,6 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withSpring,
-  withTiming,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useSegments } from 'expo-router';
@@ -15,7 +14,7 @@ import { useToastStore } from '../../stores/toastStore';
 import { submitFeedback, type FeedbackKind } from '../../lib/api/feedback';
 import { useFeatureFlag } from '../../hooks/useFeatureFlag';
 import { useAuthStore } from '../../stores/authStore';
-import { useColors, useGradients, useShadows } from '../../hooks/useColors';
+import { useGradients, useShadows } from '../../hooks/useColors';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';

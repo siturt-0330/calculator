@@ -28,7 +28,6 @@ export class ErrorBoundary extends React.Component<Props, State> {
     // Sentry に breadcrumb / event を送る (lazy)
     try {
       if (typeof window !== 'undefined') {
-        // @ts-ignore
         const Sentry = (globalThis as { Sentry?: { captureException?: (e: unknown, ctx?: unknown) => void; addBreadcrumb?: (b: unknown) => void } }).Sentry;
         if (Sentry?.addBreadcrumb) {
           Sentry.addBreadcrumb({
@@ -41,7 +40,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
           Sentry.captureException(error, { extra: { componentStack: info.componentStack, scope: this.props.scope } });
         }
       }
-    } catch {}
+    } catch { /* ignore */ }
     // 開発時は console にも出す
     if (Platform.OS === 'web' || __DEV__) {
       console.warn(`[ErrorBoundary:${this.props.scope ?? '?'}] ${error.message}`);

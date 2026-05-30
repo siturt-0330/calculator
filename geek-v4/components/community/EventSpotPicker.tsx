@@ -21,7 +21,6 @@ import { T } from '../../design/typography';
 import {
   fetchCommunitySpots,
   SPOT_CATEGORY_META,
-  type CommunitySpot,
   type SpotCategory,
 } from '../../lib/api/communities';
 

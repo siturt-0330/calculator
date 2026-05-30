@@ -359,6 +359,7 @@ export default function CommunityScreen() {
         </View>
       );
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- C.* は module-level constants (変化しない)
     [handlersByPostId, myLikes, myConcerns, mySaves, reactionsByPost, addedTagsByPost, polls, router],
   );
 
@@ -487,6 +488,7 @@ export default function CommunityScreen() {
         )}
       </View>
     );
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- C.* / GRAD.* / SHADOW.* は module-level constants
   }, [myCommunities.length, selectedCommunityId, router]);
 
   return (

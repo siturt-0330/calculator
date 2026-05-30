@@ -53,7 +53,7 @@ const YEAR_REGEX = /^(?:(20\d{2})|令和(\d{1,2})年|平成(\d{1,2})年)/;
 
 export function classifyIntent(query: string): QueryIntent {
   const q = query.trim();
-  const tokens = q.split(/\s+|　/).filter(Boolean);
+  const tokens = q.split(/\s+/).filter(Boolean);
 
   // Year
   const yearM = YEAR_REGEX.exec(q);

@@ -52,7 +52,7 @@ export default function OfficialAnalyticsScreen() {
     staleTime: 60_000,
   });
 
-  const posts = postsResult?.posts ?? [];
+  const posts = useMemo(() => postsResult?.posts ?? [], [postsResult]);
 
   const stats = useMemo(() => {
     const answered = questions.filter((q) => q.status === 'answered').length;

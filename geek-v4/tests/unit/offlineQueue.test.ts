@@ -6,7 +6,6 @@
 //
 // lib/storage.ts は react-native chain を引き込むため、ここでは
 // in-memory mock に差し替えて pure function として queue ロジックを検証する。
-// (genreOverride.test.ts と同じパターン)
 // ============================================================
 
 // lib/storage を in-memory mock に置き換え (react-native を引き込まない)

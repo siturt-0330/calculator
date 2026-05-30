@@ -87,7 +87,7 @@ export function deepNormalize(s: string): string {
 }
 
 // 単語境界で分割 (空白・句読点・括弧・記号)
-const WORD_BOUNDARY = /[\s　,.、。!?！？「」『』()（）\[\]\/\\#&|]+/;
+const WORD_BOUNDARY = /[\s,.、。!?！？「」『』()（）[\]/\\#&|]+/;
 
 export function splitWords(s: string): string[] {
   return normalize(s).split(WORD_BOUNDARY).filter((w) => w.length > 0);

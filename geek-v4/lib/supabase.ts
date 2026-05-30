@@ -22,7 +22,7 @@ const webStorage = {
       if (typeof window !== 'undefined' && window.localStorage) {
         return window.localStorage.getItem(k);
       }
-    } catch {}
+    } catch { /* localStorage が使えない環境 (Safari ITP 等) → memory にフォールバック */ }
     return memoryStore.get(k) ?? null;
   },
   setItem: async (k: string, v: string): Promise<void> => {
@@ -31,7 +31,7 @@ const webStorage = {
         window.localStorage.setItem(k, v);
         return;
       }
-    } catch {}
+    } catch { /* localStorage が使えない環境 → memory にフォールバック */ }
     memoryStore.set(k, v);
   },
   removeItem: async (k: string): Promise<void> => {
@@ -40,7 +40,7 @@ const webStorage = {
         window.localStorage.removeItem(k);
         return;
       }
-    } catch {}
+    } catch { /* localStorage が使えない環境 → memory にフォールバック */ }
     memoryStore.delete(k);
   },
 };
@@ -77,7 +77,7 @@ const SECURE_CHUNK_SIZE = 1800; // 2048 上限に対する余裕分
 
 function secureKey(k: string): string {
   // SecureStore は [A-Za-z0-9._-] のみ許容。それ以外を _ に置換。
-  return SECURE_PREFIX + k.replace(/[^A-Za-z0-9_.\-]/g, '_');
+  return SECURE_PREFIX + k.replace(/[^A-Za-z0-9_.-]/g, '_');
 }
 
 function chunkKey(baseKey: string, index: number): string {

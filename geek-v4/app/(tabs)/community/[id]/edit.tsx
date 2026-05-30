@@ -26,7 +26,6 @@ import { BackButton } from '../../../../components/nav/BackButton';
 import { Input } from '../../../../components/ui/Input';
 import { Button } from '../../../../components/ui/Button';
 import { PressableScale } from '../../../../components/ui/PressableScale';
-import { TagPill } from '../../../../components/tag/TagPill';
 import { Icon } from '../../../../constants/icons';
 import { useToastStore } from '../../../../stores/toastStore';
 import {

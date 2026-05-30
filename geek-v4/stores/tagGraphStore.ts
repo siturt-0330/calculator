@@ -368,7 +368,7 @@ export const useTagGraphStore = create<TagGraphState>((set, get) => ({
     const nodes: Record<string, TagNode> = { ...state.nodes };
     const newRootIds: string[] = [];
 
-    const build = (tn: TemplateNode, parentId: string | null): string => {
+    const build = (tn: TemplateNode, _parentId: string | null): string => {
       const id = uid();
       const childIds: string[] = [];
       const node: TagNode = {

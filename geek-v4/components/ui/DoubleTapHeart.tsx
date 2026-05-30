@@ -26,25 +26,12 @@ function DoubleTapHeartInner({
   onDoubleTap: () => void;
   enabled?: boolean;
 }) {
-  // Web (= iOS Safari / Android Chrome PWA) では GestureDetector + Tap が
-  // touch event を吸収して body の vertical scroll を妨げるバグがある。
-  // double-tap で like するのは native (iOS/Android アプリ) の操作慣習で、
-  // web 利用者は通常使わないので無効化して scroll 優先にする。
-  if (Platform.OS === 'web') {
-    return <View style={{ position: 'relative' }}>{children}</View>;
-  }
-  // useSharedValue は parent re-render で値リセットされないので大丈夫だが、
-  // useMemo でラップして reference 安定化 → useAnimatedStyle が無駄に再構築
-  // されない保険にする。
+  // hooks はすべて早期 return の前に宣言する (React rules-of-hooks)
   const scale = useSharedValue(0);
   const op = useSharedValue(0);
-  const Heart = Icon.heart;
 
   // hap.pop() は JS thread で実行する必要があるので、worklet からは runOnJS
-  // 経由でしか呼べない。アニメーション終了 callback の中で発火すると、
-  // worklet → JS bridge が animation tick 内で同期評価されて GC を巻き込む。
-  // op.value の最終 withTiming の completion callback で呼ぶことで bridge が
-  // animation 終了後に走るようにし、scroll 中の jank を回避。
+  // 経由でしか呼べない。
   const fire = useCallback(() => {
     try { hap.pop(); } catch { /* ignore */ }
     onDoubleTap();
@@ -78,6 +65,14 @@ function DoubleTapHeartInner({
     opacity: op.value,
     transform: [{ scale: scale.value }],
   }));
+
+  // Web (= iOS Safari / Android Chrome PWA) では GestureDetector + Tap が
+  // touch event を吸収して body の vertical scroll を妨げるバグがある。
+  if (Platform.OS === 'web') {
+    return <View style={{ position: 'relative' }}>{children}</View>;
+  }
+
+  const Heart = Icon.heart;
 
   return (
     <GestureDetector gesture={tap}>

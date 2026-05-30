@@ -18,7 +18,7 @@
 //   - Reanimated 3 の FadeIn で初回フェードイン (うるさくない)
 // ============================================================
 
-import { View, Text } from 'react-native';
+import { Text } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { PressableScale } from '../ui/PressableScale';

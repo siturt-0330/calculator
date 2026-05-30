@@ -34,21 +34,19 @@ export function ToastItem({ toast, onDismiss }: { toast: ToastType; onDismiss: (
     <Animated.View
       entering={FadeInUp.duration(220)}
       exiting={FadeOutUp.duration(180)}
-      style={[
-        {
-          marginBottom: SP['2'],
-          borderRadius: R.full,
-          backgroundColor: BG[toast.variant],
-          flexDirection: 'row',
-          alignItems: 'center',
-          paddingHorizontal: SP['4'],
-          paddingVertical: SP['3'],
-          gap: SP['3'],
-          borderWidth: 1,
-          borderColor: BORDER[toast.variant] ?? C.border,
-          ...SHADOW.cardPress,
-        },
-      ]}
+      style={{
+        marginBottom: SP['2'],
+        borderRadius: R.full,
+        backgroundColor: BG[toast.variant],
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: SP['4'],
+        paddingVertical: SP['3'],
+        gap: SP['3'],
+        borderWidth: 1,
+        borderColor: BORDER[toast.variant] ?? C.border,
+        ...SHADOW.cardPress,
+      }}
     >
       <Pressable
         onPress={onDismiss}

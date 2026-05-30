@@ -129,7 +129,7 @@ function createWebStorage(): SyncStorage {
 // 含まれず、bundler 警告 (mmkv は web 非対応) を避けられる。
 function createNativeStorage(): SyncStorage {
   // require は Web では実行されない (Platform.OS で gated)
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
   const { MMKV } = require('react-native-mmkv') as typeof import('react-native-mmkv');
   const mmkv = new MMKV({ id: 'geek-v4' });
   return {

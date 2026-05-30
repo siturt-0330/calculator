@@ -197,8 +197,6 @@ export function IntroAnimation({ onComplete }: { onComplete: () => void }) {
     <Animated.View
       // タップでスキップできるよう pointerEvents は box-only (子要素のヒットは無視)
       pointerEvents="box-only"
-      // @ts-ignore — Animated.View に onTouchEnd を直接渡す (Pressable で包むと
-      //   zIndex/レイヤー順が複雑になるので簡易ハンドリング)
       onStartShouldSetResponder={() => true}
       onResponderRelease={handleSkip}
       style={[
@@ -213,7 +211,7 @@ export function IntroAnimation({ onComplete }: { onComplete: () => void }) {
         containerStyle,
       ]}
     >
-      <Animated.View style={[zoomStyle]}>
+      <Animated.View style={zoomStyle}>
         <Animated.View style={[rowStyle, { flexDirection: 'row', alignItems: 'baseline' }]}>
           {/* G */}
           <Letter

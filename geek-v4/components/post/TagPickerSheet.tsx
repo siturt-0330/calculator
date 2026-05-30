@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // TagPickerSheet — 投稿に付けるタグを bottom sheet で選択
 // ------------------------------------------------------------
 // TikTok の hashtag picker 風: 検索 + 人気タグ + 最近使ったタグ。
@@ -98,7 +98,7 @@ const TAG_MAX_LEN = 32;
 function normalizeTag(raw: string): string {
   return raw
     .replace(/^#+/, '')
-    .replace(/[　\s]+/g, '')
+    .replace(/[\u3000\s]+/g, '')
     .trim()
     .slice(0, TAG_MAX_LEN);
 }

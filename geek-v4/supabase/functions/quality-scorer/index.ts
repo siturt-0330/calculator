@@ -153,14 +153,14 @@ const BLACKLIST_HOST_PATTERNS: readonly RegExp[] = [
 ];
 
 // URL 抽出 (粗いが pure heuristic としては十分)
-const URL_RE = /https?:\/\/[^\s)<>"'、。「」『』　]+/giu;
+const URL_RE = /https?:\/\/[^\s)<>"'、。「」『』]+/giu;
 
 // mention / hashtag
 const MENTION_RE = /@[A-Za-z0-9_]{2,30}/g;
 const HASHTAG_RE = /#[\p{L}\p{N}_]{1,30}/gu;
 
 // 文末記号 (日本語 + 英語)
-const SENTENCE_SPLIT_RE = /[。．\.!?！？\n]+/u;
+const SENTENCE_SPLIT_RE = /[。．.!?！？\n]+/u;
 
 // ============================================================
 // 型定義

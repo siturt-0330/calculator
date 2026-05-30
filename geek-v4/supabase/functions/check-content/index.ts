@@ -49,7 +49,7 @@ const BANNED_PATTERNS: readonly { pattern: RegExp; reason: string }[] = [
 function normalize(input: string): string {
   // NFKC で半角全角統一、ゼロ幅文字除去、空白圧縮
   let s = input.normalize('NFKC');
-  s = s.replace(/[​-‍﻿]/g, ''); // zero-width chars
+  s = s.replace(/[\u200B-\u200D\uFEFF]/g, ''); // zero-width chars
   s = s.replace(/\s+/g, ' '); // 連続空白を 1 つに
   return s;
 }

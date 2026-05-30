@@ -7,17 +7,33 @@
 //   2. useSharedValue / useAnimatedStyle が `_getAnimationTimestamp`
 //      / `_chronoNow` 等の native bridge function を呼ぶが、Web の
 //      worklet runtime ではこれらが未定義 → TypeError
-//   いずれも起動時に ErrorBoundary を発火して white screen を起こす。
+//   3. logger (logger.js handleLog / runtimes.js) が `__reanimatedLoggerConfig`
+//      を *bare global 識別子* として読む (logger.js:111 / runtimes.js:29) が、
+//      reanimated 自身の registerLoggerConfig (worklet 内 `global` 代入) は
+//      Web shim 上では globalThis に届かず未定義のまま。worklet を含む画面を
+//      開くと "Can't find variable: __reanimatedLoggerConfig" で落ちる
+//      (Layout.springify / FadeIn 等 logger 経路を踏む API で顕在化)。
+//   いずれも起動時 or 画面遷移時に ErrorBoundary を発火して white screen を起こす。
 //   JS-thread fallback として performance.now() を返す polyfill を
 //   global に注入する (UI thread では実 native runtime が上書きする
 //   ので native ビルドには影響しない)。
 // ============================================================
+/* eslint-disable no-var */
 declare global {
   var _WORKLET: boolean | undefined;
   var _getAnimationTimestamp: (() => number) | undefined;
   var _chronoNow: (() => number) | undefined;
   var _scheduleHostFunctionOnJS: ((fn: (...a: unknown[]) => unknown, args?: unknown[]) => void) | undefined;
+  // Reanimated 3.16 logger config (logger.js DEFAULT_LOGGER_CONFIG と同形)
+  var __reanimatedLoggerConfig:
+    | {
+        logFunction: (data: { level: string; message: { content: string } }) => void;
+        level: number;
+        strict: boolean;
+      }
+    | undefined;
 }
+/* eslint-enable no-var */
 if (typeof globalThis !== 'undefined') {
   if (typeof globalThis._WORKLET === 'undefined') {
     globalThis._WORKLET = false;
@@ -41,6 +57,32 @@ if (typeof globalThis !== 'undefined') {
       } catch {
         // swallow — worklet -> JS scheduling fallback
       }
+    };
+  }
+  // logger.js handleLog() / runtimes.js が bare 識別子 `__reanimatedLoggerConfig`
+  // を読む (logger.js:111 / runtimes.js:29)。Web の worklet shim では reanimated
+  // 自身の registerLoggerConfig (worklet 内 global 代入) が globalThis に届かず
+  // 未定義のままになり、worklet を含む画面で
+  //   "Can't find variable: __reanimatedLoggerConfig"
+  // を踏む。DEFAULT_LOGGER_CONFIG (logger.js:25) と同形の fallback を注入する。
+  // native / 正常な web では import 'react-native-reanimated' が
+  // registerLoggerConfig で上書きするので影響しない。
+  if (typeof globalThis.__reanimatedLoggerConfig === 'undefined') {
+    globalThis.__reanimatedLoggerConfig = {
+      logFunction: (data) => {
+        try {
+          const content = data.message.content;
+          if (data.level === 'warn') {
+            console.warn(content);
+          } else {
+            console.error(content);
+          }
+        } catch {
+          // swallow — logger fallback は決して throw させない
+        }
+      },
+      level: 1, // LogLevel.warn (reanimated DEFAULT_LOGGER_CONFIG.level)
+      strict: false,
     };
   }
 }
@@ -146,12 +188,12 @@ function shouldShowIntro(): boolean {
   if (typeof window === 'undefined') return false;
   try {
     if (sessionStorage.getItem(INTRO_SEEN_KEY) === '1') return false;
-  } catch {}
+  } catch { /* sessionStorage が使えない環境 (ITP / private mode) */ }
   return true;
 }
 function markIntroSeenForSession() {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-  try { sessionStorage.setItem(INTRO_SEEN_KEY, '1'); } catch {}
+  try { sessionStorage.setItem(INTRO_SEEN_KEY, '1'); } catch { /* ignore */ }
 }
 
 export default function RootLayout() {
@@ -223,7 +265,7 @@ export default function RootLayout() {
     //     乗らないため改修対象外)
     // signature は Promise を返す互換のままで、allSettled で堅牢化を維持。
     // テーマは同期 MMKV / localStorage 読み出し → 即 set
-    try { hydrateTheme(); } catch {}
+    try { hydrateTheme(); } catch { /* 同期ストレージ読み失敗 → デフォルトテーマで続行 */ }
     void Promise.allSettled([
       hydrateAuth(),
       hydrateSettings(),
@@ -327,7 +369,7 @@ export default function RootLayout() {
       els.push(el);
     }
     return () => {
-      for (const el of els) { try { document.head.removeChild(el); } catch {} }
+      for (const el of els) { try { document.head.removeChild(el); } catch { /* ignore */ } }
     };
   }, []);
 
@@ -348,9 +390,9 @@ export default function RootLayout() {
     const run = () => {
       if (cancelled) return;
       if (!__DEV__) {
-        try { initSentry(); } catch {}
+        try { initSentry(); } catch { /* Sentry init 失敗はサイレント */ }
       }
-      try { initAnalytics(); } catch {}
+      try { initAnalytics(); } catch { /* Analytics init 失敗はサイレント */ }
     };
     const ric: ((cb: () => void) => number) | undefined =
       typeof globalThis !== 'undefined'

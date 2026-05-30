@@ -45,7 +45,7 @@ import { Video as VideoIcon, Play as PlayIcon } from 'lucide-react-native';
 import { Icon } from '../../constants/icons';
 import { useColors } from '../../hooks/useColors';
 import { T } from '../../design/typography';
-import { R, SP, SHADOW } from '../../design/tokens';
+import { SP, SHADOW } from '../../design/tokens';
 import { SPRING_SNAPPY, PRESS_SCALE } from '../../design/motion';
 import { hapticPresets } from '../../lib/haptics';
 
