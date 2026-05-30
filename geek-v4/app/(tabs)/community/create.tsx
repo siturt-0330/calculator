@@ -36,6 +36,14 @@ type VisibilityOption = {
 import { prepareImageUpload } from '../../../lib/image';
 import { openCropper } from '../../../lib/imageCropper';
 
+// ============================================================
+// 2026-05: コミュニティ作成画面の「ジャンル」ピッカーを UI から非表示にする。
+// 推し系 / 作品系 / 体験系 / 議論系 の表記をユーザーに見せない方針。
+// false の間は genre が 'discussion' 固定 (= 最小タブ構成) で作成される。
+// ピッカーを復活させたいときは true に戻すだけ (作成ロジックは温存)。
+// ============================================================
+const SHOW_GENRE_PICKER = false;
+
 export default function CreateCommunityScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -668,6 +676,72 @@ export default function CreateCommunityScreen() {
             </Animated.View>
           )}
         </View>
+
+        {/* ジャンル選択 (migration 0044)
+            ジャンルによってコミュニティ詳細画面のタブ構成が変わる:
+              - 推し系     ホーム / 検索 / マップ / カレンダー / マイプロフ
+              - 作品系     ホーム / 掲示板 / マップ
+              - 体験系     ホーム / 掲示板 / 検索 / マップ / カレンダー / マイプロフ
+              - 議論系     ホーム / 掲示板
+            "何をするか" と同じく "何をやらないか" を意識した引き算設計。
+            後から変更可。
+            ※ 2026-05: SHOW_GENRE_PICKER=false でこのブロックごと非表示。 */}
+        {SHOW_GENRE_PICKER && (
+        <View style={{ gap: SP['2'] }}>
+          <Text style={[T.smallB, { color: C.text2 }]}>ジャンル</Text>
+          <Text style={[T.caption, { color: C.text3 }]}>
+            タブ構成を最適化するためにジャンルを選んでください
+          </Text>
+          {SELECTABLE_GENRES.map((g) => {
+            const meta = COMMUNITY_GENRE_META[g];
+            const isSelected = genre === g;
+            return (
+              <PressableScale
+                key={g}
+                onPress={() => setGenre(g)}
+                haptic="select"
+                hitSlop={4}
+                accessibilityLabel={`${meta.label} (${meta.description}) を選択`}
+                style={{
+                  flexDirection: 'row',
+                  gap: SP['3'],
+                  padding: SP['3'],
+                  backgroundColor: isSelected ? C.accentBg : C.bg2,
+                  borderRadius: R.md,
+                  borderWidth: 1.5,
+                  borderColor: isSelected ? C.accent : C.border,
+                  alignItems: 'center',
+                }}
+              >
+                {/* 旧版は 36x36 円の中に genre 絵文字 (✨ / 📚 / 🍜 / 💬) を載せていたが
+                    AI 装飾感を抑えるため削除。selected 状態は border/bg/✓ で十分伝わる。 */}
+                <View style={{ flex: 1 }}>
+                  <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
+                    {meta.label}
+                  </Text>
+                  <Text style={[T.caption, { color: C.text3, marginTop: 2 }]} numberOfLines={2}>
+                    {meta.description}
+                  </Text>
+                </View>
+                {isSelected && (
+                  <View
+                    style={{
+                      width: 20,
+                      height: 20,
+                      borderRadius: 10,
+                      backgroundColor: C.accent,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, color: '#fff', fontWeight: '800' }}>✓</Text>
+                  </View>
+                )}
+              </PressableScale>
+            );
+          })}
+        </View>
+        )}
 
         {/* 公開設定 */}
         <View style={{ gap: SP['2'] }}>
