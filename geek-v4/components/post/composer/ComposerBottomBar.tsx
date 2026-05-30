@@ -31,7 +31,6 @@ import { PressableScale } from '../../ui/PressableScale';
 // ============================================================
 const BAR_HEIGHT = 52; // バー本体の高さ (bottomInset は別途 padding に足す)
 const BTN = SIZE.touch; // 44 — 各アイコンボタンのタップ領域
-const TOGGLE_DOT = 36; // accent tint 時の背後の円 (44 のタップ領域内に収める)
 const ICON_SIZE = 22; // 左クラスタのアイコン実寸
 const DIM_OPACITY = 0.4; // 無効時の減光
 
@@ -174,20 +173,12 @@ function IconActionButton({
         alignItems: 'center',
         justifyContent: 'center',
         opacity,
+        // active 時のみ faint な accent tint を背景に敷く。
+        // 別途 absolute View を使うと Web (CSS) でアイコンが隠れるため
+        // backgroundColor を直接 button に乗せる方式に統一。
+        backgroundColor: active ? C.accentBg : 'transparent',
       }}
     >
-      {/* active 時のみ背後に faint な accent 円を敷く */}
-      {active ? (
-        <View
-          style={{
-            position: 'absolute',
-            width: TOGGLE_DOT,
-            height: TOGGLE_DOT,
-            borderRadius: TOGGLE_DOT / 2,
-            backgroundColor: C.accentBg,
-          }}
-        />
-      ) : null}
       {renderIcon(iconColor)}
     </PressableScale>
   );

@@ -21,7 +21,7 @@
 //     HomeDrawer 自身は backdrop タップ / 内部 swipe gesture / コンテンツ描画を担当。
 // ============================================================
 
-import { memo, useMemo, type ComponentType } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -35,8 +35,8 @@ import Animated, {
   interpolate,
   runOnJS,
   useAnimatedStyle,
-  useDerivedValue,
   withSpring,
+  withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -46,6 +46,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import {
   PenLine,
+  FileText,
   UserPlus2,
   Clock,
   User as UserIcon,
@@ -66,9 +67,10 @@ import { useTheme } from '../../hooks/useColors';
 import type { ColorPalette } from '../../lib/theme/palettes';
 import { R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
+import { TIMING_NORM, clampHandoff } from '../../design/motion';
 import { haptic as triggerHaptic } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
-import type { CommunityWithRole } from '../../lib/api/communities';
+import { useRecentCommunitiesStore } from '../../stores/recentCommunitiesStore';
 
 // spring 設定 (仕様書通り)
 export const HOME_DRAWER_SPRING = {
@@ -88,15 +90,26 @@ export const HOME_DRAWER_VEL_THRESHOLD = 500;
 // 画面左端からの "open swipe" を受け付ける幅 (24pt)
 export const HOME_DRAWER_EDGE_GRAB = 24;
 
+// ドロワー右エッジの影。translateX で毎フレーム動く本体に大 blur 影が乗ると
+// Web は box-shadow を毎フレーム再ラスタライズしてコンポジット負荷が上がるため、
+// Web だけ blur 半径を抑える (opacity でコントラストを補償)。native は据置。
+const DRAWER_SHADOW =
+  Platform.OS === 'web'
+    ? { shadowColor: '#000', shadowOffset: { width: 4, height: 0 }, shadowOpacity: 0.4, shadowRadius: 8 }
+    : { shadowColor: '#000', shadowOffset: { width: 4, height: 0 }, shadowOpacity: 0.35, shadowRadius: 18, elevation: 12 };
+
 // ============================================================
 // HomeDrawer (overlay)
 // ============================================================
 export const HomeDrawer = memo(function HomeDrawer({
   progress,
+  open,
   onOpenChange,
 }: {
   /** 0..1 の shared value (closed..open)。feed.tsx と共有。 */
   progress: SharedValue<number>;
+  /** コミット済みの開閉 boolean (feed.tsx の drawerOpen)。backdrop の hit 判定に使う。 */
+  open: boolean;
   /** open=true/false を JS に通知 (boolean state を反転させたい時用) */
   onOpenChange: (open: boolean) => void;
 }) {
@@ -145,6 +158,13 @@ export const HomeDrawer = memo(function HomeDrawer({
   // ===== コミュニティ (role 別) =====
   const { admin, joined } = useAdminCommunities();
 
+  // ===== 最近見たコミュニティ (履歴) =====
+  // store は sync (MMKV/localStorage) なので mount 時に即 hydrate して履歴を出す。
+  const recent = useRecentCommunitiesStore((s) => s.items);
+  useEffect(() => {
+    useRecentCommunitiesStore.getState().hydrate();
+  }, []);
+
   // ----- スワイプ to close (左方向) -----
   // drawer 内部から左スワイプで閉じる。feed.tsx 側の open swipe とは別 gesture。
   // simultaneousWithExternalGesture を組まないので、ScrollView 内部の垂直 scroll とは
@@ -163,16 +183,26 @@ export const HomeDrawer = memo(function HomeDrawer({
         })
         .onEnd((e) => {
           'worklet';
+          // 指の速度 (px/s) を progress/s に正規化してバネに引き継ぐ → 段付き解消。
+          const vNorm = e.velocityX / W;
           const shouldClose =
             e.translationX < -HOME_DRAWER_DIST_THRESHOLD ||
             e.velocityX < -HOME_DRAWER_VEL_THRESHOLD;
           if (shouldClose) {
-            progress.value = withSpring(0, HOME_DRAWER_SPRING, (fin) => {
-              if (fin) runOnJS(onOpenChange)(false);
+            // コミット確定時に即 unlock (spring 完了待ちにしない) → 着地フレームの
+            // 再 render カクつきを排除。視覚クローズは SharedValue 駆動で滑らかに続く。
+            runOnJS(onOpenChange)(false);
+            progress.value = withSpring(0, {
+              ...HOME_DRAWER_SPRING,
+              velocity: clampHandoff(vNorm, 0),
             });
             runOnJS(triggerHaptic)('tap');
           } else {
-            progress.value = withSpring(1, HOME_DRAWER_SPRING);
+            // 閾値未満 → 開いたまま戻す。指の速度をそのまま引き継ぐ。
+            progress.value = withSpring(1, {
+              ...HOME_DRAWER_SPRING,
+              velocity: clampHandoff(vNorm, 1),
+            });
           }
         }),
     [W, progress, onOpenChange],
@@ -196,25 +226,22 @@ export const HomeDrawer = memo(function HomeDrawer({
     opacity: interpolate(progress.value, [0, 1], [0, 0.5], Extrapolation.CLAMP),
   }));
 
-  // pointerEvents の切替 — closed のときは drawer / backdrop の hit を全部遮断
-  // (translateX:-W で見えなくても touchable は残るので明示 none にする)
-  const pointerEvents = useDerivedValue(() => (progress.value > 0.01 ? 'auto' : 'none'));
-
-  // backdrop タップで close (right-side 可視 feed タップ相当)
+  // backdrop タップで close。ボタン起動 (初速ゼロ) は spring の S 字立ち上がりより
+  // 一定時間の ease-out timing の方がキレ良く吸い付くため withTiming を使う。
+  // unlock は即時 (視覚クローズは SharedValue 駆動なので影響なし)。
   const handleBackdropTap = () => {
     triggerHaptic('tap');
-    progress.value = withSpring(0, HOME_DRAWER_SPRING, (fin) => {
-      'worklet';
-      if (fin) runOnJS(onOpenChange)(false);
-    });
+    onOpenChange(false);
+    progress.value = withTiming(0, TIMING_NORM);
   };
 
-  // 各 nav action — router.push と「閉じる」を同時に
+  // 各 nav action — 閉じアニメを即開始しつつ、重い router.push は rAF で 1tick
+  // 後ろへ退避して閉じ初動に遷移先マウントの JS を被せない (初動カクつき防止)。
   const navigateAndClose = (path: string) => {
     triggerHaptic('tap');
-    progress.value = withSpring(0, HOME_DRAWER_SPRING);
     onOpenChange(false);
-    router.push(path as never);
+    progress.value = withTiming(0, TIMING_NORM);
+    requestAnimationFrame(() => router.push(path as never));
   };
 
   return (
@@ -229,8 +256,15 @@ export const HomeDrawer = memo(function HomeDrawer({
         zIndex: 1000,
       }}
     >
-      {/* ===== Backdrop (黒透過 — タップで close) ===== */}
-      <AnimatedPointerView pointerEvents={pointerEvents}>
+      {/* ===== Backdrop (黒透過 — タップで close) =====
+          opacity は backdropStyle (progress 駆動) で滑らかにフェード。hit 判定だけを
+          コミット済み open boolean で切替える。旧実装の display:'none'⇄'flex' トグルは
+          開き始めの初期状態フラッシュ・閉じ切りの二段消え・Web reflow を生むため廃止。
+          closed のときは pointerEvents='none' で backdrop が下の feed タップを奪わない。 */}
+      <View
+        pointerEvents={open ? 'auto' : 'none'}
+        style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}
+      >
         <Animated.View
           style={[
             {
@@ -252,7 +286,7 @@ export const HomeDrawer = memo(function HomeDrawer({
             style={{ flex: 1 }}
           />
         </Animated.View>
-      </AnimatedPointerView>
+      </View>
 
       {/* ===== Drawer ===== */}
       <GestureDetector gesture={closeGesture}>
@@ -269,12 +303,8 @@ export const HomeDrawer = memo(function HomeDrawer({
               backgroundColor: C.bg2,
               borderRightWidth: 1,
               borderRightColor: C.divider,
-              // 右側に細い影 — 「浮いてる感」を出す
-              shadowColor: '#000',
-              shadowOffset: { width: 4, height: 0 },
-              shadowOpacity: 0.35,
-              shadowRadius: 18,
-              elevation: 12,
+              // 右側に細い影 — 「浮いてる感」を出す (Web は blur 半径を抑えて軽量化)
+              ...DRAWER_SHADOW,
             },
             drawerStyle,
           ]}
@@ -376,9 +406,9 @@ export const HomeDrawer = memo(function HomeDrawer({
                 C={C}
               />
               <DrawerAction
-                icon={Clock}
-                label="いいねした投稿"
-                onPress={() => navigateAndClose('/mypage/liked')}
+                icon={FileText}
+                label="下書き"
+                onPress={() => navigateAndClose('/drafts')}
                 C={C}
               />
               <DrawerAction
@@ -394,6 +424,22 @@ export const HomeDrawer = memo(function HomeDrawer({
                 C={C}
               />
             </View>
+
+            {/* ===== Section: 最近見たコミュニティ (履歴) ===== */}
+            {recent.length > 0 ? (
+              <>
+                <Divider C={C} />
+                <SectionHeader icon={Clock} title="最近見たコミュニティ" C={C} />
+                {recent.map((comm) => (
+                  <CommunityRow
+                    key={comm.id}
+                    community={comm}
+                    onPress={() => navigateAndClose(`/community/${comm.id}`)}
+                    C={C}
+                  />
+                ))}
+              </>
+            ) : null}
 
             {/* ===== Section 2: admin コミュニティ ===== */}
             {admin.length > 0 ? (
@@ -469,6 +515,18 @@ export const HomeDrawer = memo(function HomeDrawer({
 // 小ヘルパー (色を受け取って描画 — useTheme 多重 subscribe を避ける)
 // ============================================================
 type PaletteLike = ColorPalette;
+
+// CommunityRow は admin/joined (CommunityWithRole) と最近見た履歴
+// (RecentCommunity) の双方を受けるため、描画に必要な最小フィールドだけを
+// 要求する構造的な型にする。
+type CommunityRowData = {
+  id: string;
+  name: string;
+  icon_url: string | null;
+  icon_emoji: string;
+  icon_color: string;
+  member_count: number;
+};
 
 function CountChip({ count, label }: { count: number; label: string }) {
   const { C } = useTheme();
@@ -567,7 +625,7 @@ function CommunityRow({
   onPress,
   C,
 }: {
-  community: CommunityWithRole;
+  community: CommunityRowData;
   onPress: () => void;
   C: PaletteLike;
 }) {
@@ -605,38 +663,4 @@ function CommunityRow({
       </View>
     </PressableScale>
   );
-}
-
-// ============================================================
-// AnimatedPointerView — `pointerEvents` を shared value から制御するための薄い wrapper
-// ------------------------------------------------------------
-// react-native の pointerEvents は string only (animated bridge 経由で動的変更
-// するには Animated.View に pointerEvents prop を直接渡す必要がある)。
-// 「closed なら none / それ以外 auto」を毎 frame ではなく
-// `useDerivedValue` で計算した string を View 全体に切替えるラッパ。
-// ============================================================
-const AnimatedView = Animated.View as ComponentType<
-  React.ComponentProps<typeof Animated.View>
->;
-
-function AnimatedPointerView({
-  pointerEvents,
-  children,
-}: {
-  pointerEvents: SharedValue<'auto' | 'none'>;
-  children: React.ReactNode;
-}) {
-  // shared value → JS prop へは AnimatedProps で接続する正攻法もあるが、
-  // pointerEvents は文字列 4 値の離散なので useAnimatedStyle 内で `display`
-  // を切り替える形に倒した方が確実。ここでは progress=0 のときに hit を絶対
-  // 通したくないので display:'none' で View ごと取り除く。
-  const style = useAnimatedStyle(() => ({
-    display: pointerEvents.value === 'none' ? 'none' : 'flex',
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    right: 0,
-    bottom: 0,
-  }));
-  return <AnimatedView style={style}>{children}</AnimatedView>;
 }

@@ -49,6 +49,23 @@ export const TIMING_NORMAL: WithTimingConfig = TIMING_NORM;
 export const TIMING_SLOW: WithTimingConfig = { duration: 380, easing: EASE_OUT };
 
 // ============================================================
+// Gesture → spring velocity handoff
+// ============================================================
+// ジェスチャ解放時の指の速度 (px/s を panel 幅で割り progress/s に正規化済) を
+// withSpring の `velocity` に渡す前に整える worklet ヘルパー:
+//   (1) 目標方向と同符号の成分だけ採用 — 逆フリック時の不自然な overshoot を防ぐ
+//   (2) 絶対値に上限 (MAX) を掛ける — 端末由来の過大初速でバネが暴れるのを防ぐ
+// これにより「指を払って離した瞬間そのままスッと吸い付く」連続感を出しつつ、
+// 端末差・誤爆フリックを吸収する。HomeDrawer / feed の open・close 両方で共用。
+export function clampHandoff(vNorm: number, toValue: number): number {
+  'worklet';
+  const MAX = 8; // progress/s の上限 (≈ VEL_THRESHOLD の数倍 / 画面幅)
+  const v = Math.max(-MAX, Math.min(MAX, vNorm));
+  // toValue=0 (閉じる/戻す) は負方向、toValue=1 (開く) は正方向の速度のみ採用
+  return toValue === 0 ? Math.min(0, v) : Math.max(0, v);
+}
+
+// ============================================================
 // Component-level magic numbers
 // ============================================================
 export const PRESS_SCALE = 0.96;

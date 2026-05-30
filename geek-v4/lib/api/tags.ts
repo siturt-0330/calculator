@@ -1,5 +1,9 @@
 import { supabase } from '../supabase';
 import { withApiTimeout } from '../withApiTimeout';
+import { swallow } from '../swallow';
+import { generateVariants } from '../search/variants';
+import { similarityScore } from '../search/similarity';
+import { deepNormalize } from '../search/tokenize';
 
 export type PostAddedTag = {
   id: string;
@@ -207,4 +211,73 @@ export async function fetchEvents(tagFilter?: string[]): Promise<EventItem[]> {
   const { data, error } = await q;
   if (error) throw error;
   return (data ?? []) as EventItem[];
+}
+
+// ============ Tag search / autocomplete (表記ゆれ込み) ============
+// コミュニティ作成・投稿作成のタグ補完が共通で使う「既存タグ検索」。
+// generateVariants(ローマ字 / かな / 同義語)を OR ilike で broad fetch し、
+// 完全一致 > 前方一致 > similarity + post_count で client 再ランキングして返す。
+// 背景: community/create が生の `.ilike('%q%')` を使い表記ゆれを拾えず
+// 「既存タグが出ず新規作成ばかり」に見えていた問題の解消。searchByName /
+// searchCommunities と同じ broad-fetch + rerank 戦略に統一する。
+
+export type TagSuggestion = { name: string; post_count: number };
+
+// Supabase ilike / PostgREST or() の特殊文字を無害化 (communities.ts と同等)。
+function escapeForIlikeTag(raw: string): string {
+  let s = raw.replace(/[\\%_]/g, '\\$&');
+  s = s.replace(/[(),]/g, ' ').replace(/\s+/g, ' ').trim();
+  return s;
+}
+
+export async function searchTags(
+  query: string,
+  opts: { limit?: number; excludeTags?: string[] } = {},
+): Promise<TagSuggestion[]> {
+  const q = query.trim().replace(/^#/, '');
+  if (q.length < 1) return [];
+  const limit = opts.limit ?? 8;
+  const excludeSet = new Set((opts.excludeTags ?? []).map((t) => deepNormalize(t)));
+
+  const variants = generateVariants(q).slice(0, 6);
+  const esc = variants.map((v) => escapeForIlikeTag(v)).filter((v) => v.length > 0);
+  if (esc.length === 0) return [];
+
+  try {
+    const orQuery = esc.map((v) => `name.ilike.%${v}%`).join(',');
+    const { data, error } = await withApiTimeout(
+      supabase
+        .from('tags')
+        .select('name, post_count')
+        .or(orQuery)
+        .order('post_count', { ascending: false })
+        .limit(60),
+      'tags.searchTags',
+      8000,
+    );
+    if (error) {
+      swallow('tags.searchTags', error);
+      return [];
+    }
+    const rows = (data ?? []) as TagSuggestion[];
+    const nq = deepNormalize(q);
+    const scored = rows
+      .filter((r) => !excludeSet.has(deepNormalize(r.name)))
+      .map((r) => {
+        const dn = deepNormalize(r.name);
+        // 完全一致 > 前方一致 > 類似度。タイブレークに post_count を弱く混ぜる。
+        let rel = similarityScore(q, r.name);
+        if (dn === nq) rel = 1;
+        else if (nq.length >= 1 && (dn.startsWith(nq) || nq.startsWith(dn))) {
+          rel = Math.max(rel, 0.85);
+        }
+        const pop = Math.log10((r.post_count ?? 0) + 1) / 10; // 0..~0.x の弱い加点
+        return { r, score: rel + pop };
+      })
+      .sort((a, b) => b.score - a.score);
+    return scored.slice(0, limit).map((s) => s.r);
+  } catch (e) {
+    swallow('tags.searchTags', e);
+    return [];
+  }
 }

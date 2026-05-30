@@ -1,17 +1,36 @@
-import { View, Text, ScrollView, KeyboardAvoidingView, Platform, Image, ActivityIndicator } from 'react-native';
-import Animated, { FadeInDown, Layout } from 'react-native-reanimated';
+// =============================================================================
+// app/(tabs)/community/create.tsx — コミュニティ作成(EDITORIAL「特集」言語)
+// -----------------------------------------------------------------------------
+// 司書台帳(Library Catalog)の美学で組んだ作成フォーム。黒地 C.bg + 1px 罫線 +
+// 大型タイポ + 紫 accent を要所に集中。塗りカード/濃い影は使わず、罫線と余白で
+// リズムを作る。UI は presentational な部品に分解し、本画面は state / fetch /
+// router / 下書き連携を司る「画面」層に徹する。
+//
+//   部品: EditorialFormHeader(マストヘッド) / EditorialIconPicker(蔵書票) /
+//         EditorialField(下線一本入力) / SimilarCommunityNotice(欄外註) /
+//         EditorialTagEditor(主題分類) / EditorialVisibilityCards(ACCESS) /
+//         EditorialSubmitBar(刷る)
+//
+// 自動下書き(draftsStore):
+//   - 一度でも入力(名前/説明/タグ/アイコン)があれば 600ms debounce で 1 件 upsert。
+//     初回に newDraftId('community') を発番し、以後は同 ID を更新(draftIdRef)。
+//   - ?draftId=xxx で「下書き一覧」から再開。name/description/tags/visibility と
+//     アイコン URI を復元(blob は同一セッションなら best-effort で再構築)。
+//   - 作成成功(アイコン upload 失敗時も community は出来ている)で当該下書きを削除。
+//
+// 公開設定は API の Visibility('open'|'request'|'invite')をそのまま単一 state に
+// 持つ(旧実装の visibility+closedMode 二重管理を廃止)。
+// =============================================================================
+
+import { View, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useQuery } from '@tanstack/react-query';
-import { C, R, SP } from '../../../design/tokens';
-import { T } from '../../../design/typography';
-import { Button } from '../../../components/ui/Button';
-import { Input } from '../../../components/ui/Input';
-import { BackButton } from '../../../components/nav/BackButton';
-import { PressableScale } from '../../../components/ui/PressableScale';
-import { Icon } from '../../../constants/icons';
+
+import { C, SP } from '../../../design/tokens';
+import { TABBAR } from '../../../design/tabbar';
 import {
   createCommunity,
   searchByName,
@@ -21,80 +40,66 @@ import {
   type Community,
 } from '../../../lib/api/communities';
 import { useToastStore } from '../../../stores/toastStore';
-import { TABBAR } from '../../../design/tabbar';
-import { supabase } from '../../../lib/supabase';
+import { searchTags } from '../../../lib/api/tags';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { deepNormalize } from '../../../lib/search/tokenize';
-
-type VisibilityOption = {
-  value: Visibility | 'request' | 'invite';
-  label: string;
-  desc: string;
-  icon: React.ReactNode;
-};
-
 import { prepareImageUpload } from '../../../lib/image';
 import { openCropper } from '../../../lib/imageCropper';
+import { useDraftsStore, newDraftId } from '../../../stores/draftsStore';
 
-// ============================================================
-// 2026-05: コミュニティ作成画面の「ジャンル」ピッカーを UI から非表示にする。
-// 推し系 / 作品系 / 体験系 / 議論系 の表記をユーザーに見せない方針。
-// false の間は genre が 'discussion' 固定 (= 最小タブ構成) で作成される。
-// ピッカーを復活させたいときは true に戻すだけ (作成ロジックは温存)。
-// ============================================================
-const SHOW_GENRE_PICKER = false;
+import { EditorialFormHeader } from '../../../components/community/EditorialFormHeader';
+import { EditorialIconPicker } from '../../../components/community/EditorialIconPicker';
+import { EditorialField } from '../../../components/community/EditorialField';
+import { SimilarCommunityNotice } from '../../../components/community/SimilarCommunityNotice';
+import { EditorialTagEditor } from '../../../components/community/EditorialTagEditor';
+import { EditorialVisibilityCards } from '../../../components/community/EditorialVisibilityCards';
+import { EditorialSubmitBar } from '../../../components/community/EditorialSubmitBar';
+
+// 2026-05: コミュニティ「ジャンル」ピッカーは撤去済み (UI / state / 作成ロジック)。
+// DB column communities.genre は migration 0044 で default 'legacy' で残置 (既存データ保持)。
 
 export default function CreateCommunityScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const params = useLocalSearchParams<{ draftId?: string }>();
   const show = useToastStore((s) => s.show);
+
+  // ---- フォーム state ----
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  // ローカルでアップロード待ちの画像 (URI + blob)
+  // ローカルでアップロード待ちのアイコン (URI = preview / blob = upload body)
   const [localIconUri, setLocalIconUri] = useState<string | null>(null);
-  // Web では Blob、Native では FormData が来る。両方を Supabase Storage に
-  // そのまま渡せる (lib/image.ts の prepareImageUpload 戻り値型を参照)。
+  // Web では Blob、Native では FormData が来る。両方を Supabase Storage に渡せる。
   const [localIconBlob, setLocalIconBlob] = useState<Blob | FormData | null>(null);
   const [localIconMime, setLocalIconMime] = useState<string>('image/jpeg');
   const [iconLoading, setIconLoading] = useState(false);
+  // 公開設定は API Visibility をそのまま単一 state で持つ('open'|'request'|'invite')。
   const [visibility, setVisibility] = useState<Visibility>('open');
-  const [closedMode, setClosedMode] = useState<'request' | 'invite'>('request');
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
+  // ---- 下書き連携 ----
+  // 自動保存で同一 ID を更新するための下書き ID。初回保存 or 復元時に確定する。
+  const draftIdRef = useRef<string | null>(null);
+  // 復元は mount で 1 回だけ。
+  const draftRestored = useRef(false);
+
+  // ---------------------------------------------------------------------------
   // タグ補完: query が短いときは早めに反応 (100ms)、長くなったら 150ms debounce
+  // ---------------------------------------------------------------------------
   const debouncedTagQuery = useDebounce(tagInput, tagInput.trim().length <= 2 ? 100 : 150);
 
-  // tags テーブルから ilike '%query%' + post_count 降順で取得
   const { data: tagSuggestions = [] } = useQuery({
     queryKey: ['community-create-tag-suggestions', debouncedTagQuery.trim()],
-    queryFn: async () => {
-      const q = debouncedTagQuery.trim().replace(/^#/, '');
-      if (!q) return [];
-      // ilike は post_count 降順だが、deepNormalize の同義を逃すので
-      // 50 件取って client 側で deepNormalize 一致を優先表示する.
-      const { data } = await supabase
-        .from('tags')
-        .select('name, post_count')
-        .ilike('name', `%${q}%`)
-        .order('post_count', { ascending: false })
-        .limit(50);
-      const rows = (data ?? []) as { name: string; post_count: number }[];
-      // ひらがな / カタカナ / 半角 などの違いで ilike では落ちる候補も拾う
-      // (ilike 結果 50 件のうち、deepNormalize で部分一致するもののみ採用)
-      const nq = deepNormalize(q);
-      const matched = rows.filter((r) => deepNormalize(r.name).includes(nq));
-      return matched.slice(0, 8);
-    },
+    // 共有 searchTags: generateVariants(表記ゆれ/同義語/ローマ字)で broad fetch し
+    // similarity + post_count で再ランキング。生 ilike では拾えなかった既存タグが出る。
+    queryFn: () => searchTags(debouncedTagQuery, { limit: 8 }),
     staleTime: 30_000,
     enabled: debouncedTagQuery.trim().length > 0,
   });
 
-  // タグ追加候補に「新しいタグ "#{query}" を作る」を出すかどうか
-  // - 入力されていて
-  // - 候補に同名 (deepNormalize 一致) が無い
-  // - 既に選択済みに無い
+  // 「新しいタグ "#query" を作る」を出すか — 入力あり & 候補/既選択に同名(正規化一致)なし
   const showCreateNewTag = useMemo(() => {
     const q = debouncedTagQuery.trim().replace(/^#/, '');
     if (!q) return false;
@@ -104,7 +109,9 @@ export default function CreateCommunityScreen() {
     return true;
   }, [debouncedTagQuery, tagSuggestions, tags]);
 
+  // ---------------------------------------------------------------------------
   // 類似名チェック (短いクエリ 150ms / 通常 200ms debounce)
+  // ---------------------------------------------------------------------------
   const [similar, setSimilar] = useState<Community[]>([]);
   const [checking, setChecking] = useState(false);
   const lastQueryRef = useRef('');
@@ -128,27 +135,80 @@ export default function CreateCommunityScreen() {
     return () => clearTimeout(t);
   }, [name]);
 
-  const VISIBILITY_OPTIONS: VisibilityOption[] = [
-    {
-      value: 'open',
-      label: 'オープン',
-      desc: 'だれでも自由に参加できる。検索結果に表示される。',
-      icon: <Icon.globe size={18} color={C.green} strokeWidth={2} />,
-    },
-    {
-      value: 'request',
-      label: 'クローズ・許可制',
-      desc: '参加には承認が必要。検索結果には表示される。',
-      icon: <Icon.lock size={18} color={C.amber} strokeWidth={2} />,
-    },
-    {
-      value: 'invite',
-      label: 'クローズ・完全招待制',
-      desc: '検索結果に表示されない。招待リンクのみで参加可能。',
-      icon: <Icon.shield size={18} color={C.red} strokeWidth={2} />,
-    },
-  ];
+  // ---------------------------------------------------------------------------
+  // 下書き復元 — ?draftId=xxx で「下書き一覧」から再開 (mount 1 回)
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (draftRestored.current) return;
+    draftRestored.current = true;
+    const did = typeof params.draftId === 'string' ? params.draftId : '';
+    if (!did) return;
+    const d = useDraftsStore.getState().items.find((x) => x.id === did);
+    if (!d || d.kind !== 'community') return;
+    setName(d.name);
+    setDescription(d.description);
+    setTags(d.tags);
+    setVisibility(d.visibility);
+    if (d.iconUri) {
+      const iconUri = d.iconUri; // async closure 用に narrow を確定させる
+      setLocalIconUri(iconUri);
+      // best-effort: 同一セッションなら URI から upload blob を再構築する。
+      // 失効(別セッションの blob: URL 等)時は preview だけ残し、submit 時に再選択を促す。
+      void (async () => {
+        try {
+          const prepared = await prepareImageUpload(iconUri, {
+            maxSizeBytes: 5 * 1024 * 1024,
+            maxWidth: 512,
+            maxHeight: 512,
+            quality: 0.85,
+          });
+          setLocalIconBlob(prepared.blob);
+          setLocalIconMime(prepared.mime);
+        } catch (e) {
+          console.warn('[community/create] draft icon re-prepare failed:', e);
+        }
+      })();
+    }
+    draftIdRef.current = d.id;
+    show('下書きを開きました', 'info');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  // ---------------------------------------------------------------------------
+  // 下書き自動保存 (debounce 600ms)
+  // 一度でも何か入力したら自動で下書き登録 → 以後は同一 draftId を更新。
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const meaningful =
+      name.trim().length > 0 ||
+      description.trim().length > 0 ||
+      tags.length > 0 ||
+      !!localIconUri;
+    if (!meaningful) return;
+    const t = setTimeout(() => {
+      let id = draftIdRef.current;
+      if (!id) {
+        id = newDraftId('community');
+        draftIdRef.current = id;
+      }
+      useDraftsStore.getState().upsert({
+        id,
+        kind: 'community',
+        name,
+        description,
+        tags,
+        visibility,
+        // 単一 visibility が真。closedMode は型互換のため派生値で埋める(表示は visibility 駆動)。
+        closedMode: visibility === 'invite' ? 'invite' : 'request',
+        iconUri: localIconUri,
+      });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [name, description, tags, visibility, localIconUri]);
+
+  // ---------------------------------------------------------------------------
+  // アイコン選択 — ライブラリ → 自前 circular cropper → EXIF strip + 検証
+  // ---------------------------------------------------------------------------
   const pickIcon = async () => {
     if (iconLoading || submitting) return;
     setIconLoading(true);
@@ -157,7 +217,7 @@ export default function CreateCommunityScreen() {
         const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!perm.granted) {
           show('写真へのアクセス権限が必要です', 'warn');
-          return;  // finally で loading 解除される
+          return; // finally で loading 解除される
         }
       }
       const r = await ImagePicker.launchImageLibraryAsync({
@@ -166,12 +226,10 @@ export default function CreateCommunityScreen() {
         quality: 1,
       });
       if (r.canceled || !r.assets[0]) {
-        return;  // finally で loading 解除される
+        return; // finally で loading 解除される
       }
       const asset = r.assets[0];
-      // 自前の circular cropper を開いて切り抜く
-      // 注: openCropper 中は loading state を一度解除しないと
-      //     UI 上 spinner が出っぱなしになるので setIconLoading(false) する
+      // openCropper 中は spinner を一旦解除 (出っぱなし防止)
       setIconLoading(false);
       let croppedUri: string | null = null;
       try {
@@ -181,13 +239,10 @@ export default function CreateCommunityScreen() {
         show('画像の切り抜きでエラーが発生しました', 'error');
         return;
       }
-      if (!croppedUri) {
-        // cancel or timeout
-        return;
-      }
+      if (!croppedUri) return; // cancel or timeout
+
       setIconLoading(true);
       // prepareImageUpload: EXIF 除去 + magic byte 検証 + size check (5MB)
-      console.log('[community/create] preparing image:', { croppedUri });
       let prepared;
       try {
         prepared = await prepareImageUpload(croppedUri, {
@@ -195,13 +250,6 @@ export default function CreateCommunityScreen() {
           maxWidth: 512, // アイコンなので大きすぎないように
           maxHeight: 512,
           quality: 0.85,
-        });
-        console.log('[community/create] prepared:', {
-          mime: prepared.mime,
-          ext: prepared.ext,
-          size: prepared.size,
-          uri: prepared.uri,
-          bodyKind: prepared.blob instanceof FormData ? 'FormData' : 'Blob',
         });
       } catch (e) {
         console.warn('[community/create] prepareImageUpload failed:', e);
@@ -228,10 +276,13 @@ export default function CreateCommunityScreen() {
     setLocalIconBlob(null);
   };
 
+  // ---------------------------------------------------------------------------
+  // タグ操作
+  // ---------------------------------------------------------------------------
   const addTagByName = (raw: string) => {
     const t = raw.trim().replace(/^#/, '');
     if (!t) return;
-    // deepNormalize 一致のものは既存とみなす (例: 「ポケモン」と「ぽけもん」)
+    // deepNormalize 一致は既存とみなす (例: 「ポケモン」と「ぽけもん」)
     const nq = deepNormalize(t);
     if (tags.some((x) => deepNormalize(x) === nq)) {
       setTagInput('');
@@ -246,9 +297,11 @@ export default function CreateCommunityScreen() {
   };
 
   const addTag = () => addTagByName(tagInput);
-
   const removeTag = (t: string) => setTags(tags.filter((x) => x !== t));
 
+  // ---------------------------------------------------------------------------
+  // 作成
+  // ---------------------------------------------------------------------------
   const onSubmit = async () => {
     if (submitting) return;
     if (name.trim().length < 2) {
@@ -265,14 +318,13 @@ export default function CreateCommunityScreen() {
     }
     setSubmitting(true);
     try {
-      const v: Visibility = visibility === 'open' ? 'open' : closedMode;
       // Step 1: row を INSERT (icon_url なし)
       const { data: created, error } = await createCommunity({
         name,
         description,
         icon_emoji: '👥', // placeholder
         icon_color: '#7C6AF7', // placeholder
-        visibility: v,
+        visibility,
         tags,
       });
       if (error || !created) {
@@ -280,21 +332,16 @@ export default function CreateCommunityScreen() {
         return;
       }
       // Step 2: アイコンアップロード — 失敗しても community は出来ているので警告だけ
-      console.log('[community/create] uploading icon, body type:', {
-        isBlob: typeof Blob !== 'undefined' && localIconBlob instanceof Blob,
-        isFormData: typeof FormData !== 'undefined' && localIconBlob instanceof FormData,
-        mime: localIconMime,
-      });
       const { url, error: upErr } = await uploadCommunityIcon(created.id, localIconBlob, localIconMime);
       if (upErr || !url) {
-        // 詳細なエラー本文を toast に出して、ユーザー → 開発者で再現しやすくする
         console.warn('[community/create] icon upload failed:', upErr);
         const detail = upErr ? `\n詳細: ${upErr}` : '';
         show(`アイコンのアップロードに失敗しました。${detail}\n後で詳細画面から再設定できます。`, 'warn');
+        // community 自体は作成済 → 下書きは破棄して詳細へ
+        if (draftIdRef.current) useDraftsStore.getState().remove(draftIdRef.current);
         router.replace(`/community/${created.id}` as never);
         return;
       }
-      console.log('[community/create] icon uploaded:', url);
       // Step 3: icon_url を反映 — 失敗しても致命的ではないので警告のみ
       try {
         await updateCommunity(created.id, { icon_url: url });
@@ -302,6 +349,8 @@ export default function CreateCommunityScreen() {
         console.warn('[community/create] icon_url update failed:', e);
       }
       show('コミュニティを作成しました！', 'success');
+      // 作成成功 → この下書きを削除
+      if (draftIdRef.current) useDraftsStore.getState().remove(draftIdRef.current);
       router.replace(`/community/${created.id}` as never);
     } catch (e) {
       console.warn('[community/create] submit failed:', e);
@@ -314,34 +363,24 @@ export default function CreateCommunityScreen() {
       }
       show(userMsg, 'error');
     } finally {
-      // 成功時は router.replace で離れるので setSubmitting は不要だが、
-      // エラー時に確実にフォーム解放するため呼ぶ
+      // 成功時は router.replace で離れるが、エラー時に確実にフォーム解放するため呼ぶ
       setSubmitting(false);
     }
   };
 
-  // Preview avatar — uploaded image or fallback
-  const previewAvatar = (
-    <View
-      style={{
-        width: 96,
-        height: 96,
-        borderRadius: 48,
-        backgroundColor: C.bg3,
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: C.border,
-      }}
-    >
-      {localIconUri ? (
-        <Image source={{ uri: localIconUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-      ) : (
-        <Icon.image size={40} color={C.text4} strokeWidth={1.6} />
-      )}
-    </View>
-  );
+  // 戻る — back stack が空ならコミュニティタブへ
+  const handleBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/community' as never);
+  };
+
+  // submit が押せない理由(誌面注記用)。名前 < 2 → アイコン未選択 の順で 1 つだけ示す。
+  const disabledReason =
+    name.trim().length < 2
+      ? 'コミュニティ名を 2 文字以上で入力してください'
+      : !localIconBlob
+        ? 'アイコン画像を選択してください'
+        : null;
 
   return (
     <KeyboardAvoidingView
@@ -351,496 +390,93 @@ export default function CreateCommunityScreen() {
       <ScrollView
         contentContainerStyle={{
           paddingTop: insets.top + SP['2'],
-          paddingHorizontal: SP['5'],
-          // (tabs) 配下の screen は下部 tab bar に重なるので、その高さ + safe area
-          // を加味して padding を取らないとフォームの末尾が tab bar に隠れる
+          // (tabs) 配下なので下部 tab bar の高さ + safe area を加味して末尾が隠れないように
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
-          gap: SP['5'],
         }}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-          <BackButton />
-          <Text style={[T.h2, { color: C.text, flex: 1 }]} numberOfLines={1}>
-            新しいコミュニティ
-          </Text>
-        </View>
+        {/* マストヘッド(自前で左右 SP[5] + 最下辺 hairline を持つ) */}
+        <EditorialFormHeader
+          titleEn="NEW COMMUNITY"
+          titleJa="コミュニティを作る"
+          onBack={handleBack}
+        />
 
-        {/* プレビュー + アイコン操作 */}
-        <View
-          style={{
-            padding: SP['4'],
-            backgroundColor: C.bg2,
-            borderRadius: R.lg,
-            borderWidth: 1,
-            borderColor: C.border,
-            alignItems: 'center',
-            gap: SP['3'],
-          }}
-        >
-          {previewAvatar}
-          <View style={{ flexDirection: 'row', gap: SP['2'] }}>
-            <PressableScale
-              onPress={pickIcon}
-              haptic="tap"
-              hitSlop={8}
-              disabled={iconLoading || submitting}
-              style={{
-                paddingHorizontal: SP['4'],
-                paddingVertical: SP['2'],
-                backgroundColor: C.accent,
-                borderRadius: R.full,
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-                opacity: iconLoading ? 0.6 : 1,
-              }}
-            >
-              {iconLoading ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Icon.image size={16} color="#fff" strokeWidth={2.4} />
-              )}
-              <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>
-                {localIconUri ? '変更' : 'アイコンを選ぶ'}
-              </Text>
-            </PressableScale>
-            {localIconUri && (
-              <PressableScale
-                onPress={removeIcon}
-                haptic="tap"
-                hitSlop={8}
-                style={{
-                  paddingHorizontal: SP['4'],
-                  paddingVertical: SP['2'],
-                  borderRadius: R.full,
-                  borderWidth: 1,
-                  borderColor: C.border,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 4,
-                }}
-              >
-                <Icon.close size={14} color={C.text2} strokeWidth={2.4} />
-                <Text style={[T.smallM, { color: C.text2 }]}>削除</Text>
-              </PressableScale>
-            )}
-          </View>
-          <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
-            写真 / 画像ファイル (JPEG / PNG / WebP / GIF · 5MB まで)
-          </Text>
-        </View>
+        {/* 蔵書票アイコン(中央・必須) */}
+        <View style={{ height: SP['6'] }} />
+        <EditorialIconPicker
+          uri={localIconUri}
+          loading={iconLoading}
+          onPick={pickIcon}
+          onRemove={removeIcon}
+        />
 
-        {/* 名前 */}
-        <View style={{ gap: SP['2'] }}>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
-            <Text style={[T.smallB, { color: C.text2 }]}>名前</Text>
-            <Text style={[T.caption, { color: C.red }]}>*</Text>
-            <View style={{ flex: 1 }} />
-            <Text style={[T.caption, { color: name.length > 38 ? C.amber : C.text3 }]}>
-              {name.length} / 40
-            </Text>
-          </View>
-          <Text style={[T.caption, { color: C.text3 }]}>
-            短く・覚えやすい名前。後から変更できます (2 - 40 文字)
-          </Text>
-          <Input
+        {/* コミュニティ名(下線一本・必須・カウンタ) */}
+        <View style={{ height: SP['6'] }} />
+        <View style={{ paddingHorizontal: SP['5'] }}>
+          <EditorialField
+            label="コミュニティ名"
+            required
+            hint="短く・覚えやすい名前 (2〜40文字)"
             value={name}
             onChangeText={setName}
             placeholder="例: 関西ゲーム開発者"
             maxLength={40}
+            showCount
             autoFocus
-            keyboardAppearance="dark"
-            selectionColor={C.accent}
           />
-          {/* 類似名チェック結果 */}
-          {checking && name.trim().length >= 2 && (
-            <Text style={[T.caption, { color: C.text3 }]}>類似名を検索中…</Text>
-          )}
-          {!checking && similar.length > 0 && (
-            <Animated.View
-              entering={FadeInDown.duration(200)}
-              layout={Layout.springify().damping(20)}
-              style={{
-                padding: SP['3'],
-                backgroundColor: C.amberBg,
-                borderRadius: R.md,
-                borderWidth: 1,
-                borderColor: C.amber + '55',
-                gap: SP['2'],
-              }}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Icon.warn size={14} color={C.amber} strokeWidth={2.4} />
-                <Text style={[T.smallM, { color: C.amber, fontWeight: '700', flex: 1 }]}>
-                  似た名前のコミュニティが {similar.length} 件あります
-                </Text>
-              </View>
-              <Text style={[T.caption, { color: C.text2 }]}>
-                参加した方が早いかも。タップして確認:
-              </Text>
-              {similar.map((c) => (
-                <PressableScale
-                  key={c.id}
-                  onPress={() => router.push(`/community/${c.id}` as never)}
-                  haptic="tap"
-                  scaleValue={0.98}
-                  hitSlop={4}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: SP['2'],
-                    padding: SP['2'],
-                    backgroundColor: C.bg2,
-                    borderRadius: R.md,
-                  }}
-                >
-                  <View
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 16,
-                      backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
-                      overflow: 'hidden',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    {c.icon_url ? (
-                      <Image source={{ uri: c.icon_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                    ) : (
-                      <Text style={{ fontSize: 16 }}>{c.icon_emoji}</Text>
-                    )}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[T.smallM, { color: C.text, fontWeight: '600' }]} numberOfLines={1}>
-                      {c.name}
-                    </Text>
-                    <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
-                      メンバー {c.member_count.toLocaleString('ja-JP')} 人
-                    </Text>
-                  </View>
-                  <Icon.chevronR size={16} color={C.text3} strokeWidth={2} />
-                </PressableScale>
-              ))}
-            </Animated.View>
-          )}
         </View>
 
-        {/* 説明 */}
-        <View style={{ gap: SP['2'] }}>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
-            <Text style={[T.smallB, { color: C.text2, flex: 1 }]}>説明（任意）</Text>
-            <Text style={[T.caption, { color: description.length >= 480 ? C.amber : C.text3 }]}>
-              {description.length} / 500
-            </Text>
-          </View>
-          <Text style={[T.caption, { color: C.text3 }]}>
-            どんな話をする場所か、ひと言で
-          </Text>
-          <Input
+        {/* 似た名前の欄外註(自前で左右 SP[5] margin を持つ) */}
+        <SimilarCommunityNotice
+          communities={similar}
+          checking={checking}
+          query={name.trim()}
+          onPressCommunity={(id) => router.push(`/community/${id}` as never)}
+        />
+
+        {/* 説明(任意・複数行・カウンタ) */}
+        <View style={{ height: SP['5'] }} />
+        <View style={{ paddingHorizontal: SP['5'] }}>
+          <EditorialField
+            label="説明（任意）"
+            hint="どんな話をする場所か、ひと言で"
             value={description}
             onChangeText={setDescription}
             placeholder="どんな話をする場所か"
             maxLength={500}
             multiline
-            numberOfLines={4}
-            keyboardAppearance="dark"
-            selectionColor={C.accent}
-            style={{ minHeight: 72, textAlignVertical: 'top' }}
+            showCount
           />
         </View>
 
-        {/* タグ — autocomplete */}
-        <View style={{ gap: SP['2'] }}>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: SP['1'] }}>
-            <Text style={[T.smallB, { color: C.text2, flex: 1 }]}>タグ（任意）</Text>
-            <Text style={[T.caption, { color: tags.length >= 10 ? C.amber : C.text3 }]}>
-              {tags.length} / 10
-            </Text>
-          </View>
-          <Text style={[T.caption, { color: C.text3 }]}>
-            関連するタグを追加すると検索で見つかりやすくなります
-          </Text>
+        {/* 主題分類(タグ・自前で左右 SP[5] + 上下 border を持つ) */}
+        <View style={{ height: SP['4'] }} />
+        <EditorialTagEditor
+          tags={tags}
+          onRemove={removeTag}
+          input={tagInput}
+          onInputChange={setTagInput}
+          onSubmitTag={addTag}
+          suggestions={tagSuggestions}
+          showCreateNew={showCreateNewTag}
+          onPickSuggestion={(n) => addTagByName(n)}
+          onCreateNew={() => addTagByName(tagInput)}
+          max={10}
+        />
 
-          {/* 選択済み pills (上に表示) */}
-          {tags.length > 0 && (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['1'] }}>
-              {tags.map((t) => (
-                <PressableScale
-                  key={t}
-                  onPress={() => removeTag(t)}
-                  haptic="tap"
-                  hitSlop={4}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 4,
-                    paddingHorizontal: SP['3'],
-                    paddingVertical: 4,
-                    backgroundColor: C.accentBg,
-                    borderRadius: R.full,
-                    borderWidth: 1,
-                    borderColor: C.accentSoft,
-                  }}
-                >
-                  <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>
-                    #{t}
-                  </Text>
-                  <Icon.close size={12} color={C.accentLight} strokeWidth={2.5} />
-                </PressableScale>
-              ))}
-            </View>
-          )}
+        {/* ACCESS(公開設定・自前で左右 SP[5] を持つ) */}
+        <EditorialVisibilityCards value={visibility} onChange={setVisibility} />
 
-          {/* 検索 input */}
-          <Input
-            icon={Icon.hash}
-            value={tagInput}
-            onChangeText={setTagInput}
-            onSubmitEditing={addTag}
-            placeholder="タグを検索 (アニメ、ゲーム…)"
-            returnKeyType="done"
-            keyboardAppearance="dark"
-            selectionColor={C.accent}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-
-          {/* サジェスト一覧 (input が空でない時のみ) */}
-          {tagInput.trim().length > 0 && (tagSuggestions.length > 0 || showCreateNewTag) && (
-            <Animated.View
-              entering={FadeInDown.duration(180)}
-              layout={Layout.springify().damping(20)}
-              style={{
-                backgroundColor: C.bg2,
-                borderRadius: R.lg,
-                borderWidth: 1,
-                borderColor: C.border,
-                overflow: 'hidden',
-              }}
-            >
-              {tagSuggestions.map((s, idx) => {
-                const isLast = idx === tagSuggestions.length - 1 && !showCreateNewTag;
-                return (
-                  <PressableScale
-                    key={s.name}
-                    onPress={() => addTagByName(s.name)}
-                    haptic="tap"
-                    scaleValue={0.99}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: SP['2'],
-                      paddingHorizontal: SP['3'],
-                      paddingVertical: SP['2'],
-                      borderBottomWidth: isLast ? 0 : 1,
-                      borderBottomColor: C.divider,
-                    }}
-                  >
-                    <View style={{ flex: 1, gap: 2 }}>
-                      <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
-                        # {s.name}
-                      </Text>
-                      <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
-                        {s.post_count.toLocaleString('ja-JP')} 投稿
-                      </Text>
-                    </View>
-                    <Icon.plus size={16} color={C.text3} strokeWidth={2.4} />
-                  </PressableScale>
-                );
-              })}
-
-              {/* 「新しいタグを作る」行 */}
-              {showCreateNewTag && (
-                <PressableScale
-                  onPress={() => addTagByName(tagInput)}
-                  haptic="confirm"
-                  scaleValue={0.99}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: SP['2'],
-                    paddingHorizontal: SP['3'],
-                    paddingVertical: SP['2'],
-                    borderTopWidth: tagSuggestions.length > 0 ? 1 : 0,
-                    borderTopColor: C.divider,
-                  }}
-                >
-                  <Icon.plus size={16} color={C.accent} strokeWidth={2.6} />
-                  <Text style={[T.bodyMd, { color: C.accent, fontWeight: '700', flex: 1 }]} numberOfLines={1}>
-                    新しいタグ &quot;#{tagInput.trim().replace(/^#/, '')}&quot; を作る
-                  </Text>
-                </PressableScale>
-              )}
-            </Animated.View>
-          )}
-        </View>
-
-        {/* ジャンル選択 (migration 0044)
-            ジャンルによってコミュニティ詳細画面のタブ構成が変わる:
-              - 推し系     ホーム / 検索 / マップ / カレンダー / マイプロフ
-              - 作品系     ホーム / 掲示板 / マップ
-              - 体験系     ホーム / 掲示板 / 検索 / マップ / カレンダー / マイプロフ
-              - 議論系     ホーム / 掲示板
-            "何をするか" と同じく "何をやらないか" を意識した引き算設計。
-            後から変更可。
-            ※ 2026-05: SHOW_GENRE_PICKER=false でこのブロックごと非表示。 */}
-        {SHOW_GENRE_PICKER && (
-        <View style={{ gap: SP['2'] }}>
-          <Text style={[T.smallB, { color: C.text2 }]}>ジャンル</Text>
-          <Text style={[T.caption, { color: C.text3 }]}>
-            タブ構成を最適化するためにジャンルを選んでください
-          </Text>
-          {SELECTABLE_GENRES.map((g) => {
-            const meta = COMMUNITY_GENRE_META[g];
-            const isSelected = genre === g;
-            return (
-              <PressableScale
-                key={g}
-                onPress={() => setGenre(g)}
-                haptic="select"
-                hitSlop={4}
-                accessibilityLabel={`${meta.label} (${meta.description}) を選択`}
-                style={{
-                  flexDirection: 'row',
-                  gap: SP['3'],
-                  padding: SP['3'],
-                  backgroundColor: isSelected ? C.accentBg : C.bg2,
-                  borderRadius: R.md,
-                  borderWidth: 1.5,
-                  borderColor: isSelected ? C.accent : C.border,
-                  alignItems: 'center',
-                }}
-              >
-                {/* 旧版は 36x36 円の中に genre 絵文字 (✨ / 📚 / 🍜 / 💬) を載せていたが
-                    AI 装飾感を抑えるため削除。selected 状態は border/bg/✓ で十分伝わる。 */}
-                <View style={{ flex: 1 }}>
-                  <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
-                    {meta.label}
-                  </Text>
-                  <Text style={[T.caption, { color: C.text3, marginTop: 2 }]} numberOfLines={2}>
-                    {meta.description}
-                  </Text>
-                </View>
-                {isSelected && (
-                  <View
-                    style={{
-                      width: 20,
-                      height: 20,
-                      borderRadius: 10,
-                      backgroundColor: C.accent,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Text style={{ fontSize: 11, color: '#fff', fontWeight: '800' }}>✓</Text>
-                  </View>
-                )}
-              </PressableScale>
-            );
-          })}
-        </View>
-        )}
-
-        {/* 公開設定 */}
-        <View style={{ gap: SP['2'] }}>
-          <Text style={[T.smallB, { color: C.text2 }]}>公開設定</Text>
-          <Text style={[T.caption, { color: C.text3 }]}>
-            誰が参加できるかを選択。後から変更可
-          </Text>
-          {VISIBILITY_OPTIONS.map((opt) => {
-            const isClosed = opt.value !== 'open';
-            const isSelected = isClosed
-              ? visibility !== 'open' && closedMode === opt.value
-              : visibility === 'open';
-            return (
-              <PressableScale
-                key={opt.value}
-                onPress={() => {
-                  if (opt.value === 'open') {
-                    setVisibility('open');
-                  } else {
-                    setVisibility('request');
-                    setClosedMode(opt.value as 'request' | 'invite');
-                  }
-                }}
-                haptic="select"
-                hitSlop={4}
-                style={{
-                  flexDirection: 'row',
-                  gap: SP['3'],
-                  padding: SP['3'],
-                  backgroundColor: isSelected ? C.accentBg : C.bg2,
-                  borderRadius: R.md,
-                  borderWidth: 1.5,
-                  borderColor: isSelected ? C.accent : C.border,
-                  alignItems: 'center',
-                }}
-              >
-                <View
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    backgroundColor: C.bg3,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  {opt.icon}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
-                    {opt.label}
-                  </Text>
-                  <Text style={[T.caption, { color: C.text3, marginTop: 2 }]} numberOfLines={2}>
-                    {opt.desc}
-                  </Text>
-                </View>
-                <View
-                  style={{
-                    width: 20,
-                    height: 20,
-                    borderRadius: 10,
-                    borderWidth: 2,
-                    borderColor: isSelected ? C.accent : C.text4,
-                    backgroundColor: isSelected ? C.accent : 'transparent',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  {isSelected && <Icon.ok size={12} color="#fff" strokeWidth={3} />}
-                </View>
-              </PressableScale>
-            );
-          })}
-        </View>
-
-        {/* Submit ボタンが disabled の理由を inline で示す — 何で押せないか分からない事象を防ぐ */}
-        {!submitting && (name.trim().length < 2 || !localIconBlob) && (
-          <View style={{
-            flexDirection: 'row', alignItems: 'center', gap: 6,
-            paddingHorizontal: SP['3'], paddingVertical: SP['2'],
-            backgroundColor: C.amberBg,
-            borderRadius: R.md,
-            borderWidth: 1,
-            borderColor: C.amber + '40',
-          }}>
-            <Icon.warn size={14} color={C.amber} strokeWidth={2.4} />
-            <Text style={[T.caption, { color: C.amber, fontWeight: '600', flex: 1 }]}>
-              {name.trim().length < 2
-                ? 'コミュニティ名を 2 文字以上で入力してください'
-                : 'アイコン画像を選択してください'}
-            </Text>
-          </View>
-        )}
-        <Button
+        {/* 刷る(作成・自前で左右 SP[5] を持つ) */}
+        <View style={{ height: SP['5'] }} />
+        <EditorialSubmitBar
           label="コミュニティを作成"
           onPress={onSubmit}
           loading={submitting}
-          disabled={submitting || name.trim().length < 2 || !localIconBlob}
-          haptic="confirm"
+          disabled={name.trim().length < 2 || !localIconBlob}
+          disabledReason={disabledReason}
         />
       </ScrollView>
     </KeyboardAvoidingView>

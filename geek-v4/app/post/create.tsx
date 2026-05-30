@@ -18,7 +18,6 @@ import {
   KeyboardAvoidingView,
   TextInput,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -36,6 +35,7 @@ import { PollEditorSheet } from '../../components/post/composer/PollEditorSheet'
 import { useToastStore } from '../../stores/toastStore';
 import { useAuthStore } from '../../stores/authStore';
 import { usePostDraftStore } from '../../stores/postDraftStore';
+import { useDraftsStore, newDraftId } from '../../stores/draftsStore';
 import { hap } from '../../design/haptics';
 import { fetchCommunity } from '../../lib/api/communities';
 import { validateVideoSource } from '../../lib/media';
@@ -46,8 +46,6 @@ import { useColors } from '../../hooks/useColors';
 // ============================================================
 // 定数
 // ============================================================
-
-const DRAFT_KEY = 'geek:post_draft_v1';
 
 // 本文プレースホルダ候補 (mount ごとにランダム — discussion framing)
 const PLACEHOLDER_POOL: string[] = [
@@ -69,6 +67,7 @@ export default function CreatePost() {
   const params = useLocalSearchParams<{
     community_id?: string;
     prefill_tag?: string;
+    draftId?: string;
   }>();
   const insets = useSafeAreaInsets();
   const show = useToastStore((s) => s.show);
@@ -121,46 +120,71 @@ export default function CreatePost() {
   }, []);
 
   // -----------------------------------------------------------
-  // 下書き復元 (mount 1 回)
+  // 下書き復元 — ?draftId=xxx で「下書き一覧」から再開 (mount 1 回)
+  // draftsStore の post 下書きを postDraftStore に流し込み、以後は同 ID を更新する。
   // -----------------------------------------------------------
   useEffect(() => {
     if (draftRestored.current) return;
     draftRestored.current = true;
-    void AsyncStorage.getItem(DRAFT_KEY).then((raw) => {
-      if (!raw) return;
-      try {
-        const d = JSON.parse(raw) as { title?: string; content?: string; anonymous?: boolean };
-        if (!d.content?.trim() && !d.title?.trim()) return;
-        if (d.title) setTitle(d.title);
-        if (d.content) setContent(d.content);
-        if (d.anonymous !== undefined) setAnonymous(d.anonymous);
-        show('下書きを復元しました', 'info', {
-          undoLabel: '破棄',
-          onUndo: () => {
-            setTitle('');
-            setContent('');
-            setAnonymous(true);
-            void AsyncStorage.removeItem(DRAFT_KEY);
-          },
-        });
-      } catch {
-        // 壊れた draft は無視
-      }
-    });
+    const did = typeof params.draftId === 'string' ? params.draftId : '';
+    if (!did) return;
+    const d = useDraftsStore.getState().items.find((x) => x.id === did);
+    if (!d || d.kind !== 'post') return;
+    const st = usePostDraftStore.getState();
+    st.setTitle(d.title);
+    st.setContent(d.content);
+    st.setImages(d.images);
+    st.setVideo(d.video);
+    st.setAnonymous(d.anonymous);
+    st.setTags(d.tags);
+    st.setVisibility(d.visibility);
+    st.setSelectedCommunities(d.selectedCommunityIds, d.selectedCommunities);
+    st.setCwCategory(d.cwCategory);
+    st.setCwText(d.cwText);
+    st.setSourceUrl(d.sourceUrl);
+    st.setPoll(d.showPoll, d.pollQuestion, d.pollOptions, d.pollMulti, d.pollHours);
+    st.setDraftId(d.id);
+    show('下書きを開きました', 'info');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 下書き自動保存 (debounce 500ms)
+  // 下書き自動保存 (debounce 600ms)
+  // 「一度でも何か入力したら」自動で下書き登録 → 以後は同一 draftId を更新。
+  // Step 1 の content フィールド (title/content/images/video) を契機に store 全体を snapshot する。
   useEffect(() => {
-    if (!content.trim() && !title.trim()) {
-      void AsyncStorage.removeItem(DRAFT_KEY);
-      return;
-    }
+    const meaningful = title.trim() || content.trim() || images.length > 0 || !!video;
+    if (!meaningful) return;
     const t = setTimeout(() => {
-      void AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({ title, content, anonymous }));
-    }, 500);
+      const s = usePostDraftStore.getState();
+      let id = s.draftId;
+      if (!id) {
+        id = newDraftId('post');
+        s.setDraftId(id);
+      }
+      useDraftsStore.getState().upsert({
+        id,
+        kind: 'post',
+        title: s.title,
+        content: s.content,
+        images: s.images,
+        video: s.video,
+        anonymous: s.anonymous,
+        tags: s.tags,
+        visibility: s.visibility,
+        selectedCommunityIds: s.selectedCommunityIds,
+        selectedCommunities: s.selectedCommunities,
+        cwCategory: s.cwCategory,
+        cwText: s.cwText,
+        sourceUrl: s.sourceUrl,
+        showPoll: s.showPoll,
+        pollQuestion: s.pollQuestion,
+        pollOptions: s.pollOptions,
+        pollMulti: s.pollMulti,
+        pollHours: s.pollHours,
+      });
+    }, 600);
     return () => clearTimeout(t);
-  }, [content, title, anonymous]);
+  }, [title, content, images, video, anonymous]);
 
   // deep link prefill — community_id / prefill_tag (mount 1 回)
   useEffect(() => {

@@ -25,7 +25,6 @@ import {
   KeyboardAvoidingView,
   ActivityIndicator,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -48,6 +47,7 @@ import { PressableScale } from '../../components/ui/PressableScale';
 import { useToastStore } from '../../stores/toastStore';
 import { useAuthStore } from '../../stores/authStore';
 import { usePostDraftStore } from '../../stores/postDraftStore';
+import { useDraftsStore, newDraftId } from '../../stores/draftsStore';
 import { hap } from '../../design/haptics';
 import { createPost } from '../../lib/api/posts';
 import { fetchMyCommunities, type Community } from '../../lib/api/communities';
@@ -62,8 +62,6 @@ import { useColors } from '../../hooks/useColors';
 // ============================================================
 // constants
 // ============================================================
-
-const DRAFT_KEY = 'geek:post_draft_v1';
 
 /** CW カテゴリ → 日本語ラベル (chip 表示用) */
 const CW_LABELS: Record<string, string> = {
@@ -183,6 +181,46 @@ export default function CreateSettings() {
     return () => clearTimeout(t);
   }, [content]);
   const autoTagSuggestions = useAutoTagSuggest(debouncedContent, tags, 6);
+
+  // ----------------------------------------------------------
+  // 下書き自動保存 (Step 2 の設定変更も反映, debounce 600ms)
+  // Step 1 で draftId が発番済みなら同 ID を更新。未発番でも本文があれば発番して保存。
+  // ----------------------------------------------------------
+  useEffect(() => {
+    const cur = usePostDraftStore.getState();
+    const meaningful = cur.title.trim() || cur.content.trim() || cur.images.length > 0 || !!cur.video;
+    if (!meaningful) return;
+    const t = setTimeout(() => {
+      const s = usePostDraftStore.getState();
+      let id = s.draftId;
+      if (!id) {
+        id = newDraftId('post');
+        s.setDraftId(id);
+      }
+      useDraftsStore.getState().upsert({
+        id,
+        kind: 'post',
+        title: s.title,
+        content: s.content,
+        images: s.images,
+        video: s.video,
+        anonymous: s.anonymous,
+        tags: s.tags,
+        visibility: s.visibility,
+        selectedCommunityIds: s.selectedCommunityIds,
+        selectedCommunities: s.selectedCommunities,
+        cwCategory: s.cwCategory,
+        cwText: s.cwText,
+        sourceUrl: s.sourceUrl,
+        showPoll: s.showPoll,
+        pollQuestion: s.pollQuestion,
+        pollOptions: s.pollOptions,
+        pollMulti: s.pollMulti,
+        pollHours: s.pollHours,
+      });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [tags, visibility, selectedCommunityIds, cwCategory, cwText, sourceUrl]);
 
   // ----------------------------------------------------------
   // コミュニティ表示判定 + visibility が非コミュニティになったら選択クリア
@@ -385,7 +423,11 @@ export default function CreateSettings() {
 
       hap.success();
       show('投稿しました', 'success');
-      void AsyncStorage.removeItem(DRAFT_KEY);
+      // 投稿成功 → この下書きを削除 (draftId は reset() で null に戻る)
+      {
+        const did = usePostDraftStore.getState().draftId;
+        if (did) useDraftsStore.getState().remove(did);
+      }
 
       // キャッシュ invalidate
       void qc.invalidateQueries({ queryKey: ['my-community-feed'] });
