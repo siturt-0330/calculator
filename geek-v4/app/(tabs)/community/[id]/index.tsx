@@ -33,6 +33,7 @@ import { Icon } from '../../../../constants/icons';
 import { AnonPostCard } from '../../../../components/feed/AnonPostCard';
 import { OfficialBadge } from '../../../../components/community/OfficialBadge';
 import { useAuthStore } from '../../../../stores/authStore';
+import { useRecentCommunitiesStore } from '../../../../stores/recentCommunitiesStore';
 import { useDelayedLoading } from '../../../../hooks/useDelayedLoading';
 import {
   fetchCommunity,
@@ -168,6 +169,21 @@ export default function CommunityDetailScreen() {
   // Smart skeleton timing — Spinner only after 200ms of continuous loading.
   // <200ms loads (cache hits via staleTime) skip flash entirely.
   const showCommunitySpinner = useDelayedLoading(communityLoading, 200);
+
+  // ===== 最近見たコミュニティ履歴に記録 (HomeDrawer「履歴」用) =====
+  // community ロード完了時に LRU へ前置。refetch で参照が変わっても id で dedupe。
+  const recordRecentCommunity = useRecentCommunitiesStore((s) => s.record);
+  useEffect(() => {
+    if (!community) return;
+    recordRecentCommunity({
+      id: community.id,
+      name: community.name,
+      icon_url: community.icon_url,
+      icon_emoji: community.icon_emoji,
+      icon_color: community.icon_color,
+      member_count: community.member_count,
+    });
+  }, [community, recordRecentCommunity]);
 
   // -----------------------------------------------------------
   // Tab "compose" → route to post create + reset

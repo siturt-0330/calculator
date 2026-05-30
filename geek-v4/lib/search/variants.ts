@@ -78,14 +78,59 @@ const ROMAJI_HIRAGANA: [string, string][] = [
   ['n', 'ん'],
 ];
 
+// ROMAJI_HIRAGANA を「最長一致」で引くための Map (3→2→1 文字で消費)。
+const ROMAJI_MAP: ReadonlyMap<string, string> = new Map(ROMAJI_HIRAGANA);
+const ROMAJI_MAX_KEY = 3; // kya / sha / tsu などが最長
+
+/**
+ * ローマ字 → ひらがな。左から最長一致で消費するオートマトン。
+ *   - 子音重複 (kk/tt/pp/...) → 促音「っ」+ 次音
+ *   - 末尾 or 子音前の n → 撥音「ん」 (nn は「ん」、na/nya 等は通常変換)
+ *   - 未知文字 (漢字 / 記号 / 数字) はそのまま通す
+ * recall 目的なので strict ではない。旧実装の単純 replaceAll による部分文字列衝突
+ * (例: 'nn'/'n' 競合・促音未処理) を解消する。
+ */
 export function romajiToHiragana(s: string): string {
-  let result = s.toLowerCase();
-  // 長母音記号
-  result = result.replace(/(.)\1+/g, (m, ch) => ch + 'ー'.repeat(m.length - 1));
-  for (const [r, h] of ROMAJI_HIRAGANA) {
-    result = result.replaceAll(r, h);
+  const src = s.toLowerCase();
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i]!;
+    // 促音: 母音 / n 以外の子音が同じ文字で連続 → 「っ」
+    if (
+      ch !== 'a' && ch !== 'i' && ch !== 'u' && ch !== 'e' && ch !== 'o' &&
+      ch !== 'n' && src[i + 1] === ch
+    ) {
+      out += 'っ';
+      i += 1;
+      continue;
+    }
+    // 撥音 n: nn → ん / 母音・y 以外が続く or 末尾 → ん
+    if (ch === 'n') {
+      const next = src[i + 1];
+      if (next === 'n') { out += 'ん'; i += 2; continue; }
+      const vowelOrY =
+        next === 'a' || next === 'i' || next === 'u' || next === 'e' ||
+        next === 'o' || next === 'y';
+      if (!vowelOrY) { out += 'ん'; i += 1; continue; }
+      // 母音 / y が続くなら na / nya 等として下の最長一致へ委ねる
+    }
+    // 最長一致 (3 → 2 → 1 文字)
+    let matched = false;
+    for (let len = Math.min(ROMAJI_MAX_KEY, src.length - i); len >= 1; len--) {
+      const hira = ROMAJI_MAP.get(src.slice(i, i + len));
+      if (hira !== undefined) {
+        out += hira;
+        i += len;
+        matched = true;
+        break;
+      }
+    }
+    if (matched) continue;
+    out += ch; // 未知文字 (漢字 / 記号 / 数字)
+    i += 1;
   }
-  return result;
+  return out;
 }
 
 // ひらがな → ローマ字 (検索 recall 用; "ぎーく" → "giiku" / "geek" を意識)
@@ -444,11 +489,14 @@ export function generateVariants(query: string): string[] {
   if (katakana !== halfWidth) push(katakana);
   if (hiragana !== halfWidth) push(hiragana);
 
-  // ★ Tier 6: ローマ字 → ひらがな
+  // ★ Tier 6: ローマ字 → ひらがな (誤爆ガードつき)
+  // 変換後も Latin が過半数残るなら「ローマ字ではなかった」とみなし捨てる
+  // (例: "project" は kana 化に失敗し latin だらけ → push しない)。
   if (/[a-z]/i.test(original)) {
     const lower = original.toLowerCase();
     const kana = romajiToHiragana(lower);
-    if (kana !== lower) {
+    const latinCount = (kana.match(/[a-z]/g) ?? []).length;
+    if (kana !== lower && latinCount * 2 < kana.length) {
       push(kana);
       push(hiraganaToKatakana(kana));
     }

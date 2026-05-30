@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Image as ExpoImage } from 'expo-image';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
 import { supabase } from '../../lib/supabase';
 import { fetchNotifications } from '../../lib/api/notifications';
@@ -34,7 +34,7 @@ import {
   getHomeDrawerWidth,
 } from '../../components/nav/HomeDrawer';
 import { haptic as triggerHaptic } from '../../lib/haptics';
-import { EASE_OUT_QUART } from '../../design/motion';
+import { EASE_OUT_QUART, TIMING_NORM, clampHandoff } from '../../design/motion';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -65,6 +65,13 @@ import type { Ad } from '../../lib/api/ads';
 type AdItem = { __ad: true; ad: Ad; position: number; matchedTags: string[]; key: string };
 type FeedItem = Post | AdItem;
 const isAdItem = (it: FeedItem): it is AdItem => (it as AdItem).__ad === true;
+
+// ヘッダー左上アバター用の最小プロフィール型 (mypage-stats cache の subset)
+type MeProfileLite = {
+  nickname: string | null;
+  avatar_emoji: string | null;
+  avatar_url: string | null;
+};
 
 // パフォーマンス監査: renderItem で `??[]` を使うと毎回新 array が生成され
 // AnonPostCard memo が壊れる (props 比較で false 判定 → 全カード re-render)。
@@ -132,6 +139,7 @@ import { logEvent } from '../../lib/personalize';
 import { PostCardSkeleton } from '../../components/feed/PostCardSkeleton';
 import { TrendingRow } from '../../components/feed/TrendingRow';
 import { PressableScale } from '../../components/ui/PressableScale';
+import { Avatar } from '../../components/ui/Avatar';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Icon } from '../../constants/icons';
@@ -174,6 +182,16 @@ export default function FeedScreen() {
   const drawerProgress = useSharedValue(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  // ★ PC / アクセシビリティ対策: 右スワイプできない環境 (デスクトップ Web など) でも
+  //   ヘッダー左上のアバターボタンから明示的にドロワーを開けるようにする。
+  // ボタン起動は指の velocity を持たないため、初速0の spring (緩→加速→僅かに行き過ぎる
+  // S 字) より一定時間の ease-out timing の方がキレ良く吸い付く。lock は即時。
+  const openDrawer = useCallback(() => {
+    triggerHaptic('tap');
+    setDrawerOpen(true);
+    drawerProgress.value = withTiming(1, TIMING_NORM);
+  }, [drawerProgress]);
+
   // 画面左端 24pt 以内から右にスワイプで open。drawerOpen=true のときは無効化
   // (HomeDrawer 内部の close gesture が担当)。
   const openGesture = useMemo(
@@ -201,21 +219,33 @@ export default function FeedScreen() {
           'worklet';
           if (drawerProgress.value > 0.99) return;
           const startX = e.x - e.translationX;
+          // 指の速度 (px/s) を progress/s に正規化してバネに引き継ぐ → 段付き解消。
+          const vNorm = e.velocityX / DRAWER_WIDTH;
           // 左端 grab 範囲外で始まった場合は何もせず spring で戻す
           if (startX > HOME_DRAWER_EDGE_GRAB) {
-            drawerProgress.value = withSpring(0, HOME_DRAWER_SPRING);
+            drawerProgress.value = withSpring(0, {
+              ...HOME_DRAWER_SPRING,
+              velocity: clampHandoff(vNorm, 0),
+            });
             return;
           }
           const shouldOpen =
             e.translationX > HOME_DRAWER_DIST_THRESHOLD ||
             e.velocityX > HOME_DRAWER_VEL_THRESHOLD;
           if (shouldOpen) {
-            drawerProgress.value = withSpring(1, HOME_DRAWER_SPRING, (fin) => {
-              if (fin) runOnJS(setDrawerOpen)(true);
+            // コミット確定時に即 lock (spring 完了待ちにしない) → 開アニメ中の縦 scroll
+            // 競合を断ち、着地フレームの再 render カクつきも排除。
+            runOnJS(setDrawerOpen)(true);
+            drawerProgress.value = withSpring(1, {
+              ...HOME_DRAWER_SPRING,
+              velocity: clampHandoff(vNorm, 1),
             });
             runOnJS(triggerHaptic)('tap');
           } else {
-            drawerProgress.value = withSpring(0, HOME_DRAWER_SPRING);
+            drawerProgress.value = withSpring(0, {
+              ...HOME_DRAWER_SPRING,
+              velocity: clampHandoff(vNorm, 0),
+            });
           }
         }),
     [DRAWER_WIDTH, drawerProgress],
@@ -249,6 +279,23 @@ export default function FeedScreen() {
   //   瞬間に「白画面 → spinner → データ」ではなく即表示できる。
   const qc = useQueryClient();
   const userId = useAuthStore((s) => s.user?.id);
+
+  // ヘッダー左上アバター (= ドロワーを開くボタン) 用プロフィール。
+  // queryKey / queryFn / staleTime は mypage / HomeDrawer と完全一致させ cache を共有する。
+  const { data: meProfile } = useQuery<MeProfileLite | null>({
+    queryKey: ['mypage-stats', userId],
+    queryFn: async () => {
+      if (!userId) return null;
+      const { data } = await supabase
+        .from('profiles')
+        .select('post_count, like_received_count, comment_count, concern_received_count, created_at, nickname, avatar_emoji, avatar_url')
+        .eq('id', userId)
+        .single();
+      return data as MeProfileLite | null;
+    },
+    enabled: !!userId,
+    staleTime: 60_000,
+  });
 
   // 好きなタグが無いときに closed scope に居たら open へ強制
   useEffect(() => {
@@ -667,6 +714,24 @@ export default function FeedScreen() {
           flexDirection: 'row',
           alignItems: 'center',
         }}>
+          {/* ★ 左上アバター = ドロワーを開くボタン。
+              右スワイプできない環境 (デスクトップ Web など) の主要導線。
+              タップで HomeDrawer を開く (X と同じ操作感)。 */}
+          <PressableScale
+            onPress={openDrawer}
+            hitSlop={10}
+            haptic="tap"
+            accessibilityRole="button"
+            accessibilityLabel="メニューを開く"
+            style={{ marginRight: SP['3'] }}
+          >
+            <Avatar
+              size={32}
+              uri={meProfile?.avatar_url ?? undefined}
+              emoji={meProfile?.avatar_emoji ?? undefined}
+              name={meProfile?.nickname ?? 'メニュー'}
+            />
+          </PressableScale>
           {/* 新規投稿 FAB はグローバル TabBar の「+」に一本化したため削除 (2026-05-29)。
               投稿作成導線は画面下の TabBar 右隣「+」円ボタンへ集約。 */}
           {/* Geek brand wordmark — Orbitron Black + accent gradient (web) + glow */}
@@ -848,6 +913,7 @@ export default function FeedScreen() {
           drawerOpen は backdrop タップ / 左スワイプ閉操作後の同期 boolean state。 */}
       <HomeDrawer
         progress={drawerProgress}
+        open={drawerOpen}
         onOpenChange={setDrawerOpen}
       />
     </View>

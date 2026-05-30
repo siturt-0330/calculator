@@ -31,31 +31,27 @@ import {
   View,
   Text,
   ScrollView,
-  ActivityIndicator,
   TextInput,
   RefreshControl,
   Keyboard,
 } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-  interpolateColor,
-} from 'react-native-reanimated';
-import { Image as ExpoImage } from 'expo-image';
+import { useSharedValue, withTiming } from 'react-native-reanimated';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { TopBar } from '../../components/nav/TopBar';
 import { PressableScale } from '../../components/ui/PressableScale';
-import { HighlightedText } from '../../components/ui/HighlightedText';
-import { Avatar } from '../../components/ui/Avatar';
 import { Icon } from '../../constants/icons';
-import { C, R, SHADOW, SP } from '../../design/tokens';
+import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
-import { TIMING_FAST } from '../../design/motion';
-import { formatRelative } from '../../lib/utils/date';
 import { fetchPostById } from '../../lib/api/posts';
+// EDITORIAL「特集」検索 UI コンポーネント群
+import { InklineSearchBar } from '../../components/search/InklineSearchBar';
+import { EditorialMasthead } from '../../components/search/EditorialMasthead';
+import { CategoryRunningHead } from '../../components/search/CategoryRunningHead';
+import { EditorialPostCard } from '../../components/search/EditorialPostCard';
+import { EditorialCommunityRow } from '../../components/search/EditorialCommunityRow';
+import { EditorialSkeleton } from '../../components/search/EditorialSkeleton';
+import { EditorialEmpty } from '../../components/search/EditorialEmpty';
 import {
   searchCommunities,
   discoverCommunities,
@@ -90,6 +86,17 @@ const DEBOUNCE_MS = 200;
 const PREVIEW_LIMIT = 5;
 
 type ResultCategory = 'all' | 'posts' | 'communities';
+
+// 発行メタ「VOL.{ISO週番号} ／ {M月D日}」用の ISO 週番号算出 (誌面マストヘッド)
+function getISOWeek(d: Date): number {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = (date.getUTCDay() + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - dayNum + 3);
+  const firstThursday = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));
+  const firstDayNum = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNum + 3);
+  return 1 + Math.round((date.getTime() - firstThursday.getTime()) / (7 * 24 * 3600 * 1000));
+}
 
 // ============================================================
 // SearchScreen
@@ -155,19 +162,11 @@ export default function SearchScreen() {
     setExpandCommunities(false);
   }, [debouncedQuery]);
 
-  // ============= focus 時 animated border (iOS-native) =============
+  // ============= focus 進捗 (Inkline 下線 / Masthead 畳み を駆動する SharedValue) =============
   const focusProgress = useSharedValue(0);
   useEffect(() => {
-    focusProgress.value = withTiming(inputFocused ? 1 : 0, TIMING_FAST);
+    focusProgress.value = withTiming(inputFocused ? 1 : 0, { duration: 220 });
   }, [inputFocused, focusProgress]);
-
-  const aSearchBorder = useAnimatedStyle(() => ({
-    borderColor: interpolateColor(
-      focusProgress.value,
-      [0, 1],
-      ['rgba(255,255,255,0.08)', C.accent + 'CC'],
-    ),
-  }));
 
   // ============= 検索クエリ実行 (v4) =============
   const showResults = debouncedQuery.length > 0;
@@ -417,116 +416,54 @@ export default function SearchScreen() {
   // ============= history を表示するか? (input focus + empty + 履歴あり) =============
   const showHistory = inputFocused && rawQuery.length === 0 && history.length > 0;
 
+  // ============= EDITORIAL: 派生 UI 値 =============
+  // typing = 入力はあるが debounce 未着地 (Inkline の往復ハイライト判定)
+  const isTyping = rawQuery.trim().length > 0 && rawQuery.trim() !== debouncedQuery;
+  // 検索バー右肩の件数 (結果表示中のみ)
+  const resultCount = showResults ? totalCount : null;
+  // 発行メタ (マストヘッド右下)
+  const volText = useMemo(() => {
+    const now = new Date();
+    return `VOL.${getISOWeek(now)} ／ ${now.getMonth() + 1}月${now.getDate()}日`;
+  }, []);
+
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <TopBar title="検索" />
-
-      {/* ============= sticky 検索 input ============= */}
+      {/* ============= sticky ヘッダ (Inkline 検索バー) ============= */}
       <View
         style={{
-          paddingHorizontal: SP['4'],
-          paddingTop: SP['2'],
+          paddingTop: insets.top + SP['2'],
           paddingBottom: SP['2'],
           backgroundColor: C.bg,
           // sticky な見え方 (z-index で history dropdown を被せる)
           zIndex: 10,
         }}
       >
-        <Animated.View
-          style={[
-            {
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: SP['2'],
-              paddingHorizontal: 12,
-              paddingVertical: 10,
-              backgroundColor: C.bg2,
-              // iOS-native 検索バー風 — pill ではなく radius 12 の rounded rect
-              borderRadius: 12,
-              borderWidth: 1,
-            },
-            aSearchBorder,
-            inputFocused ? SHADOW.sm : SHADOW.xs,
-          ]}
-        >
-          <Icon.search
-            size={18}
-            color={inputFocused ? C.accentLight : C.text3}
-            strokeWidth={2.2}
-          />
-          <TextInput
-            ref={inputRef}
-            value={rawQuery}
-            onChangeText={setRawQuery}
-            placeholder="Geek 内を検索"
-            placeholderTextColor={C.text3}
-            onFocus={() => setInputFocused(true)}
-            onBlur={() => setInputFocused(false)}
-            onSubmitEditing={() => commit()}
-            returnKeyType="search"
-            blurOnSubmit
-            autoCorrect={false}
-            autoCapitalize="none"
-            keyboardAppearance="dark"
-            selectionColor={C.accent}
-            cursorColor={C.accent}
-            accessibilityLabel="検索キーワード入力"
-            // memory DoS 対策
-            maxLength={200}
-            style={[T.body, { flex: 1, color: C.text, paddingVertical: 0 }]}
-          />
-
-          {/* right side: clear (× when typing) / voice icon (placeholder) */}
-          {rawQuery.length > 0 ? (
-            <PressableScale
-              onPress={clearInput}
-              haptic="tap"
-              hitSlop={10}
-              accessibilityLabel="入力をクリア"
-              accessibilityRole="button"
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: 11,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: C.bg4,
-              }}
-            >
-              <Icon.close size={13} color={C.text2} strokeWidth={2.4} />
-            </PressableScale>
-          ) : (
-            // Voice icon — placeholder のみ (tap 無効)
-            <View
-              accessibilityElementsHidden
-              importantForAccessibility="no"
-              style={{
-                width: 22,
-                height: 22,
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: 0.45,
-              }}
-            >
-              <Icon.phone size={16} color={C.text3} strokeWidth={2} />
-            </View>
-          )}
-        </Animated.View>
+        <InklineSearchBar
+          value={rawQuery}
+          onChangeText={setRawQuery}
+          onSubmit={() => commit()}
+          onFocus={() => setInputFocused(true)}
+          onBlur={() => setInputFocused(false)}
+          onClear={clearInput}
+          focusProgress={focusProgress}
+          resultCount={resultCount}
+          isTyping={isTyping}
+          inputRef={inputRef}
+        />
 
         {/* ============= 履歴 dropdown (focus + empty) ============= */}
         {showHistory && (
           <View
-            style={[
-              {
-                marginTop: SP['2'],
-                backgroundColor: C.bg2,
-                borderRadius: R.lg,
-                borderWidth: 1,
-                borderColor: C.border,
-                overflow: 'hidden',
-              },
-              SHADOW.md,
-            ]}
+            style={{
+              marginTop: SP['2'],
+              marginHorizontal: SP['5'],
+              backgroundColor: C.bg2,
+              borderRadius: R.lg,
+              borderWidth: 1,
+              borderColor: C.border,
+              overflow: 'hidden',
+            }}
           >
             {/* header — 「最近の検索」 + 「すべて消去」 */}
             <View
@@ -617,7 +554,7 @@ export default function SearchScreen() {
               flexDirection: 'row',
               alignItems: 'center',
               gap: 6,
-              paddingHorizontal: 2,
+              paddingHorizontal: SP['5'],
             }}
             accessibilityLabel={`検索意図: ${topIntent.intent}`}
           >
@@ -633,6 +570,7 @@ export default function SearchScreen() {
           <View
             style={{
               marginTop: SP['2'],
+              marginHorizontal: SP['5'],
               flexDirection: 'row',
               alignItems: 'center',
               gap: 6,
@@ -653,76 +591,18 @@ export default function SearchScreen() {
           </View>
         )}
 
-        {/* ============= カテゴリタブ (結果あり時のみ) ============= */}
+        {/* ============= カテゴリ ランニングヘッド (結果あり時のみ) ============= */}
         {showResults && !showHistory && (
           <View style={{ marginTop: SP['2'] }}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              <View style={{ flexDirection: 'row', gap: 6 }}>
-                {(['all', 'posts', 'communities'] as ResultCategory[]).map((c) => {
-                  const active = category === c;
-                  const label = c === 'all' ? 'すべて' : c === 'posts' ? '投稿' : 'コミュニティ';
-                  const count = c === 'posts' ? posts.length
-                    : c === 'communities' ? communities.length
-                    : totalCount;
-                  return (
-                    <PressableScale
-                      key={c}
-                      onPress={() => setCategory(c)}
-                      haptic="select"
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: active }}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 6,
-                        paddingHorizontal: SP['3'],
-                        paddingVertical: 7,
-                        backgroundColor: active ? C.accentBg : C.bg2,
-                        borderRadius: R.full,
-                        borderWidth: 1,
-                        borderColor: active ? C.accent : C.border,
-                      }}
-                    >
-                      <Text
-                        style={[
-                          T.smallM,
-                          {
-                            color: active ? C.accentLight : C.text,
-                            fontWeight: '700',
-                          },
-                        ]}
-                      >
-                        {label}
-                      </Text>
-                      <View
-                        style={{
-                          paddingHorizontal: 5,
-                          paddingVertical: 1,
-                          backgroundColor: active ? C.accent : C.bg4,
-                          borderRadius: R.sm,
-                          minWidth: 18,
-                          alignItems: 'center',
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontSize: 9,
-                            color: active ? '#fff' : C.text3,
-                            fontWeight: '700',
-                          }}
-                        >
-                          {count}
-                        </Text>
-                      </View>
-                    </PressableScale>
-                  );
-                })}
-              </View>
-            </ScrollView>
+            <CategoryRunningHead
+              tabs={[
+                { key: 'all', label: 'すべて', count: totalCount },
+                { key: 'posts', label: '投稿', count: posts.length },
+                { key: 'communities', label: 'コミュニティ', count: communities.length },
+              ]}
+              category={category}
+              onChange={setCategory}
+            />
           </View>
         )}
       </View>
@@ -747,20 +627,27 @@ export default function SearchScreen() {
         }
       >
         {!showResults ? (
-          <DiscoveryView />
+          <>
+            {/* 署名マストヘッド — フォーカスで畳まれる */}
+            <EditorialMasthead focusProgress={focusProgress} volText={volText} />
+            <DiscoveryView />
+          </>
         ) : isLoading && totalCount === 0 ? (
-          <View style={{ paddingVertical: SP['10'], alignItems: 'center' }}>
-            <ActivityIndicator color={C.accent} />
-          </View>
+          // 組版中スケルトン (実カード同寸 + 水平シマー)
+          <EditorialSkeleton />
         ) : isEmpty ? (
-          <EmptyResultsView
+          <EditorialEmpty
             query={debouncedQuery}
             didYouMean={didYouMean}
             onPickSuggestion={(s) => commit(s)}
             onClear={clearInput}
+            onBrowse={() => {
+              clearInput();
+              Keyboard.dismiss();
+            }}
           />
         ) : (
-          <View style={{ paddingHorizontal: SP['4'], gap: SP['4'] }}>
+          <View style={{ paddingHorizontal: SP['5'] }}>
             {/* ============= 投稿セクション ============= */}
             {(category === 'all' || category === 'posts') && posts.length > 0 && (
               <ResultSection
@@ -778,12 +665,13 @@ export default function SearchScreen() {
                   ? posts.slice(0, PREVIEW_LIMIT)
                   : posts
                 ).map((p, idx) => (
-                  <CompactPostCard
+                  <EditorialPostCard
                     key={p.id}
                     post={p}
-                    highlightTerms={highlightTerms}
+                    rank={idx + 1}
+                    terms={highlightTerms}
                     onPress={() => {
-                      // 1-based position を server に送る
+                      // 1-based position を server に送る (hookpoint 温存)
                       recordClickAndDwellStart(p.id, idx + 1);
                       recordSignal({ kind: 'post', id: p.id, tags: p.tag_names });
                       router.push(`/post/${p.id}` as never);
@@ -812,11 +700,12 @@ export default function SearchScreen() {
                 {(category === 'all' && !expandCommunities
                   ? communities.slice(0, PREVIEW_LIMIT)
                   : communities
-                ).map((c) => (
-                  <CompactCommunityCard
+                ).map((c, idx) => (
+                  <EditorialCommunityRow
                     key={c.id}
                     community={c}
-                    highlightTerms={highlightTerms}
+                    rank={idx + 1}
+                    terms={highlightTerms}
                     onPress={() => {
                       router.push(`/community/${c.id}` as never);
                     }}
@@ -1105,353 +994,3 @@ function ResultSection({
     </View>
   );
 }
-
-// ============================================================
-// CompactPostCard — 検索結果用の小型投稿カード
-// ------------------------------------------------------------
-// AnonPostCard はリアクション / メディア / コメントなどを全部抱えていて重い。
-// 検索結果は「何の話か」一目で分かれば良いので、title + content 抜粋 + meta
-// だけのコンパクト版にする。
-// ============================================================
-function CompactPostCard({
-  post,
-  highlightTerms,
-  onPress,
-  onExplain,
-}: {
-  post: Post;
-  highlightTerms: string[];
-  onPress: () => void;
-  /** ⓘ「なぜこの結果?」アイコンをタップしたとき */
-  onExplain: () => void;
-}) {
-  // タイトル (title フィールド or content 1 行目)
-  const title = useMemo(() => {
-    if (post.title && post.title.trim().length > 0) return post.title;
-    const firstLine = (post.content ?? '').split('\n')[0]?.trim() ?? '';
-    return firstLine.length > 0 ? firstLine : null;
-  }, [post.title, post.content]);
-
-  // 本文プレビュー (title と重複しないように)
-  const preview = useMemo(() => {
-    const content = (post.content ?? '').trim();
-    if (!content) return '';
-    if (post.title) return content.slice(0, 160);
-    // title が content の 1 行目から来ているなら、2 行目以降を出す
-    const rest = content.split('\n').slice(1).join(' ').trim();
-    return rest.length > 0 ? rest.slice(0, 160) : '';
-  }, [post.title, post.content]);
-
-  // 画像 thumbnail — media_urls[0] があれば横長 row の左側に小さく表示。
-  // 拡大せず objectFit cover で中央 crop (情報密度を保つ)。
-  // 動画/blurhash は AnonPostCard の重い経路に任せ、検索結果は静止画 URL のみ。
-  const thumbUrl = useMemo(() => {
-    const urls = post.media_urls;
-    if (!Array.isArray(urls) || urls.length === 0) return null;
-    const first = urls[0];
-    if (typeof first !== 'string' || first.length === 0) return null;
-    // ローカル URI が混ざることはない契約 (createPost で弾く) だが念のため http(s) のみ通す
-    if (!/^https?:\/\//i.test(first)) return null;
-    return first;
-  }, [post.media_urls]);
-
-  return (
-    <PressableScale
-      onPress={onPress}
-      haptic="tap"
-      accessibilityRole="button"
-      accessibilityLabel={`投稿を開く: ${title ?? ''}`}
-      style={{
-        padding: SP['3'],
-        backgroundColor: C.bg2,
-        borderRadius: R.lg,
-        borderWidth: 1,
-        borderColor: C.border,
-        gap: SP['2'],
-      }}
-    >
-      {/* meta — 匿名 + 相対時刻 + 反応カウント + 「なぜこの結果?」 */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-        <Avatar size={20} anonymous />
-        <Text style={[T.caption, { color: C.text3, flex: 1 }]} numberOfLines={1}>
-          匿名 · {formatRelative(post.created_at)}
-        </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <Icon.heart size={11} color={C.text3} strokeWidth={2} />
-          <Text style={[T.caption, { color: C.text3, fontWeight: '700' }]}>
-            {post.likes_count.toLocaleString('ja-JP')}
-          </Text>
-          <Icon.comment size={11} color={C.text3} strokeWidth={2} />
-          <Text style={[T.caption, { color: C.text3, fontWeight: '700' }]}>
-            {post.comments_count.toLocaleString('ja-JP')}
-          </Text>
-        </View>
-        {/* ⓘ「なぜこの結果?」 — RankingExplainer modal を開く
-            React Native の Pressable は default で親へイベント伝播しない
-            (capture/bubble は SyntheticEvent 経路を取らない) ため、
-            stopPropagation は不要 — 子の onPress は親の onPress を
-            発火させない。 */}
-        <PressableScale
-          onPress={onExplain}
-          haptic="tap"
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel="この結果が出た理由を見る"
-          style={{
-            width: 22,
-            height: 22,
-            borderRadius: 11,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: C.bg3,
-          }}
-        >
-          <Icon.info size={12} color={C.text3} strokeWidth={2.2} />
-        </PressableScale>
-      </View>
-
-      {/* 本文ブロック — 画像があれば horizontal layout (image left, text right)、
-          無ければ素の縦並び。iOS-native な「Mail の添付プレビュー」感を狙う。 */}
-      <View
-        style={{
-          flexDirection: thumbUrl ? 'row' : 'column',
-          alignItems: thumbUrl ? 'flex-start' : 'stretch',
-          gap: thumbUrl ? SP['3'] : SP['2'],
-        }}
-      >
-        {thumbUrl && (
-          <ExpoImage
-            source={{ uri: thumbUrl }}
-            style={{
-              width: 72,
-              height: 72,
-              borderRadius: 10,
-              backgroundColor: C.bg3,
-            }}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            transition={120}
-            recyclingKey={post.id}
-            accessibilityIgnoresInvertColors
-          />
-        )}
-        <View style={{ flex: 1, gap: SP['2'] }}>
-          {/* title — 大きく */}
-          {title && (
-            <HighlightedText
-              text={title}
-              terms={highlightTerms}
-              style={[T.bodyB, { color: C.text }]}
-              numberOfLines={2}
-            />
-          )}
-
-          {/* 本文 preview */}
-          {preview.length > 0 && (
-            <HighlightedText
-              text={preview}
-              terms={highlightTerms}
-              style={[T.small, { color: C.text2 }]}
-              numberOfLines={2}
-            />
-          )}
-
-          {/* tag chips (上位 3 件まで) */}
-          {post.tag_names && post.tag_names.length > 0 && (
-            <View style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
-              {Array.from(new Set(post.tag_names)).slice(0, 3).map((tg) => (
-                <Text
-                  key={tg}
-                  style={[T.caption, { color: C.accent, fontWeight: '700' }]}
-                >
-                  #{tg}
-                </Text>
-              ))}
-            </View>
-          )}
-        </View>
-      </View>
-    </PressableScale>
-  );
-}
-
-// ============================================================
-// CompactCommunityCard — 検索結果用のコミュ行
-// ------------------------------------------------------------
-// 既存 RecommendedCommunities は 120x140 縦カード (Discovery 用)。
-// 検索結果は横長 row のほうが情報密度が高い。
-// ============================================================
-function CompactCommunityCard({
-  community,
-  highlightTerms,
-  onPress,
-}: {
-  community: CommunityHit;
-  highlightTerms: string[];
-  onPress: () => void;
-}) {
-  return (
-    <PressableScale
-      onPress={onPress}
-      haptic="tap"
-      accessibilityRole="button"
-      accessibilityLabel={`コミュニティを開く: ${community.name}`}
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: SP['3'],
-        padding: SP['3'],
-        backgroundColor: C.bg2,
-        borderRadius: R.lg,
-        borderWidth: 1,
-        borderColor: C.border,
-      }}
-    >
-      {/* icon — 既存 emoji + color stripe を踏襲 */}
-      <View
-        style={{
-          width: 44,
-          height: 44,
-          borderRadius: 22,
-          backgroundColor: community.icon_color || C.bg3,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Text style={{ fontSize: 22 }}>{community.icon_emoji || '🏷'}</Text>
-      </View>
-      <View style={{ flex: 1, gap: 2 }}>
-        <HighlightedText
-          text={community.name}
-          terms={highlightTerms}
-          style={[T.bodyB, { color: C.text }]}
-          numberOfLines={1}
-        />
-        {community.description && community.description.length > 0 && (
-          <HighlightedText
-            text={community.description}
-            terms={highlightTerms}
-            style={[T.caption, { color: C.text3 }]}
-            numberOfLines={1}
-          />
-        )}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
-          <Icon.friends size={11} color={C.text3} strokeWidth={2} />
-          <Text style={[T.caption, { color: C.text3, fontWeight: '700' }]}>
-            {community.member_count.toLocaleString('ja-JP')} 人
-          </Text>
-        </View>
-      </View>
-      <Icon.chevronR size={16} color={C.text3} strokeWidth={2} />
-    </PressableScale>
-  );
-}
-
-// ============================================================
-// EmptyResultsView — 結果 0 件
-// ------------------------------------------------------------
-// - "もしかして..." (synonym 候補)
-// - 入力をクリア / トレンドへ
-// ============================================================
-function EmptyResultsView({
-  query,
-  didYouMean,
-  onPickSuggestion,
-  onClear,
-}: {
-  query: string;
-  didYouMean: string | null;
-  onPickSuggestion: (q: string) => void;
-  onClear: () => void;
-}) {
-  return (
-    <View
-      style={{
-        paddingHorizontal: SP['4'],
-        paddingVertical: SP['6'],
-        alignItems: 'center',
-        gap: SP['4'],
-      }}
-    >
-      <View
-        style={{
-          width: 84,
-          height: 84,
-          borderRadius: 42,
-          backgroundColor: C.amberBg,
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderWidth: 1,
-          borderColor: C.amber + '40',
-        }}
-      >
-        <Icon.search size={36} color={C.amber} strokeWidth={2} />
-      </View>
-      <View style={{ alignItems: 'center', gap: SP['2'] }}>
-        <Text style={[T.h3, { color: C.text, textAlign: 'center' }]}>
-          結果がありません
-        </Text>
-        <Text
-          style={[T.small, { color: C.text3, textAlign: 'center', maxWidth: 320 }]}
-        >
-          <Text style={{ color: C.accentLight, fontWeight: '700' }}>「{query}」</Text>
-          に一致する投稿やコミュニティが見つかりませんでした。
-        </Text>
-      </View>
-      <View
-        style={{
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
-          gap: SP['2'],
-        }}
-      >
-        {didYouMean && (
-          <PressableScale
-            onPress={() => onPickSuggestion(didYouMean)}
-            haptic="confirm"
-            accessibilityRole="button"
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              paddingHorizontal: SP['3'],
-              paddingVertical: 8,
-              backgroundColor: C.accentBg,
-              borderRadius: R.full,
-              borderWidth: 1,
-              borderColor: C.accent + '66',
-            }}
-          >
-            <Icon.sparkles size={14} color={C.accentLight} strokeWidth={2.2} />
-            <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>
-              「{didYouMean}」で検索
-            </Text>
-          </PressableScale>
-        )}
-        <PressableScale
-          onPress={onClear}
-          haptic="tap"
-          accessibilityRole="button"
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 6,
-            paddingHorizontal: SP['3'],
-            paddingVertical: 8,
-            backgroundColor: C.bg2,
-            borderRadius: R.full,
-            borderWidth: 1,
-            borderColor: C.border,
-          }}
-        >
-          <Icon.close size={14} color={C.text2} strokeWidth={2.2} />
-          <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>
-            検索をクリア
-          </Text>
-        </PressableScale>
-      </View>
-    </View>
-  );
-}
-

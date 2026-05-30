@@ -27,6 +27,11 @@ const DEFAULT_STATE = {
   pollOptions: ['', ''] as string[],
   pollMulti: false,
   pollHours: 24 as number | null,
+
+  // ---- 下書き連携 ----
+  // draftsStore 上の下書き ID。投稿フロー (create + create-settings) で共有し、
+  // 自動保存で同一 ID を更新、投稿成功時に reset() で null へ戻す。
+  draftId: null as string | null,
 };
 
 interface PostDraftState {
@@ -50,6 +55,7 @@ interface PostDraftState {
   pollOptions: string[];
   pollMulti: boolean;
   pollHours: number | null;
+  draftId: string | null;
 
   // ---- Actions ----
   setTitle: (t: string) => void;
@@ -64,6 +70,7 @@ interface PostDraftState {
   setCwText: (t: string) => void;
   setSourceUrl: (u: string) => void;
   setPoll: (show: boolean, question: string, options: string[], multi: boolean, hours: number | null) => void;
+  setDraftId: (id: string | null) => void;
   reset: () => void;
 }
 
@@ -84,5 +91,6 @@ export const usePostDraftStore = create<PostDraftState>()((set) => ({
   setSourceUrl: (u) => set(() => ({ sourceUrl: u })),
   setPoll: (show, question, options, multi, hours) =>
     set(() => ({ showPoll: show, pollQuestion: question, pollOptions: options, pollMulti: multi, pollHours: hours })),
+  setDraftId: (id) => set(() => ({ draftId: id })),
   reset: () => set(() => ({ ...DEFAULT_STATE })),
 }));
