@@ -1,22 +1,45 @@
-import { View, Text, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, TextInput, Image } from 'react-native';
+// =============================================================================
+// app/settings/profile-edit.tsx — プロフィール編集 (EDITORIAL「特集」言語)
+// -----------------------------------------------------------------------------
+// マイページの鉛筆バッジから飛ぶ画面。アイコン (写真 / 絵文字)・カバー画像・
+// ニックネーム・自己紹介 (bio) を 1 画面で編集する。
+//
+// デザイン言語: 検索 / コミュ作成と同じ「特集」(EDITORIAL):
+//   - 黒地 C.bg + 1px hairlines + 大型 Apple SF 系見出し
+//   - 紫 accent を一点集中、塗りカードは subtle のみ
+//   - セクション = 大文字小型ラベル (LOGO_FONT) + コンテンツ
+//   - 入力欄 = EditorialField (下線一本 / 文字数カウンタは部品自体が持つので
+//     重複表示しない)
+//   - 保存 = EditorialSubmitBar
+// =============================================================================
+
 import { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
+  Image,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { TopBar } from '../../components/nav/TopBar';
-import { BackButton } from '../../components/nav/BackButton';
-import { Input } from '../../components/ui/Input';
-import { Button } from '../../components/ui/Button';
-import { Avatar } from '../../components/ui/Avatar';
-import { PressableScale } from '../../components/ui/PressableScale';
+import { Lock, Camera, Image as ImageIcon } from 'lucide-react-native';
+
 import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
 import { supabase } from '../../lib/supabase';
 import { prepareImageUpload } from '../../lib/image';
 import { openCropper } from '../../lib/imageCropper';
+import { PressableScale } from '../../components/ui/PressableScale';
+import { HeroAvatar } from '../../components/mypage/HeroAvatar';
+import { EditorialFormHeader } from '../../components/community/EditorialFormHeader';
+import { EditorialField } from '../../components/community/EditorialField';
+import { EditorialSubmitBar } from '../../components/community/EditorialSubmitBar';
 import { C, R, SP } from '../../design/tokens';
-import { T } from '../../design/typography';
-import { Icon } from '../../constants/icons';
+import { T, LOGO_FONT, LOGO_FONT_WEIGHT } from '../../design/typography';
 
 const AVATAR_EMOJIS = [
   '😀', '😎', '🥰', '🤩', '🥳', '😇', '🤓', '🥸',
@@ -26,6 +49,7 @@ const AVATAR_EMOJIS = [
 ];
 
 const BIO_MAX = 200;
+type AvatarMode = 'photo' | 'emoji';
 
 export default function ProfileEditScreen() {
   const insets = useSafeAreaInsets();
@@ -33,14 +57,14 @@ export default function ProfileEditScreen() {
   const user = useAuthStore((s) => s.user);
   const refreshProfile = useAuthStore((s) => s.refreshProfile);
   const show = useToastStore((s) => s.show);
+
   const [nickname, setNickname] = useState(user?.nickname ?? '');
   const [bio, setBio] = useState('');
   const [emoji, setEmoji] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [avatarMode, setAvatarMode] = useState<AvatarMode>('photo');
   const [loading, setLoading] = useState(false);
-  // アバター / カバーで個別に upload 状態を持ち、片方の upload 中にもう片方の
-  // ボタンが固まらないようにする。save は両方の uploading を見て disable する。
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [uploadingCover, setUploadingCover] = useState(false);
   const uploading = uploadingAvatar || uploadingCover;
@@ -66,14 +90,15 @@ export default function ProfileEditScreen() {
         setEmoji(row.avatar_emoji ?? null);
         setAvatarUrl(row.avatar_url ?? null);
         setCoverUrl(row.cover_url ?? null);
+        // 既存の状態から default mode を決める: 絵文字が選ばれていれば 'emoji'。
+        setAvatarMode(row.avatar_emoji ? 'emoji' : 'photo');
       }
     })();
   }, [user]);
 
   // ===== アバター (正方形・circular cropper) =====
   const pickAvatar = async () => {
-    if (!user) return;
-    if (uploadingAvatar) return;
+    if (!user || uploadingAvatar) return;
     if (Platform.OS !== 'web') {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
@@ -99,35 +124,33 @@ export default function ProfileEditScreen() {
     try {
       const prepared = await prepareImageUpload(croppedUri, { maxSizeBytes: 5 * 1024 * 1024 });
       const path = `${user.id}/${Date.now()}.${prepared.ext}`;
-      const { error: upErr } = await supabase.storage.from('avatars').upload(path, prepared.blob, {
-        contentType: prepared.mime,
-        upsert: true,
-      });
+      const { error: upErr } = await supabase.storage
+        .from('avatars')
+        .upload(path, prepared.blob, { contentType: prepared.mime, upsert: true });
       if (upErr) throw upErr;
       const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
       setAvatarUrl(pub.publicUrl);
       setEmoji(null);
+      setAvatarMode('photo');
       show('アイコンをアップロードしました', 'success');
     } catch (e) {
       console.warn('avatar upload error:', e);
-      const detail = e instanceof Error ? e.message : (e !== null && typeof e === 'object' && 'message' in e) ? String((e as {message: unknown}).message) : '';
+      const detail = e instanceof Error
+        ? e.message
+        : (e !== null && typeof e === 'object' && 'message' in e)
+          ? String((e as { message: unknown }).message)
+          : '';
       show(detail.includes('大きすぎ') ? detail : 'アップロードに失敗しました', 'error');
     } finally {
       setUploadingAvatar(false);
     }
   };
 
-  const removeAvatar = () => {
-    setAvatarUrl(null);
-  };
+  const removeAvatar = () => setAvatarUrl(null);
 
-  // ===== カバー (横長・circular cropper は使わない) =====
-  // native は OS の crop UI を 16:9 で出す。Web は prepareImageUpload で
-  // 1600x900 に内側 fit で resize して保存 (cover 表示時に中央寄せ)。
-  // 既存 `avatars` bucket を path で分離して流用 (cover_<ts>.<ext>)。
+  // ===== カバー (横長・OS の crop UI を 16:9 で / Web は cropper なし resize) =====
   const pickCover = async () => {
-    if (!user) return;
-    if (uploadingCover) return;
+    if (!user || uploadingCover) return;
     if (Platform.OS !== 'web') {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
@@ -152,30 +175,30 @@ export default function ProfileEditScreen() {
         quality: 0.85,
       });
       const path = `${user.id}/cover_${Date.now()}.${prepared.ext}`;
-      const { error: upErr } = await supabase.storage.from('avatars').upload(path, prepared.blob, {
-        contentType: prepared.mime,
-        upsert: true,
-      });
+      const { error: upErr } = await supabase.storage
+        .from('avatars')
+        .upload(path, prepared.blob, { contentType: prepared.mime, upsert: true });
       if (upErr) throw upErr;
       const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
       setCoverUrl(pub.publicUrl);
       show('カバー画像をアップロードしました', 'success');
     } catch (e) {
       console.warn('cover upload error:', e);
-      const detail = e instanceof Error ? e.message : (e !== null && typeof e === 'object' && 'message' in e) ? String((e as {message: unknown}).message) : '';
+      const detail = e instanceof Error
+        ? e.message
+        : (e !== null && typeof e === 'object' && 'message' in e)
+          ? String((e as { message: unknown }).message)
+          : '';
       show(detail.includes('大きすぎ') ? detail : 'アップロードに失敗しました', 'error');
     } finally {
       setUploadingCover(false);
     }
   };
 
-  const removeCover = () => {
-    setCoverUrl(null);
-  };
+  const removeCover = () => setCoverUrl(null);
 
   const save = async () => {
-    if (!user) return;
-    if (loading || uploading) return;
+    if (!user || loading || uploading) return;
     const trimmedNickname = nickname.trim();
     if (trimmedNickname.length < 2) {
       show('ニックネームは2文字以上で入力してください', 'warn');
@@ -220,30 +243,45 @@ export default function ProfileEditScreen() {
     }
   };
 
+  const canSubmit = !uploading && nickname.trim().length >= 2 && bio.length <= BIO_MAX;
+  const disabledReason =
+    nickname.trim().length < 2
+      ? 'ニックネームを 2 文字以上で入力してください'
+      : bio.length > BIO_MAX
+        ? `自己紹介は ${BIO_MAX} 文字以内にしてください`
+        : uploading
+          ? '画像アップロード中は保存できません'
+          : null;
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={{ flex: 1, backgroundColor: C.bg }}
     >
-      <TopBar title="プロフィール編集" left={<BackButton />} />
       <ScrollView
         contentContainerStyle={{
-          padding: SP['4'],
-          paddingBottom: insets.bottom + SP['10'],
-          gap: SP['5'],
+          paddingTop: insets.top + SP['2'],
+          paddingBottom: insets.bottom + SP['12'],
         }}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        {/* ===== カバー画像 ===== */}
-        <View style={{ gap: SP['2'] }}>
-          <Text style={[T.smallM, { color: C.text2 }]}>カバー画像</Text>
+        {/* ===== マストヘッド ===== */}
+        <EditorialFormHeader
+          titleEn="EDIT PROFILE"
+          titleJa="プロフィール"
+          onBack={() => router.back()}
+        />
+
+        {/* ===== COVER ===== */}
+        <Section label="COVER" topGap>
           <View
             style={{
-              height: 140,
+              height: 160,
               borderRadius: R.lg,
               backgroundColor: C.bg2,
               borderWidth: 1,
-              borderColor: C.border,
+              borderColor: C.divider,
               overflow: 'hidden',
               alignItems: 'center',
               justifyContent: 'center',
@@ -253,190 +291,375 @@ export default function ProfileEditScreen() {
               <Image source={{ uri: coverUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
             ) : (
               <View style={{ alignItems: 'center', gap: 6 }}>
-                <Icon.image size={28} color={C.text3} strokeWidth={1.8} />
+                <ImageIcon size={26} color={C.text3} strokeWidth={1.6} />
                 <Text style={[T.caption, { color: C.text3 }]}>未設定 (16:9 推奨)</Text>
               </View>
             )}
+            {uploadingCover ? (
+              <View
+                style={{
+                  ...StyleSheetAbsoluteFill,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: 'rgba(0,0,0,0.5)',
+                }}
+              >
+                <ActivityIndicator color={C.accent} />
+              </View>
+            ) : null}
           </View>
-          <View style={{ flexDirection: 'row', gap: SP['2'] }}>
-            <PressableScale
+          <LinkRow>
+            <ActionLink
               onPress={pickCover}
-              haptic="tap"
               disabled={uploadingCover}
-              accessibilityState={{ busy: uploadingCover, disabled: uploadingCover }}
-              style={{
-                flexDirection: 'row', alignItems: 'center', gap: SP['1'],
-                paddingHorizontal: SP['3'], paddingVertical: SP['2'],
-                backgroundColor: C.accent, borderRadius: R.full,
-                opacity: uploadingCover ? 0.6 : 1,
-              }}
-            >
-              {uploadingCover ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Icon.camera size={16} color="#fff" strokeWidth={2.2} />
-              )}
-              <Text style={[T.smallM, { color: '#fff' }]}>
-                {uploadingCover ? 'アップロード中…' : coverUrl ? 'カバーを変更' : 'カバーを選ぶ'}
-              </Text>
-            </PressableScale>
-            {coverUrl && (
-              <PressableScale
+              accessibilityLabel="カバーを変更"
+              icon={<Camera size={13} color={C.accent} strokeWidth={2.2} />}
+              label={coverUrl ? 'カバーを変更' : 'カバーを選ぶ'}
+            />
+            {coverUrl ? (
+              <ActionLink
                 onPress={removeCover}
-                haptic="warn"
-                style={{
-                  paddingHorizontal: SP['3'], paddingVertical: SP['2'],
-                  backgroundColor: C.bg3, borderRadius: R.full,
-                  borderWidth: 1, borderColor: C.border,
-                }}
-              >
-                <Text style={[T.smallM, { color: C.text2 }]}>外す</Text>
-              </PressableScale>
-            )}
-          </View>
-        </View>
+                disabled={uploadingCover}
+                variant="muted"
+                accessibilityLabel="カバーを外す"
+                label="外す"
+              />
+            ) : null}
+          </LinkRow>
+        </Section>
 
-        {/* ===== アバター ===== */}
-        <View style={{ alignItems: 'center', gap: SP['3'] }}>
-          <Avatar size={120} name={nickname} emoji={emoji ?? undefined} uri={avatarUrl ?? undefined} />
-          <View style={{ flexDirection: 'row', gap: SP['2'] }}>
-            <PressableScale
-              onPress={pickAvatar}
-              haptic="tap"
-              disabled={uploadingAvatar}
-              accessibilityState={{ busy: uploadingAvatar, disabled: uploadingAvatar }}
+        {/* ===== AVATAR ===== */}
+        <Section label="AVATAR" topGap>
+          <View style={{ alignItems: 'center', gap: SP['3'] }}>
+            <View
               style={{
-                flexDirection: 'row', alignItems: 'center', gap: SP['1'],
-                paddingHorizontal: SP['3'], paddingVertical: SP['2'],
-                backgroundColor: C.accent, borderRadius: R.full,
-                opacity: uploadingAvatar ? 0.6 : 1,
+                borderRadius: 70,
+                backgroundColor: C.bg,
+                padding: 4,
+                position: 'relative',
               }}
             >
+              <HeroAvatar
+                size={128}
+                nickname={nickname}
+                avatarEmoji={emoji}
+                avatarUrl={avatarUrl}
+              />
               {uploadingAvatar ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Icon.camera size={16} color="#fff" strokeWidth={2.2} />
-              )}
-              <Text style={[T.smallM, { color: '#fff' }]}>
-                {uploadingAvatar ? 'アップロード中…' : 'アイコンを選ぶ'}
-              </Text>
-            </PressableScale>
-            {avatarUrl && (
-              <PressableScale
-                onPress={removeAvatar}
-                haptic="warn"
-                style={{
-                  paddingHorizontal: SP['3'], paddingVertical: SP['2'],
-                  backgroundColor: C.bg3, borderRadius: R.full,
-                  borderWidth: 1, borderColor: C.border,
-                }}
-              >
-                <Text style={[T.smallM, { color: C.text2 }]}>外す</Text>
-              </PressableScale>
-            )}
-          </View>
-          <Text style={[T.caption, { color: C.text3, textAlign: 'center' }]}>
-            🔒 このアイコンとニックネームは自分にだけ見えます{'\n'}
-            他のユーザーから見たあなたは常に「匿」マークの匿名表示です
-          </Text>
-        </View>
+                <View
+                  style={{
+                    ...StyleSheetAbsoluteFill,
+                    borderRadius: 70,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: 'rgba(0,0,0,0.45)',
+                  }}
+                >
+                  <ActivityIndicator color={C.accent} />
+                </View>
+              ) : null}
+            </View>
 
-        {/* ===== ニックネーム ===== */}
-        <View style={{ gap: SP['1'] }}>
-          <Input
-            label="ニックネーム（自分用）"
-            icon={Icon.mypage}
+            {/* 写真 / 絵文字 セグメント */}
+            <SegmentedPill
+              value={avatarMode}
+              onChange={setAvatarMode}
+              options={[
+                { value: 'photo', label: '写真' },
+                { value: 'emoji', label: '絵文字' },
+              ]}
+            />
+          </View>
+
+          {avatarMode === 'photo' ? (
+            <LinkRow center>
+              <ActionLink
+                onPress={pickAvatar}
+                disabled={uploadingAvatar}
+                accessibilityLabel="写真を選ぶ"
+                icon={<Camera size={13} color={C.accent} strokeWidth={2.2} />}
+                label={avatarUrl ? 'アイコン画像を変更' : 'アイコン画像を選ぶ'}
+              />
+              {avatarUrl ? (
+                <ActionLink
+                  onPress={removeAvatar}
+                  disabled={uploadingAvatar}
+                  variant="muted"
+                  accessibilityLabel="写真を外す"
+                  label="外す"
+                />
+              ) : null}
+            </LinkRow>
+          ) : (
+            <View style={{ marginTop: SP['1'] }}>
+              <EmojiGrid value={emoji} onSelect={(e) => { setEmoji(e); setAvatarUrl(null); }} />
+            </View>
+          )}
+
+          {/* プライバシー注記 */}
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'flex-start',
+              gap: SP['2'],
+              marginTop: SP['3'],
+              paddingHorizontal: SP['3'],
+              paddingVertical: SP['3'],
+              backgroundColor: C.bg2,
+              borderRadius: R.md,
+              borderWidth: 1,
+              borderColor: C.divider,
+            }}
+          >
+            <Lock size={14} color={C.text3} strokeWidth={2.2} style={{ marginTop: 2 }} />
+            <Text style={[T.caption, { color: C.text3, flex: 1, lineHeight: 18 }]}>
+              アイコンとニックネームは自分にだけ見えます。他のユーザーから見たあなたは常に「匿」マークの匿名表示です。
+            </Text>
+          </View>
+        </Section>
+
+        {/* ===== NAME ===== */}
+        <Section label="NAME" topGap>
+          <EditorialField
+            label="ニックネーム"
+            required
+            hint="自分が見る名前 (2〜20 文字)"
             value={nickname}
             onChangeText={setNickname}
             placeholder="例: ぽけオタク"
             maxLength={20}
+            showCount
             returnKeyType="done"
           />
-          <Text style={[T.caption, {
-            color: Array.from(nickname.trim()).length > 20 ? C.amber : C.text3,
-            textAlign: 'right',
-            paddingRight: SP['1'],
-            fontVariant: ['tabular-nums'],
-          }]}>
-            {Array.from(nickname.trim()).length}/20
-          </Text>
-        </View>
+        </Section>
 
-        {/* ===== 自己紹介 (bio) ===== */}
-        <View style={{ gap: SP['1'] }}>
-          <Text style={[T.smallM, { color: C.text2 }]}>自己紹介（任意）</Text>
-          <View
-            style={{
-              backgroundColor: C.bg2,
-              borderWidth: 1,
-              borderColor: C.border,
-              borderRadius: R.md,
-              paddingHorizontal: SP['3'],
-              paddingVertical: 10,
-            }}
-          >
-            <TextInput
-              value={bio}
-              onChangeText={(t) => setBio(t.slice(0, BIO_MAX))}
-              placeholder="あなたについて (200文字まで)"
-              placeholderTextColor={C.text3}
-              selectionColor={C.accent}
-              cursorColor={C.accent}
-              multiline
-              maxLength={BIO_MAX}
-              underlineColorAndroid="transparent"
-              style={[T.body, { color: C.text, minHeight: 96, textAlignVertical: 'top' }]}
-            />
-          </View>
-          <Text style={[T.caption, {
-            color: bio.length > BIO_MAX * 0.9 ? C.amber : C.text3,
-            textAlign: 'right',
-            paddingRight: SP['1'],
-            fontVariant: ['tabular-nums'],
-          }]}>
-            {bio.length}/{BIO_MAX}
-          </Text>
-        </View>
+        {/* ===== BIO ===== */}
+        <Section label="ABOUT" topGap>
+          <EditorialField
+            label="自己紹介"
+            hint="あなたについて、好きなもの、最近ハマっているもの"
+            value={bio}
+            onChangeText={(t) => setBio(t.slice(0, BIO_MAX))}
+            placeholder="例: アニメと音楽が好き。最近は◯◯にハマっています。"
+            maxLength={BIO_MAX}
+            multiline
+            showCount
+          />
+        </Section>
 
-        {/* ===== 絵文字アイコン選択 ===== */}
-        <View style={{ gap: SP['2'] }}>
-          <Text style={[T.smallM, { color: C.text2 }]}>
-            または絵文字から選ぶ
-          </Text>
-          <View style={{
-            flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'],
-            padding: SP['3'],
-            backgroundColor: C.bg2,
-            borderRadius: R.lg,
-            borderWidth: 1,
-            borderColor: C.border,
-          }}>
-            {AVATAR_EMOJIS.map((e) => (
-              <PressableScale
-                key={e}
-                onPress={() => { setEmoji(e); setAvatarUrl(null); }}
-                haptic="select"
-                style={{
-                  width: 48, height: 48, borderRadius: 24,
-                  backgroundColor: emoji === e ? C.accentBg : C.bg3,
-                  alignItems: 'center', justifyContent: 'center',
-                  borderWidth: emoji === e ? 2 : 1,
-                  borderColor: emoji === e ? C.accent : C.border,
-                }}
-              >
-                <Text style={{ fontSize: 24 }}>{e}</Text>
-              </PressableScale>
-            ))}
-          </View>
+        {/* ===== SAVE ===== */}
+        <View style={{ marginTop: SP['8'] }}>
+          <EditorialSubmitBar
+            label="変更を保存"
+            onPress={save}
+            loading={loading}
+            disabled={!canSubmit}
+            disabledReason={disabledReason}
+          />
         </View>
-
-        <Button label="保存" onPress={save} loading={loading} disabled={uploading} />
-        {uploading && (
-          <Text style={[T.caption, { color: C.text3, textAlign: 'center', marginTop: -SP['2'] }]}>
-            画像アップロード中は保存できません
-          </Text>
-        )}
       </ScrollView>
     </KeyboardAvoidingView>
+  );
+}
+
+// =============================================================================
+// 内部の小部品
+// =============================================================================
+
+const StyleSheetAbsoluteFill = {
+  position: 'absolute' as const,
+  left: 0,
+  right: 0,
+  top: 0,
+  bottom: 0,
+};
+
+function Section({
+  label,
+  topGap,
+  children,
+}: {
+  label: string;
+  topGap?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <View
+      style={{
+        paddingHorizontal: SP['5'],
+        marginTop: topGap ? SP['6'] : 0,
+        gap: SP['3'],
+      }}
+    >
+      <Text
+        style={{
+          fontFamily: LOGO_FONT,
+          fontWeight: LOGO_FONT_WEIGHT,
+          fontSize: 11,
+          lineHeight: 14,
+          letterSpacing: 1.8,
+          color: C.text3,
+          textTransform: 'uppercase',
+        }}
+      >
+        {label}
+      </Text>
+      {children}
+    </View>
+  );
+}
+
+function LinkRow({ children, center }: { children: React.ReactNode; center?: boolean }) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SP['4'],
+        justifyContent: center ? 'center' : 'flex-start',
+        marginTop: SP['1'],
+      }}
+    >
+      {children}
+    </View>
+  );
+}
+
+function ActionLink({
+  onPress,
+  label,
+  icon,
+  disabled,
+  variant = 'accent',
+  accessibilityLabel,
+}: {
+  onPress: () => void;
+  label: string;
+  icon?: React.ReactNode;
+  disabled?: boolean;
+  variant?: 'accent' | 'muted';
+  accessibilityLabel: string;
+}) {
+  const color = variant === 'accent' ? C.accent : C.text3;
+  return (
+    <PressableScale
+      onPress={onPress}
+      haptic="tap"
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      style={{ alignItems: 'center', opacity: disabled ? 0.5 : 1 }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+        {icon}
+        <Text style={[T.smallB, { color, fontSize: 13 }]}>{label}</Text>
+      </View>
+      {/* accent variant のみ下線 (EDITORIAL の所作) */}
+      {variant === 'accent' ? (
+        <View
+          style={{
+            alignSelf: 'stretch',
+            height: 1,
+            backgroundColor: color,
+            marginTop: 3,
+          }}
+        />
+      ) : null}
+    </PressableScale>
+  );
+}
+
+function SegmentedPill<T extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string }[];
+}) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        backgroundColor: C.bg2,
+        borderRadius: R.full,
+        padding: 3,
+        borderWidth: 1,
+        borderColor: C.divider,
+      }}
+    >
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <PressableScale
+            key={o.value}
+            onPress={() => onChange(o.value)}
+            haptic="select"
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active }}
+            style={{
+              paddingHorizontal: SP['4'],
+              paddingVertical: 6,
+              borderRadius: R.full,
+              backgroundColor: active ? C.accent : 'transparent',
+            }}
+          >
+            <Text
+              style={[
+                T.smallB,
+                { color: active ? '#fff' : C.text2, fontSize: 12 },
+              ]}
+            >
+              {o.label}
+            </Text>
+          </PressableScale>
+        );
+      })}
+    </View>
+  );
+}
+
+function EmojiGrid({
+  value,
+  onSelect,
+}: {
+  value: string | null;
+  onSelect: (e: string) => void;
+}) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: SP['2'],
+        paddingVertical: SP['1'],
+      }}
+    >
+      {AVATAR_EMOJIS.map((e) => {
+        const active = value === e;
+        return (
+          <PressableScale
+            key={e}
+            onPress={() => onSelect(e)}
+            haptic="select"
+            accessibilityRole="button"
+            accessibilityLabel={`絵文字 ${e}`}
+            style={{
+              width: 50,
+              height: 50,
+              borderRadius: 25,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: active ? C.accentBg : 'transparent',
+              borderWidth: active ? 1.5 : 1,
+              borderColor: active ? C.accent : C.divider,
+            }}
+          >
+            <Text style={{ fontSize: 26 }}>{e}</Text>
+          </PressableScale>
+        );
+      })}
+    </View>
   );
 }
