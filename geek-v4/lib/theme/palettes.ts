@@ -348,42 +348,47 @@ export const SHADOW_DARK: ShadowSet = {
   },
 };
 
+// SHADOW_LIGHT — ライトモード用の影セット (2026-05-31 改修)
+// 旧版は dark と同じ `#0a0a0a` を流用していたため、白基調の上に「黒い影」が
+// 落ちて「中途半端に黒い」気持ち悪さを生んでいた。
+// shadowColor を中性的な薄灰 (#94a3b8 = slate-400) に変更し、opacity を
+// 若干下げて「白に馴染むふんわりとした浮遊感」に振り直す。
 export const SHADOW_LIGHT: ShadowSet = {
   none: {} as Record<string, never>,
   xs: {
-    shadowColor: '#0a0a0a',
+    shadowColor: '#94a3b8',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
+    shadowOpacity: 0.12,
     shadowRadius: 2,
     elevation: 1,
   },
   sm: {
-    shadowColor: '#0a0a0a',
+    shadowColor: '#94a3b8',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
+    shadowOpacity: 0.14,
     shadowRadius: 6,
     elevation: 2,
   },
   md: {
-    shadowColor: '#0a0a0a',
+    shadowColor: '#94a3b8',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.16,
     shadowRadius: 12,
-    elevation: 4,
+    elevation: 3,
   },
   card: {
-    shadowColor: '#0a0a0a',
+    shadowColor: '#94a3b8',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.10,
+    shadowOpacity: 0.18,
     shadowRadius: 14,
-    elevation: 4,
+    elevation: 3,
   },
   cardPress: {
-    shadowColor: '#0a0a0a',
+    shadowColor: '#94a3b8',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.14,
+    shadowOpacity: 0.22,
     shadowRadius: 20,
-    elevation: 6,
+    elevation: 4,
   },
   accentGlow: {
     shadowColor: '#2563EB',

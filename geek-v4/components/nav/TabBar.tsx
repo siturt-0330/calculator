@@ -97,9 +97,11 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
     Platform.OS === 'web'
       ? ({
           // box-shadow を CSS で補強 (RN shadow は web で elevation を出さない)
+          // light は黒透過だと「白基調に黒影」で気持ち悪いので slate-400 ベースに。
+          // 影の存在感はやや上げ、色を中性的な薄灰にして白に馴染ませる。
           boxShadow: isDark
             ? '0 8px 24px rgba(0,0,0,0.45)'
-            : '0 8px 24px rgba(0,0,0,0.12)',
+            : '0 8px 24px rgba(148,163,184,0.30)',
         } as Record<string, unknown>)
       : null;
 
