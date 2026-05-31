@@ -97,9 +97,11 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
     Platform.OS === 'web'
       ? ({
           // box-shadow を CSS で補強 (RN shadow は web で elevation を出さない)
+          // light は黒透過だと「白基調に黒影」で気持ち悪いので slate-400 ベースに。
+          // 影の存在感はやや上げ、色を中性的な薄灰にして白に馴染ませる。
           boxShadow: isDark
             ? '0 8px 24px rgba(0,0,0,0.45)'
-            : '0 8px 24px rgba(0,0,0,0.12)',
+            : '0 8px 24px rgba(148,163,184,0.30)',
         } as Record<string, unknown>)
       : null;
 
@@ -150,12 +152,19 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
             if (!tab) return null;
 
             const onPress = () => {
+              // tabPress event を emit する。useScrollToTop はこのイベントを listen して
+              // focused タブ配下の登録済み ScrollView/FlashList を先頭に scroll する。
               const event = navigation.emit({
                 type: 'tabPress',
                 target: route.key,
                 canPreventDefault: true,
               });
-              if (!focused && !event.defaultPrevented) {
+              if (event.defaultPrevented) return;
+              if (focused) {
+                // 再タップ: stack に積まれている sub-route (例: /community/<id>/admin)
+                // から tab の root へ戻す。useScrollToTop が同時に scroll を実行する。
+                router.navigate(`/(tabs)/${route.name}` as never);
+              } else {
                 navigation.navigate(route.name, route.params as never);
               }
             };

@@ -132,7 +132,7 @@ import { OfflineBanner } from '../components/ui/OfflineBanner';
 import { initAnalytics } from '../lib/analytics';
 import { initSentry, setSentryUser, clearSentryUser } from '../lib/sentry';
 import { initWebVitals } from '../lib/webVitals';
-import { useThemeStore, useResolvedTheme } from '../lib/theme/themeStore';
+import { useThemeStore, useResolvedTheme, syncStaticPaletteWithTheme } from '../lib/theme/themeStore';
 import { useColors } from '../hooks/useColors';
 import { AppState } from 'react-native';
 import { supabase } from '../lib/supabase';
@@ -240,6 +240,17 @@ export default function RootLayout() {
   const C = useColors();
   const resolvedTheme = useResolvedTheme();
 
+  // ★ ライトモード対応 (2026-05-31): 193+ ファイルが `import { C } from 'tokens'`
+  //   で static C を直参照しているため、テーマ切替時に C / GRAD の中身を
+  //   破壊的に書き換える。同時に下の <View key={resolvedTheme}> で navigation
+  //   tree 全体を remount して、static C を closure に持つ全コンポーネントが
+  //   新パレットで再描画されるようにする。
+  //   theme 切替は頻繁ではなく、ナビ位置がリセットされても許容範囲。
+  //
+  //   commit 段階 (render の前) で同期実行することで、初回 paint から
+  //   正しい色になる。useEffect だと一瞬古い色でフラッシュする。
+  syncStaticPaletteWithTheme(resolvedTheme);
+
   // ★ 言語切替反映 (Web):
   // `document.documentElement.lang` を更新することで:
   //   1. Chrome / Edge / Safari の "このページを翻訳" 機能が自動発火
@@ -255,7 +266,49 @@ export default function RootLayout() {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     try {
       document.documentElement.lang = lang;
-    } catch { /* ignore */ }
+      // ★ 2026-05-31: ブラウザ翻訳ブロックの動的解除
+      //   scripts/fix-html.mjs が dist/index.html に <html translate="no"> +
+      //   <meta name="google" content="notranslate"> を注入して Chrome / Edge /
+      //   Safari の翻訳機能をブロックしているため、ユーザーが言語を ja 以外に
+      //   切替えても UI が一切翻訳されない状態だった。
+      //   - lang === 'ja' → 翻訳ブロックを維持 (日本語ユーザーが Chrome の自動
+      //     翻訳をオンにしていても勝手に変な訳が入らない既存挙動を維持)
+      //   - lang !== 'ja' → translate='yes' に上書き + notranslate meta を除去
+      //     して、Chrome の "このページを翻訳" プロンプトを発火させる
+      const html = document.documentElement;
+      const isJa = lang === 'ja';
+      html.setAttribute('translate', isJa ? 'no' : 'yes');
+      // <meta name="google" content="notranslate"> の除去 / 復活
+      const head = document.head;
+      let googleMeta = head.querySelector('meta[name="google"]') as HTMLMetaElement | null;
+      if (isJa) {
+        if (!googleMeta) {
+          googleMeta = document.createElement('meta');
+          googleMeta.setAttribute('name', 'google');
+          head.appendChild(googleMeta);
+        }
+        googleMeta.setAttribute('content', 'notranslate');
+      } else if (googleMeta) {
+        googleMeta.parentElement?.removeChild(googleMeta);
+      }
+      // <meta name="robots"> から 'notranslate' を抜く (translate を許可する)
+      const robotsMeta = head.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+      if (robotsMeta) {
+        const cur = robotsMeta.getAttribute('content') ?? '';
+        if (isJa) {
+          if (!cur.includes('notranslate')) {
+            robotsMeta.setAttribute('content', cur ? `notranslate, ${cur}` : 'notranslate');
+          }
+        } else {
+          const cleaned = cur
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => s && s !== 'notranslate')
+            .join(', ');
+          robotsMeta.setAttribute('content', cleaned || 'index, follow');
+        }
+      }
+    } catch { /* ignore — DOM 操作失敗時はベスト effort で続行 */ }
   }, [lang]);
   useEffect(() => {
     // hydrate 改修 (MMKV 化):
@@ -468,7 +521,10 @@ export default function RootLayout() {
             persistOptions={{ persister, maxAge: 1000 * 60 * 60 * 2 }}
           >
             <BottomSheetModalProvider>
-              <View style={{ flex: 1, backgroundColor: C.bg }}>
+              {/* ★ key={resolvedTheme} で theme 切替時に全 navigation tree を
+                  remount し、static `import { C }` を持つ全コンポーネントを
+                  新パレットで再描画させる。テーマ切替は頻度低いので許容。 */}
+              <View key={resolvedTheme} style={{ flex: 1, backgroundColor: C.bg }}>
                 <StatusBar style={resolvedTheme === 'light' ? 'dark' : 'light'} />
                 {/* User-scoped realtime channel — notifications / feature_flags /
                     bookmark_collections / saved_searches / user_stamps を 1 channel に集約。
