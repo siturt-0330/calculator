@@ -266,7 +266,49 @@ export default function RootLayout() {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     try {
       document.documentElement.lang = lang;
-    } catch { /* ignore */ }
+      // ★ 2026-05-31: ブラウザ翻訳ブロックの動的解除
+      //   scripts/fix-html.mjs が dist/index.html に <html translate="no"> +
+      //   <meta name="google" content="notranslate"> を注入して Chrome / Edge /
+      //   Safari の翻訳機能をブロックしているため、ユーザーが言語を ja 以外に
+      //   切替えても UI が一切翻訳されない状態だった。
+      //   - lang === 'ja' → 翻訳ブロックを維持 (日本語ユーザーが Chrome の自動
+      //     翻訳をオンにしていても勝手に変な訳が入らない既存挙動を維持)
+      //   - lang !== 'ja' → translate='yes' に上書き + notranslate meta を除去
+      //     して、Chrome の "このページを翻訳" プロンプトを発火させる
+      const html = document.documentElement;
+      const isJa = lang === 'ja';
+      html.setAttribute('translate', isJa ? 'no' : 'yes');
+      // <meta name="google" content="notranslate"> の除去 / 復活
+      const head = document.head;
+      let googleMeta = head.querySelector('meta[name="google"]') as HTMLMetaElement | null;
+      if (isJa) {
+        if (!googleMeta) {
+          googleMeta = document.createElement('meta');
+          googleMeta.setAttribute('name', 'google');
+          head.appendChild(googleMeta);
+        }
+        googleMeta.setAttribute('content', 'notranslate');
+      } else if (googleMeta) {
+        googleMeta.parentElement?.removeChild(googleMeta);
+      }
+      // <meta name="robots"> から 'notranslate' を抜く (translate を許可する)
+      const robotsMeta = head.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+      if (robotsMeta) {
+        const cur = robotsMeta.getAttribute('content') ?? '';
+        if (isJa) {
+          if (!cur.includes('notranslate')) {
+            robotsMeta.setAttribute('content', cur ? `notranslate, ${cur}` : 'notranslate');
+          }
+        } else {
+          const cleaned = cur
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => s && s !== 'notranslate')
+            .join(', ');
+          robotsMeta.setAttribute('content', cleaned || 'index, follow');
+        }
+      }
+    } catch { /* ignore — DOM 操作失敗時はベスト effort で続行 */ }
   }, [lang]);
   useEffect(() => {
     // hydrate 改修 (MMKV 化):

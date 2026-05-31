@@ -41,6 +41,10 @@ export default function LanguageSettingsScreen() {
     setLang(l);
     // ja に戻すなら自動翻訳も切る (= 「日本語に戻したら英語のままになる」混乱を防ぐ)
     if (l === 'ja' && autoTranslate) setAutoTranslate(false);
+    // ja 以外を選んだら autoTranslate を自動 ON にして投稿本文も翻訳する。
+    // 静的 DICT 未対応の UI ラベルは Web のブラウザ翻訳機能 (_layout.tsx で
+    // translate='yes' に切替済) が拾ってくれるので、本文 + ラベル両方が翻訳される。
+    if (l !== 'ja' && !autoTranslate) setAutoTranslate(true);
     const opt = LANG_OPTIONS.find((o) => o.code === l);
     show(`${opt?.flag ?? ''} ${opt?.native ?? l} に変更しました`, 'success');
   };
