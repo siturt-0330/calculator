@@ -35,6 +35,31 @@ async function fetchTrendingTagNames(): Promise<string[]> {
     .filter((t): t is string => !!t);
 }
 
+// ============================================================
+// インデックスの module レベル共有メモ (perf)
+// ------------------------------------------------------------
+// useTagSearchV3 は投稿の Step 2 などで複数 component から同時に呼ばれる
+// (例: <TagInputSuggestions> と useAutoTagSuggest)。各 instance が同一データから
+// n-gram / trie / PMI embeddings を別々に二重構築していて初回マウントが重かった。
+// タグデータはアプリ全体で 1 セットなので、入力参照が一致すれば構築結果を使い回す
+// 単一スロットのメモを module レベルに置いて全 consumer で共有する。
+// react-query / zustand は変化時のみ新しい参照を返すので ref 等価で安全に共有できる。
+// ============================================================
+function sharedSlotMemo<R>(): (key: readonly unknown[], build: () => R) => R {
+  let slot: { key: readonly unknown[]; val: R } | null = null;
+  return (key, build) => {
+    if (slot && slot.key.length === key.length && slot.key.every((k, i) => Object.is(k, key[i]))) {
+      return slot.val;
+    }
+    const val = build();
+    slot = { key, val };
+    return val;
+  };
+}
+const _ngramMemo = sharedSlotMemo<NgramIndex>();
+const _trieMemo = sharedSlotMemo<Trie>();
+const _embedMemo = sharedSlotMemo<ReturnType<typeof buildEmbeddings>>();
+
 export function useTagSearchV3() {
   // Field-scoped selectors — whole-store destructure was causing this hook
   // (consumed by autocomplete input) to re-build n-gram / trie / PMI indexes
@@ -72,36 +97,47 @@ export function useTagSearchV3() {
   const signals = useMemo(() => aggregate(), [aggregate]);
 
   // N-gram インデックス
-  const ngramIndex = useMemo(() => {
-    const idx = new NgramIndex();
-    for (const t of (allTagsQ.data ?? [])) idx.add(t);
-    for (const n of Object.values(nodes)) {
-      idx.add(n.label);
-      for (const a of n.aliases) idx.add(a);
-      for (const r of (n.related ?? [])) idx.add(r);
-    }
-    for (const t of Object.keys(tagPopularity)) idx.add(t);
-    return idx;
-  }, [allTagsQ.data, nodes, tagPopularity]);
+  const ngramIndex = useMemo(
+    () =>
+      _ngramMemo([allTagsQ.data, nodes, tagPopularity], () => {
+        const idx = new NgramIndex();
+        for (const t of (allTagsQ.data ?? [])) idx.add(t);
+        for (const n of Object.values(nodes)) {
+          idx.add(n.label);
+          for (const a of n.aliases) idx.add(a);
+          for (const r of (n.related ?? [])) idx.add(r);
+        }
+        for (const t of Object.keys(tagPopularity)) idx.add(t);
+        return idx;
+      }),
+    [allTagsQ.data, nodes, tagPopularity],
+  );
 
   // Trie for prefix completion
-  const trie = useMemo(() => {
-    const t = new Trie();
-    const entries: Array<{ tag: string; popularity: number }> = [];
-    const allTags = new Set<string>(allTagsQ.data ?? []);
-    for (const n of Object.values(nodes)) {
-      allTags.add(n.label);
-      for (const a of n.aliases) allTags.add(a);
-    }
-    for (const tag of allTags) {
-      entries.push({ tag, popularity: tagPopularity[tag] ?? 0 });
-    }
-    t.build(entries);
-    return t;
-  }, [allTagsQ.data, nodes, tagPopularity]);
+  const trie = useMemo(
+    () =>
+      _trieMemo([allTagsQ.data, nodes, tagPopularity], () => {
+        const t = new Trie();
+        const entries: Array<{ tag: string; popularity: number }> = [];
+        const allTags = new Set<string>(allTagsQ.data ?? []);
+        for (const n of Object.values(nodes)) {
+          allTags.add(n.label);
+          for (const a of n.aliases) allTags.add(a);
+        }
+        for (const tag of allTags) {
+          entries.push({ tag, popularity: tagPopularity[tag] ?? 0 });
+        }
+        t.build(entries);
+        return t;
+      }),
+    [allTagsQ.data, nodes, tagPopularity],
+  );
 
   // PMI Embeddings
-  const embeddings = useMemo(() => buildEmbeddings(cooccur, tagPopularity), [cooccur, tagPopularity]);
+  const embeddings = useMemo(
+    () => _embedMemo([cooccur, tagPopularity], () => buildEmbeddings(cooccur, tagPopularity)),
+    [cooccur, tagPopularity],
+  );
 
   const trendingTags = useMemo(() => new Set(trendingQ.data ?? []), [trendingQ.data]);
 

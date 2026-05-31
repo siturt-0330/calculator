@@ -3,6 +3,7 @@ import { View, Text } from 'react-native';
 import Animated, { FadeInDown, Layout } from 'react-native-reanimated';
 import { PressableScale } from '../ui/PressableScale';
 import { useTagSearchV3 } from '../../hooks/useTagSearchV3';
+import { useDebounce } from '../../hooks/useDebounce';
 import { useSearchClickStore } from '../../stores/searchClickStore';
 import { classifyIntent, intentEmoji, intentLabel } from '../../lib/search/queryIntent';
 import { didYouMean } from '../../lib/search/tagSearchV2';
@@ -41,7 +42,11 @@ export function TagInputSuggestions({
     blockedTags: [...(ctx.blockedTags ?? []), ...excludeTags],
   }), [ctx, excludeTags]);
 
-  const trimmed = input.trim().replace(/^#/, '');
+  // 入力は debounce してから重い検索 (searchTagsV3 / variants / PMI / didYouMean)
+  // にかける。毎キーストロークで search が走ると入力中にカクつくため。表示テキスト
+  // 自体は親 (Input) が即時更新するので、入力の体感応答は損なわない。
+  const debouncedInput = useDebounce(input, 200);
+  const trimmed = debouncedInput.trim().replace(/^#/, '');
   // ★ try/catch ガード (2026-05-31): タグ入力中に検索エンジン (variants /
   //   ngram / PMI / didYouMean) のいずれかが例外を投げると画面ごと crash していた
   //   問題の防御。失敗時は空サジェストにフォールバックし入力フローを止めない。
