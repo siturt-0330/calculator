@@ -9,6 +9,7 @@ import Animated, {
   withSpring,
   withTiming,
   Easing,
+  interpolateColor,
 } from 'react-native-reanimated';
 import { useQueryClient } from '@tanstack/react-query';
 import { Avatar } from '../ui/Avatar';
@@ -30,48 +31,73 @@ import { SPRING_SNAPPY } from '../../design/motion';
 import type { Comment } from '../../types/models';
 
 // ============================================================
-// CommentThreadItem — 階層コメントを再帰的に描画する component
+// CommentThreadItem — 階層コメントを再帰的に描画する component (GEEK-Rail)
 // ------------------------------------------------------------
 // 親 (app/post/[id].tsx) は buildCommentTree で組み立てた root[] を持って
 // いて、これを map で 1 ルートずつ <CommentThreadItem /> に渡す。
 // children はこの component が自分で再帰 render する。
 //
-// 仕様:
-//   - indent: depth * 16px (max depth=3 = 48px)。最左に「縦バー」を描く。
-//     縦バーの色は theme-aware (`C.divider` / `C.border`) で、bubble の高さに
-//     追従して自動で伸縮する (flex stretch + Layout.springify)。
-//   - depth ≥ 2 のスレッドは初期 collapsed (タップで展開)。
-//     ただし「子が 1 件 + 自分も最深」のような場面では collapse が邪魔なので、
-//     children が 0 件のときは collapsed UI を出さない。
-//   - 「↪ 返信」ボタンで onReply(comment) を呼ぶ。親の入力欄に @hash + flag を
-//     セットする想定 (返信モード)。
-//   - 未読ハイライト (unreadIds に含まれる時) は背景 accentBg + 左 accent バー。
+// 設計言語 = GEEK-Rail:
+//   GEEK は username が存在しない匿名 SNS。アイデンティティは「アバター色 +
+//   #N バッジ」だけ。深いネストで枠付きバブルを並べると視覚ノイズで情報密度を
+//   殺すので、枠付きバブルを全廃し「線で束ね、余白で分ける」フラットツリーに
+//   する (Reddit / YouTube / Material の本質)。
 //
-// アニメーション (Apple Photos / Reddit 風の polish):
-//   - 折りたたみの展開/収納: 子セクションを Layout.springify({damping:26,stiffness:280})
-//     で滑らかに高さ変化 + FadeIn/Out
+//   - depth>0 のノードは行頭に「縦レール + 角丸 L 字エルボー (┗)」を 1 枚 View の
+//     border だけで描く (SVG / Skia / gradient を使わない = 単一コードで線幅が
+//     崩れず追加依存ゼロ)。
+//   - 縦レールは「最後の子だけアバター中心 (ELBOW_DROP) で止める / 途中の子は
+//     下端まで貫通させる」(YouTube / Material の兄弟連結)。これを内部 private
+//     prop `_isLastChild` で伝播する (公開 API は不変)。
+//   - レール / エルボーは折りたたみハンドルを兼ね、折りたたみ中 (collapsed) は
+//     interpolateColor で border2 → accent に着色して「この枝は閉じている」を
+//     主張する (Input.tsx の proven パターン)。
+//   - 線色は C.divider ではなく C.border2 を使う。divider(#ececef) は light
+//     (#fff 上) で消えるが border2(#d4d4d8) は静かに見える (system-aware の肝)。
+//   - unread は枠で囲わず、本文ブロックのみ accentBg 薄帯 + 左 accent ヘアライン
+//     + Avatar ring=accent で示す (Apple-Hairline 風の上品な表現)。
+//
+//   - depth ≥ 2 のスレッドは初期 collapsed (タップで展開)。children が 0 件の
+//     ときは collapsed UI を出さない。
+//   - 「↪ 返信」ピルで onReply(comment) を呼ぶ (depth < COMMENT_MAX_DEPTH のみ)。
+//
+// アニメーション:
+//   - 折りたたみ展開/収納: 子セクションを Layout.springify で滑らかに高さ変化
+//     + FadeIn/Out。エルボー/縦線は absolute なので高さ伸縮に自然追従。
+//   - レール/エルボー着色: railActive 0→1 を interpolateColor (border2 ↔ accent)
 //   - Avatar pulse: 展開時に 0.92 → 1.0 を SPRING_SNAPPY で
-//   - Body fade: collapsed snippet / expanded full のクロスフェード 180ms
-//   - Chevron rotate: 0deg ↔ 180deg を withTiming(180ms easing.out)
-//   - tap target: bubble 全体を Pressable にして展開/折りたたみを軽快に切替
+//   - Chevron rotate: 0 ↔ 180deg を withTiming(180ms easing.out) (chevronD ▼)
+//   - Body: FadeIn/FadeOut のみで割り切る (snippet/full は条件レンダーで同時に
+//     存在しないため opacity 補間は効かない → 惰性で残さない)
 //   - ReduceMotion: spring/pulse をスキップ、withTiming(150) で即時遷移
 //
 // 性能:
-//   - 再帰呼び出しは tree.depth 上限 3 なので最大 depth 3 まで。FlashList を使わず
-//     直接 View で render しても性能は問題なし (実測 1 ルート 50 子で 60fps 維持)。
+//   - 再帰呼び出しは tree.depth 上限 3。FlashList を使わず直接 View で render
+//     しても性能は問題なし (実測 1 ルート 50 子で 60fps 維持)。
 //   - shared value のみでアニメーション (state 更新を伴わない) — 100+ コメントでも
-//     スクロール中の再 render コストは増えない。
+//     スクロール中の再 render コストは増えない。1 ノードあたりレール列で View は
+//     +3 (縦線 / エルボー / 透明 tap) だが absolute + 着色のみ shared value なので
+//     影響軽微。
 // ============================================================
 
-const INDENT_PX = 16;        // depth 1 段あたりの左 padding
+const AV = 32; // アバター直径 (全 depth 共通。depth で縮小しない = 線の幾何を単純化)
+const GUTTER = 28; // depth 1 段の左インデント (= レール列幅)。SIZE 非依存の独自値
+const RAIL_W = 2; // 縦レール / エルボー線の太さ
+const RAIL_HIT = 16; // レール tap の透明当たり幅 (細い線を押せるように)
+const ELBOW_R = R.md; // エルボー角丸半径 = 10 (R.lg だと深 depth で曲がりが大袈裟)
+const RAIL_CENTER_X = GUTTER / 2; // 14: レール芯を GUTTER 列の中央に通す
+const ELBOW_DROP = AV / 2; // 16: エルボーがアバター垂直中心 (子アバター中心 y) で曲がる
 const COLLAPSE_FROM_DEPTH = 2; // この depth 以上は初期 collapsed
-// 高さ伸縮 (collapse / expand) 用の spring — 指示書準拠
+
+// 高さ伸縮 (collapse / expand) 用の spring
 const COLLAPSE_SPRING = { damping: 26, stiffness: 280, mass: 0.8 } as const;
-// chevron rotate / opacity fade 用 timing
+// chevron rotate 用 timing
 const CHEVRON_TIMING = { duration: 180, easing: Easing.out(Easing.cubic) } as const;
 // ReduceMotion 時の即時遷移 timing (spring 禁止)
 const REDUCED_TIMING = { duration: 150, easing: Easing.out(Easing.cubic) } as const;
-// body fade のクロスフェード duration
+// レール/エルボー着色の timing
+const RAIL_TINT = { duration: 120, easing: Easing.out(Easing.cubic) } as const;
+// body fade duration
 const BODY_FADE_MS = 180;
 // collapsed 時に body から抜き出す最大文字数 (要約 snippet)
 const COLLAPSED_SNIPPET_MAX = 80;
@@ -90,6 +116,93 @@ export type CommentThreadItemProps = {
   onReply?: (comment: Comment) => void;
 };
 
+// 内部用の private 型 — 公開 CommentThreadItemProps は 1 文字も変えない。
+// sibling 位置 (最後の子か) は再帰が children.map で起きることを利用し、
+// `_isLastChild` を内部から渡す。root 呼び出し (親) は未指定 → default false。
+// root(depth=0) はエルボーを描かない (showElbow=false) ので _isLastChild は未使用。
+type InternalProps = CommentThreadItemProps & { _isLastChild?: boolean };
+
+// ============================================================
+// ThreadRail — depth>0 のノードの左に置くレール列 (純 View の border のみ)。
+// ------------------------------------------------------------
+//   (A) 縦の通し線。最後の子は ELBOW_DROP で止め、途中の子は下端まで貫通。
+//   (B) 角丸 L 字エルボー (┗): borderLeft + borderBottom + 左下 radius。
+//   着色: idle(border2) ↔ accent。collapsed(active=1) のとき accent に光る。
+//   tap target (透明 16px) は呼び元で absolute に重ねる (細い線を押せるように)。
+// ============================================================
+function ThreadRail({
+  isLast,
+  active,
+  unread,
+  reduceMotion,
+}: {
+  isLast: boolean;
+  active: boolean;
+  unread: boolean;
+  reduceMotion: boolean;
+}) {
+  const C = useColors();
+  // idle 色: unread サブツリーは accent 寄せ、通常は border2
+  // (★ divider ではない = light #fff 上でも消えない)
+  const idle = unread ? C.accent : C.border2;
+  const railActive = useSharedValue(active ? 1 : 0);
+
+  useEffect(() => {
+    railActive.value = withTiming(active ? 1 : 0, reduceMotion ? REDUCED_TIMING : RAIL_TINT);
+  }, [active, reduceMotion, railActive]);
+
+  // idle(border2/accent) ↔ accent を補間。idle / C.accent を直接参照するので
+  // テーマ切替 (= key remount で component 再生成) でも古い色を持たない。
+  const lineStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(railActive.value, [0, 1], [idle, C.accent]),
+  }));
+  const borderStyle = useAnimatedStyle(() => ({
+    borderColor: interpolateColor(railActive.value, [0, 1], [idle, C.accent]),
+  }));
+
+  return (
+    <View style={{ width: GUTTER, alignSelf: 'stretch' }} pointerEvents="box-none">
+      {/* (A) 縦の通し線。
+          - isLast=true (最後の子): top:0 から ELBOW_DROP(16) で止め角を丸く閉じる
+          - isLast=false (途中の子): top:0 から bottom:0 まで貫通 → 兄弟連結が続く
+          left は RAIL_CENTER_X(14) − RAIL_W/2 = 13 (整数固定で subpixel gap を回避) */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            left: RAIL_CENTER_X - RAIL_W / 2, // 13
+            top: 0,
+            width: RAIL_W,
+            ...(isLast ? { height: ELBOW_DROP } : { bottom: 0 }),
+          },
+          lineStyle,
+        ]}
+      />
+      {/* (B) 角丸 L 字エルボー (┗): borderLeft + borderBottom + 左下 radius で
+          「滑らかな曲がり」。縦線の終端 (ELBOW_DROP − ELBOW_R) から曲げ始め、
+          水平の払いが子アバター左端へ向かう (YouTube / Material 風の曲がり)。 */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: 'absolute',
+            left: RAIL_CENTER_X - RAIL_W / 2, // 13
+            top: ELBOW_DROP - ELBOW_R, // 6: 立ち上がり終端で曲げ始める
+            width: ELBOW_R, // 10
+            height: ELBOW_R, // 10
+            borderLeftWidth: RAIL_W,
+            borderBottomWidth: RAIL_W,
+            borderBottomLeftRadius: ELBOW_R, // ← 角丸 L 字の核
+            backgroundColor: 'transparent',
+          },
+          borderStyle,
+        ]}
+      />
+    </View>
+  );
+}
+
 export function CommentThreadItem({
   comment,
   rootIndex,
@@ -98,7 +211,8 @@ export function CommentThreadItem({
   postId,
   parentCommunityId,
   onReply,
-}: CommentThreadItemProps) {
+  _isLastChild = false,
+}: InternalProps) {
   const qc = useQueryClient();
   const C = useColors();
   const reduceMotion = useReducedMotion();
@@ -109,7 +223,9 @@ export function CommentThreadItem({
   const isOwnComment = !!commentAuthorId && commentAuthorId === currentUserId;
   const depth = Math.min(COMMENT_MAX_DEPTH, comment.depth ?? 0);
   const children = comment.children ?? [];
-  const indent = depth * INDENT_PX;
+  // depth>0 のノードだけレール列 (縦線 + エルボー) を描く。
+  // depth0(root) は CollapsedComment の左バーと二重化を避けるため描かない。
+  const showElbow = depth > 0;
   // collapsed UI: 深い枝で子が居る場合だけ
   const initiallyCollapsed = depth >= COLLAPSE_FROM_DEPTH && children.length > 0;
   const [collapsed, setCollapsed] = useState<boolean>(initiallyCollapsed);
@@ -133,55 +249,42 @@ export function CommentThreadItem({
   // ============================================================
   // shared values — 全て worklet 側で動かす。state を持たないので 100+ 行でも軽い。
   // ============================================================
-  // chevron rotation (0 = collapsed=▶, 1 = expanded=▼)
+  // chevron rotation (0 = collapsed=▼, 1 = expanded=▲ 相当)
   const chevronProgress = useSharedValue(initiallyCollapsed ? 0 : 1);
   // avatar pulse scale (展開時に 0.92 → 1.0)
   const avatarScale = useSharedValue(1);
-  // body crossfade progress (0 = snippet 表示 / 1 = full 表示)
-  const bodyProgress = useSharedValue(initiallyCollapsed ? 0 : 1);
+  // ※ レール/エルボーの着色は ThreadRail が自前の shared value で行う
+  //   (active = collapsed && isCollapsible を prop で受け取る)。ここでは持たない。
 
   useEffect(() => {
     const expanded = !collapsed;
     if (reduceMotion) {
       // ReduceMotion: spring / pulse をスキップ、150ms timing で即時遷移
       chevronProgress.value = withTiming(expanded ? 1 : 0, REDUCED_TIMING);
-      bodyProgress.value = withTiming(expanded ? 1 : 0, REDUCED_TIMING);
       avatarScale.value = 1; // pulse 無し
       return;
     }
     chevronProgress.value = withTiming(expanded ? 1 : 0, CHEVRON_TIMING);
-    bodyProgress.value = withTiming(expanded ? 1 : 0, {
-      duration: BODY_FADE_MS,
-      easing: Easing.out(Easing.cubic),
-    });
     // expand 時のみ avatar pulse (0.92 → 1.0)
     if (expanded) {
       avatarScale.value = 0.92;
       avatarScale.value = withSpring(1, SPRING_SNAPPY);
     }
-  }, [collapsed, reduceMotion, chevronProgress, bodyProgress, avatarScale]);
+  }, [collapsed, reduceMotion, chevronProgress, avatarScale]);
 
-  // chevron は 0 → 90deg 回転 (▶ → ▼ 相当)
+  // chevron は 0 → 180deg 回転 (chevronD ▼ → ▲ 相当)
   const chevronStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${chevronProgress.value * 90}deg` }],
+    transform: [{ rotate: `${chevronProgress.value * 180}deg` }],
   }));
   const avatarAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: avatarScale.value }],
   }));
-  // body の crossfade — full は opacity = progress, snippet は 1-progress
-  const fullBodyStyle = useAnimatedStyle(() => ({ opacity: bodyProgress.value }));
-  const snippetBodyStyle = useAnimatedStyle(() => ({ opacity: 1 - bodyProgress.value }));
 
-  // 折りたたみの toggle handler。bubble 全体 + chevron 専用ボタン両方から呼ばれる。
+  // 折りたたみの toggle handler。行全体 + レール tap + chevron ピル から呼ばれる。
   const toggleCollapsed = () => {
     if (!isCollapsible) return;
     setCollapsed((s) => !s);
   };
-
-  // bubble の背景色は collapsed / expanded で僅かに切替 (collapsed は subtle bg2)
-  // unread highlight は accentBg/accent で従来通り優先。
-  const bubbleBg = unread ? C.accentBg : collapsed ? C.bg2 : C.bg;
-  const bubbleBorder = unread ? C.accent : C.border;
 
   return (
     <View style={{ width: '100%' }}>
@@ -190,33 +293,58 @@ export function CommentThreadItem({
         style={{
           flexDirection: 'row',
           alignItems: 'stretch',
-          // depth 分の左 padding。0 のときは指定しないことで余白を最小化。
-          paddingLeft: indent,
+          // depth 分の左 padding。レール列はこの padding 内の左端に absolute で描く。
+          paddingLeft: showElbow ? GUTTER : 0,
+          marginVertical: SP['1'],
         }}
       >
-        {/* depth > 0 は左に縦バーを引いて階層を視覚化。
-            alignItems:'stretch' により bubble の高さに自動で追従する。
-            color は theme-aware の C.divider (より subtle)。 */}
-        {depth > 0 && (
-          <View
+        {/* depth>0 のレール列 (縦線 + 角丸 L 字エルボー)。
+            alignItems:'stretch' により行高に縦線が追従する。
+            折りたたみ中 (collapsed && isCollapsible) は accent に着色。 */}
+        {showElbow && (
+          <ThreadRail
+            isLast={_isLastChild}
+            active={collapsed && isCollapsible}
+            unread={unread}
+            reduceMotion={reduceMotion}
+          />
+        )}
+
+        {/* レール tap = 折りたたみハンドル。実線は 2px だが透明 16px の当たり判定を
+            重ねて指で押せるようにする。isCollapsible のときだけ出す (= active を
+            出せる枝のみ / Web の本文選択を阻害しないよう限定)。 */}
+        {showElbow && isCollapsible && (
+          <PressableScale
+            onPress={toggleCollapsed}
+            haptic="tap"
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            scaleValue={1} // 線は縮めない。色変化 (railActive) でフィードバック
+            accessibilityRole="button"
+            accessibilityLabel={
+              collapsed
+                ? `返信 ${children.length} 件を表示`
+                : `返信 ${children.length} 件を折りたたむ`
+            }
+            accessibilityState={{ expanded: !collapsed }}
             style={{
-              width: 2,
-              backgroundColor: C.divider,
-              marginRight: SP['2'],
-              borderRadius: 1,
+              position: 'absolute',
+              top: 0,
+              bottom: 0,
+              left: (GUTTER - RAIL_HIT) / 2, // 6: レール芯(14)を中心に ±8px
+              width: RAIL_HIT,
+              zIndex: 2,
             }}
           />
         )}
 
-        {/* bubble 本体を PressableScale で包んで「行全体」を tap target にする。
-            isCollapsible でない時は disabled で見た目だけ非アクティブ化 (scale 無し)。
-            内部の PressableScale (返信ボタン / chevron / ModMenu / Obsidian) は
-            自分で onPress を持つので親の Pressable と競合せず動く。 */}
+        {/* 行本体を PressableScale で包んで「行全体」を tap target にする。
+            枠なし路線なので scale は控えめ (0.99)。isCollapsible でない時は
+            disabled で見た目だけ非アクティブ化。内部の PressableScale (返信ピル /
+            開閉ピル / ModMenu / Obsidian) は自分で onPress を持つので競合しない。 */}
         <PressableScale
           onPress={toggleCollapsed}
           disabled={!isCollapsible}
-          // collapsed toggle の時のみ tap feedback を有効化。scale は控えめに。
-          scaleValue={0.98}
+          scaleValue={0.99}
           haptic={isCollapsible ? 'tap' : undefined}
           accessibilityRole={isCollapsible ? 'button' : 'none'}
           accessibilityLabel={
@@ -231,23 +359,23 @@ export function CommentThreadItem({
             flex: 1,
             flexDirection: 'row',
             gap: SP['3'],
-            padding: SP['3'],
-            backgroundColor: bubbleBg,
-            borderRadius: R.lg,
-            borderWidth: 1,
-            borderColor: bubbleBorder,
-            borderLeftWidth: unread ? 3 : 1,
-            borderLeftColor: unread ? C.accent : bubbleBorder,
-            marginVertical: 4,
+            paddingVertical: SP['1'],
+            paddingRight: SP['1'],
+            // unread のときだけ本文ブロックに accentBg 薄帯 + 左 accent ヘアライン。
+            paddingLeft: unread ? SP['2'] : 0,
+            backgroundColor: unread ? C.accentBg : 'transparent',
+            borderRadius: unread ? R.md : 0,
+            borderLeftWidth: unread ? 2 : 0,
+            borderLeftColor: C.accent,
           }}
         >
-          <Animated.View
-            style={[
-              { alignItems: 'center', gap: 2, width: 36 },
-              avatarAnimStyle,
-            ]}
-          >
-            <Avatar size={32} color={comment.avatar_color} name={String(rootIndex)} />
+          <Animated.View style={[{ width: AV, alignItems: 'center', gap: 2 }, avatarAnimStyle]}>
+            <Avatar
+              size={AV}
+              color={comment.avatar_color}
+              name={String(rootIndex)}
+              ring={unread ? 'accent' : 'none'}
+            />
             <View
               style={{
                 paddingHorizontal: 4,
@@ -258,13 +386,14 @@ export function CommentThreadItem({
                 alignItems: 'center',
               }}
             >
-              <Text style={{ fontSize: 9, color: C.text3, fontWeight: '700' }}>
-                #{rootIndex}
-              </Text>
+              {/* #N が匿名アイデンティティの主役。fontWeight は 700 で確定
+                  (800 にしない = NotoSansJP は 700 まで)。 */}
+              <Text style={{ fontSize: 9, color: C.text3, fontWeight: '700' }}>#{rootIndex}</Text>
             </View>
           </Animated.View>
 
           <View style={{ flex: 1, minWidth: 0 }}>
+            {/* ① メタ行 */}
             <View
               style={{
                 flexDirection: 'row',
@@ -278,6 +407,7 @@ export function CommentThreadItem({
                 {formatRelative(comment.created_at)}
               </Text>
               {likesRaw !== undefined && (
+                // 読み取り専用のいいね件数。heart アイコン化しない / 塗りも足さない。
                 <Text
                   style={[T.caption, { color: C.text3 }]}
                   accessibilityLabel={`いいね ${likesDisplay}`}
@@ -295,9 +425,8 @@ export function CommentThreadItem({
                   }}
                   accessibilityLabel="未読のコメント"
                 >
-                  <Text style={{ fontSize: 9, color: '#fff', fontWeight: '800' }}>
-                    NEW
-                  </Text>
+                  {/* #fff は許可された唯一の直書き。NEW は短いので 800 で良い。 */}
+                  <Text style={{ fontSize: 9, color: '#fff', fontWeight: '800' }}>NEW</Text>
                 </View>
               )}
               <View style={{ flex: 1 }} />
@@ -326,12 +455,11 @@ export function CommentThreadItem({
                 />
               )}
             </View>
-            {/* body crossfade.
-                collapsed: 1 行 snippet (text3 やや薄め)
-                expanded: full content (text, lineHeight 22)
-                両方を絶対配置で重ねず、collapsed 時は snippet only / expanded 時は
-                full only を出す方が layout の高さが自然に伸縮する (Layout.springify
-                でアニメ)。各 Text の opacity を bodyProgress と連動させて crossfade。 */}
+
+            {/* ② body — FadeIn/FadeOut のみで割り切る。
+                snippet/full は条件レンダーで同時に存在しないため opacity 補間は
+                効かない (惰性で残さない)。collapsed↔expanded の切替時に各
+                Animated.Text の entering/exiting が発火する。 */}
             <View>
               {collapsed ? (
                 <Animated.Text
@@ -339,11 +467,7 @@ export function CommentThreadItem({
                   entering={reduceMotion ? undefined : FadeIn.duration(BODY_FADE_MS)}
                   exiting={reduceMotion ? undefined : FadeOut.duration(BODY_FADE_MS)}
                   numberOfLines={1}
-                  style={[
-                    T.body,
-                    { color: C.text2, lineHeight: 20 },
-                    snippetBodyStyle,
-                  ]}
+                  style={[T.body, { color: C.text2, lineHeight: 20 }]}
                 >
                   {snippet}
                 </Animated.Text>
@@ -352,12 +476,14 @@ export function CommentThreadItem({
                   key="full"
                   entering={reduceMotion ? undefined : FadeIn.duration(BODY_FADE_MS)}
                   exiting={reduceMotion ? undefined : FadeOut.duration(BODY_FADE_MS)}
-                  style={[T.body, { color: C.text, lineHeight: 22 }, fullBodyStyle]}
+                  style={[T.body, { color: C.text, lineHeight: 22 }]}
                 >
                   {comment.content}
                 </Animated.Text>
               )}
             </View>
+
+            {/* ③ アクション行 */}
             <View
               style={{
                 flexDirection: 'row',
@@ -378,22 +504,13 @@ export function CommentThreadItem({
                     gap: 4,
                     paddingHorizontal: SP['2'],
                     paddingVertical: 4,
-                    borderRadius: R.sm,
+                    borderRadius: R.full,
                     backgroundColor: C.bg3,
-                    borderWidth: 1,
-                    borderColor: C.border,
                   }}
                 >
-                  <Icon.send size={11} color={C.text2} strokeWidth={2.2} />
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      color: C.text2,
-                      fontWeight: '700',
-                    }}
-                  >
-                    返信
-                  </Text>
+                  {/* arrowUL(ArrowUpLeft) = 曲線コネクタ示唆。枠なし。 */}
+                  <Icon.arrowUL size={12} color={C.text2} strokeWidth={2.2} />
+                  <Text style={{ fontSize: 11, color: C.text2, fontWeight: '700' }}>返信</Text>
                 </PressableScale>
               )}
               {isCollapsible && (
@@ -411,28 +528,18 @@ export function CommentThreadItem({
                     flexDirection: 'row',
                     alignItems: 'center',
                     gap: 4,
-                    paddingHorizontal: SP['2'],
-                    paddingVertical: 4,
-                    borderRadius: R.sm,
-                    backgroundColor: C.bg3,
-                    borderWidth: 1,
-                    borderColor: C.border,
+                    paddingHorizontal: SP['3'],
+                    paddingVertical: SP['1'],
+                    borderRadius: R.full,
+                    backgroundColor: C.accentBg,
                   }}
                 >
-                  {/* chevron は 0 → 90deg 回転で collapsed/expanded を表現 */}
+                  {/* chevronD は 0 → 180deg 回転で collapsed/expanded を表現 */}
                   <Animated.View style={chevronStyle}>
-                    <Icon.chevronR size={11} color={C.text2} strokeWidth={2.4} />
+                    <Icon.chevronD size={13} color={C.accent} strokeWidth={2.4} />
                   </Animated.View>
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      color: C.text2,
-                      fontWeight: '700',
-                    }}
-                  >
-                    {collapsed
-                      ? `${children.length} 件の返信を表示`
-                      : '折りたたむ'}
+                  <Text style={{ fontSize: 12, color: C.accent, fontWeight: '700' }}>
+                    {collapsed ? `${children.length} 件の返信を表示` : '折りたたむ'}
                   </Text>
                 </PressableScale>
               )}
@@ -443,8 +550,9 @@ export function CommentThreadItem({
 
       {/* 子 (再帰) — collapsed の場合は何も出さない。
           Layout.springify({damping:26, stiffness:280}) で兄弟 layout の伸縮を
-          滑らかに駆動 (RN Reanimated v3 の native layout transition)。
-          ReduceMotion 時は entering/exiting と layout を外して即時切替。 */}
+          滑らかに駆動。エルボー/縦線は absolute なので高さ伸縮に自然追従。
+          ReduceMotion 時は entering/exiting と layout を外して即時切替。
+          _isLastChild で「最後の子は縦線を止める / 途中は貫通」を切替える。 */}
       {!collapsed && children.length > 0 && (
         <Animated.View
           entering={reduceMotion ? undefined : FadeIn.duration(BODY_FADE_MS)}
@@ -458,15 +566,18 @@ export function CommentThreadItem({
                   .mass(COLLAPSE_SPRING.mass)
           }
         >
-          {children.map((child) => (
+          {children.map((child, i) => (
             <CommentThreadItem
               key={child.id}
               comment={child}
               rootIndex={rootIndex}
+              // unread は親 (post/[id].tsx) が root にのみ付与し子には伝播しない
+              // (現行仕様)。レールの active=accent は「折りたたみ中」を表し独立。
               postContent={postContent}
               postId={postId}
               parentCommunityId={parentCommunityId}
               onReply={onReply}
+              _isLastChild={i === children.length - 1}
             />
           ))}
         </Animated.View>
@@ -474,4 +585,3 @@ export function CommentThreadItem({
     </View>
   );
 }
-
