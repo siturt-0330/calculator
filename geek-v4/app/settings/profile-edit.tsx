@@ -41,15 +41,9 @@ import { EditorialSubmitBar } from '../../components/community/EditorialSubmitBa
 import { C, R, SP } from '../../design/tokens';
 import { T, LOGO_FONT, LOGO_FONT_WEIGHT } from '../../design/typography';
 
-const AVATAR_EMOJIS = [
-  '😀', '😎', '🥰', '🤩', '🥳', '😇', '🤓', '🥸',
-  '😈', '👽', '🤖', '👻', '🎃', '💀', '🦄', '🐱',
-  '🐶', '🐻', '🦊', '🐼', '🐯', '🦁', '🐸', '🦉',
-  '🌸', '🌟', '⚡', '🔥', '💎', '🎨', '🎮', '🎵',
-];
-
 const BIO_MAX = 200;
-type AvatarMode = 'photo' | 'emoji';
+// 絵文字アイコン選択は UI を撤去 (2026-05-31)。emoji フィールド自体は既存ユーザの
+// 値を保持するため state / fetch / update には残す。新規選択は写真のみ。
 
 export default function ProfileEditScreen() {
   const insets = useSafeAreaInsets();
@@ -63,7 +57,6 @@ export default function ProfileEditScreen() {
   const [emoji, setEmoji] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
-  const [avatarMode, setAvatarMode] = useState<AvatarMode>('photo');
   const [loading, setLoading] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [uploadingCover, setUploadingCover] = useState(false);
@@ -90,8 +83,6 @@ export default function ProfileEditScreen() {
         setEmoji(row.avatar_emoji ?? null);
         setAvatarUrl(row.avatar_url ?? null);
         setCoverUrl(row.cover_url ?? null);
-        // 既存の状態から default mode を決める: 絵文字が選ばれていれば 'emoji'。
-        setAvatarMode(row.avatar_emoji ? 'emoji' : 'photo');
       }
     })();
   }, [user]);
@@ -131,7 +122,6 @@ export default function ProfileEditScreen() {
       const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
       setAvatarUrl(pub.publicUrl);
       setEmoji(null);
-      setAvatarMode('photo');
       show('アイコンをアップロードしました', 'success');
     } catch (e) {
       console.warn('avatar upload error:', e);
@@ -360,41 +350,26 @@ export default function ProfileEditScreen() {
               ) : null}
             </View>
 
-            {/* 写真 / 絵文字 セグメント */}
-            <SegmentedPill
-              value={avatarMode}
-              onChange={setAvatarMode}
-              options={[
-                { value: 'photo', label: '写真' },
-                { value: 'emoji', label: '絵文字' },
-              ]}
-            />
           </View>
 
-          {avatarMode === 'photo' ? (
-            <LinkRow center>
+          <LinkRow center>
+            <ActionLink
+              onPress={pickAvatar}
+              disabled={uploadingAvatar}
+              accessibilityLabel="写真を選ぶ"
+              icon={<Camera size={13} color={C.accent} strokeWidth={2.2} />}
+              label={avatarUrl ? 'アイコン画像を変更' : 'アイコン画像を選ぶ'}
+            />
+            {avatarUrl ? (
               <ActionLink
-                onPress={pickAvatar}
+                onPress={removeAvatar}
                 disabled={uploadingAvatar}
-                accessibilityLabel="写真を選ぶ"
-                icon={<Camera size={13} color={C.accent} strokeWidth={2.2} />}
-                label={avatarUrl ? 'アイコン画像を変更' : 'アイコン画像を選ぶ'}
+                variant="muted"
+                accessibilityLabel="写真を外す"
+                label="外す"
               />
-              {avatarUrl ? (
-                <ActionLink
-                  onPress={removeAvatar}
-                  disabled={uploadingAvatar}
-                  variant="muted"
-                  accessibilityLabel="写真を外す"
-                  label="外す"
-                />
-              ) : null}
-            </LinkRow>
-          ) : (
-            <View style={{ marginTop: SP['1'] }}>
-              <EmojiGrid value={emoji} onSelect={(e) => { setEmoji(e); setAvatarUrl(null); }} />
-            </View>
-          )}
+            ) : null}
+          </LinkRow>
 
           {/* プライバシー注記 */}
           <View
@@ -569,97 +544,3 @@ function ActionLink({
   );
 }
 
-function SegmentedPill<T extends string>({
-  value,
-  onChange,
-  options,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  options: { value: T; label: string }[];
-}) {
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        backgroundColor: C.bg2,
-        borderRadius: R.full,
-        padding: 3,
-        borderWidth: 1,
-        borderColor: C.divider,
-      }}
-    >
-      {options.map((o) => {
-        const active = o.value === value;
-        return (
-          <PressableScale
-            key={o.value}
-            onPress={() => onChange(o.value)}
-            haptic="select"
-            accessibilityRole="tab"
-            accessibilityState={{ selected: active }}
-            style={{
-              paddingHorizontal: SP['4'],
-              paddingVertical: 6,
-              borderRadius: R.full,
-              backgroundColor: active ? C.accent : 'transparent',
-            }}
-          >
-            <Text
-              style={[
-                T.smallB,
-                { color: active ? '#fff' : C.text2, fontSize: 12 },
-              ]}
-            >
-              {o.label}
-            </Text>
-          </PressableScale>
-        );
-      })}
-    </View>
-  );
-}
-
-function EmojiGrid({
-  value,
-  onSelect,
-}: {
-  value: string | null;
-  onSelect: (e: string) => void;
-}) {
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: SP['2'],
-        paddingVertical: SP['1'],
-      }}
-    >
-      {AVATAR_EMOJIS.map((e) => {
-        const active = value === e;
-        return (
-          <PressableScale
-            key={e}
-            onPress={() => onSelect(e)}
-            haptic="select"
-            accessibilityRole="button"
-            accessibilityLabel={`絵文字 ${e}`}
-            style={{
-              width: 50,
-              height: 50,
-              borderRadius: 25,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: active ? C.accentBg : 'transparent',
-              borderWidth: active ? 1.5 : 1,
-              borderColor: active ? C.accent : C.divider,
-            }}
-          >
-            <Text style={{ fontSize: 26 }}>{e}</Text>
-          </PressableScale>
-        );
-      })}
-    </View>
-  );
-}
