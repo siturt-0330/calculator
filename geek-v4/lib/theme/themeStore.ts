@@ -12,6 +12,8 @@
 import { create } from 'zustand';
 import { useColorScheme as useRNColorScheme } from 'react-native';
 import { getString, setString } from '../storage';
+import { applyThemeC } from '../../design/tokens';
+import { PALETTE_DARK, PALETTE_LIGHT } from './palettes';
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
@@ -70,4 +72,21 @@ export function useResolvedTheme(): ResolvedTheme {
     return system === 'light' ? 'light' : 'dark';
   }
   return mode;
+}
+
+/**
+ * design/tokens の static C / GRAD を resolvedTheme に応じて hot-swap する。
+ * _layout.tsx の useEffect 経由で呼ばれ、テーマ切替で全 193+ ファイル
+ * (static `import { C }` の同期 importer) が一斉に追従する。
+ *
+ * 注: 値の書換だけでは React の再 render は走らないので、呼出元で
+ * key remount (例: <View key={theme}> で全 tree 再構築) も併用する。
+ */
+export function syncStaticPaletteWithTheme(theme: ResolvedTheme): void {
+  const palette = theme === 'light' ? PALETTE_LIGHT : PALETTE_DARK;
+  applyThemeC(palette);
+  // GRAD は LinearGradient の strict tuple 型と相性悪く mutable 化を断念。
+  // brand 色 (primary / warm / success) は theme 非依存で OK、fadeBottom 等は
+  // dark 固定で残る (light モード時に bottom fade が黒寄りになる小さな違和感は
+  // 許容)。
 }

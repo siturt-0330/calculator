@@ -1,4 +1,22 @@
-export const C = {
+// ============================================================
+// C — テーマ追従型カラーパレット (2026-05-31 改修)
+// ------------------------------------------------------------
+// 193 ファイルが `import { C } from '../design/tokens'` で C を直参照しているが、
+// ライトモード切替時にも値が dark のまま固定されて「色合いが変」になる問題が
+// あったため、C を mutable 参照に変更して theme 切替で破壊的更新できるよう
+// にした。各 importer は object 参照を持ち続けるので、_layout.tsx で
+// applyThemeC() + key remount を実行すれば全 193 ファイルが追従する。
+//
+// 設計:
+//   - import { PALETTE_DARK, PALETTE_LIGHT } from '../lib/theme/palettes'
+//     を import すると循環参照になるため、palette 値はここに直書きして
+//     applyThemeC() で書き換える。 (palettes.ts と shape を完全一致させる)
+// ============================================================
+
+import type { ColorPalette } from '../lib/theme/palettes';
+
+// dark 既定値 (PALETTE_DARK と完全一致 — palettes.ts と二重定義だが循環回避のため)
+const _DARK: ColorPalette = {
   bg:   '#0a0a0a',
   bg2:  '#161618',
   bg3:  '#1c1c1c',
@@ -51,29 +69,39 @@ export const C = {
   trustHi:  '#22D3A4',
   scrim:        'rgba(0,0,0,0.75)',
   scrimLight:   'rgba(0,0,0,0.45)',
-} as const;
+};
 
+// mutable な現役パレット。export const C はこの参照を返す。
+// applyThemeC() で Object.assign による破壊的更新を行うが参照は維持。
+const _C: ColorPalette = { ..._DARK };
+export const C: ColorPalette = _C;
+
+/**
+ * テーマを切り替えて C の中身を破壊的に書き換える。
+ * _layout.tsx で resolvedTheme 変化時に呼ばれる + 全 tree を key remount。
+ */
+export function applyThemeC(palette: ColorPalette): void {
+  Object.assign(_C, palette);
+}
+
+// GRAD は dark 固定 (LinearGradient props の strict tuple type と相性悪く、
+// mutable 化すると大量の型エラー)。fadeBottom / fadeTop の bg 連動は諦め、
+// 主要 brand gradient (primary / warm / success / accent) は theme 非依存で
+// 統一感を維持する方が UX 上も自然。
 export const GRAD = {
-  accent:      [C.accent, C.accentDeep] as const,
-  accentSoft:  [C.accentLight, C.accent] as const,
-  fadeBottom:  ['rgba(10,10,10,0)', C.bg] as const,
-  fadeTop:     [C.bg, 'rgba(10,10,10,0)'] as const,
+  accent:      [_DARK.accent, _DARK.accentDeep] as const,
+  accentSoft:  [_DARK.accentLight, _DARK.accent] as const,
+  fadeBottom:  ['rgba(10,10,10,0)', _DARK.bg] as const,
+  fadeTop:     [_DARK.bg, 'rgba(10,10,10,0)'] as const,
   fadeBottomDark: ['rgba(10,10,10,0)', 'rgba(10,10,10,0.95)'] as const,
-  trust:       [C.trustLow, C.trustMid, C.trustHi] as const,
-  storyRing:   [C.accent, C.pink, C.amber] as const,
+  trust:       [_DARK.trustLow, _DARK.trustMid, _DARK.trustHi] as const,
+  storyRing:   [_DARK.accent, _DARK.pink, _DARK.amber] as const,
   goldBadge:   ['#F5C842', '#E5A823'] as const,
-  // ----- UI Polish (Phase 2) — keep above legacy keys intact -----
-  // 紫 → 桃 (アクション・hero 系) — Geek の核となるアクセント
   primary:     ['#7C6AF7', '#B47AF7', '#F87AB4'] as const,
-  // 紫 → 藍 (落ち着いた hero 背景)
   primarySoft: ['#7C6AF7', '#6B7AF7'] as const,
-  // ピンク → オレンジ (CTA、強調)
   warm:        ['#F87AB4', '#FBAC72'] as const,
-  // 緑系 (success / 成功時)
   success:     ['#52D49B', '#52C4D4'] as const,
-  // ニュートラル glass overlay (背景に重ねる)
   glass:       ['rgba(124,106,247,0.15)', 'rgba(180,122,247,0.08)', 'rgba(0,0,0,0)'] as const,
-  // 赤グラデ — destructive な action 用 (PolishedButton destructive)
   destructive: ['#F87A7A', '#F86B5A'] as const,
 } as const;
 
