@@ -150,12 +150,19 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
             if (!tab) return null;
 
             const onPress = () => {
+              // tabPress event を emit する。useScrollToTop はこのイベントを listen して
+              // focused タブ配下の登録済み ScrollView/FlashList を先頭に scroll する。
               const event = navigation.emit({
                 type: 'tabPress',
                 target: route.key,
                 canPreventDefault: true,
               });
-              if (!focused && !event.defaultPrevented) {
+              if (event.defaultPrevented) return;
+              if (focused) {
+                // 再タップ: stack に積まれている sub-route (例: /community/<id>/admin)
+                // から tab の root へ戻す。useScrollToTop が同時に scroll を実行する。
+                router.navigate(`/(tabs)/${route.name}` as never);
+              } else {
                 navigation.navigate(route.name, route.params as never);
               }
             };

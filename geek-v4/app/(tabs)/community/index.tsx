@@ -1,6 +1,7 @@
 import { View, Text, RefreshControl } from 'react-native';
-import { useEffect, useCallback, useMemo, useState } from 'react';
+import { useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
+import { useScrollToTop } from '@react-navigation/native';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -56,6 +57,14 @@ export default function CommunityScreen() {
   const { show: showToast } = useToastStore();
   // テーマ購読 — light/dark 切替で community 画面が自動再 render
   const { C, GRAD, SHADOW } = useTheme();
+  // コミュタブ再タップで本体 FlashList を先頭にスクロール (X 流)。
+  // TabBar 側で router.navigate('/(tabs)/community') が同時に発火し、
+  // /community/<id>/admin 等の sub-route から /community に戻る。
+  // FlashList は generics が tight なので useScrollToTop に渡す ref は
+  // 型キャストで「scrollToOffset を持つもの」相当に緩める。
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const listRef = useRef<FlashList<any>>(null);
+  useScrollToTop(listRef as unknown as React.RefObject<{ scrollToOffset: (p: { offset: number; animated?: boolean }) => void }>);
 
   // YouTube 登録チャンネル風 UX — avatar 行で community を tap すると
   // 詳細ページ遷移ではなく **画面内で post を絞り込む**。
@@ -554,6 +563,7 @@ export default function CommunityScreen() {
       </View>
 
       <FlashList
+        ref={listRef}
         data={feedItems}
         renderItem={renderItem}
         keyExtractor={keyExtractor}

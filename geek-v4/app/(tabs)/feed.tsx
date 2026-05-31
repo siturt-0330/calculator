@@ -25,6 +25,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { useScrollToTop } from '@react-navigation/native';
 import {
   HomeDrawer,
   HOME_DRAWER_SPRING,
@@ -310,6 +311,10 @@ export default function FeedScreen() {
   const { share } = useShare();
   const { report } = useReport();
   const listRef = useRef<FlashList<FeedItem>>(null);
+  // ホームタブを再タップで listRef を先頭にスクロール (X / Instagram と同等の挙動)。
+  // TabBar 側で focused 時に router.navigate で root へ戻すのと合わせて、
+  // 「再タップ = 先頭 + ルート」が成立する。
+  useScrollToTop(listRef as unknown as React.RefObject<{ scrollToOffset: (p: { offset: number; animated?: boolean }) => void }>);
   const [reportPostId, setReportPostId] = useState<string | null>(null);
 
   useEffect(() => {

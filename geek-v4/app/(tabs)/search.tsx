@@ -36,6 +36,7 @@ import {
   Keyboard,
 } from 'react-native';
 import { useSharedValue, withTiming } from 'react-native-reanimated';
+import { useScrollToTop } from '@react-navigation/native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -107,6 +108,10 @@ export default function SearchScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ q?: string; community?: string }>();
   const qc = useQueryClient();
+  // 検索タブを再タップで本体 ScrollView を先頭にスクロール (X / Instagram 流)。
+  // 同時に TabBar 側で router.navigate('/(tabs)/search') を呼び stack root にリセット。
+  const scrollRef = useRef<ScrollView>(null);
+  useScrollToTop(scrollRef);
 
   // ============= state =============
   const [rawQuery, setRawQuery] = useState<string>(typeof params.q === 'string' ? params.q : '');
@@ -610,6 +615,7 @@ export default function SearchScreen() {
 
       {/* ============= スクロール本体 ============= */}
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={{
           paddingTop: SP['2'],
           // (tabs) 配下なので下部の floating TabBar + 投稿 FAB に

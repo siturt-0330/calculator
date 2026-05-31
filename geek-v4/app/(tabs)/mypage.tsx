@@ -17,11 +17,12 @@
 //   - 保存済みは自分専用 (RLS で他人は読めない)。トグル不要。
 // =============================================================================
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, ScrollView, RefreshControl, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useScrollToTop } from '@react-navigation/native';
 
 import { useAuthStore } from '../../stores/authStore';
 import { useProfileVisibilityStore } from '../../stores/profileVisibilityStore';
@@ -52,6 +53,9 @@ export default function MypageScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const qc = useQueryClient();
+  // マイページタブ再タップで本体 ScrollView を先頭にスクロール。
+  const scrollRef = useRef<ScrollView>(null);
+  useScrollToTop(scrollRef);
 
   // ---- タブ state ----
   const [tab, setTab] = useState<ProfileTabKey>('shared');
@@ -131,6 +135,7 @@ export default function MypageScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={{
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
         }}
