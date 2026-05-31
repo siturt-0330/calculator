@@ -42,6 +42,12 @@ import {
   usePromoteMember,
   useDemoteMember,
 } from '../../../../hooks/useCommunityMods';
+import {
+  useCommunityJoinRequests,
+  useApproveJoinRequest,
+  useRejectJoinRequest,
+} from '../../../../hooks/useCommunityJoinRequests';
+import { Avatar } from '../../../../components/ui/Avatar';
 import type {
   MemberWithProfile,
   BanWithProfile,
@@ -94,6 +100,14 @@ export default function CommunityAdminScreen() {
   const unban = useUnbanMember(id);
   const promote = usePromoteMember(id);
   const demote = useDemoteMember(id);
+
+  // 参加申請 (owner / admin) — visibility が open のときは UI を隠す
+  const showJoinRequests = isMod && !!community && community.visibility !== 'open';
+  const { requests: joinRequests, isLoading: requestsLoading } = useCommunityJoinRequests(
+    showJoinRequests ? id : undefined,
+  );
+  const approveReq = useApproveJoinRequest(id);
+  const rejectReq = useRejectJoinRequest(id);
 
   const [filter, setFilter] = useState<MembersFilter>('all');
   const [pending, setPending] = useState<PendingAction>(null);
@@ -248,6 +262,125 @@ export default function CommunityAdminScreen() {
           gap: SP['5'],
         }}
       >
+        {/* ============= Section 0: 参加申請 (request 制のみ) ============= */}
+        {showJoinRequests && (
+          <>
+            <View style={{ paddingHorizontal: SP['4'], gap: SP['3'] }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Icon.bell size={18} color={C.accent} strokeWidth={2.4} />
+                  <Text style={[T.h3, { color: C.text }]}>参加申請</Text>
+                </View>
+                {joinRequests.length > 0 ? (
+                  <View
+                    style={{
+                      backgroundColor: C.accent,
+                      paddingHorizontal: SP['2'],
+                      paddingVertical: 2,
+                      borderRadius: R.full,
+                      minWidth: 24,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Text style={[T.caption, { color: '#fff', fontWeight: '700' }]}>
+                      {joinRequests.length}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={[T.caption, { color: C.text3 }]}>0 件</Text>
+                )}
+              </View>
+              {requestsLoading ? (
+                <View style={{ paddingVertical: SP['6'], alignItems: 'center' }}>
+                  <Spinner size="large" />
+                </View>
+              ) : joinRequests.length === 0 ? (
+                <View style={{ paddingVertical: SP['6'], alignItems: 'center', gap: SP['2'] }}>
+                  <Icon.bell size={28} color={C.text3} strokeWidth={1.6} />
+                  <Text style={[T.small, { color: C.text3 }]}>保留中の申請はありません</Text>
+                </View>
+              ) : (
+                <View style={{ gap: SP['2'] }}>
+                  {joinRequests.map((req) => {
+                    const submitting = approveReq.isPending || rejectReq.isPending;
+                    return (
+                      <View
+                        key={req.user_id}
+                        style={{
+                          padding: SP['3'],
+                          backgroundColor: C.bg2,
+                          borderRadius: R.md,
+                          borderWidth: 1,
+                          borderColor: C.border,
+                          gap: SP['3'],
+                        }}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+                          <Avatar
+                            size={36}
+                            uri={req.avatar_url ?? undefined}
+                            emoji={req.avatar_emoji ?? undefined}
+                            name={req.nickname}
+                          />
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={[T.smallB, { color: C.text }]} numberOfLines={1}>
+                              {req.nickname}
+                            </Text>
+                            <Text style={[T.caption, { color: C.text3 }]}>
+                              {formatRelative(req.created_at)}
+                            </Text>
+                          </View>
+                        </View>
+                        {req.message ? (
+                          <Text style={[T.small, { color: C.text2 }]} numberOfLines={3}>
+                            {req.message}
+                          </Text>
+                        ) : null}
+                        <View style={{ flexDirection: 'row', gap: SP['2'] }}>
+                          <PressableScale
+                            onPress={() => rejectReq.mutate(req.user_id)}
+                            haptic="tap"
+                            disabled={submitting}
+                            accessibilityLabel={`${req.nickname} の申請を拒否`}
+                            style={{
+                              flex: 1,
+                              paddingVertical: SP['2'],
+                              borderRadius: R.md,
+                              borderWidth: 1,
+                              borderColor: C.border2,
+                              alignItems: 'center',
+                              opacity: submitting ? 0.5 : 1,
+                            }}
+                          >
+                            <Text style={[T.smallB, { color: C.text2 }]}>拒否</Text>
+                          </PressableScale>
+                          <PressableScale
+                            onPress={() => approveReq.mutate(req.user_id)}
+                            haptic="confirm"
+                            disabled={submitting}
+                            accessibilityLabel={`${req.nickname} の申請を承認`}
+                            style={{
+                              flex: 2,
+                              paddingVertical: SP['2'],
+                              borderRadius: R.md,
+                              backgroundColor: C.accent,
+                              alignItems: 'center',
+                              opacity: submitting ? 0.5 : 1,
+                            }}
+                          >
+                            <Text style={[T.smallB, { color: '#fff' }]}>承認</Text>
+                          </PressableScale>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+            <Divider />
+          </>
+        )}
+
         {/* ============= Section 1: メンバー一覧 ============= */}
         <View style={{ paddingHorizontal: SP['4'], gap: SP['3'] }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>

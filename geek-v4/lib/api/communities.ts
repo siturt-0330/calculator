@@ -1007,6 +1007,120 @@ export async function requestJoinCommunity(id: string, message = ''): Promise<{ 
 }
 
 // ============================================================
+// 参加申請 — owner 用: 一覧取得 / 承認 / 拒否
+// ------------------------------------------------------------
+// request 制コミュニティで status='pending' の申請を取得・処理する。
+// RLS:
+//   - SELECT: owner / 申請者自身が見られる (0017)
+//   - UPDATE: owner のみ (0017)
+//   - community_members INSERT: owner が他人を追加可 (0026 trigger 経由)
+// admin.tsx の「参加申請」セクションから呼ばれる。
+// ============================================================
+export type JoinRequestWithProfile = {
+  community_id: string;
+  user_id: string;
+  message: string;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+  nickname: string;
+  avatar_emoji: string | null;
+  avatar_url: string | null;
+};
+
+export async function fetchPendingJoinRequests(
+  communityId: string,
+): Promise<JoinRequestWithProfile[]> {
+  if (!UUID_RE.test(communityId)) return [];
+  // profiles を user_id 経由で join (公開 view profiles_public でも OK だが、
+  // owner は自コミュニティに限り通常 profiles を読める想定)
+  const { data, error } = await supabase
+    .from('community_join_requests')
+    .select('community_id, user_id, message, status, created_at, profiles!user_id ( nickname, avatar_emoji, avatar_url )')
+    .eq('community_id', communityId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false });
+  if (error) {
+    console.warn('[communities] fetchPendingJoinRequests:', error.message);
+    return [];
+  }
+  // Supabase JS は FK join の戻りを array で推論しがち (たとえ to-one でも)。
+  // 配列で受け取り [0] を取り出す形に統一して TS と整合させる。
+  type ProfileLite = { nickname: string | null; avatar_emoji: string | null; avatar_url: string | null };
+  type Row = {
+    community_id: string;
+    user_id: string;
+    message: string | null;
+    status: 'pending' | 'approved' | 'rejected';
+    created_at: string;
+    profiles: ProfileLite[] | ProfileLite | null;
+  };
+  return ((data ?? []) as unknown as Row[]).map((r) => {
+    const p = Array.isArray(r.profiles) ? r.profiles[0] ?? null : r.profiles;
+    return {
+      community_id: r.community_id,
+      user_id: r.user_id,
+      message: r.message ?? '',
+      status: r.status,
+      created_at: r.created_at,
+      nickname: p?.nickname ?? '匿名',
+      avatar_emoji: p?.avatar_emoji ?? null,
+      avatar_url: p?.avatar_url ?? null,
+    };
+  });
+}
+
+export async function approveJoinRequest(
+  communityId: string,
+  userId: string,
+): Promise<{ error: string | null }> {
+  if (!UUID_RE.test(communityId) || !UUID_RE.test(userId)) {
+    return { error: '不正な ID です' };
+  }
+  // セッション refresh — RLS の auth.uid() が null になる事故を防ぐ
+  await supabase.auth.refreshSession().catch(() => {});
+  // 1. community_members に追加 (owner なら 0026 trigger で他人 INSERT が許可される)
+  const { error: insErr } = await supabase
+    .from('community_members')
+    .insert({ community_id: communityId, user_id: userId, role: 'member' });
+  if (insErr && !insErr.message.toLowerCase().includes('duplicate')) {
+    // 既存メンバーなら duplicate でスキップ、それ以外は失敗
+    console.warn('[communities] approveJoinRequest insert:', insErr.message);
+    return { error: insErr.message };
+  }
+  // 2. 申請の status を approved に更新 (一覧から消える)
+  const { error: updErr } = await supabase
+    .from('community_join_requests')
+    .update({ status: 'approved' })
+    .eq('community_id', communityId)
+    .eq('user_id', userId);
+  if (updErr) {
+    console.warn('[communities] approveJoinRequest update:', updErr.message);
+    return { error: updErr.message };
+  }
+  return { error: null };
+}
+
+export async function rejectJoinRequest(
+  communityId: string,
+  userId: string,
+): Promise<{ error: string | null }> {
+  if (!UUID_RE.test(communityId) || !UUID_RE.test(userId)) {
+    return { error: '不正な ID です' };
+  }
+  await supabase.auth.refreshSession().catch(() => {});
+  const { error } = await supabase
+    .from('community_join_requests')
+    .update({ status: 'rejected' })
+    .eq('community_id', communityId)
+    .eq('user_id', userId);
+  if (error) {
+    console.warn('[communities] rejectJoinRequest:', error.message);
+    return { error: error.message };
+  }
+  return { error: null };
+}
+
+// ============================================================
 // コミュニティから退出
 // ============================================================
 // 監査での指摘 (Critical):
