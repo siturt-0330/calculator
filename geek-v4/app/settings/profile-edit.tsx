@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, TextInput, Image } from 'react-native';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,6 +25,8 @@ const AVATAR_EMOJIS = [
   '🌸', '🌟', '⚡', '🔥', '💎', '🎨', '🎮', '🎵',
 ];
 
+const BIO_MAX = 200;
+
 export default function ProfileEditScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -32,32 +34,46 @@ export default function ProfileEditScreen() {
   const refreshProfile = useAuthStore((s) => s.refreshProfile);
   const show = useToastStore((s) => s.show);
   const [nickname, setNickname] = useState(user?.nickname ?? '');
+  const [bio, setBio] = useState('');
   const [emoji, setEmoji] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  // アバター / カバーで個別に upload 状態を持ち、片方の upload 中にもう片方の
+  // ボタンが固まらないようにする。save は両方の uploading を見て disable する。
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [uploadingCover, setUploadingCover] = useState(false);
+  const uploading = uploadingAvatar || uploadingCover;
 
   useEffect(() => {
     (async () => {
       if (!user) return;
       const { data } = await supabase
         .from('profiles')
-        .select('nickname, avatar_emoji, avatar_url')
+        .select('nickname, bio, avatar_emoji, avatar_url, cover_url')
         .eq('id', user.id)
         .single();
       if (data) {
-        setNickname(data.nickname ?? '');
-        setEmoji(data.avatar_emoji ?? null);
-        setAvatarUrl(data.avatar_url ?? null);
+        const row = data as {
+          nickname: string | null;
+          bio: string | null;
+          avatar_emoji: string | null;
+          avatar_url: string | null;
+          cover_url: string | null;
+        };
+        setNickname(row.nickname ?? '');
+        setBio(row.bio ?? '');
+        setEmoji(row.avatar_emoji ?? null);
+        setAvatarUrl(row.avatar_url ?? null);
+        setCoverUrl(row.cover_url ?? null);
       }
     })();
   }, [user]);
 
-  const pickPhoto = async () => {
+  // ===== アバター (正方形・circular cropper) =====
+  const pickAvatar = async () => {
     if (!user) return;
-    // 再エントリ防止 — uploading 中の再 tap や permission dialog 開いてる最中の
-    // 連打で picker が 2 重起動するのを避ける
-    if (uploading) return;
+    if (uploadingAvatar) return;
     if (Platform.OS !== 'web') {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
@@ -67,25 +83,19 @@ export default function ProfileEditScreen() {
     }
     const r = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: 'images',
-      // Web では allowsEditing/aspect が完全に無視される (expo-image-picker の制約)。
-      // しかも 4K HEIC が ~13MB の base64 data URL で返ってきて Canvas decode に
-      // 失敗して silent に「真っ黒な JPEG」が upload される事故が起きるので、
-      // Web は自前の openCropper (circular crop UI) を挟む。
-      // native (iOS/Android) は OS の crop UI を出す方が UX 自然なので従来通り。
       allowsEditing: Platform.OS !== 'web',
       aspect: Platform.OS !== 'web' ? [1, 1] : undefined,
       quality: 0.8,
     });
     if (r.canceled || !r.assets[0]) return;
     const asset = r.assets[0];
-    // Web のみ自前 cropper を挟む。native は allowsEditing で既に square。
     let croppedUri: string = asset.uri;
     if (Platform.OS === 'web') {
       const cropped = await openCropper(asset.uri);
-      if (!cropped) return; // ユーザーが cancel
+      if (!cropped) return;
       croppedUri = cropped;
     }
-    setUploading(true);
+    setUploadingAvatar(true);
     try {
       const prepared = await prepareImageUpload(croppedUri, { maxSizeBytes: 5 * 1024 * 1024 });
       const path = `${user.id}/${Date.now()}.${prepared.ext}`;
@@ -97,23 +107,74 @@ export default function ProfileEditScreen() {
       const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
       setAvatarUrl(pub.publicUrl);
       setEmoji(null);
-      show('画像をアップロードしました', 'success');
+      show('アイコンをアップロードしました', 'success');
     } catch (e) {
-      console.warn('upload error:', e);
+      console.warn('avatar upload error:', e);
       const detail = e instanceof Error ? e.message : (e !== null && typeof e === 'object' && 'message' in e) ? String((e as {message: unknown}).message) : '';
       show(detail.includes('大きすぎ') ? detail : 'アップロードに失敗しました', 'error');
     } finally {
-      setUploading(false);
+      setUploadingAvatar(false);
     }
   };
 
-  const removePhoto = () => {
+  const removeAvatar = () => {
     setAvatarUrl(null);
+  };
+
+  // ===== カバー (横長・circular cropper は使わない) =====
+  // native は OS の crop UI を 16:9 で出す。Web は prepareImageUpload で
+  // 1600x900 に内側 fit で resize して保存 (cover 表示時に中央寄せ)。
+  // 既存 `avatars` bucket を path で分離して流用 (cover_<ts>.<ext>)。
+  const pickCover = async () => {
+    if (!user) return;
+    if (uploadingCover) return;
+    if (Platform.OS !== 'web') {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        show('写真へのアクセス権限が必要です', 'warn');
+        return;
+      }
+    }
+    const r = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: 'images',
+      allowsEditing: Platform.OS !== 'web',
+      aspect: Platform.OS !== 'web' ? [16, 9] : undefined,
+      quality: 0.85,
+    });
+    if (r.canceled || !r.assets[0]) return;
+    const asset = r.assets[0];
+    setUploadingCover(true);
+    try {
+      const prepared = await prepareImageUpload(asset.uri, {
+        maxSizeBytes: 5 * 1024 * 1024,
+        maxWidth: 1600,
+        maxHeight: 900,
+        quality: 0.85,
+      });
+      const path = `${user.id}/cover_${Date.now()}.${prepared.ext}`;
+      const { error: upErr } = await supabase.storage.from('avatars').upload(path, prepared.blob, {
+        contentType: prepared.mime,
+        upsert: true,
+      });
+      if (upErr) throw upErr;
+      const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
+      setCoverUrl(pub.publicUrl);
+      show('カバー画像をアップロードしました', 'success');
+    } catch (e) {
+      console.warn('cover upload error:', e);
+      const detail = e instanceof Error ? e.message : (e !== null && typeof e === 'object' && 'message' in e) ? String((e as {message: unknown}).message) : '';
+      show(detail.includes('大きすぎ') ? detail : 'アップロードに失敗しました', 'error');
+    } finally {
+      setUploadingCover(false);
+    }
+  };
+
+  const removeCover = () => {
+    setCoverUrl(null);
   };
 
   const save = async () => {
     if (!user) return;
-    // 二重 submit 防止 — ボタン連打で重複 update を防ぐ
     if (loading || uploading) return;
     const trimmedNickname = nickname.trim();
     if (trimmedNickname.length < 2) {
@@ -124,11 +185,21 @@ export default function ProfileEditScreen() {
       show('ニックネームは20文字以内にしてください', 'warn');
       return;
     }
+    if (bio.length > BIO_MAX) {
+      show(`自己紹介は${BIO_MAX}文字以内にしてください`, 'warn');
+      return;
+    }
     setLoading(true);
     try {
       const { error } = await supabase
         .from('profiles')
-        .update({ nickname: trimmedNickname, avatar_emoji: emoji, avatar_url: avatarUrl })
+        .update({
+          nickname: trimmedNickname,
+          bio: bio.trim() || null,
+          avatar_emoji: emoji,
+          avatar_url: avatarUrl,
+          cover_url: coverUrl,
+        })
         .eq('id', user.id);
       if (error) {
         const msg = error.message.toLowerCase();
@@ -143,7 +214,6 @@ export default function ProfileEditScreen() {
       await refreshProfile();
       router.back();
     } catch {
-      // ネットワーク例外でも loading を確実に解除する
       show('ネットワークエラー。接続を確認してください。', 'error');
     } finally {
       setLoading(false);
@@ -164,42 +234,55 @@ export default function ProfileEditScreen() {
         }}
         keyboardShouldPersistTaps="handled"
       >
-        {/* 現在のアバター */}
-        <View style={{ alignItems: 'center', gap: SP['3'] }}>
-          <Avatar size={120} name={nickname} emoji={emoji ?? undefined} uri={avatarUrl ?? undefined} />
+        {/* ===== カバー画像 ===== */}
+        <View style={{ gap: SP['2'] }}>
+          <Text style={[T.smallM, { color: C.text2 }]}>カバー画像</Text>
+          <View
+            style={{
+              height: 140,
+              borderRadius: R.lg,
+              backgroundColor: C.bg2,
+              borderWidth: 1,
+              borderColor: C.border,
+              overflow: 'hidden',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {coverUrl ? (
+              <Image source={{ uri: coverUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+            ) : (
+              <View style={{ alignItems: 'center', gap: 6 }}>
+                <Icon.image size={28} color={C.text3} strokeWidth={1.8} />
+                <Text style={[T.caption, { color: C.text3 }]}>未設定 (16:9 推奨)</Text>
+              </View>
+            )}
+          </View>
           <View style={{ flexDirection: 'row', gap: SP['2'] }}>
-            {/* クリック応答監査:
-                旧版は disabled={uploading} でタップを止めるだけで、視覚フィードバックが
-                テキスト変化 ("写真を選ぶ" → "アップロード中…") しかなかった。
-                PressableScale の disabled 時は scale animation も haptic も走らないため、
-                「何も起きていない」ようにユーザーに見える bug があった。
-                fix:
-                  - opacity 0.6 で disabled の状態を明示
-                  - ActivityIndicator を camera icon の代わりに表示し進捗を可視化 */}
             <PressableScale
-              onPress={pickPhoto}
+              onPress={pickCover}
               haptic="tap"
-              disabled={uploading}
-              accessibilityState={{ busy: uploading, disabled: uploading }}
+              disabled={uploadingCover}
+              accessibilityState={{ busy: uploadingCover, disabled: uploadingCover }}
               style={{
                 flexDirection: 'row', alignItems: 'center', gap: SP['1'],
                 paddingHorizontal: SP['3'], paddingVertical: SP['2'],
                 backgroundColor: C.accent, borderRadius: R.full,
-                opacity: uploading ? 0.6 : 1,
+                opacity: uploadingCover ? 0.6 : 1,
               }}
             >
-              {uploading ? (
+              {uploadingCover ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <Icon.camera size={16} color="#fff" strokeWidth={2.2} />
               )}
               <Text style={[T.smallM, { color: '#fff' }]}>
-                {uploading ? 'アップロード中…' : '写真を選ぶ'}
+                {uploadingCover ? 'アップロード中…' : coverUrl ? 'カバーを変更' : 'カバーを選ぶ'}
               </Text>
             </PressableScale>
-            {avatarUrl && (
+            {coverUrl && (
               <PressableScale
-                onPress={removePhoto}
+                onPress={removeCover}
                 haptic="warn"
                 style={{
                   paddingHorizontal: SP['3'], paddingVertical: SP['2'],
@@ -207,7 +290,48 @@ export default function ProfileEditScreen() {
                   borderWidth: 1, borderColor: C.border,
                 }}
               >
-                <Text style={[T.smallM, { color: C.text2 }]}>写真を外す</Text>
+                <Text style={[T.smallM, { color: C.text2 }]}>外す</Text>
+              </PressableScale>
+            )}
+          </View>
+        </View>
+
+        {/* ===== アバター ===== */}
+        <View style={{ alignItems: 'center', gap: SP['3'] }}>
+          <Avatar size={120} name={nickname} emoji={emoji ?? undefined} uri={avatarUrl ?? undefined} />
+          <View style={{ flexDirection: 'row', gap: SP['2'] }}>
+            <PressableScale
+              onPress={pickAvatar}
+              haptic="tap"
+              disabled={uploadingAvatar}
+              accessibilityState={{ busy: uploadingAvatar, disabled: uploadingAvatar }}
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: SP['1'],
+                paddingHorizontal: SP['3'], paddingVertical: SP['2'],
+                backgroundColor: C.accent, borderRadius: R.full,
+                opacity: uploadingAvatar ? 0.6 : 1,
+              }}
+            >
+              {uploadingAvatar ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Icon.camera size={16} color="#fff" strokeWidth={2.2} />
+              )}
+              <Text style={[T.smallM, { color: '#fff' }]}>
+                {uploadingAvatar ? 'アップロード中…' : 'アイコンを選ぶ'}
+              </Text>
+            </PressableScale>
+            {avatarUrl && (
+              <PressableScale
+                onPress={removeAvatar}
+                haptic="warn"
+                style={{
+                  paddingHorizontal: SP['3'], paddingVertical: SP['2'],
+                  backgroundColor: C.bg3, borderRadius: R.full,
+                  borderWidth: 1, borderColor: C.border,
+                }}
+              >
+                <Text style={[T.smallM, { color: C.text2 }]}>外す</Text>
               </PressableScale>
             )}
           </View>
@@ -217,6 +341,7 @@ export default function ProfileEditScreen() {
           </Text>
         </View>
 
+        {/* ===== ニックネーム ===== */}
         <View style={{ gap: SP['1'] }}>
           <Input
             label="ニックネーム（自分用）"
@@ -225,17 +350,10 @@ export default function ProfileEditScreen() {
             onChangeText={setNickname}
             placeholder="例: ぽけオタク"
             maxLength={20}
-            // 改行キーで直接保存 — フォームを下までスクロールせず済む
             returnKeyType="done"
-            onSubmitEditing={() => { void save(); }}
           />
-          {/* 文字数カウンタ — 「2〜20文字」の範囲が一目で分かる */}
           <Text style={[T.caption, {
-            color: Array.from(nickname.trim()).length > 20
-              ? C.amber
-              : Array.from(nickname.trim()).length >= 2
-                ? C.text3
-                : C.text3,
+            color: Array.from(nickname.trim()).length > 20 ? C.amber : C.text3,
             textAlign: 'right',
             paddingRight: SP['1'],
             fontVariant: ['tabular-nums'],
@@ -244,7 +362,43 @@ export default function ProfileEditScreen() {
           </Text>
         </View>
 
-        {/* 絵文字アイコン選択 */}
+        {/* ===== 自己紹介 (bio) ===== */}
+        <View style={{ gap: SP['1'] }}>
+          <Text style={[T.smallM, { color: C.text2 }]}>自己紹介（任意）</Text>
+          <View
+            style={{
+              backgroundColor: C.bg2,
+              borderWidth: 1,
+              borderColor: C.border,
+              borderRadius: R.md,
+              paddingHorizontal: SP['3'],
+              paddingVertical: 10,
+            }}
+          >
+            <TextInput
+              value={bio}
+              onChangeText={(t) => setBio(t.slice(0, BIO_MAX))}
+              placeholder="あなたについて (200文字まで)"
+              placeholderTextColor={C.text3}
+              selectionColor={C.accent}
+              cursorColor={C.accent}
+              multiline
+              maxLength={BIO_MAX}
+              underlineColorAndroid="transparent"
+              style={[T.body, { color: C.text, minHeight: 96, textAlignVertical: 'top' }]}
+            />
+          </View>
+          <Text style={[T.caption, {
+            color: bio.length > BIO_MAX * 0.9 ? C.amber : C.text3,
+            textAlign: 'right',
+            paddingRight: SP['1'],
+            fontVariant: ['tabular-nums'],
+          }]}>
+            {bio.length}/{BIO_MAX}
+          </Text>
+        </View>
+
+        {/* ===== 絵文字アイコン選択 ===== */}
         <View style={{ gap: SP['2'] }}>
           <Text style={[T.smallM, { color: C.text2 }]}>
             または絵文字から選ぶ
