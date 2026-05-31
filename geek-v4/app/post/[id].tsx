@@ -50,7 +50,6 @@ import {
   shouldCollapseComment,
   groupConsecutiveCollapsed,
 } from '../../lib/utils/commentCollapse';
-import { getThreadUserId } from '../../lib/utils/threadUserId';
 import * as Haptics from 'expo-haptics';
 import { isValidUuid } from '../../lib/validation';
 
@@ -132,7 +131,8 @@ export default function PostDetailScreen() {
   // ------------------------------------------------------------
   // 「このコメントに返信」をタップしたら replyTo に Comment をセットする。
   //   - 送信時: parentId = replyTo.id, replyToId = replyTo.id を attach
-  //   - draft 先頭に「↳ #<rootIndex> さんへ」を自動挿入
+  //   - 返信先は「#N さんに返信中」バナー + ツリーのレール/エルボーで示す。
+  //     本文には何も差し込まない (旧: 「↳ #N さんへ」自動挿入は本文を汚すため廃止)。
   //   - キャンセル ✕ ボタンで replyTo を null に戻す
   // ============================================================
   const [replyTo, setReplyTo] = useState<Comment | null>(null);
@@ -384,18 +384,13 @@ export default function PostDetailScreen() {
     });
   };
 
-  // 返信ボタン押下: replyTo セット + draft に「↳ #N さんへ」を挿入
-  // (UI 上は人間に読めるラベル / DB 上は reply_to_comment_id の uuid で正規化)
+  // 返信ボタン押下: replyTo をセットするだけ。
+  // 返信先は「#N さんに返信中」バナー + ツリーのレール/エルボーで示し、DB は
+  // handleSend が parent_comment_id / reply_to_comment_id を attach する。
+  // 本文には何も差し込まない (旧実装の「↳ #N (hash) さんへ」自動挿入は、その
+  // テキストがそのまま投稿本文に混ざってしまうため廃止)。
   const handleReply = (c: Comment) => {
     setReplyTo(c);
-    // root index は flat 順 (replies の index + 1) を使う — buildCommentTree の
-    // root だけ index 付与してるので、 reply 対象が child の場合は親 root の番号
-    // を表示したい。ここでは comment id から root index を逆引きする。
-    const idx = rootIndexById.get(rootOfCommentId(c.id)) ?? 0;
-    const hash = getThreadUserId(c.id, id ?? '');
-    const prefix = `↳ #${idx + 1} (${hash}) さんへ `;
-    // 既に prefix がある場合は重複させない
-    setText((cur) => (cur.startsWith('↳ ') ? cur : prefix + cur));
   };
 
   // route param validation 失敗 → cache 汚染を防ぐため早期 return
@@ -935,11 +930,7 @@ export default function PostDetailScreen() {
               </Text>
               <View style={{ flex: 1 }} />
               <PressableScale
-                onPress={() => {
-                  setReplyTo(null);
-                  // prefix を text から取り除く (1 行目だけ消す素朴な実装)
-                  setText((cur) => cur.replace(/^↳[^\n]*\n?/, ''));
-                }}
+                onPress={() => setReplyTo(null)}
                 haptic="tap"
                 hitSlop={8}
                 accessibilityLabel="返信モードを解除"
