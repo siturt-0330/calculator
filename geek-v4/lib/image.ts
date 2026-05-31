@@ -141,6 +141,7 @@ export async function cropImageOnWebCanvas(input: {
 export async function makeWebPreviewDataUrl(
   sourceUri: string,
   maxEdge = 1024,
+  quality = 0.8,
 ): Promise<string> {
   // Canvas で同サイズに drawImage して JPEG 化
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -180,7 +181,7 @@ export async function makeWebPreviewDataUrl(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'medium'; // preview なので medium で十分
   ctx.drawImage(img, 0, 0, outW, outH);
-  const out = canvas.toDataURL('image/jpeg', 0.8);
+  const out = canvas.toDataURL('image/jpeg', quality);
   // ★ toDataURL 無音失敗ガード: WebView Canvas memory 不足や tainted canvas で
   //   'data:,' / 極端に短い data URL が返る事故を検出する.
   //   有効な JPEG data URL は base64 でほぼ確実に 200 文字以上.

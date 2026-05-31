@@ -39,6 +39,7 @@ import { useDraftsStore, newDraftId } from '../../stores/draftsStore';
 import { hap } from '../../design/haptics';
 import { fetchCommunity } from '../../lib/api/communities';
 import { validateVideoSource } from '../../lib/media';
+import { makeWebPreviewDataUrl } from '../../lib/image';
 import { SP, R } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { useColors } from '../../hooks/useColors';
@@ -226,7 +227,27 @@ export default function CreatePost() {
         selectionLimit: 4,
       });
       if (!r.canceled) {
-        setImages(r.assets.map((a) => a.uri).slice(0, 4));
+        const uris = r.assets.map((a) => a.uri).slice(0, 4);
+        if (Platform.OS === 'web') {
+          // Web では送信時の canvas リサイズ (manipulateAsync) がメインスレッドを
+          // 塞いで「投稿の瞬間フリーズ」になる。ピック時に 1600px JPEG (data URL)
+          // へ前倒しすると、送信時は prepareImageUpload の data: 短絡パスを通って
+          // 重い処理が走らない。canvas 再エンコードで EXIF も除去される。
+          // 失敗時は生 URI にフォールバック (= 従来どおり送信時に処理) するので退行なし。
+          const processed = await Promise.all(
+            uris.map(async (u) => {
+              try {
+                return await makeWebPreviewDataUrl(u, 1600, 0.85);
+              } catch (e) {
+                console.warn('[post/create] web image pre-process failed, fallback to raw uri:', e);
+                return u;
+              }
+            }),
+          );
+          setImages(processed);
+        } else {
+          setImages(uris);
+        }
         hap.tap();
       }
     } catch (e) {

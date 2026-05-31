@@ -342,48 +342,44 @@ export default function CreateSettings() {
 
     setPosting(true);
     try {
-      // AI コンテンツチェック
-      const check = await checkContent({ content: s.content, tags: s.tags });
-      if (!check.ok) {
-        hap.error();
-        Alert.alert('投稿できません', check.reason ?? 'コンテンツポリシーに反する可能性があります');
-        return;
-      }
-
       const userId = useAuthStore.getState().user?.id;
       if (!userId) {
         show('ログインし直してください', 'error');
         return;
       }
 
-      // 1) 画像 upload (並列)
+      // AI コンテンツチェック (本文+タグ) とメディアアップロードは互いに独立なので
+      // 並列実行する。直列だと「AI チェックの往復」を待ってからアップロードが
+      // 始まり、送信ボタン押下後の待ちが長く感じる。チェックが NG のときは
+      // アップロード結果を破棄して createPost には進めない (ごく稀に orphan な
+      // メディアが Storage に残るが、ポリシー違反は元々レアなので許容)。
+      setUploadStatus(s.images.length > 0 || s.video ? 'アップロード中…' : '確認中…');
+
+      let check: Awaited<ReturnType<typeof checkContent>>;
       let uploadedImageUrls: string[] = [];
-      if (s.images.length > 0) {
-        setUploadStatus(`画像 ${s.images.length} 枚をアップロード中…`);
-        try {
-          uploadedImageUrls = await Promise.all(
-            s.images.map((uri) => uploadPostImage(uri, userId)),
-          );
-        } catch (e) {
-          show(e instanceof Error ? e.message : String(e), 'error');
-          return;
-        }
+      let uploadedVideoUrls: string[] = [];
+      try {
+        [check, uploadedImageUrls, uploadedVideoUrls] = await Promise.all([
+          checkContent({ content: s.content, tags: s.tags }),
+          s.images.length > 0
+            ? Promise.all(s.images.map((uri) => uploadPostImage(uri, userId)))
+            : Promise.resolve<string[]>([]),
+          s.video
+            ? uploadPostVideo(s.video.uri, userId, {
+                mime: s.video.mime,
+                ext: s.video.ext,
+              }).then((url) => [url])
+            : Promise.resolve<string[]>([]),
+        ]);
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), 'error');
+        return;
       }
 
-      // 2) 動画 upload (1 本)
-      let uploadedVideoUrls: string[] = [];
-      if (s.video) {
-        setUploadStatus(`動画 (${(s.video.size / 1024 / 1024).toFixed(1)}MB) をアップロード中…`);
-        try {
-          const url = await uploadPostVideo(s.video.uri, userId, {
-            mime: s.video.mime,
-            ext: s.video.ext,
-          });
-          uploadedVideoUrls = [url];
-        } catch (e) {
-          show(e instanceof Error ? e.message : String(e), 'error');
-          return;
-        }
+      if (!check.ok) {
+        hap.error();
+        Alert.alert('投稿できません', check.reason ?? 'コンテンツポリシーに反する可能性があります');
+        return;
       }
 
       setUploadStatus('投稿を作成中…');
