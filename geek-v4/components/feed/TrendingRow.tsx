@@ -1,5 +1,5 @@
-import { memo } from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, ScrollView, type LayoutChangeEvent } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
@@ -11,6 +11,12 @@ import { T } from '../../design/typography';
 
 function TrendingRowInner() {
   const router = useRouter();
+
+  // 各 chip の開始 x 座標を ref に積み、揃ったら snapToOffsets に渡す。
+  // これでスクロール停止位置が必ず「ある chip の左端」になり、半分見切れの
+  // 中途半端な状態がなくなる (画面に入っているなら完全表示、外なら完全に隠れる)。
+  const positionsRef = useRef<Map<string, number>>(new Map());
+  const [snapOffsets, setSnapOffsets] = useState<number[]>([]);
 
   // Phase 3: cluster diversity を有効にするため cooccur を取得 (hydrate 済みなら)
   // cooccur が無くても fetch 自体は動く (diversify はスキップ)
@@ -34,6 +40,24 @@ function TrendingRowInner() {
     refetchOnMount: false,
   });
 
+  // trending が変わったら計測をリセット
+  useEffect(() => {
+    positionsRef.current.clear();
+    setSnapOffsets([]);
+  }, [trending]);
+
+  const handleChipLayout = useCallback(
+    (name: string, e: LayoutChangeEvent) => {
+      positionsRef.current.set(name, e.nativeEvent.layout.x);
+      // すべての chip が onLayout 通過したら offsets を sorted array で確定
+      if (positionsRef.current.size === trending.length) {
+        const offsets = [...positionsRef.current.values()].sort((a, b) => a - b);
+        setSnapOffsets(offsets);
+      }
+    },
+    [trending.length],
+  );
+
   if (trending.length === 0) return null;
 
   return (
@@ -49,12 +73,18 @@ function TrendingRowInner() {
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ gap: SP['2'], paddingRight: SP['4'] }}
+          // 各 chip の開始位置で snap させ、半分見切れの中途半端な状態を防ぐ。
+          // 画面外にスクロールアウトしたものは完全に見切れる挙動になる。
+          snapToOffsets={snapOffsets.length > 0 ? snapOffsets : undefined}
+          snapToAlignment="start"
+          decelerationRate="fast"
         >
           {trending.map((t, i) => (
             <PressableScale
               key={t.name}
               onPress={() => router.push(`/tag/${encodeURIComponent(t.name)}` as never)}
               haptic="tap"
+              onLayout={(e) => handleChipLayout(t.name, e)}
               style={{
                 paddingHorizontal: SP['3'],
                 paddingVertical: SP['2'],

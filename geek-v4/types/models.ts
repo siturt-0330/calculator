@@ -109,11 +109,25 @@ export type Notification = {
   id: string;
   // 'official_post' は公式コミュニティ管理者投稿 (migration 0035 のトリガー由来)。
   // tag_name にはコミュニティ名が入る — 遷移時に name→id でルックアップする。
-  type: 'like' | 'comment' | 'follow' | 'reply' | 'event' | 'official_post';
+  // 'join_request' は request 制コミュニティへの参加申請 (migration 0101 の
+  // community_join_requests AFTER INSERT トリガー由来)。owner / admin に届く。
+  // data.community_id を遷移先 (/community/<id>/admin) として使う。
+  type:
+    | 'like'
+    | 'comment'
+    | 'follow'
+    | 'reply'
+    | 'event'
+    | 'official_post'
+    | 'mention'
+    | 'announcement'
+    | 'join_request';
   tag_name: string | null;
   message: string;
   read: boolean;
   created_at: string;
+  /** 通知種別ごとの追加メタ (jsonb)。join_request は community_id / applicant_user_id 等を含む。 */
+  data?: Record<string, unknown> | null;
 };
 
 export type CalendarEvent = {

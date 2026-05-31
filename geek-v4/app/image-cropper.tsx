@@ -32,7 +32,7 @@ import { Icon } from '../constants/icons';
 import { C, SP } from '../design/tokens';
 import { PressableScale } from '../components/ui/PressableScale';
 import { resolveCropper, consumePendingSource } from '../lib/imageCropper';
-import { cropImageOnWebCanvas, makeWebPreviewDataUrl } from '../lib/image';
+import { cropImageOnWebCanvas } from '../lib/image';
 
 type Rotation = 0 | 90 | 180 | 270;
 
@@ -68,13 +68,13 @@ export default function ImageCropperScreen() {
   const [imageSize, setImageSize] = useState<{ w: number; h: number } | null>(null);
   const [rotation, setRotation] = useState<Rotation>(0);
   const [busy, setBusy] = useState(false);
-  // ★ Web のみ: gesture 描画用の preview (低解像度) を別途生成。
-  //   crop 計算は sourceUri の原寸 (imageSize) を使う。
-  //   これにより iPhone の 4K 写真でも pan/pinch が滑らかになる。
-  const [displayUri, setDisplayUri] = useState<string>(sourceUri);
-  // ★「たまに cropper が真っ黒」事故の最終救命: displayUri (= preview data URL) が
-  //   描画できなかった場合に sourceUri に巻き戻すフラグ. revert 後にもう一度 onError が
-  //   発火したら本当に sourceUri も描画不能なのでエラー表示する.
+  // ★「真っ黒」事故撲滅 (2026-05-31):
+  //   旧実装は Web で makeWebPreviewDataUrl(1024) を生成して displayUri を差し替えていたが、
+  //   iOS Safari / WKWebView (TikTok 等 in-app browser) では canvas.toDataURL の
+  //   結果が onLoad は通るが naturalWidth=0 になる silent decode failure が起きる
+  //   ことがあり、それが「円の中身だけ真っ黒」事故の正体だった。
+  //   preview は完全に撤去し、常に sourceUri を直描画する。pan/pinch のカクつき対策は
+  //   Web 側で will-change/translate3d による GPU layer 化 + 表示時の resize に置換。
   const [renderError, setRenderError] = useState(false);
 
   // 動かす変数 — reanimated SharedValue で worklet スレッドからも触れる
@@ -139,33 +139,8 @@ export default function ImageCropperScreen() {
     };
   }, [sourceUri, router]);
 
-  // ★ Web: 大きな画像 (1024px 超) は preview にダウンサンプルして表示用に使う
-  //    これで pan/pinch の体感が大幅に改善 (iPhone 4K 写真でフレームレート ~10fps → 50+fps)
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    if (!sourceUri) return;
-    if (!imageSize) return;
-    // 既に十分小さい画像なら preview 化不要 (data URL は触らない)
-    if (imageSize.w <= 1024 && imageSize.h <= 1024) return;
-    let alive = true;
-    makeWebPreviewDataUrl(sourceUri, 1024)
-      .then((url) => {
-        if (!alive) return;
-        // ★ 二重ガード: lib/image.ts 側でも検証済だが念のためここでも形を確認.
-        //   壊れた data URL を setDisplayUri すると Image が真っ黒になる事故が起きる.
-        if (!url || !url.startsWith('data:image/') || url.length < 200) {
-          console.warn('[image-cropper] preview URL が無効 — sourceUri を維持:', url?.slice(0, 32));
-          return;
-        }
-        setDisplayUri(url);
-      })
-      .catch((e) => {
-        console.warn('[image-cropper] preview generation failed (continuing with raw uri):', e);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [sourceUri, imageSize]);
+  // ※ 旧 preview 生成 useEffect は撤去 (上記コメント参照)。displayUri 自体を廃止し
+  //    Animated.Image には sourceUri を直接渡す。
 
   // cover-fit の dimensions (rotation 適用後の自然 aspect で考える)
   const fitDims = useMemo(() => {
@@ -417,32 +392,26 @@ export default function ImageCropperScreen() {
           >
             {imageSize && fitDims ? (
               <Animated.Image
-                // ★ Web では低解像度 preview を使用 (4K 写真 → 1024px へダウンサンプル済)
-                //   crop 計算は元 sourceUri + imageSize の原寸座標系で正確に行うので、
-                //   表示用と crop 用で URL を分離しても結果に影響しない。
-                source={{ uri: displayUri }}
+                // ★ 真っ黒事故撲滅: preview を介さず sourceUri を直接描画。
+                //   crop 計算は imageSize の原寸座標系で正確 (preview 無くても結果不変)。
+                source={{ uri: sourceUri }}
                 onError={(e) => {
-                  // ★ displayUri (preview data URL) が壊れている場合の救命処置.
-                  //   iOS Safari / WKWebView の Canvas memory 不足や HEIC の
-                  //   silent decode failure で「cropper の中身が真っ黒」になる事故を防ぐ.
                   const err = (e as { nativeEvent?: { error?: string } })?.nativeEvent?.error ?? 'unknown';
-                  console.warn('[image-cropper] image render failed:', err, 'uri:', displayUri?.slice(0, 64));
-                  if (displayUri !== sourceUri && sourceUri) {
-                    // preview が壊れていた → 原画像 sourceUri に巻き戻し
-                    console.warn('[image-cropper] reverting displayUri → sourceUri');
-                    setDisplayUri(sourceUri);
-                  } else {
-                    // sourceUri 自体が render 不能 (HEIC を WebView がデコードできない等) → エラー表示
-                    setRenderError(true);
-                  }
+                  console.warn('[image-cropper] image render failed:', err, 'uri:', sourceUri?.slice(0, 64));
+                  // sourceUri 自体が render 不能 (HEIC を WebView がデコードできない等) → エラー表示
+                  setRenderError(true);
                 }}
                 onLoad={() => {
-                  // 一度成功したら error フラグ解除
                   if (renderError) setRenderError(false);
                 }}
                 style={[
                   { width: fitDims.fitW, height: fitDims.fitH },
                   imgAnimStyle,
+                  // ★ Web で pan/pinch が滑らかになるよう GPU layer を確保。
+                  //   will-change + translate3d hint でブラウザに合成レイヤを促す。
+                  Platform.OS === 'web'
+                    ? ({ willChange: 'transform', backfaceVisibility: 'hidden' } as object)
+                    : null,
                 ]}
                 resizeMode="cover"
               />

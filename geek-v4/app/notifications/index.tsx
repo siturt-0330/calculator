@@ -209,6 +209,17 @@ export default function NotificationsScreen() {
       }
       return;
     }
+    // 参加申請通知 (migration 0101) — data.community_id を読んで admin 画面へ
+    if (n.type === 'join_request') {
+      const data = n.data as { community_id?: unknown } | null;
+      const cid = data && typeof data.community_id === 'string' ? data.community_id : null;
+      if (cid) {
+        router.push(`/community/${cid}/admin` as never);
+        return;
+      }
+      router.push('/(tabs)/community' as never);
+      return;
+    }
     if (n.tag_name) {
       router.push(`/tag/${encodeURIComponent(n.tag_name)}` as never);
     } else if (n.type === 'follow') {

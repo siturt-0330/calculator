@@ -392,15 +392,15 @@ export default function CreateSpotScreen() {
         </Card>
       </ScrollView>
 
-      {/* ───────── Sticky CTA ───────── */}
+      {/* ───────── Sticky CTA — (tabs) 配下なので TabBar の上に出す ───────── */}
       <View
         style={{
           position: 'absolute',
           left: 0, right: 0,
-          bottom: 0,
+          bottom: TABBAR.height + insets.bottom,
           paddingHorizontal: SP['4'],
           paddingTop: SP['3'],
-          paddingBottom: insets.bottom + SP['3'],
+          paddingBottom: SP['3'],
           backgroundColor: C.bg,
           borderTopWidth: 1,
           borderTopColor: C.border,

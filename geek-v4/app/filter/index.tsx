@@ -1,8 +1,19 @@
+// =============================================================================
+// app/filter/index.tsx — 「好きなタグ」管理画面
+// -----------------------------------------------------------------------------
+// フィードで「選択した # のみ」を押したとき (likedTags 空) に開く画面。
+// 旧版は「ブロックするタグ」セクションで 158 個のデフォルト有害タグ
+// (詐欺 / 自殺 / 性暴力 / 虐待 / 等) を赤い pill で一覧表示していたが、
+// ユーザー要望によりブロックリストの画面表示を全廃 (2026-05-31)。
+//
+//   - ブロック機能自体は内部で動作し続ける (検索/フィード側でフィルタ)。
+//   - 個別のブロックタグ編集が必要なら settings/blocked-tags から行う。
+//   - この画面では「好きなタグ」追加 / 削除 / 提案だけを扱う。
+// =============================================================================
 import { View, Text, ScrollView } from 'react-native';
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useTagFilterStore, DEFAULT_BLOCKED_TAGS } from '../../stores/tagFilterStore';
+import { useTagFilterStore } from '../../stores/tagFilterStore';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useTagGraphStore } from '../../stores/tagGraphStore';
 import { useToastStore } from '../../stores/toastStore';
@@ -20,17 +31,14 @@ import { buildTagSuggestions, REASON_LABEL } from '../../lib/utils/tagSuggest';
 import { useTagRecommendations } from '../../hooks/useTagRecommendations';
 
 export default function FilterScreen() {
-  const router = useRouter();
   const [likedInput, setLikedInput] = useState('');
-  const [blockedInput, setBlockedInput] = useState('');
   const [showReset, setShowReset] = useState(false);
   // 個別 selector で subscribe — graph nodes や toast の更新で全体 re-render しない
   const likedTags = useTagFilterStore((s) => s.likedTags);
+  // blockedTags は handleAddLiked の「既にブロックなら案内 toast」だけで使う (UI 露出なし)
   const blockedTags = useTagFilterStore((s) => s.blockedTags);
   const addLiked = useTagFilterStore((s) => s.addLiked);
   const removeLiked = useTagFilterStore((s) => s.removeLiked);
-  const addBlocked = useTagFilterStore((s) => s.addBlocked);
-  const removeBlocked = useTagFilterStore((s) => s.removeBlocked);
   const nodes = useTagGraphStore((s) => s.nodes);
   const rootIds = useTagGraphStore((s) => s.rootIds);
   const hydrateGraph = useTagGraphStore((s) => s.hydrate);
@@ -38,18 +46,18 @@ export default function FilterScreen() {
   const insets = useSafeAreaInsets();
   const Hash = Icon.hash;
 
-  useEffect(() => { void hydrateGraph(); }, [hydrateGraph]);
+  useEffect(() => {
+    void hydrateGraph();
+  }, [hydrateGraph]);
 
   // V4 エンジン: PMI 埋め込み + グラフ + 共起 + CTR + トレンド 統合レコメンド
   const likedRecommendations = useTagRecommendations(likedTags, [...likedTags, ...blockedTags], 20);
-  const blockedRecommendations = useTagRecommendations(blockedTags, [...likedTags, ...blockedTags], 30);
 
   // 旧 graph-only サジェストも fallback として保持 (タグツリーが疎な時のため)
   const graphSuggestions = useMemo(
     () => buildTagSuggestions(likedTags, nodes, rootIds, 20),
     [likedTags, nodes, rootIds],
   );
-  // V4 レコメンドに変換して filter screen の表示形式に合わせる
   const suggestions = useMemo(() => {
     if (likedRecommendations.length > 0) {
       return likedRecommendations.map((r) => ({
@@ -60,19 +68,6 @@ export default function FilterScreen() {
     }
     return graphSuggestions;
   }, [likedRecommendations, graphSuggestions]);
-
-  const blockSuggestions = useMemo(() => {
-    if (blockedRecommendations.length > 0) {
-      return blockedRecommendations.map((r) => ({
-        tag: r.tag,
-        reason: 'related' as const,
-        via: r.primaryReason,
-      }));
-    }
-    return buildTagSuggestions(blockedTags, nodes, rootIds, 30).filter(
-      (s) => !likedTags.includes(s.tag) && !blockedTags.includes(s.tag),
-    );
-  }, [blockedRecommendations, blockedTags, likedTags, nodes, rootIds]);
 
   const handleAddLiked = () => {
     const t = likedInput.trim().replace(/^#/, '');
@@ -85,34 +80,17 @@ export default function FilterScreen() {
     }
   };
 
-  const handleAddBlocked = () => {
-    const t = blockedInput.trim().replace(/^#/, '');
-    if (!t) return;
-    const wasLiked = likedTags.includes(t);
-    addBlocked(t);
-    setBlockedInput('');
-    if (wasLiked) {
-      show(`「${t}」を好きから外してブロックに移動しました`, 'info');
-    }
-  };
-
-  // 「好き」+ ユーザー追加ブロックを 0 に戻す
-  // (デフォルト安全タグはセーフティ網なので保持)
-  const customBlockedCount = blockedTags.filter((t) => !DEFAULT_BLOCKED_TAGS.includes(t)).length;
-  const hasResettable = likedTags.length > 0 || customBlockedCount > 0;
+  const hasResettable = likedTags.length > 0;
   const doReset = () => {
     for (const t of [...likedTags]) removeLiked(t);
-    for (const t of [...blockedTags]) {
-      if (!DEFAULT_BLOCKED_TAGS.includes(t)) removeBlocked(t);
-    }
     setShowReset(false);
-    show('フィルターをリセットしました', 'success');
+    show('好きなタグをリセットしました', 'success');
   };
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <TopBar
-        title="フィルター設定"
+        title="好きなタグ"
         left={<BackButton />}
         right={
           hasResettable ? (
@@ -142,6 +120,26 @@ export default function FilterScreen() {
           title={`好きなタグ${likedTags.length > 0 ? ` · ${likedTags.length}` : ''}`}
         />
         <View style={{ paddingHorizontal: SP['4'], gap: SP['3'] }}>
+          {/* 空状態のヒント (likedTags が 0 件のとき大きめに案内) */}
+          {likedTags.length === 0 ? (
+            <View
+              style={{
+                paddingHorizontal: SP['4'],
+                paddingVertical: SP['4'],
+                backgroundColor: C.bg2,
+                borderRadius: R.lg,
+                borderWidth: 1,
+                borderColor: C.divider,
+                gap: SP['1'],
+              }}
+            >
+              <Text style={[T.bodyB, { color: C.text }]}>好きなタグを追加してください</Text>
+              <Text style={[T.caption, { color: C.text3 }]}>
+                追加したタグの投稿だけがフィードに並びます。下の入力欄から自由に追加できます。
+              </Text>
+            </View>
+          ) : null}
+
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: SP['2'] }}>
             <View style={{ flex: 1 }}>
               <Input
@@ -180,35 +178,37 @@ export default function FilterScreen() {
           <TagInputSuggestions
             input={likedInput}
             excludeTags={[...likedTags, ...blockedTags]}
-            onPick={(t) => { addLiked(t); setLikedInput(''); }}
+            onPick={(t) => {
+              addLiked(t);
+              setLikedInput('');
+            }}
             variant="liked"
           />
 
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-            {likedTags.map((t) => (
-              <TagPill key={t} name={t} state="liked" onPress={() => removeLiked(t)} />
-            ))}
-            {likedTags.length === 0 && (
-              <Text style={[T.small, { color: C.text3 }]}>まだ追加されていません</Text>
-            )}
-          </View>
+          {likedTags.length > 0 ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
+              {likedTags.map((t) => (
+                <TagPill key={t} name={t} state="liked" onPress={() => removeLiked(t)} />
+              ))}
+            </View>
+          ) : null}
 
           {/* タグツリーからのサジェスト: 候補がある時だけ表示 */}
           {suggestions.length > 0 && (
             <View style={{ marginTop: SP['2'], gap: SP['2'] }}>
               <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5 }]}>おすすめ</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  {suggestions.map((s) => {
-                    const meta = REASON_LABEL[s.reason];
-                    return (
-                      <PressableScale
-                        key={s.tag}
-                        onPress={() => {
-                          addLiked(s.tag);
-                          show(`「${s.tag}」を好きに追加`, 'success');
-                        }}
-                        haptic="confirm"
-                        style={{
+                {suggestions.map((s) => {
+                  const meta = REASON_LABEL[s.reason];
+                  return (
+                    <PressableScale
+                      key={s.tag}
+                      onPress={() => {
+                        addLiked(s.tag);
+                        show(`「${s.tag}」を好きに追加`, 'success');
+                      }}
+                      haptic="confirm"
+                      style={{
                         flexDirection: 'row',
                         alignItems: 'center',
                         gap: 4,
@@ -226,7 +226,8 @@ export default function FilterScreen() {
                         {s.tag}
                       </Text>
                       <Text style={{ fontSize: 9, color: C.text3 }}>
-                        {meta.icon}{s.via}
+                        {meta.icon}
+                        {s.via}
                       </Text>
                     </PressableScale>
                   );
@@ -235,219 +236,11 @@ export default function FilterScreen() {
             </View>
           )}
         </View>
-
-        <SectionHeader
-          title={`ブロックするタグ · ${blockedTags.length}/${DEFAULT_BLOCKED_TAGS.length + customBlockedCount}`}
-        />
-        <View style={{ paddingHorizontal: SP['4'], gap: SP['3'] }}>
-          {/* 安全のため事前にブロック中のタグの案内 */}
-          <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5 }]}>
-            有害カテゴリを自動ブロック中
-          </Text>
-
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: SP['2'] }}>
-            <View style={{ flex: 1 }}>
-              <Input
-                icon={Hash}
-                placeholder="例: ネタバレ"
-                value={blockedInput}
-                onChangeText={setBlockedInput}
-                onSubmitEditing={handleAddBlocked}
-                returnKeyType="done"
-                autoCapitalize="none"
-                // memory DoS 対策: tag 名は 40 文字 cap
-                maxLength={40}
-              />
-            </View>
-            <PressableScale
-              onPress={handleAddBlocked}
-              haptic="confirm"
-              disabled={!blockedInput.trim()}
-              style={{
-                paddingHorizontal: SP['3'],
-                height: 44,
-                backgroundColor: blockedInput.trim() ? '#E24B4A' : C.bg3,
-                borderRadius: R.md,
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 4,
-                opacity: blockedInput.trim() ? 1 : 0.5,
-              }}
-            >
-              <Icon.plus size={18} color="#fff" strokeWidth={2.6} />
-              <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>追加</Text>
-            </PressableScale>
-          </View>
-
-          {/* 入力中のリアルタイム類似タグ提案 */}
-          <TagInputSuggestions
-            input={blockedInput}
-            excludeTags={[...likedTags, ...blockedTags]}
-            onPick={(t) => { addBlocked(t); setBlockedInput(''); }}
-            variant="blocked"
-          />
-
-          {/* ユーザーが追加したカスタムブロック */}
-          {(() => {
-            const defaultSet = new Set(DEFAULT_BLOCKED_TAGS);
-            const customBlocked = blockedTags.filter((t) => !defaultSet.has(t));
-            return customBlocked.length > 0 ? (
-              <View style={{ gap: SP['2'] }}>
-                <Text style={[T.caption, { color: C.text2, fontWeight: '700' }]}>
-                  あなたが追加 ({customBlocked.length})
-                </Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-                  {customBlocked.map((t) => (
-                    <TagPill key={t} name={t} state="blocked" onPress={() => removeBlocked(t)} />
-                  ))}
-                </View>
-              </View>
-            ) : null;
-          })()}
-
-          {/* デフォルト安全タグ (全71個常時表示、トグル可能) */}
-          <View style={{ gap: SP['2'], marginTop: SP['2'] }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ fontSize: 12 }}>🛡️</Text>
-              <Text style={[T.caption, { color: C.text2, fontWeight: '700', flex: 1 }]}>
-                安全のためデフォルトでブロック ({blockedTags.filter((t) => DEFAULT_BLOCKED_TAGS.includes(t)).length}/{DEFAULT_BLOCKED_TAGS.length})
-              </Text>
-            </View>
-            <Text style={[T.caption, { color: C.text3 }]}>
-              赤=ブロック中 / グレー=解除済み。タップで切り替え
-            </Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-              {DEFAULT_BLOCKED_TAGS.map((t) => {
-                const active = blockedTags.includes(t);
-                return active ? (
-                  <TagPill key={t} name={t} state="blocked" onPress={() => removeBlocked(t)} />
-                ) : (
-                  <PressableScale
-                    key={t}
-                    onPress={() => addBlocked(t)}
-                    haptic="select"
-                    style={{
-                      paddingHorizontal: SP['3'],
-                      paddingVertical: 4,
-                      borderRadius: R.full,
-                      backgroundColor: 'transparent',
-                      borderWidth: 1,
-                      borderColor: C.border,
-                      opacity: 0.5,
-                    }}
-                  >
-                    <Text style={[T.small, { color: C.text3 }]}>
-                      #{t}
-                    </Text>
-                  </PressableScale>
-                );
-              })}
-            </View>
-          </View>
-
-          {/* タグ連携からの関連ブロック候補 */}
-          <View style={{
-            marginTop: SP['3'],
-            padding: SP['3'],
-            backgroundColor: C.bg2,
-            borderRadius: R.md,
-            borderWidth: 1,
-            borderColor: C.border,
-            gap: SP['2'],
-          }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ fontSize: 14 }}>🛡️</Text>
-              <Text style={[T.smallM, { color: C.text, fontWeight: '700', flex: 1 }]}>
-                これもブロックしますか？
-              </Text>
-              <PressableScale onPress={() => router.push('/oshi/tag-graph' as never)} haptic="tap">
-                <Text style={[T.caption, { color: C.accent }]}>連携を編集</Text>
-              </PressableScale>
-            </View>
-
-            {blockSuggestions.length === 0 ? (
-              <Text style={[T.small, { color: C.text2 }]}>
-                {blockedTags.length === 0
-                  ? 'ブロック中のタグから自動的に関連タグを提案します。まずは1つブロックしてみてください。'
-                  : '今のブロックタグに関連する候補はありません。'}
-              </Text>
-            ) : (
-              <>
-                <Text style={[T.caption, { color: C.text3 }]}>
-                  ブロック中のタグから検索エンジンが関連を分析・提案 ({blockSuggestions.length}件)
-                </Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  {blockSuggestions.map((s) => {
-                    const meta = REASON_LABEL[s.reason];
-                    return (
-                      <PressableScale
-                        key={s.tag}
-                        onPress={() => {
-                          addBlocked(s.tag);
-                          show(`「${s.tag}」をブロックに追加`, 'success');
-                        }}
-                        haptic="confirm"
-                        style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          gap: 4,
-                          paddingHorizontal: SP['3'],
-                          paddingVertical: 6,
-                          backgroundColor: 'rgba(226,75,74,0.13)',
-                          borderRadius: R.full,
-                          borderWidth: 1,
-                          borderColor: 'rgba(226,75,74,0.4)',
-                        }}
-                      >
-                        <Text style={{ fontSize: 11 }}>{meta.icon}</Text>
-                        <Text style={[T.smallM, { color: '#E24B4A', fontWeight: '700' }]}>
-                          {s.tag}
-                        </Text>
-                        <Text style={{ fontSize: 9, color: C.text3, marginLeft: 2 }}>
-                          {meta.label}
-                        </Text>
-                      </PressableScale>
-                    );
-                  })}
-                </View>
-                {blockSuggestions.length > 0 && (
-                  <PressableScale
-                    onPress={() => {
-                      let count = 0;
-                      for (const s of blockSuggestions) {
-                        if (!blockedTags.includes(s.tag) && !likedTags.includes(s.tag)) {
-                          addBlocked(s.tag);
-                          count++;
-                        }
-                      }
-                      if (count > 0) show(`${count}件のタグを一括ブロック`, 'success');
-                    }}
-                    haptic="confirm"
-                    style={{
-                      alignSelf: 'flex-start',
-                      marginTop: SP['1'],
-                      paddingHorizontal: SP['3'],
-                      paddingVertical: SP['1'],
-                      backgroundColor: 'rgba(226,75,74,0.20)',
-                      borderRadius: R.full,
-                      borderWidth: 1,
-                      borderColor: 'rgba(226,75,74,0.5)',
-                    }}
-                  >
-                    <Text style={[T.caption, { color: '#E24B4A', fontWeight: '700' }]}>
-                      🛡️ 上記をまとめてブロック
-                    </Text>
-                  </PressableScale>
-                )}
-              </>
-            )}
-          </View>
-        </View>
       </ScrollView>
       <ConfirmDialog
         visible={showReset}
-        title="フィルターをリセット"
-        message={`好きなタグ ${likedTags.length} 件${customBlockedCount > 0 ? `、追加でブロックしたタグ ${customBlockedCount} 件` : ''}を削除します。安全のためのデフォルトブロックは残ります。`}
+        title="好きなタグをリセット"
+        message={`好きなタグ ${likedTags.length} 件を削除します。`}
         confirmLabel="リセット"
         onConfirm={doReset}
         onCancel={() => setShowReset(false)}

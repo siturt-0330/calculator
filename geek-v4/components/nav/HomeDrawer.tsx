@@ -36,12 +36,11 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   withSpring,
-  withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -67,7 +66,7 @@ import { useTheme } from '../../hooks/useColors';
 import type { ColorPalette } from '../../lib/theme/palettes';
 import { R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
-import { TIMING_NORM, clampHandoff } from '../../design/motion';
+import { clampHandoff } from '../../design/motion';
 import { haptic as triggerHaptic } from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
 import { useRecentCommunitiesStore } from '../../stores/recentCommunitiesStore';
@@ -116,6 +115,7 @@ export const HomeDrawer = memo(function HomeDrawer({
   const { width: WW, height: WH } = useWindowDimensions();
   const W = getHomeDrawerWidth(WW);
   const router = useRouter();
+  const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const { C, GRAD } = useTheme();
 
@@ -226,21 +226,26 @@ export const HomeDrawer = memo(function HomeDrawer({
     opacity: interpolate(progress.value, [0, 1], [0, 0.5], Extrapolation.CLAMP),
   }));
 
-  // backdrop タップで close。ボタン起動 (初速ゼロ) は spring の S 字立ち上がりより
-  // 一定時間の ease-out timing の方がキレ良く吸い付くため withTiming を使う。
-  // unlock は即時 (視覚クローズは SharedValue 駆動なので影響なし)。
+  // backdrop タップで close。スワイプ閉と同じ spring を使って物理感を揃え、
+  // 「タップは timing / スワイプは spring」の異種ミックスによる体感の違和感を解消。
+  // 初速ゼロでもダンピングが効いた SPRING なら overshoot は気にならない。
   const handleBackdropTap = () => {
     triggerHaptic('tap');
     onOpenChange(false);
-    progress.value = withTiming(0, TIMING_NORM);
+    progress.value = withSpring(0, HOME_DRAWER_SPRING);
   };
 
-  // 各 nav action — 閉じアニメを即開始しつつ、重い router.push は rAF で 1tick
-  // 後ろへ退避して閉じ初動に遷移先マウントの JS を被せない (初動カクつき防止)。
+  // 各 nav action — 閉じアニメをスワイプと同じ spring で即開始し、
+  // 同じ画面への navigation はスキップする (drawer 閉アニメに無駄な
+  // navigation transition を被せないため = カクつき主因)。
+  // 別画面への遷移は rAF で 1tick 退避して push の JS を閉じ初動から外す。
   const navigateAndClose = (path: string) => {
     triggerHaptic('tap');
     onOpenChange(false);
-    progress.value = withTiming(0, TIMING_NORM);
+    progress.value = withSpring(0, HOME_DRAWER_SPRING);
+    // 同一画面チェック: (tabs) などの group prefix と trailing slash を吸収。
+    const norm = (p: string) => p.replace(/\([^)]+\)\//g, '').replace(/\/$/, '');
+    if (norm(pathname) === norm(path)) return;
     requestAnimationFrame(() => router.push(path as never));
   };
 

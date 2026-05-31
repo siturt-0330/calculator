@@ -16,12 +16,11 @@ import { View, Text, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
 import {
-  Share2,
+  UserCog,
   MoreHorizontal,
   ArrowLeft,
   Plus,
   Search as SearchIcon,
-  Camera,
   Pencil,
 } from 'lucide-react-native';
 
@@ -39,13 +38,12 @@ export type ProfileMastheadProps = {
   coverUri: string | null;
   /** SafeArea top inset (アクションpillをstatus barの下に配置するため) */
   topInset: number;
-  onSharePress: () => void;
+  /** ヘッダー右上 3 番目のピル: プロフィール編集 (UserCog アイコン) */
+  onEditProfilePress: () => void;
   onMorePress: () => void;
   onAddPress: () => void; // 投稿/写真追加
   onSearchPress: () => void;
   onBackPress?: () => void; // 任意 (PC 3 カラムでは不要)
-  /** 本人視点のときだけ渡す: カバー編集ボタン (右下のカメラ pill) */
-  onEditCover?: () => void;
   /** 本人視点のときだけ渡す: アバター編集ボタン (アバター右下の鉛筆バッジ) */
   onEditAvatar?: () => void;
 };
@@ -58,12 +56,11 @@ export function ProfileMasthead(props: ProfileMastheadProps) {
     avatarEmoji,
     coverUri,
     topInset,
-    onSharePress,
+    onEditProfilePress,
     onMorePress,
     onAddPress,
     onSearchPress,
     onBackPress,
-    onEditCover,
     onEditAvatar,
   } = props;
 
@@ -100,37 +97,6 @@ export function ProfileMasthead(props: ProfileMastheadProps) {
           pointerEvents="none"
         />
 
-        {/* カバー編集 pill (本人視点のみ・右下に半透明の「カメラ」ボタン) */}
-        {onEditCover ? (
-          <PressableScale
-            onPress={onEditCover}
-            haptic="tap"
-            accessibilityRole="button"
-            accessibilityLabel="カバー画像を変更"
-            style={{
-              position: 'absolute',
-              right: SP['4'],
-              bottom: SP['4'],
-              paddingHorizontal: SP['3'],
-              paddingVertical: 6,
-              borderRadius: R.full,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              backgroundColor: 'rgba(0,0,0,0.55)',
-              borderWidth: 1,
-              borderColor: 'rgba(255,255,255,0.18)',
-              ...(Platform.OS === 'web'
-                ? ({ backdropFilter: 'blur(8px)' } as object)
-                : null),
-            }}
-          >
-            <Camera size={14} color="#fff" strokeWidth={2.2} />
-            <Text style={[T.smallB, { color: '#fff', fontSize: 12 }]}>
-              カバーを変更
-            </Text>
-          </PressableScale>
-        ) : null}
 
         {/* ===== 上端ピル群 (戻る + 追加 + 検索 + 共有 + もっと) ===== */}
         <View
@@ -176,8 +142,8 @@ export function ProfileMasthead(props: ProfileMastheadProps) {
             <PillIcon onPress={onSearchPress} accessibilityLabel="検索">
               <SearchIcon size={18} color="#fff" strokeWidth={2.4} />
             </PillIcon>
-            <PillIcon onPress={onSharePress} accessibilityLabel="共有">
-              <Share2 size={18} color="#fff" strokeWidth={2.4} />
+            <PillIcon onPress={onEditProfilePress} accessibilityLabel="プロフィールを編集">
+              <UserCog size={18} color="#fff" strokeWidth={2.4} />
             </PillIcon>
             <PillIcon onPress={onMorePress} accessibilityLabel="もっと">
               <MoreHorizontal size={20} color="#fff" strokeWidth={2.4} />

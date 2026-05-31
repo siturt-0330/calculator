@@ -24,7 +24,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAuthStore } from '../../stores/authStore';
-import { useToastStore } from '../../stores/toastStore';
 import { useProfileVisibilityStore } from '../../stores/profileVisibilityStore';
 import { supabase } from '../../lib/supabase';
 import { fetchMyPhotos } from '../../lib/api/albums';
@@ -45,12 +44,12 @@ type MypageStats = {
   nickname: string | null;
   avatar_emoji: string | null;
   avatar_url: string | null;
+  cover_url: string | null;
 };
 
 export default function MypageScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const show = useToastStore((s) => s.show);
   const user = useAuthStore((s) => s.user);
   const qc = useQueryClient();
 
@@ -74,7 +73,7 @@ export default function MypageScreen() {
       if (!user) return null;
       const { data } = await supabase
         .from('profiles')
-        .select('nickname, avatar_emoji, avatar_url')
+        .select('nickname, avatar_emoji, avatar_url, cover_url')
         .eq('id', user.id)
         .single();
       return data as MypageStats | null;
@@ -91,12 +90,14 @@ export default function MypageScreen() {
     staleTime: 30_000,
   });
 
-  // ---- カバー画像 = 最新の shared 写真 (なければ null → masthead が gradient fallback)
+  // ---- カバー画像: 本人が設定した cover_url を最優先、無ければ最新 shared 写真、
+  //      それも無ければ null (masthead が accent gradient fallback)
   const coverUri = useMemo(() => {
+    if (stats?.cover_url) return stats.cover_url;
     if (sharedPhotos.length === 0) return null;
     const top = sharedPhotos[0];
     return top?.image_url ?? null;
-  }, [sharedPhotos]);
+  }, [stats?.cover_url, sharedPhotos]);
 
   // ---- Pull-to-refresh ----
   const [refreshing, setRefreshing] = useState(false);
@@ -152,14 +153,12 @@ export default function MypageScreen() {
           avatarEmoji={stats?.avatar_emoji}
           coverUri={coverUri}
           topInset={insets.top}
-          onSharePress={() => show('プロフィールの共有 (準備中)', 'info')}
+          onEditProfilePress={() => router.push('/settings/profile-edit' as never)}
           onMorePress={() => router.push('/settings' as never)}
           onAddPress={() => router.push('/post/create' as never)}
           onSearchPress={() => router.push('/(tabs)/search' as never)}
-          // 本人視点なので編集導線を渡す。プロフィール編集画面でアバター/カバーを
-          // 直接差し替えられる (タップで画像 picker が開く)。
+          // 本人視点なのでアバター編集導線を渡す (カバー編集は削除)。
           onEditAvatar={() => router.push('/settings/profile-edit' as never)}
-          onEditCover={() => router.push('/settings/profile-edit' as never)}
         />
 
         {/* ===== AccountState (制限時のみ表示) ===== */}

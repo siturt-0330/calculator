@@ -26,6 +26,7 @@ import { BackButton } from '../../../../components/nav/BackButton';
 import { Input } from '../../../../components/ui/Input';
 import { Button } from '../../../../components/ui/Button';
 import { PressableScale } from '../../../../components/ui/PressableScale';
+import { ConfirmDialog } from '../../../../components/ui/ConfirmDialog';
 import { Icon } from '../../../../constants/icons';
 import { useToastStore } from '../../../../stores/toastStore';
 import {
@@ -67,6 +68,9 @@ export default function EditCommunityScreen() {
 
   const [iconLoading, setIconLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // 公開設定変更 (owner 限定): クローズ系 → open への一方通行
+  const [showOpenConfirm, setShowOpenConfirm] = useState(false);
+  const [changingVisibility, setChangingVisibility] = useState(false);
 
   useEffect(() => {
     if (community && !hydrated) {
@@ -167,6 +171,26 @@ export default function EditCommunityScreen() {
 
   const removeTag = (t: string) => {
     setTags(tags.filter((x) => x !== t));
+  };
+
+  // 公開設定: クローズ (request / invite) → オープン への一方通行変更。
+  // 「オープンに公開した後で閉じる」と既存メンバー / 閲覧者の体験が壊れるため
+  // 逆方向 (open → request / invite) は意図的に提供しない。owner だけが実行可能。
+  const changeVisibilityToOpen = async () => {
+    if (!community || changingVisibility) return;
+    setChangingVisibility(true);
+    try {
+      const { error } = await updateCommunity(community.id, { visibility: 'open' });
+      if (error) {
+        show(error, 'error');
+        return;
+      }
+      show('コミュニティをオープンに変更しました', 'success');
+      void qc.invalidateQueries({ queryKey: ['community', id] });
+      setShowOpenConfirm(false);
+    } finally {
+      setChangingVisibility(false);
+    }
   };
 
   const handleSave = async () => {
@@ -493,17 +517,88 @@ export default function EditCommunityScreen() {
             </View>
           )}
         </Card>
+
+        {/* 公開設定 (オーナーのみ): クローズ系 → オープン の一方通行変更 */}
+        {community.role === 'owner' && (
+          <Card>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+              <Icon.globe size={18} color={C.text2} strokeWidth={2.2} />
+              <Text style={[T.bodyB, { color: C.text, flex: 1 }]}>
+                公開設定（オーナーのみ）
+              </Text>
+            </View>
+            {community.visibility === 'open' ? (
+              <View style={{ marginTop: SP['3'], gap: SP['2'] }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Icon.globe size={14} color={C.green} strokeWidth={2.2} />
+                  <Text style={[T.smallB, { color: C.text }]}>オープン</Text>
+                </View>
+                <Text style={[T.caption, { color: C.text3 }]}>
+                  だれでも参加できます。一度オープンにしたコミュニティは、許可制 / 招待制に戻すことはできません。
+                </Text>
+              </View>
+            ) : (
+              <View style={{ marginTop: SP['3'], gap: SP['3'] }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  {community.visibility === 'request' ? (
+                    <Icon.lock size={14} color={C.amber} strokeWidth={2.2} />
+                  ) : (
+                    <Icon.shield size={14} color={C.red} strokeWidth={2.2} />
+                  )}
+                  <Text style={[T.smallB, { color: C.text }]}>
+                    {community.visibility === 'request'
+                      ? 'クローズ・許可制'
+                      : 'クローズ・完全招待制'}
+                  </Text>
+                </View>
+                <Text style={[T.caption, { color: C.text3 }]}>
+                  オープンに変更すると、だれでも参加・検索表示できるようになります。
+                  一度オープンにすると、許可制 / 招待制には戻せません。
+                </Text>
+                <PressableScale
+                  onPress={() => setShowOpenConfirm(true)}
+                  haptic="tap"
+                  disabled={changingVisibility}
+                  accessibilityLabel="オープンに変更"
+                  style={{
+                    alignSelf: 'flex-start',
+                    paddingHorizontal: SP['4'],
+                    paddingVertical: SP['2'],
+                    borderRadius: R.md,
+                    backgroundColor: C.accent,
+                    opacity: changingVisibility ? 0.5 : 1,
+                  }}
+                >
+                  <Text style={[T.smallB, { color: '#fff' }]}>
+                    {changingVisibility ? '変更中…' : 'オープンに変更'}
+                  </Text>
+                </PressableScale>
+              </View>
+            )}
+          </Card>
+        )}
       </ScrollView>
 
-      {/* Sticky CTA */}
+      <ConfirmDialog
+        visible={showOpenConfirm}
+        title="オープンに変更しますか？"
+        message="だれでも参加・検索表示できるようになります。一度オープンにすると、許可制 / 招待制には戻せません。"
+        confirmLabel={changingVisibility ? '変更中…' : 'オープンに変更'}
+        cancelLabel="キャンセル"
+        onCancel={() => setShowOpenConfirm(false)}
+        onConfirm={changeVisibilityToOpen}
+        destructive
+      />
+
+      {/* Sticky CTA — (tabs) 配下なので TabBar の上に出す (bottom 0 だと隠れる) */}
       <View
         style={{
           position: 'absolute',
           left: 0, right: 0,
-          bottom: 0,
+          bottom: TABBAR.height + insets.bottom,
           paddingHorizontal: SP['4'],
           paddingTop: SP['3'],
-          paddingBottom: insets.bottom + SP['3'],
+          paddingBottom: SP['3'],
           backgroundColor: C.bg,
           borderTopWidth: 1,
           borderTopColor: C.border,
