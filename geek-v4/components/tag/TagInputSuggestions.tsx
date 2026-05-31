@@ -42,32 +42,57 @@ export function TagInputSuggestions({
   }), [ctx, excludeTags]);
 
   const trimmed = input.trim().replace(/^#/, '');
+  // ★ try/catch ガード (2026-05-31): タグ入力中に検索エンジン (variants /
+  //   ngram / PMI / didYouMean) のいずれかが例外を投げると画面ごと crash していた
+  //   問題の防御。失敗時は空サジェストにフォールバックし入力フローを止めない。
   const suggestions = useMemo(() => {
     if (trimmed.length < 1) return [];
-    return search(trimmed, limit);
+    try {
+      return search(trimmed, limit);
+    } catch (e) {
+      console.warn('[TagInputSuggestions] search threw:', e);
+      return [];
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trimmed, limit, ctx.tagPopularity, ctx.cooccur, ctx.nodes, ctx.likedTags, ctx.blockedTags]);
 
   // クエリ Intent (人名/作品/場所/年/質問/タグ)
-  const intent = useMemo(() => (trimmed ? classifyIntent(trimmed) : null), [trimmed]);
+  const intent = useMemo(() => {
+    if (!trimmed) return null;
+    try {
+      return classifyIntent(trimmed);
+    } catch (e) {
+      console.warn('[TagInputSuggestions] classifyIntent threw:', e);
+      return null;
+    }
+  }, [trimmed]);
 
   // CTR Boost wrap: クリック時に記録
   const pickWithLearning = (tag: string) => {
-    recordClick(trimmed, tag);
+    try {
+      recordClick(trimmed, tag);
+    } catch (e) {
+      console.warn('[TagInputSuggestions] recordClick threw:', e);
+    }
     onPick(tag);
   };
 
   const dymResult = useMemo(() => {
     if (suggestions.length > 0 || trimmed.length < 2) return null;
-    return didYouMean(trimmed, {
-      allTags: ctxWithExclude.ngramIndex.getAllTags(),
-      nodes: ctxWithExclude.nodes,
-      cooccur: ctxWithExclude.cooccur,
-      tagPopularity: ctxWithExclude.tagPopularity,
-      likedTags: ctxWithExclude.likedTags,
-      blockedTags: ctxWithExclude.blockedTags,
-      tagAffinity: ctxWithExclude.tagAffinity,
-    });
+    try {
+      return didYouMean(trimmed, {
+        allTags: ctxWithExclude.ngramIndex.getAllTags(),
+        nodes: ctxWithExclude.nodes,
+        cooccur: ctxWithExclude.cooccur,
+        tagPopularity: ctxWithExclude.tagPopularity,
+        likedTags: ctxWithExclude.likedTags,
+        blockedTags: ctxWithExclude.blockedTags,
+        tagAffinity: ctxWithExclude.tagAffinity,
+      });
+    } catch (e) {
+      console.warn('[TagInputSuggestions] didYouMean threw:', e);
+      return null;
+    }
   }, [suggestions, trimmed, ctxWithExclude]);
 
   if (trimmed.length < 1) return null;
