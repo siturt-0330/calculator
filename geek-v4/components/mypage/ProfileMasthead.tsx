@@ -21,7 +21,6 @@ import {
   ArrowLeft,
   Plus,
   Search as SearchIcon,
-  Camera,
   Pencil,
 } from 'lucide-react-native';
 
@@ -45,8 +44,6 @@ export type ProfileMastheadProps = {
   onAddPress: () => void; // 投稿/写真追加
   onSearchPress: () => void;
   onBackPress?: () => void; // 任意 (PC 3 カラムでは不要)
-  /** 本人視点のときだけ渡す: カバー編集ボタン (右下のカメラ pill) */
-  onEditCover?: () => void;
   /** 本人視点のときだけ渡す: アバター編集ボタン (アバター右下の鉛筆バッジ) */
   onEditAvatar?: () => void;
 };
@@ -64,7 +61,6 @@ export function ProfileMasthead(props: ProfileMastheadProps) {
     onAddPress,
     onSearchPress,
     onBackPress,
-    onEditCover,
     onEditAvatar,
   } = props;
 
@@ -101,37 +97,6 @@ export function ProfileMasthead(props: ProfileMastheadProps) {
           pointerEvents="none"
         />
 
-        {/* カバー編集 pill (本人視点のみ・右下に半透明の「カメラ」ボタン) */}
-        {onEditCover ? (
-          <PressableScale
-            onPress={onEditCover}
-            haptic="tap"
-            accessibilityRole="button"
-            accessibilityLabel="カバー画像を変更"
-            style={{
-              position: 'absolute',
-              right: SP['4'],
-              bottom: SP['4'],
-              paddingHorizontal: SP['3'],
-              paddingVertical: 6,
-              borderRadius: R.full,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              backgroundColor: 'rgba(0,0,0,0.55)',
-              borderWidth: 1,
-              borderColor: 'rgba(255,255,255,0.18)',
-              ...(Platform.OS === 'web'
-                ? ({ backdropFilter: 'blur(8px)' } as object)
-                : null),
-            }}
-          >
-            <Camera size={14} color="#fff" strokeWidth={2.2} />
-            <Text style={[T.smallB, { color: '#fff', fontSize: 12 }]}>
-              カバーを変更
-            </Text>
-          </PressableScale>
-        ) : null}
 
         {/* ===== 上端ピル群 (戻る + 追加 + 検索 + 共有 + もっと) ===== */}
         <View

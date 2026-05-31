@@ -154,10 +154,8 @@ export default function MypageScreen() {
           onMorePress={() => router.push('/settings' as never)}
           onAddPress={() => router.push('/post/create' as never)}
           onSearchPress={() => router.push('/(tabs)/search' as never)}
-          // 本人視点なので編集導線を渡す。プロフィール編集画面でアバター/カバーを
-          // 直接差し替えられる (タップで画像 picker が開く)。
+          // 本人視点なのでアバター編集導線を渡す (カバー編集は削除)。
           onEditAvatar={() => router.push('/settings/profile-edit' as never)}
-          onEditCover={() => router.push('/settings/profile-edit' as never)}
         />
 
         {/* ===== AccountState (制限時のみ表示) ===== */}
