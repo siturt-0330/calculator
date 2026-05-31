@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
 import { Lock, Camera, Image as ImageIcon } from 'lucide-react-native';
 
@@ -48,6 +49,7 @@ const BIO_MAX = 200;
 export default function ProfileEditScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const qc = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const refreshProfile = useAuthStore((s) => s.refreshProfile);
   const show = useToastStore((s) => s.show);
@@ -224,7 +226,14 @@ export default function ProfileEditScreen() {
         return;
       }
       show('保存しました', 'success');
-      await refreshProfile();
+      // refreshProfile() は authStore.user (nickname) を更新するが、mypage の
+      // ['mypage-stats'] cache (avatar_url / cover_url 等) は staleTime:60s で
+      // 残るため明示 invalidate。HomeDrawer / feed.tsx も同じ queryKey を
+      // 共有しているので 1 回の invalidate で全箇所に反映される。
+      await Promise.all([
+        refreshProfile(),
+        qc.invalidateQueries({ queryKey: ['mypage-stats'] }),
+      ]);
       router.back();
     } catch {
       show('ネットワークエラー。接続を確認してください。', 'error');
