@@ -81,10 +81,28 @@ export function useFeed() {
   // data.pages は React Query が変更時のみ新参照を返すが、flatMap は毎回新配列を作る。
   // 中身 (post 配列) が同じなら同じ参照を保ちたいので、pages 参照を deps にした useMemo で安定化。
   // これで下流の useMemo (smartSort, postIds 等) が無駄に再計算されない。
-  const rawPosts: Post[] = useMemo(
-    () => data?.pages.flatMap((p) => p.posts) ?? [],
-    [data?.pages],
-  );
+  //
+  // ★ ページ境界の重複 id を de-dup する (FlashList key 衝突対策)。
+  //   cursor pagination の tie-break 漏れ (top は `likes_count|created_at`、hot は
+  //   `hot_score|created_at` で id の二次キーを持たないため同値タイで境界が重なる) や、
+  //   ページ取得間の hot_score drift で、同一 post が複数ページに跨って返ることがある。
+  //   重複 id があると FlashList の keyExtractor が同じ key を 2 回返し、
+  //   RecyclerListView が衝突回避キー (`#<n>_rlv_c`, n は単調増加) を毎データ更新で
+  //   再生成 → React の "same key" 警告がコンソールをフラッドし、表示崩れ (行の重複/欠落)
+  //   も招く。Set で最初の 1 件だけ残して一意化する (表示順は先勝ちで維持)。
+  const rawPosts: Post[] = useMemo(() => {
+    const flat = data?.pages.flatMap((p) => p.posts) ?? [];
+    const seen = new Set<string>();
+    const deduped: Post[] = [];
+    for (const p of flat) {
+      if (seen.has(p.id)) continue;
+      seen.add(p.id);
+      deduped.push(p);
+    }
+    // 重複が無ければ元配列をそのまま返したいところだが、flat 自体が毎回新参照なので
+    // ここで作る deduped を返しても下流の安定化 (postIdsHash) は効く。
+    return deduped;
+  }, [data?.pages]);
 
   // 各 post に紐付いた community のメタを 1 リクエストで取得 (FlashList N+1 回避)
   // postIds が空のうちは fetch しない (enabled で抑止)
