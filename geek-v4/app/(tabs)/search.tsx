@@ -770,8 +770,17 @@ function DiscoveryView() {
   //   query を mount 同時 fan-out させないのが肝。
   const [deferReady, setDeferReady] = useState(false);
   useEffect(() => {
+    // first paint 後に重いセクションを解禁する。
+    // ★ ただし Web では InteractionManager.runAfterInteractions が未解放の
+    //   interaction handle (アニメーション等) のせいで発火しないことがあり、その場合
+    //   「おすすめ」等のセクションが永久にスケルトンのまま固まる (= 投稿が表示されない)。
+    //   150ms の setTimeout フォールバックで必ず解禁し、ハングを防ぐ。
     const handle = InteractionManager.runAfterInteractions(() => setDeferReady(true));
-    return () => handle.cancel();
+    const timer = setTimeout(() => setDeferReady(true), 150);
+    return () => {
+      handle.cancel();
+      clearTimeout(timer);
+    };
   }, []);
 
   // おすすめ — query 無し discoverCommunities = 人気順 (member_count desc)
