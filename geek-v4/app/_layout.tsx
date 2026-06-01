@@ -485,7 +485,11 @@ export default function RootLayout() {
   }, [ready]);
 
   useEffect(() => {
-    if (!ready || segments.length < 1) return;
+    // F4: redirect 判定は authHydrated を直接見る。ready は forceReady(500ms) を含むため、
+    // hydrate 完了前(=有効 session 復元前で user=null)に !user 分岐で login へ誤バウンス
+    // していた。描画ガード (下の `if (!ready) return null`) は ready のまま残し黒画面 safety
+    // は維持する。
+    if (!authHydrated || segments.length < 1) return;
     const inAuth = segments[0] === '(auth)';
     const inOnboarding = segments[0] === 'onboarding';
     // パスワードリセット中は session が確立されていてもリセット画面に留まる必要がある。
@@ -500,12 +504,16 @@ export default function RootLayout() {
     } else if (inResetPassword) {
       // ログイン状態でも reset-password 画面はそのまま表示する
       return;
-    } else if (!user.onboarded) {
+    } else if (user.onboarded === false) {
+      // F3: onboarded が undefined(=profile 取得 timeout / cache miss で未確定)では
+      // onboarding に飛ばさない。確実に false のときだけ誘導する (確立済ユーザーが
+      // 一過性の profile fetch 失敗で onboarding に誤バウンスするのを防ぐ)。
+      // 真の新規ユーザーの onboarding 誘導は signIn 経路が担保している。
       if (!inOnboarding) router.replace('/onboarding');
     } else {
       if (inAuth || inOnboarding) router.replace('/(tabs)/feed');
     }
-  }, [user, ready, segments, router]);
+  }, [user, authHydrated, segments, router]);
 
   if (!ready) return null;
 

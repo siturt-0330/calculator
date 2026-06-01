@@ -125,14 +125,75 @@ let storageListenerRegistered = false;
 // 二重 signOut を防ぐ — module-scope lock
 let signOutInFlight = false;
 
+// ============================================================
+// F1/F5: 「投稿中・タブ/アプリ復帰時に急に login に戻る」対策の session 復活
+// ------------------------------------------------------------
+// auth-js は getUser/refresh/visibility 復帰の失敗時に内部で自律的に SIGNED_OUT を
+// 発火し、その前に storage を消す。これを authStore が即 user:null にすると、refresh
+// token がまだ生きていてもログイン画面に飛ぶ。直近の有効 session の token を控えておき、
+// 明示 signOut 以外の喪失シグナル(SIGNED_OUT / 他タブ storage 消失)では setSession で
+// 復活を 1 回試し、本当に失効しているときだけ user:null にする。
+// (storage は SIGNED_OUT より前に消されるため、引数なし refreshSession では復活でき
+//  ない。控えた refresh_token を setSession に明示的に渡すのが要点。)
+// ============================================================
+let lastKnownTokens: { access_token: string; refresh_token: string } | null = null;
+let recoverInFlight = false;
+
+async function tryRecoverSession(set: (partial: Partial<AuthState>) => void): Promise<void> {
+  // setSession 失敗は再度 SIGNED_OUT を発火し得るので二重実行を防ぐ
+  if (recoverInFlight) return;
+  recoverInFlight = true;
+  try {
+    const toks = lastKnownTokens;
+    if (!toks) {
+      set({ user: null });
+      return;
+    }
+    const res = await withTimeout(supabase.auth.setSession(toks), 6000);
+    if (res && !res.error && res.data.session?.user) {
+      lastKnownTokens = {
+        access_token: res.data.session.access_token,
+        refresh_token: res.data.session.refresh_token,
+      };
+      try {
+        set({ user: await buildUser(res.data.session.user) });
+      } catch {
+        set({ user: res.data.session.user as AppUser });
+      }
+      return;
+    }
+    // 復活不能 = 本当に session 失効
+    lastKnownTokens = null;
+    set({ user: null });
+  } catch (e) {
+    swallow('auth.recoverSession', e);
+    set({ user: null });
+  } finally {
+    recoverInFlight = false;
+  }
+}
+
 function registerAuthListener(set: (partial: Partial<AuthState>) => void) {
   if (listenerRegistered) return;
   listenerRegistered = true;
   supabase.auth.onAuthStateChange(async (event, session) => {
+    // 有効 session の token を控える (F1: SIGNED_OUT 時の setSession 復活に使う)。
+    // session が無いイベント(SIGNED_OUT)では上書きしないので直前の値が残る。
+    if (session?.access_token && session?.refresh_token) {
+      lastKnownTokens = { access_token: session.access_token, refresh_token: session.refresh_token };
+    }
     // 全イベント明示処理 — ログで debug 可能に
     if (event === 'INITIAL_SESSION') return;
     if (event === 'SIGNED_OUT') {
-      set({ user: null });
+      // 自タブの明示 signOut は素直に user:null (無限復活を防ぐ)。
+      if (signOutInFlight) {
+        lastKnownTokens = null;
+        set({ user: null });
+        return;
+      }
+      // それ以外の SIGNED_OUT は auth-js が getUser/refresh/visibility 失敗で内部発火した
+      // もの。即 null 化せず、控えた token で setSession 復活を試す (F1)。
+      void tryRecoverSession(set);
       return;
     }
     if (event === 'PASSWORD_RECOVERY') {
@@ -173,10 +234,12 @@ function registerStorageListener(set: (partial: Partial<AuthState>) => void) {
   storageListenerRegistered = true;
   window.addEventListener('storage', (e) => {
     if (e.key === 'geek-v4-auth') {
-      // 他タブで auth が消えた = 他タブで logout した → 同期する
+      // 他タブで auth storage が消えた。だが token rotation の一瞬の remove や別タブの
+      // 一過性 _removeSession でも発火するので、即 logout せず控えた token で setSession
+      // 復活を試す (F5)。本当に失効していれば復活に失敗して user:null になる。
       if (e.newValue === null || e.newValue === '') {
-        console.log('[authStore] cross-tab logout detected');
-        set({ user: null });
+        console.log('[authStore] cross-tab auth storage cleared — verifying');
+        void tryRecoverSession(set);
       }
     }
   });
@@ -193,7 +256,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     setUnauthorizedHandler(async () => {
       const u = get().user;
       if (!u) return; // 既に logged out
-      console.warn('[authStore] 401 detected, forcing signOut');
+      // 401 = アクセストークン期限切れの可能性。即 signOut すると「投稿しようと
+      // したら急に login 画面に飛ぶ」事故になる (タブ非アクティブ / アプリ復帰時に
+      // auto-refresh が取りこぼすと最初の呼び出しが 401 になる)。
+      // まず refreshSession で回復を試し、refresh token が有効なら user を維持。
+      // 本当に無効 (refresh も失敗) のときだけ signOut する。
+      try {
+        const res = await withTimeout(supabase.auth.refreshSession(), 6000);
+        if (res && !res.error && res.data.session?.user) {
+          console.warn('[authStore] 401 → session refreshed, staying logged in');
+          return; // user は維持。onAuthStateChange の TOKEN_REFRESHED が profile を更新
+        }
+      } catch (e) {
+        swallow('auth.refresh.unauthorized', e);
+      }
+      console.warn('[authStore] 401 detected and refresh failed, forcing signOut');
       await get().signOut();
     });
     // ★ Safety: 7 秒以内に返らなければ hydrated:true で起動継続
@@ -220,12 +297,41 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const authUser = session?.user ?? null;
       let user: AppUser | null = null;
       if (authUser) {
-        // session の token expiry を check — 期限切れなら強制 signOut
+        // session の token expiry を check。
         const expiresAt = session?.expires_at;
-        if (expiresAt && expiresAt * 1000 < Date.now()) {
-          console.warn('[authStore] hydrate: token expired, forcing signOut');
-          // signOut も auth client 経由で stall し得るため timeout を付ける
-          try { await withTimeout(supabase.auth.signOut(), 2000); } catch (e) { swallow('auth.signOut.hydrate', e); }
+        // 期限切れ + 期限が近い(60s 以内)も refresh 対象にする (F7: 起動直後の最初の
+        // API 呼び出しが期限切れ目前 token で 401 になるのを防ぐ)。
+        if (expiresAt && expiresAt * 1000 < Date.now() + 60_000) {
+          // アクセストークン期限切れ/間近。即 signOut せず、まず refreshSession で回復を
+          // 試す (アプリを 1 時間以上閉じてから再開すると毎回 login に飛ぶのを防ぐ)。
+          // refresh token が無効だったときだけ signOut する。
+          console.warn('[authStore] hydrate: token expired/expiring, trying refresh');
+          let refreshedUser: User | null = null;
+          try {
+            const res = await withTimeout(supabase.auth.refreshSession(), 6000);
+            if (res && !res.error && res.data.session?.user) {
+              refreshedUser = res.data.session.user;
+            }
+          } catch (e) {
+            swallow('auth.refresh.hydrate', e);
+          }
+          if (refreshedUser) {
+            console.warn('[authStore] hydrate: session refreshed, staying logged in');
+            try {
+              user = await buildUser(refreshedUser);
+            } catch (e) {
+              console.warn('build user (hydrate refresh) failed:', e);
+              user = refreshedUser as AppUser;
+            }
+          } else {
+            console.warn('[authStore] hydrate: refresh failed, forcing signOut');
+            // signOut も auth client 経由で stall し得るため timeout を付ける
+            try { await withTimeout(supabase.auth.signOut(), 2000); } catch (e) { swallow('auth.signOut.hydrate', e); }
+            // F9: bare signOut は channel detach を通らないので明示 detach する
+            // (残留 channel が後続の 401 を二次誘発するのを防ぐ)。
+            try { detachAllChannels(); } catch (e) { swallow('auth.detach.hydrate', e); }
+            lastKnownTokens = null;
+          }
         } else {
           try {
             user = await buildUser(authUser);
@@ -396,6 +502,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // 作るのを防ぐ)
       const u = get().user;
       set({ user: null });
+      // 復活用に控えた token も破棄 (明示 logout なので setSession 復活させない)
+      lastKnownTokens = null;
       // Supabase 側
       try { await supabase.auth.signOut(); } catch (e) { console.warn('signOut error:', e); }
       // 全 realtime channel を強制 detach
