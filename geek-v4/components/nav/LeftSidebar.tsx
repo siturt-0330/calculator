@@ -7,7 +7,7 @@
 //
 // 構成:
 //   - Geek ロゴ (グラデ wordmark / feed.tsx と同等の見栄え)
-//   - ナビ群 (ホーム / 探検 / 検索 / 通知 / ブックマーク / マイプロフィール)
+//   - ナビ群 (ホーム / コミュニティ / 検索 / 通知 / 保存済み / マイプロフィール / 設定)
 //   - 投稿するボタン (accent 塗りの大きめ pill)
 //   - 最下部のアカウントブロック (アバター + 名前 + handle / タップで /mypage)
 //
@@ -22,7 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   PenLine,
   Home,
-  Compass,
+  Users2,
   Search as SearchIcon,
   Bell,
   Bookmark,
@@ -129,7 +129,7 @@ export function LeftSidebar() {
       {/* ===== ナビ群 ===== */}
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
         <NavItem icon={Home} label="ホーム" onPress={() => router.push('/(tabs)/feed' as never)} C={C} />
-        <NavItem icon={Compass} label="探検する" onPress={() => router.push('/(tabs)/community' as never)} C={C} />
+        <NavItem icon={Users2} label="コミュニティ" onPress={() => router.push('/(tabs)/community' as never)} C={C} />
         <NavItem icon={SearchIcon} label="検索" onPress={() => router.push('/(tabs)/search' as never)} C={C} />
         <NavItem
           icon={Bell}
@@ -138,7 +138,7 @@ export function LeftSidebar() {
           onPress={() => router.push('/notifications' as never)}
           C={C}
         />
-        <NavItem icon={Bookmark} label="ブックマーク" onPress={() => router.push('/mypage/saved' as never)} C={C} />
+        <NavItem icon={Bookmark} label="保存済み" onPress={() => router.push('/mypage/saved' as never)} C={C} />
         <NavItem icon={UserIcon} label="マイプロフィール" onPress={() => router.push('/(tabs)/mypage' as never)} C={C} />
         <NavItem icon={SettingsIcon} label="設定" onPress={() => router.push('/settings' as never)} C={C} />
 
@@ -147,7 +147,7 @@ export function LeftSidebar() {
           onPress={() => router.push('/post/create' as never)}
           haptic="tap"
           accessibilityRole="button"
-          accessibilityLabel="投稿する"
+          accessibilityLabel="投稿をする"
           style={{
             marginTop: SP['3'],
             marginHorizontal: SP['2'],
@@ -162,7 +162,7 @@ export function LeftSidebar() {
           }}
         >
           <PenLine size={18} color="#fff" strokeWidth={2.2} />
-          <Text style={[T.smallB, { color: '#fff', fontSize: 15 }]}>投稿する</Text>
+          <Text style={[T.smallB, { color: '#fff', fontSize: 15 }]}>投稿をする</Text>
         </PressableScale>
       </ScrollView>
 
