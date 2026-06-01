@@ -9,6 +9,7 @@ import Animated, {
   withTiming,
   withSpring,
   Easing,
+  interpolateColor,
 } from 'react-native-reanimated';
 import { useQueryClient } from '@tanstack/react-query';
 import { safeOpenUrl } from '../../lib/openUrl';
@@ -18,6 +19,7 @@ import { useLanguageStore } from '../../stores/languageStore';
 import { useAuthStore } from '../../stores/authStore';
 import { translateDynamic, useT } from '../../lib/i18n';
 import { MemeReactionPicker } from './MemeReactionPicker';
+import { ReactionListSheet } from './ReactionListSheet';
 import type { ReactionAgg } from '../../lib/api/reactions';
 import { R, SP } from '../../design/tokens';
 import { useColors } from '../../hooks/useColors';
@@ -224,7 +226,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   // 「匿」をやや強めに、relative time は subtle に — Twitter/Threads と同じ階層感
   // letterSpacing は iOS の SF Pro Text に倣う (size 13: 約 -0.08, size 12: 0)
-  anonLabel: { color: C.text, fontWeight: '700', letterSpacing: -0.08 },
+  anonLabel: { color: C.text, fontWeight: '800', letterSpacing: -0.08 },
   anonRelative: { color: C.text3, fontSize: 12, lineHeight: 16 },
   morePress: { padding: 4 },
 
@@ -251,10 +253,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     minWidth: 0,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    backgroundColor: C.bg3,
+    backgroundColor: 'transparent',
     borderRadius: R.full,
     borderWidth: 1,
-    borderColor: C.divider,
+    borderColor: C.border,
   },
   // 18px 円 ring (avatar 外枠). chip 内側なので border は外して shape だけ。
   communityInlineRingBase: {
@@ -286,7 +288,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // CW — iOS-native: 角 12px、amber border は少し透ける (44 = 27% alpha) と上品
   cwBox: {
     marginTop: SP['2'],
-    paddingHorizontal: SP['4'],
+    paddingHorizontal: 0,
     paddingVertical: SP['4'],
     backgroundColor: C.bg3,
     borderRadius: 12,
@@ -301,24 +303,26 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   cwTap: { color: C.accent, marginTop: 4 },
 
   // メディア — iOS-native: 角 12px (card 14px の内側に少し小さい round で nested 階層感)
-  mediaWrap: { gap: SP['2'], marginTop: SP['2'] },
+  mediaWrap: { gap: 2, marginTop: SP['3'] },
   mediaItemBase: {
     width: '100%',
     backgroundColor: C.bg2,
-    borderRadius: 12,
+    borderRadius: 16,
     overflow: 'hidden',
   },
 
   // 本文 — Apple News 寄り: fontSize 15 / lineHeight 22 (1.47, iOS 標準 1.4-1.5 域)
   // letterSpacing -0.08 は SF Pro Text の自然な tracking
   bodyInner: { paddingTop: SP['3'], paddingBottom: SP['1'] },
-  bodyText: { color: C.text, fontSize: 15, lineHeight: 22, letterSpacing: -0.08 },
+  bodyText: { color: C.text, fontSize: 15, lineHeight: 23, letterSpacing: -0.08 },
+  // BBS タイトル見出し (T.h3 と結合して使用) — 本文との階層を立てる
+  bbsTitle: { color: C.text, fontWeight: '700', letterSpacing: -0.3 },
   // 出典 — iOS-native: 角 12px, hairline divider, 軽い bg3
   sourceBtn: {
     marginTop: SP['2'],
     paddingHorizontal: SP['3'],
     paddingVertical: 10,
-    backgroundColor: C.bg3,
+    backgroundColor: 'transparent',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: C.divider,
@@ -335,7 +339,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 10,
+    paddingTop: 12,
     paddingBottom: 0,
     gap: SP['5'],
   },
@@ -355,7 +359,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   reactionsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 4,
+    gap: 6,
     paddingTop: SP['2'],
   },
   reactionPillBase: {
@@ -373,10 +377,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   reactionOverflowPill: {
     paddingHorizontal: 10,
     paddingVertical: 6,
-    backgroundColor: C.bg3,
+    backgroundColor: 'transparent',
     borderRadius: R.full,
     borderWidth: 1,
-    borderColor: C.divider,
+    borderColor: C.border,
   },
   reactionOverflowText: { fontSize: 12, color: C.text3, fontWeight: '700' },
 });
@@ -396,7 +400,7 @@ function mediaItemAspect(aspect: number): { aspectRatio: number } {
 
 function reactionPillColors(C: ColorPalette, mine: boolean): { backgroundColor: string; borderColor: string } {
   return {
-    backgroundColor: mine ? C.accentBg : C.bg3,
+    backgroundColor: mine ? C.accentBg : 'transparent',
     borderColor: mine ? C.accent : C.border,
   };
 }
@@ -868,6 +872,8 @@ function AnonPostCardInner({
 
   // ミームリアクション (props 経由で DB から取得済み)
   const [memePickerOpen, setMemePickerOpen] = useState(false);
+  // 「…」タップで「押された全スタンプ」一覧シートを開く
+  const [reactionsDetailOpen, setReactionsDetailOpen] = useState(false);
   const reactionsList = reactions;
   // myReactionsForPost は MemeReactionPicker の `picked` に渡る — 毎 render 新 array
   // を作ると Picker 側 effect が無駄発火する。 reactions ref が変わらない限り stable。
@@ -1028,66 +1034,50 @@ function AnonPostCardInner({
   );
 
   // ── 動的 style: props/state に依存するもののみ useMemo 化 ──
-  // ルート Container — iOS-native な「上品な elevated card」。
-  //   - 背景: bg2 (elevated)
-  //   - 角: 14px (iOS 標準の card radius. R.xl=20 はやや大袈裟だった)
-  //   - hairline border (theme.border で divider トークンに揃える)
-  //   - iOS-native shadow: opacity 0.04, radius 12, offset (0,2) — 重すぎない
-  //     low-trust 時は border を amber に強調するだけで shadow は同じ
-  //   - 横 padding は feed.tsx 側 (FlashList contentContainer) で吸収するため
-  //     card 自体には marginHorizontal を持たせない。
-  //   - card 間 gap は marginBottom で確保。
-  //   - 横/縦 padding は 18 / 18 / 14 で iOS 標準の "上品な余白"
+  // ルート Container — X(旧Twitter)/Threads 風の「フラットな全幅行」。
+  //   - 背景: transparent (カード面 bg2 を撤廃。地 (C.bg) に溶ける。light でも正)
+  //   - 角丸 / 全周 border / shadow / 投稿間 gap(marginBottom) を全て撤廃
+  //   - 区切りは下罫線 hairline (C.divider) のみ。隙間を空けず罫線で分ける。
+  //   - 横/縦 padding は 16 / 12 / 12 で全行の左端を 16px に一元化。
+  //   - low-trust は外枠で強調せず、行内の lowTrustBanner が担う。
+  //   - maxWidth:720 + alignSelf:center は PC 幅で中央 720 列に寄せる (X と同様)。
   const containerStyle = useMemo(
     () => ({
-      backgroundColor: C.bg2,
-      borderWidth: 1,
-      borderColor: lowTrust ? C.amber + '44' : C.border,
-      borderRadius: 14,
-      paddingHorizontal: 18,
-      paddingTop: 18,
-      paddingBottom: 14,
-      marginBottom: SP['3'],
+      backgroundColor: 'transparent' as const,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: C.divider,
+      paddingHorizontal: 16,
+      paddingTop: 12,
+      paddingBottom: 12,
       maxWidth: 720,
       alignSelf: 'center' as const,
       width: '100%' as const,
-      // shadowColor / shadowOffset / shadowRadius は静的 (worklet で扱う必要なし)。
-      // shadowOpacity / elevation だけを worklet 経由で動的に変える (下記参照)。
-      // iOS 標準: subtle で散らない. radius 12 + offset y:2 が "上品な elevation"
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 } as const,
-      shadowRadius: 12,
     }),
-    // C 全体ではなく実際使う 3 値のみ依存 — テーマ切替時のみ再計算
-    [C.bg2, C.amber, C.border, lowTrust],
+    [C.divider],
   );
 
   // ============================================================
-  // Press feedback — Reddit iOS 風 "lift up"
+  // Press feedback — フラット行の「背景ハイライト」
   // ------------------------------------------------------------
-  // 押下中: 全カードを scale 0.96 + shadow expand (opacity 0.08→0.18 / elevation 2→5)。
-  //   - 内側 PressableScale の scale 0.94 は本文 Text のみに作用するので、
-  //     カード全体を「凹ませる」には container 側でも scale が必要。
-  //   - 0.96 と 0.94 のネストで本文だけが少し深く凹む subtle な階層感が出る。
-  // 離す: spring で滑らかに戻す (粘らない / 弾みすぎない)。
-  // ReducedMotion: scale / shadow 変化を止め、静的固定。
+  // カードを撤廃したので scale/shadow の "lift" はやめ、行タップ中に背景を
+  // transparent → C.bg2 へ薄く差し込む X/Threads 風ハイライトに置換する。
+  //   - pressLift 0→1 を本文/タイトルの onPressIn/onPressOut が駆動 (流用)。
+  //   - interpolateColor で transparent↔bg2 を補間 → 行全体がふっと沈む。
+  // 離す: spring で滑らかに戻す。ReducedMotion: 常に transparent (変化なし)。
   // shared value 駆動なので 100 件 mount でも cheap (React state ではない)。
   // ============================================================
   const reduceMotionForCard = useReducedMotion();
   const pressLift = useSharedValue(0);
   const animatedShadowStyle = useAnimatedStyle(() => {
     if (reduceMotionForCard) {
-      // ReducedMotion: 固定 shadow / scale 1 (worklet からは触らない)
-      // iOS-native subtle shadow: opacity 0.04, elevation 1
-      return { shadowOpacity: 0.04, elevation: 1, transform: [{ scale: 1 }] };
+      return { backgroundColor: 'transparent' };
     }
-    // 0 → 1 で scale 1 → 0.96 / shadowOpacity 0.04 → 0.10 / elevation 1 → 3
-    // iOS では shadow を主役にせず、軽い lift だけ感じさせる
-    const liftScale = 1 - pressLift.value * 0.04;
     return {
-      shadowOpacity: 0.04 + pressLift.value * 0.06,
-      elevation: 1 + pressLift.value * 2,
-      transform: [{ scale: liftScale }],
+      backgroundColor: interpolateColor(
+        pressLift.value,
+        [0, 1],
+        ['transparent', C.bg2],
+      ),
     };
   });
 
@@ -1095,6 +1085,8 @@ function AnonPostCardInner({
   // 旧コード: deps が `[]` で STYLES.bodyText (テーマ変化で別 ref) を捉えていなかった
   // → light/dark 切替で本文色だけ残るバグの恐れ。STYLES を deps に追加。
   const bodyTextStyle = useMemo(() => [T.body, STYLES.bodyText], [STYLES.bodyText]);
+  // BBS タイトル — T.h3(18/26) に格上げして本文(15)との見出し階層を立てる。
+  const bbsTitleStyle = useMemo(() => [T.h3, STYLES.bbsTitle], [STYLES.bbsTitle]);
 
   // Like ラベル/カウント色 — テーマ切替も拾えるよう C.pink/C.text2 も deps へ
   const likeCountTextStyle = useMemo(
@@ -1265,12 +1257,9 @@ function AnonPostCardInner({
           スレ形式 post (旧 BBS thread) は title が main contentで、 content は ''。
           tap で post detail へ遷移 (本文 PressableScale と同じ behavior)。 */}
       {post.title && !isCwHidden ? (
-        <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'], paddingBottom: post.content ? SP['1'] : SP['3'] }}>
-          <PressableScale onPress={onComment} haptic="tap" scaleValue={0.97}>
-            <Text
-              style={[T.h4, { color: C.text, fontWeight: '700' }]}
-              numberOfLines={3}
-            >
+        <View style={{ paddingTop: SP['3'], paddingBottom: post.content ? SP['1'] : SP['3'] }}>
+          <PressableScale onPress={onComment} haptic="tap" scaleValue={1}>
+            <Text style={bbsTitleStyle} numberOfLines={3}>
               {post.title}
             </Text>
           </PressableScale>
@@ -1289,7 +1278,7 @@ function AnonPostCardInner({
             onPress={onComment}
             onLongPress={useQuickReaction ? () => setMemePickerOpen(true) : undefined}
             haptic="tap"
-            scaleValue={0.94}
+            scaleValue={1}
             onPressIn={() => {
               if (reduceMotionForCard) return;
               pressLift.value = withTiming(1, { duration: 120, easing: Easing.out(Easing.cubic) });
@@ -1356,7 +1345,7 @@ function AnonPostCardInner({
                         blurhash={blurhash}
                         width="100%"
                         height="100%"
-                        radius={R.md}
+                        radius={16}
                         lazy
                         // フィード 1 列幅 (max 720) の 1x DPR で 480 が綺麗 + 軽い。
                         // 旧 720 default は retina 換算でも過剰だった (1 枚 ~120KB 多い)。
@@ -1487,7 +1476,7 @@ function AnonPostCardInner({
       {/* リアクション表示行 */}
       {reactionsList.length > 0 && (
         <View style={STYLES.reactionsRow}>
-          {reactionsList.slice(0, 8).map((r) => (
+          {reactionsList.slice(0, 5).map((r) => (
             <PressableScale
               key={r.meme}
               onPress={() => onReact(r.meme)}
@@ -1504,17 +1493,15 @@ function AnonPostCardInner({
               </Text>
             </PressableScale>
           ))}
-          {reactionsList.length > 8 && (
+          {reactionsList.length > 5 && (
             <PressableScale
-              onPress={() => setMemePickerOpen(true)}
+              onPress={() => setReactionsDetailOpen(true)}
               haptic="tap"
               hitSlop={10}
-              accessibilityLabel="他のリアクションを見る"
+              accessibilityLabel="押された全スタンプを見る"
               style={STYLES.reactionOverflowPill}
             >
-              <Text style={STYLES.reactionOverflowText}>
-                +{reactionsList.length - 8}
-              </Text>
+              <Text style={STYLES.reactionOverflowText}>…</Text>
             </PressableScale>
           )}
         </View>
@@ -1526,6 +1513,14 @@ function AnonPostCardInner({
         onClose={() => setMemePickerOpen(false)}
         onPick={(meme) => onReact(meme)}
         picked={myReactionsForPost}
+      />
+
+      {/* 「…」から開く: 押された全スタンプの一覧 (閲覧 + タップでトグル) */}
+      <ReactionListSheet
+        visible={reactionsDetailOpen}
+        onClose={() => setReactionsDetailOpen(false)}
+        reactions={reactionsList}
+        onReact={onReact}
       />
 
       {/* 画像ライトボックス — tap 時に開く全画面ビューア。

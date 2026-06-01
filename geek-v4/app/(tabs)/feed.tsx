@@ -4,6 +4,7 @@ import {
   Text,
   RefreshControl,
   Platform,
+  StyleSheet,
   useWindowDimensions,
   type NativeSyntheticEvent,
   type NativeScrollEvent,
@@ -839,9 +840,9 @@ export default function FeedScreen() {
         </View>
       </View>
 
-      {/* ヘッダーとリストの境界 — glass card style に合わせて hairline を弱めに
-          (旧 C.divider はカードと衝突して "二重 border" に見えていた) */}
-      <View style={{ height: 1, backgroundColor: C.divider }} />
+      {/* ヘッダーとリストの境界 — 各投稿の下罫線と太さを揃えた hairline。
+          (フラット化で投稿が全幅 hairline 区切りになったため、先頭境界も同じ細さに) */}
+      <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: C.divider }} />
 
       <FlashList
         ref={listRef}
@@ -879,11 +880,11 @@ export default function FeedScreen() {
         onEndReached={loadMore}
         onEndReachedThreshold={0.6}
         contentContainerStyle={{
-          // post 間の余白を確保するため top padding を増やす
-          paddingTop: SP['3'],
-          // 横方向: card は自身で角丸 + shadow を持つので、左右にちょっと余白を作って
-          //  「浮いてる感」を出す。card 自体は maxWidth:720 + alignSelf:center.
-          paddingHorizontal: SP['3'],
+          // フラット: 投稿は全幅・隙間なし。横余白は投稿側 (paddingHorizontal:16) に
+          // 一元化し、下罫線 (hairline) を中央 720 列の端まで延ばす。先頭の上余白も
+          // 作らない (上境界は直前の hairline が担う)。
+          paddingTop: 0,
+          paddingHorizontal: 0,
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
         }}
         ListEmptyComponent={
