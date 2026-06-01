@@ -114,43 +114,50 @@ const nativeSecureStorage = {
   },
   setItem: async (key: string, value: string): Promise<void> => {
     const base = secureKey(key);
+    // F6: keychainAccessible を AFTER_FIRST_UNLOCK にして、端末ロック中/バックグラウンドの
+    // token rotation 書き込みが Keychain アクセス不能で失敗 → session 永久消失するのを防ぐ。
+    const saveOpts = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK };
     try {
-      // 既存値があれば事前に削除 (chunk 数の整合性確保)
+      // 旧 chunk 数を控える (新規書き込み後に「余った」旧 chunk を掃除するため)。
+      let oldCount = 0;
       try {
         const oldMeta = await SecureStore.getItemAsync(metaKey(base));
         if (oldMeta) {
-          const oldCount = parseInt(oldMeta, 10);
-          if (Number.isFinite(oldCount) && oldCount > 0) {
-            for (let i = 0; i < oldCount; i++) {
-              await SecureStore.deleteItemAsync(chunkKey(base, i)).catch(() => {});
-            }
-          }
+          const n = parseInt(oldMeta, 10);
+          if (Number.isFinite(n) && n > 0) oldCount = n;
         }
-        // 旧単一 key 形式も掃除 (chunked 移行時の cleanup)
-        await SecureStore.deleteItemAsync(base).catch(() => {});
       } catch {
         /* ignore */
       }
 
-      // 小さければ chunking 不要 (single key 形式で書く + meta=1)
-      // ※ それでも meta は付けて新形式に統一 (getItem の経路を 1 本化)
       const chunks: string[] = [];
       for (let i = 0; i < value.length; i += SECURE_CHUNK_SIZE) {
         chunks.push(value.slice(i, i + SECURE_CHUNK_SIZE));
       }
-      const count = chunks.length || 1;
       // 空文字列の場合は 1 chunk (空) を書く
       if (chunks.length === 0) chunks.push('');
+      const count = chunks.length;
 
-      for (let i = 0; i < chunks.length; i++) {
-        const chunkValue = chunks[i] ?? '';
-        await SecureStore.setItemAsync(chunkKey(base, i), chunkValue);
+      // ★ F6: 旧データを「先に消さない」。新 chunk を書き切ってから meta(=コミット点)を
+      //   書き、最後に「新 count を超える旧 chunk + 旧単一 key」だけ掃除する。これにより
+      //   書き込みが途中失敗しても旧 session が即座に全消失しない (delete-before-write だと
+      //   1 回の失敗で session 全損 → 次回起動で login だった)。掃除対象は meta が指す範囲外
+      //   なので getItem の読みを壊さない。
+      for (let i = 0; i < count; i++) {
+        await SecureStore.setItemAsync(chunkKey(base, i), chunks[i] ?? '', saveOpts);
       }
-      await SecureStore.setItemAsync(metaKey(base), String(count));
-    } catch {
-      // SecureStore 失敗 (Keychain 利用不可・wipe 等) → AsyncStorage への
-      // silent fallback は意図的にしない。権限を下げてしまうため。
-      // 結果: session 保存失敗 = 次回起動で再ログイン要求。
+      await SecureStore.setItemAsync(metaKey(base), String(count), saveOpts);
+
+      // コミット後の掃除: 余剰の旧 chunk と旧単一 key 形式の残骸を削除 (失敗は無視)。
+      for (let i = count; i < oldCount; i++) {
+        await SecureStore.deleteItemAsync(chunkKey(base, i)).catch(() => {});
+      }
+      await SecureStore.deleteItemAsync(base).catch(() => {});
+    } catch (e) {
+      // SecureStore 失敗 (Keychain 利用不可・wipe 等) → AsyncStorage への silent fallback は
+      // 意図的にしない (権限を下げるため)。結果: 次回起動で再ログイン要求。
+      // F6: サイレント消失を観測可能にするため warn を残す。
+      console.warn('[securestore] setItem failed (session may be lost):', e);
     }
   },
   removeItem: async (key: string): Promise<void> => {

@@ -3,11 +3,16 @@ import { View, Text, ScrollView, type LayoutChangeEvent } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { fetchTrendingTags } from '../../lib/api/trending';
+import { fetchTrendingTags, type TrendingTag } from '../../lib/api/trending';
 import { useTagCooccurStore } from '../../stores/tagCooccurStore';
 import { PressableScale } from '../ui/PressableScale';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
+
+// data 未取得時の default。module 定数にして「毎レンダー新しい [] 参照」を作らない。
+// 旧 `data: trending = []` は loading 中に新しい [] を量産し、useEffect([trending]) を
+// 毎レンダー無限発火させて "Maximum update depth exceeded" を起こしていた。
+const EMPTY_TRENDING: TrendingTag[] = [];
 
 function TrendingRowInner() {
   const router = useRouter();
@@ -29,7 +34,7 @@ function TrendingRowInner() {
   // `posts INSERT` (filter 不可) を購読していたが、トレンドは 5 分粒度の集計で
   // 十分鮮度を保てる + INSERT 全件 fanout は全クライアントに刺さって痛い。
   // staleTime 5 分 + pull-to-refresh / feed refetch で十分なので realtime 撤去。
-  const { data: trending = [] } = useQuery({
+  const { data } = useQuery({
     queryKey: ['trending-tags', cooccurKey],
     queryFn: () => fetchTrendingTags({
       limit: 10,
@@ -39,11 +44,14 @@ function TrendingRowInner() {
     staleTime: 5 * 60 * 1000,  // 5分
     refetchOnMount: false,
   });
+  // 安定した空配列を default にする (上記 EMPTY_TRENDING のコメント参照)。
+  const trending = data ?? EMPTY_TRENDING;
 
   // trending が変わったら計測をリセット
   useEffect(() => {
     positionsRef.current.clear();
-    setSnapOffsets([]);
+    // 既に空なら新しい [] を作らない (無駄な再レンダー/churn を避ける)。
+    setSnapOffsets((prev) => (prev.length === 0 ? prev : []));
   }, [trending]);
 
   const handleChipLayout = useCallback(
@@ -52,7 +60,10 @@ function TrendingRowInner() {
       // すべての chip が onLayout 通過したら offsets を sorted array で確定
       if (positionsRef.current.size === trending.length) {
         const offsets = [...positionsRef.current.values()].sort((a, b) => a - b);
-        setSnapOffsets(offsets);
+        // 同値なら据え置き — onLayout 再発火 → 新配列 setState の再レンダーループを防ぐ。
+        setSnapOffsets((prev) =>
+          prev.length === offsets.length && prev.every((v, i) => v === offsets[i]) ? prev : offsets,
+        );
       }
     },
     [trending.length],
