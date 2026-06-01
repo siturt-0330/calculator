@@ -28,7 +28,7 @@ export default function CalendarScreen() {
   // selector化: 必要 field の likedTags のみ subscribe — blockedTags 更新時に
   // calendar 全体が re-render するのを防ぐ。
   const likedTags = useTagFilterStore((s) => s.likedTags);
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const qc = useQueryClient();
 
   const [cursor, setCursor] = useState(() => new Date());
@@ -349,7 +349,7 @@ function AddEventModal({
   // selector化 — modal が出るたびに blockedTags の更新で巻き込まれないよう、
   // likedTags のみ subscribe する。
   const likedTags = useTagFilterStore((s) => s.likedTags);
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const [title, setTitle] = useState('');
   const [date, setDate] = useState(defaultDate);
   const [tag, setTag] = useState(likedTags[0] ?? '');

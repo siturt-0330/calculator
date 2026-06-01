@@ -75,7 +75,7 @@ export default function TrustScoreScreen() {
         }}
       >
         <BackButton />
-        <Text style={[T.h3, { color: C.text }]}>信用スコア</Text>
+        <Text style={[T.h3, { color: C.text }]}>信頼スコア</Text>
       </View>
 
       {isLoading && !profile ? (
@@ -181,7 +181,7 @@ function About() {
         スコアは自分以外には公開されません。
       </Text>
       <Text style={[T.small, { color: C.text3, lineHeight: 18 }]}>
-        投稿・いいね・コメント・利用日数で加算され、報告を受けると減算されます。
+        投稿・いいね・コメント・利用日数で加算され、他のユーザーから「気になる」を多く受けると減算されます。
       </Text>
     </View>
   );
@@ -266,7 +266,7 @@ function ComponentRow({ comp }: { comp: TrustComponent }) {
 function Disclaimer() {
   return (
     <Text style={[T.caption, { color: C.text3, lineHeight: 18, textAlign: 'center' }]}>
-      報告を受けるとスコアが下がります。コミュニティを尊重した発言を心がけましょう。{'\n'}
+      「気になる」を多く受けるとスコアが下がります。コミュニティを尊重した発言を心がけましょう。{'\n'}
       スコアは数分以内に反映されます。
     </Text>
   );

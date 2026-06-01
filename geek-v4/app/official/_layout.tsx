@@ -16,7 +16,7 @@ import { Spinner } from '../../components/ui/Spinner';
 
 export default function OfficialLayout() {
   const user = useAuthStore((s) => s.user);
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
 
   const { data, isLoading } = useQuery({
     queryKey: ['my-official-communities', user?.id],

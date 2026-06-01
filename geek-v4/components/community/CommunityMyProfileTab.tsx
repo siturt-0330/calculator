@@ -45,7 +45,7 @@ export function CommunityMyProfileTab({
   isMember: boolean;
 }) {
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const [editOpen, setEditOpen] = useState(false);
 
   const { data: profile, isLoading } = useQuery({
@@ -309,7 +309,7 @@ function ProfileEditModal({
   onSaved: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
 
   const [topOshi, setTopOshi] = useState('');
   const [oshiSince, setOshiSince] = useState('');

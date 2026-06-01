@@ -47,7 +47,7 @@ export default function MypageMessagesScreen() {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((s) => s.user);
   const qc = useQueryClient();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const { data: messages = [], isLoading, error, refetch } = useQuery({

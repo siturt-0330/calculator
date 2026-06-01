@@ -45,7 +45,7 @@ export default function CreateSpotScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const id = typeof params.id === 'string' ? params.id : '';
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const qc = useQueryClient();
 
   // 入力 state

@@ -1,5 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchNotifications, markAllRead } from '../lib/api/notifications';
+import { fetchMyNotificationPreferences } from '../lib/api/notificationPreferences';
+import { shouldShowInApp } from '../lib/utils/notificationFilter';
 import { useAuthStore } from '../stores/authStore';
 import { useToastStore } from '../stores/toastStore';
 import type { Notification } from '../types/models';
@@ -35,7 +37,20 @@ export function useNotifications() {
     enabled: !!userId,
   });
 
-  const notifications = (q.data ?? []) as Notification[];
+  // 通知設定 (アプリ内表示の ON/OFF) — settings/notifications.tsx と同じ prefs。
+  const prefsQuery = useQuery({
+    queryKey: ['notification-preferences', userId],
+    queryFn: fetchMyNotificationPreferences,
+    enabled: !!userId,
+    staleTime: 5 * 60_000,
+  });
+  const prefs = prefsQuery.data ?? [];
+
+  // アプリ内表示 OFF のカテゴリは一覧・未読数の両方から除外する (#20)。
+  // prefs 未取得 / 未設定カテゴリは shouldShowInApp が default true を返す (fail-open)。
+  const notifications = ((q.data ?? []) as Notification[]).filter((n) =>
+    shouldShowInApp(n, prefs),
+  );
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   return {

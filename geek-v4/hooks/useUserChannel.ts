@@ -62,8 +62,10 @@ function bindUserChannel(userId: string, qc: QueryClient) {
           },
           (payload) => {
             const newRow = payload.new as Notification;
+            // realtime が同じ row を二重配信したり、楽観 prepend と衝突しても
+            // 重複させない (未読数の水増し / key 衝突を防ぐ)。
             qc.setQueryData<Notification[]>(NOTIF_KEY as unknown as readonly unknown[], (old) =>
-              [newRow, ...(old ?? [])],
+              [newRow, ...(old ?? []).filter((n) => n.id !== newRow.id)],
             );
           },
         )

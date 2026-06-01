@@ -196,10 +196,14 @@ export function useReactionToggle() {
   // 加算するだけ。settle 時に (count - 1) が奇数なら net toggle を再 dispatch
   // することで「N 連打した結果の parity」が server-truth に反映される。
   // これにより picker XOR (localFlips) の visual と server が必ず最終一致する。
+  // mutation オブジェクトは毎 render で新 ref になるため、安定参照の mutation.mutate
+  // にのみ依存させる。これで fire/toggle が安定し、feed の handlersByPostId 再生成 →
+  // AnonPostCard memo 全崩壊を防ぐ (perf)。
+  const mutate = mutation.mutate;
   const fire = useCallback((vars: Vars) => {
     const k = `${vars.postId}:${vars.meme}`;
     pending.current.set(k, 1);
-    mutation.mutate(vars, {
+    mutate(vars, {
       onSettled: (_data, error) => {
         const total = pending.current.get(k) ?? 1;
         pending.current.delete(k);
@@ -214,7 +218,7 @@ export function useReactionToggle() {
         if (extra % 2 === 1) fire(vars); // 余剰が奇数 → もう一度 toggle
       },
     });
-  }, [mutation]);
+  }, [mutate]);
 
   const toggle = useCallback((postId: string, meme: string) => {
     const k = `${postId}:${meme}`;

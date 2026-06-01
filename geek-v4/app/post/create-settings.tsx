@@ -355,12 +355,20 @@ export default function CreateSettings() {
       // メディアが Storage に残るが、ポリシー違反は元々レアなので許容)。
       setUploadStatus(s.images.length > 0 || s.video ? 'アップロード中…' : '確認中…');
 
-      let check: Awaited<ReturnType<typeof checkContent>>;
       let uploadedImageUrls: string[] = [];
       let uploadedVideoUrls: string[] = [];
       try {
-        [check, uploadedImageUrls, uploadedVideoUrls] = await Promise.all([
-          checkContent({ content: s.content, tags: s.tags }),
+        // ★ 先に AI コンテンツチェックを await し、NG ならアップロードしない (#37)。
+        //   旧実装は checkContent と upload を Promise.all で並列実行していたため、
+        //   NG 時にアップロード済みメディアが Storage に orphan として残っていた。
+        //   体感速度よりデータ整合性を優先する。
+        const check = await checkContent({ content: s.content, tags: s.tags });
+        if (!check.ok) {
+          hap.error();
+          Alert.alert('投稿できません', check.reason ?? 'コンテンツポリシーに反する可能性があります');
+          return;
+        }
+        [uploadedImageUrls, uploadedVideoUrls] = await Promise.all([
           s.images.length > 0
             ? Promise.all(s.images.map((uri) => uploadPostImage(uri, userId)))
             : Promise.resolve<string[]>([]),
@@ -373,12 +381,6 @@ export default function CreateSettings() {
         ]);
       } catch (e) {
         show(e instanceof Error ? e.message : String(e), 'error');
-        return;
-      }
-
-      if (!check.ok) {
-        hap.error();
-        Alert.alert('投稿できません', check.reason ?? 'コンテンツポリシーに反する可能性があります');
         return;
       }
 
@@ -404,7 +406,7 @@ export default function CreateSettings() {
         videoDurations: [],
         videoPosters: [],
         tagNames: s.tags,
-        isAnonymous: s.anonymous,
+        isAnonymous: true,  // 常に匿名 (匿名トグル廃止 — 匿名SNSの一貫性 #3)。公開投稿がフィードから消える問題も解消。
         sourceUrl: s.sourceUrl.trim() || null,
         isPublic: s.visibility !== 'private',
         contentWarning: s.cwCategory !== 'none' ? (s.cwText.trim() || null) : null,

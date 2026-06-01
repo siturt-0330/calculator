@@ -1,79 +1,148 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { View, Text, Platform, type ViewStyle } from 'react-native';
+import { View, Text, Platform, Dimensions, type ViewStyle } from 'react-native';
 import { PressableScale } from './PressableScale';
+import { Icon } from '../../constants/icons';
 import { R } from '../../design/tokens';
 import { T } from '../../design/typography';
 
 // ============================================================
-// VideoPlayer — expo-av Video の薄い wrapper
+// VideoPlayer — X / Instagram 風「ビューポート自動再生」プレイヤー
 // ============================================================
 // 要件:
-//   - feed の中で再生する想定 → デフォルトで muted, tap で再生/停止
-//   - 縦長フィードに突き刺さらないよう aspectRatio を強制 (16:9)
-//   - expo-av を dynamic require して Web bundle 肥大化を抑える
-//     (Web では <video> タグで素直に置く方が安定 + サイズ小)
-//   - 失敗時は generic "再生できません" を表示 (silent fail にしない)
-//
-// 注: 動画ポスター画像は将来 (server transform 経由で thumbnail) 対応。
+//   - 画面に入った瞬間に muted で自動再生し、画面外に出たら停止 (IG/X feed と同じ)
+//   - tap で音声 ON/OFF (デフォルト muted)。ループ再生。
+//   - 可視判定はコンポーネント側で自己完結 → 親リストへの配線が不要
+//       Web    : IntersectionObserver (<video> を直接 observe)
+//       Native : 親 View を measureInWindow で定期計測 (350ms) して in-view 判定
+//   - shouldPlay を渡せば自前検出を上書きして明示制御も可能 (将来のリスト精密制御用)
+//   - expo-av は native のみ dynamic require して Web bundle を太らせない
+//   - 失敗時は "再生できません" を表示 (silent fail にしない)
 // ============================================================
 type Props = {
   uri: string;
   poster?: string;
-  /** width 100% で、aspect 比は親で固定 */
+  /** width 100% で aspect 比は内部で 16:9 固定 (親で上書き可) */
   style?: ViewStyle;
-  /** 視聴領域に入ったら auto-play (feed 自動再生用に外部から制御) */
+  /** 明示制御の override。未指定なら自前で viewport を検出して自動再生/停止する。 */
   shouldPlay?: boolean;
+  /** 自動再生を無効化したい場合 false。default true (X / Instagram 風)。 */
+  autoplay?: boolean;
 };
 
-export function VideoPlayer({ uri, poster, style, shouldPlay = false }: Props) {
+const FRAME = {
+  width: '100%' as const,
+  aspectRatio: 16 / 9,
+  backgroundColor: '#000',
+  borderRadius: R.lg,
+  overflow: 'hidden' as const,
+};
+
+export function VideoPlayer({ uri, poster, style, shouldPlay, autoplay = true }: Props) {
+  if (Platform.OS === 'web') {
+    return <WebVideo uri={uri} poster={poster} style={style} shouldPlay={shouldPlay} autoplay={autoplay} />;
+  }
+  return <NativeVideo uri={uri} poster={poster} style={style} shouldPlay={shouldPlay} autoplay={autoplay} />;
+}
+
+// ============================================================
+// Web 経路 — <video> + IntersectionObserver
+// ============================================================
+function WebVideo({ uri, poster, style, shouldPlay, autoplay = true }: Props) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const videoRef = useRef<any>(null);
+  const mutedRef = useRef(true);
+  const [muted, setMuted] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ---- Web 経路: <video> 要素で済む (expo-av より bundle 軽い) ----
-  if (Platform.OS === 'web') {
-    return (
-      <View
-        style={[
-          { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000', borderRadius: R.lg, overflow: 'hidden' },
-          style,
-        ]}
-      >
-        {/*
-          RN Web では <video> 要素は使えるが React Native 型に無い。
-          createElement 経由で型ガードを回避し、Web 専用 DOM 要素として描画。
-        */}
-        {(() => {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-          const React = require('react') as typeof import('react');
-          return React.createElement('video', {
-            src: uri,
-            poster,
-            controls: true,
-            playsInline: true,
-            preload: 'metadata',
-            style: { width: '100%', height: '100%', objectFit: 'contain', backgroundColor: '#000' },
-            onError: () => setError('動画を読み込めませんでした'),
-          });
-        })()}
-        {error && <ErrorOverlay msg={error} />}
-      </View>
-    );
-  }
+  const applyMuted = useCallback((m: boolean) => {
+    mutedRef.current = m;
+    setMuted(m);
+    if (videoRef.current) videoRef.current.muted = m;
+  }, []);
 
-  // ---- Native 経路: expo-av の Video コンポーネント (lazy require) ----
+  // ref は安定化 (毎 render で detach/attach されると再生が一瞬途切れる)
+  const setVideoRef = useCallback((n: unknown) => {
+    videoRef.current = n;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (n) (n as any).muted = mutedRef.current;
+  }, []);
+
+  // 明示 override (shouldPlay 指定時)
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el || shouldPlay === undefined) return;
+    if (shouldPlay) el.play?.().catch(() => {});
+    else el.pause?.();
+  }, [shouldPlay]);
+
+  // 自前 viewport 検出 — override 未指定 & autoplay 有効時のみ
+  useEffect(() => {
+    if (shouldPlay !== undefined || !autoplay) return;
+    const el = videoRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const e = entries[0];
+        if (!e) return;
+        if (e.isIntersecting && e.intersectionRatio >= 0.6) {
+          // 現在の mute 設定で再生 → 音あり autoplay が弾かれたら muted で再試行
+          el.muted = mutedRef.current;
+          el.play?.().catch(() => {
+            applyMuted(true);
+            el.play?.().catch(() => {});
+          });
+        } else {
+          el.pause?.();
+        }
+      },
+      { threshold: [0, 0.6, 1] },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [autoplay, shouldPlay, uri, applyMuted]);
+
   return (
-    <NativeVideo uri={uri} poster={poster} style={style} shouldPlay={shouldPlay} />
+    <View style={[FRAME, style]}>
+      {(() => {
+        // RN Web では <video> を createElement で直接描画 (RN 型に無いため)
+        // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+        const React = require('react') as typeof import('react');
+        return React.createElement('video', {
+          ref: setVideoRef,
+          src: uri,
+          poster,
+          muted,
+          loop: true,
+          playsInline: true,
+          preload: 'metadata',
+          // controls は出さず IG/X 風。tap で mute トグル。
+          onClick: () => applyMuted(!mutedRef.current),
+          style: {
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+            backgroundColor: '#000',
+            cursor: 'pointer',
+          },
+          onError: () => setError('動画を読み込めませんでした'),
+        });
+      })()}
+      {!error && <MuteBadge muted={muted} onPress={() => applyMuted(!muted)} />}
+      {error && <ErrorOverlay msg={error} />}
+    </View>
   );
 }
 
-function NativeVideo({ uri, poster, style, shouldPlay }: Required<Pick<Props, 'uri'>> & Props) {
+// ============================================================
+// Native 経路 — expo-av Video + measureInWindow 可視判定
+// ============================================================
+function NativeVideo({ uri, poster, style, shouldPlay, autoplay = true }: Props) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const VideoRef = useRef<any>(null);
+  const containerRef = useRef<any>(null);
   const [muted, setMuted] = useState(true);
-  const [playing, setPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // expo-av は native のみ。Web bundle に乗らないよう lazy require。
-  // 型は loose にして any 経由で逃がす — ファイル内に閉じ込めるので影響限定的。
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let VideoCmp: any = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -84,103 +153,105 @@ function NativeVideo({ uri, poster, style, shouldPlay }: Required<Pick<Props, 'u
     VideoCmp = av.Video;
     ResizeMode = av.ResizeMode;
   } catch (e) {
-    // expo-av 未 install / 不在環境 — エラーを画面に表示して silent fail を避ける
     console.warn('[VideoPlayer] expo-av load failed:', e);
   }
 
-  useEffect(() => {
-    if (!VideoRef.current) return;
-    if (shouldPlay && !playing) {
-      VideoRef.current.playAsync?.().catch(() => {});
-      setPlaying(true);
-    }
-  }, [shouldPlay, playing]);
-
-  const togglePlay = useCallback(() => {
-    if (!VideoRef.current) return;
-    if (playing) {
-      VideoRef.current.pauseAsync?.().catch(() => {});
-      setPlaying(false);
-    } else {
-      VideoRef.current.playAsync?.().catch(() => {});
-      setPlaying(true);
-    }
-  }, [playing]);
+  const externallyControlled = shouldPlay !== undefined;
+  const selfDetect = autoplay && !externallyControlled;
+  const inView = useNativeInView(containerRef, selfDetect);
+  const playing = externallyControlled ? !!shouldPlay : autoplay ? inView : false;
 
   if (!VideoCmp) {
     return (
-      <View
-        style={[
-          { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000', borderRadius: R.lg, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
-          style,
-        ]}
-      >
+      <View style={[FRAME, { alignItems: 'center', justifyContent: 'center' }, style]}>
         <Text style={[T.caption, { color: '#fff' }]}>動画プレイヤを読み込めません</Text>
       </View>
     );
   }
 
   return (
-    <View
-      style={[
-        { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000', borderRadius: R.lg, overflow: 'hidden' },
-        style,
-      ]}
-    >
+    <View ref={containerRef} style={[FRAME, style]}>
       <VideoCmp
-        ref={VideoRef}
         source={{ uri }}
         posterSource={poster ? { uri: poster } : undefined}
         usePoster={!!poster}
+        shouldPlay={playing}
         isMuted={muted}
         isLooping
-        useNativeControls
         resizeMode={ResizeMode?.CONTAIN ?? 'contain'}
         style={{ width: '100%', height: '100%' }}
         onError={(e: unknown) => {
-          const msg = typeof e === 'string' ? e : '動画を読み込めませんでした';
-          setError(msg);
+          setError(typeof e === 'string' ? e : '動画を読み込めませんでした');
         }}
       />
-      {/* mute toggle — useNativeControls だけだと iOS で muted トグルが出ないことがある */}
-      <PressableScale
-        onPress={() => setMuted((m) => !m)}
-        hitSlop={10}
-        accessibilityLabel={muted ? 'ミュート解除' : 'ミュート'}
-        style={{
-          position: 'absolute',
-          right: 8, bottom: 8,
-          paddingHorizontal: 8, paddingVertical: 4,
-          backgroundColor: 'rgba(0,0,0,0.55)',
-          borderRadius: R.full,
-        }}
-      >
-        <Text style={{ fontSize: 14 }}>{muted ? '🔇' : '🔊'}</Text>
-      </PressableScale>
-      {/* 中央 play overlay (停止時) */}
-      {!playing && (
-        <PressableScale
-          onPress={togglePlay}
-          accessibilityLabel="再生"
-          style={{
-            position: 'absolute',
-            top: 0, left: 0, right: 0, bottom: 0,
-            alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          <View
-            style={{
-              width: 60, height: 60, borderRadius: 30,
-              backgroundColor: 'rgba(0,0,0,0.55)',
-              alignItems: 'center', justifyContent: 'center',
-            }}
-          >
-            <Text style={{ fontSize: 28, color: '#fff' }}>▶</Text>
-          </View>
-        </PressableScale>
-      )}
+      {!error && <MuteBadge muted={muted} onPress={() => setMuted((m) => !m)} />}
       {error && <ErrorOverlay msg={error} />}
     </View>
+  );
+}
+
+// 親 View を定期計測して「画面内に 50% 以上あるか」を返す自己完結フック (native)
+function useNativeInView(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ref: React.MutableRefObject<any>,
+  enabled: boolean,
+): boolean {
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    if (!enabled) {
+      setInView(false);
+      return;
+    }
+    let alive = true;
+    const check = () => {
+      const node = ref.current;
+      if (!node || typeof node.measureInWindow !== 'function') return;
+      node.measureInWindow((_x: number, y: number, _w: number, h: number) => {
+        if (!alive) return;
+        const screenH = Dimensions.get('window').height;
+        if (!h || !screenH) {
+          setInView(false);
+          return;
+        }
+        const visibleTop = Math.max(y, 0);
+        const visibleBottom = Math.min(y + h, screenH);
+        const ratio = (visibleBottom - visibleTop) / h;
+        // setState は同値なら React が bailout するので 350ms ポーリングでも再 render は最小
+        setInView(ratio >= 0.5);
+      });
+    };
+    check();
+    const id = setInterval(check, 350);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [ref, enabled]);
+  return inView;
+}
+
+// ミュート切替バッジ (右下)
+function MuteBadge({ muted, onPress }: { muted: boolean; onPress: () => void }) {
+  const V = muted ? Icon.volumeMute : Icon.volume;
+  return (
+    <PressableScale
+      onPress={onPress}
+      hitSlop={10}
+      accessibilityLabel={muted ? 'ミュート解除' : 'ミュート'}
+      style={{
+        position: 'absolute',
+        right: 8,
+        bottom: 8,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <V size={16} color="#fff" strokeWidth={2.2} />
+    </PressableScale>
   );
 }
 
@@ -189,9 +260,13 @@ function ErrorOverlay({ msg }: { msg: string }) {
     <View
       style={{
         position: 'absolute',
-        top: 0, left: 0, right: 0, bottom: 0,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
         backgroundColor: 'rgba(0,0,0,0.85)',
-        alignItems: 'center', justifyContent: 'center',
+        alignItems: 'center',
+        justifyContent: 'center',
         padding: 12,
       }}
     >

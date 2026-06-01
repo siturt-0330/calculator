@@ -41,7 +41,7 @@ export default function EditSpotScreen() {
   const params = useLocalSearchParams();
   const id = typeof params.id === 'string' ? params.id : '';
   const spotId = typeof params.spotId === 'string' ? params.spotId : '';
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const qc = useQueryClient();
 
   const { data: spot, isLoading } = useQuery({

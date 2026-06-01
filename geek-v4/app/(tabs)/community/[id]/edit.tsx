@@ -45,7 +45,7 @@ export default function EditCommunityScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const id = typeof params.id === 'string' ? params.id : '';
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const qc = useQueryClient();
 
   const { data: community, isLoading } = useQuery({

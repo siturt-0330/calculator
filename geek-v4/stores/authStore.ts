@@ -156,7 +156,14 @@ async function tryRecoverSession(set: (partial: Partial<AuthState>) => void): Pr
         refresh_token: res.data.session.refresh_token,
       };
       try {
-        set({ user: await buildUser(res.data.session.user) });
+        const recovered = await buildUser(res.data.session.user);
+        // 復活させた user が凍結/制限なら復活させない (signIn の stateError と一貫)。
+        if (checkAccountState(recovered)) {
+          lastKnownTokens = null;
+          set({ user: null });
+          return;
+        }
+        set({ user: recovered });
       } catch {
         set({ user: res.data.session.user as AppUser });
       }
@@ -384,7 +391,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // 凍結 / 制限アカウントなら強制 signOut してエラー返却
       const stateError = checkAccountState(user);
       if (stateError) {
-        try { await supabase.auth.signOut(); } catch (e) { swallow('auth.signOut.signIn-stateError', e); }
+        // 凍結/制限アカウントを確実にログアウトさせる。lastKnownTokens を先に消し、
+        // signOutInFlight を立てることで、直後の SIGNED_OUT が tryRecoverSession に
+        // 渡って凍結ユーザーを復活させる race を防ぐ (security)。
+        signOutInFlight = true;
+        lastKnownTokens = null;
+        try {
+          await supabase.auth.signOut();
+        } catch (e) {
+          swallow('auth.signOut.signIn-stateError', e);
+        } finally {
+          signOutInFlight = false;
+        }
         set({ user: null });
         return { error: stateError };
       }

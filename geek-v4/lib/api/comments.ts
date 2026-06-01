@@ -20,11 +20,12 @@ import { checkRate, rateLimitMessage } from '../rateLimit';
 // SELECT カラムは一箇所でメンテ — parent / reply_to を join 不要で取れるよう
 // raw uuid のまま返す (クライアント側 buildCommentTree がツリー化する)。
 const COMMENT_SELECT_COLS =
-  'id, post_id, content, avatar_color, created_at, parent_comment_id, reply_to_comment_id';
+  'id, post_id, author_id, content, avatar_color, created_at, parent_comment_id, reply_to_comment_id';
 
 type RawCommentWithAuthor = {
   id: string;
   post_id: string;
+  author_id: string;
   content: string;
   avatar_color: string;
   created_at: string;
@@ -60,6 +61,7 @@ export async function fetchComments(postId: string): Promise<Comment[]> {
       return {
         id: c.id,
         post_id: c.post_id,
+        author_id: c.author_id,
         content: c.content,
         avatar_color: c.avatar_color,
         created_at: c.created_at,
@@ -85,6 +87,7 @@ export async function fetchComments(postId: string): Promise<Comment[]> {
   return (fallback.data ?? []).map((c: RawCommentNoAuthor) => ({
     id: c.id,
     post_id: c.post_id,
+    author_id: c.author_id,
     content: c.content,
     avatar_color: c.avatar_color,
     created_at: c.created_at,

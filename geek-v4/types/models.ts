@@ -55,6 +55,7 @@ export type Comment = {
   content: string;
   avatar_color: string;
   created_at: string;
+  author_id?: string | null;  // コメント主の user id — モデレーション操作・own判定用 (fetchComments が SELECT)
   trust_score?: number | null;  // 著者の現在の信頼スコア
   // ============================================================
   // コメントツリー (migration 0059)

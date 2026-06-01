@@ -159,7 +159,7 @@ export default function SettingsScreen() {
           />
           <SettingsRow
             icon={Icon.award}
-            label="信用スコア"
+            label="信頼スコア"
             sublabel="あなたの活動スコアを見る"
             tintBg={C.amberBg}
             tintFg={C.amber}

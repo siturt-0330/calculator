@@ -14,6 +14,7 @@ import { Icon } from '../../constants/icons';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { formatRelative } from '../../lib/utils/date';
+import { useAuthStore } from '../../stores/authStore';
 import { ObsidianSaveButton } from '../../components/ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
 
@@ -49,9 +50,13 @@ async function fetchLikedPosts(): Promise<Item[]> {
 export default function LikedPosts() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  // 別ユーザーが同一端末でログインした際、永続キャッシュ経由で前ユーザーの
+  // 「いいね」リストが見えてしまうのを防ぐため queryKey を userId でスコープ化。
+  const userId = useAuthStore((s) => s.user?.id);
   const { data: items = [], isLoading } = useQuery({
-    queryKey: ['liked-posts'],
+    queryKey: ['liked-posts', userId],
     queryFn: fetchLikedPosts,
+    enabled: !!userId,
   });
 
   return (

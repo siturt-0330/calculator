@@ -407,7 +407,7 @@ export default function FeedScreen() {
   const { data: legacyAddedTags } = useAddedTags(legacyIds);
   const { polls: legacyPolls } = usePolls(legacyIds);
   const { addTag } = useAddTag();
-  const { show: showToast } = useToastStore();
+  const showToast = useToastStore((s) => s.show);
 
   const handleAddTag = useCallback(async (postId: string, tag: string) => {
     try {

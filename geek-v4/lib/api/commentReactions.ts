@@ -28,25 +28,43 @@ export async function fetchCommentReactionsForComments(
   const { data: session } = await supabase.auth.getSession();
   const myId = session.session?.user.id;
 
+  // 他ユーザーの user_id をクライアントへ出さない (名寄せ防止 #38)。
+  // 集計は comment_id + meme のみ取得し、件数だけ数える。
   const { data, error } = await withApiTimeout(
     supabase
       .from('comment_reactions')
-      .select('comment_id, user_id, meme')
+      .select('comment_id, meme')
       .in('comment_id', commentIds),
     'commentReactions.fetchForComments',
     8000,
   );
   if (error) return {};
 
-  const rows = (data ?? []) as CommentReactionRow[];
-  // commentId → meme → { count, mine }
-  const map: Record<string, Record<string, { count: number; mine: boolean }>> = {};
+  // mine 判定は「自分の行」だけを別途取得する (自分の user_id は露出して問題ない)。
+  let mineSet = new Set<string>();
+  if (myId) {
+    const { data: mineRows } = await withApiTimeout(
+      supabase
+        .from('comment_reactions')
+        .select('comment_id, meme')
+        .eq('user_id', myId)
+        .in('comment_id', commentIds),
+      'commentReactions.fetchMine',
+      8000,
+    );
+    mineSet = new Set(
+      ((mineRows ?? []) as { comment_id: string; meme: string }[]).map(
+        (r) => `${r.comment_id}:${r.meme}`,
+      ),
+    );
+  }
+
+  const rows = (data ?? []) as { comment_id: string; meme: string }[];
+  // commentId → meme → count
+  const map: Record<string, Record<string, number>> = {};
   for (const r of rows) {
     const byMeme = map[r.comment_id] ?? (map[r.comment_id] = {});
-    const m = byMeme[r.meme] ?? { count: 0, mine: false };
-    m.count += 1;
-    if (myId && r.user_id === myId) m.mine = true;
-    byMeme[r.meme] = m;
+    byMeme[r.meme] = (byMeme[r.meme] ?? 0) + 1;
   }
 
   const result: ReactionsByComment = {};
@@ -54,7 +72,7 @@ export async function fetchCommentReactionsForComments(
     const memes = map[cid];
     if (!memes) { result[cid] = []; continue; }
     result[cid] = Object.entries(memes)
-      .map(([meme, v]) => ({ meme, count: v.count, mine: v.mine }))
+      .map(([meme, count]) => ({ meme, count, mine: mineSet.has(`${cid}:${meme}`) }))
       .sort((a, b) => b.count - a.count);
   }
   return result;

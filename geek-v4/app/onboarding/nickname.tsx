@@ -22,7 +22,7 @@ export default function NicknameScreen() {
   const UserIcon = Icon.mypage;
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
 
   useEffect(() => {
     if (user?.nickname) setNickname(user.nickname);

@@ -21,7 +21,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { X as IconX, EyeOff, Eye } from 'lucide-react-native';
+import { X as IconX, EyeOff } from 'lucide-react-native';
 
 import { PressableScale } from '../../components/ui/PressableScale';
 import { Avatar } from '../../components/ui/Avatar';
@@ -88,8 +88,9 @@ export default function CreatePost() {
   const setImages = usePostDraftStore((s) => s.setImages);
   const video = usePostDraftStore((s) => s.video);
   const setVideo = usePostDraftStore((s) => s.setVideo);
-  const anonymous = usePostDraftStore((s) => s.anonymous);
-  const setAnonymous = usePostDraftStore((s) => s.setAnonymous);
+  // 投稿は常に匿名 (匿名トグルは廃止 — 匿名SNSの一貫性 #3)。
+  // 実際の is_anonymous も create-settings 側で true 固定にしてある。
+  const anonymous = true;
   const showPoll = usePostDraftStore((s) => s.showPoll);
   const pollQuestion = usePostDraftStore((s) => s.pollQuestion);
   const pollOptions = usePostDraftStore((s) => s.pollOptions);
@@ -499,12 +500,9 @@ export default function CreatePost() {
                     {anonymous ? '名前は表示されません' : 'プロフィールに表示されます'}
                   </Text>
                 </View>
-                <PressableScale
-                  haptic="select"
-                  onPress={() => setAnonymous(!anonymous)}
-                  accessibilityRole="switch"
-                  accessibilityState={{ checked: anonymous }}
-                  accessibilityLabel={anonymous ? '匿名をオフ' : '匿名にする'}
+                {/* 投稿は常に匿名 — 操作不可の静的バッジで明示 (トグル廃止 #3) */}
+                <View
+                  accessibilityLabel="この投稿は匿名で送信されます"
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
@@ -512,23 +510,14 @@ export default function CreatePost() {
                     paddingHorizontal: SP['3'],
                     paddingVertical: 6,
                     borderRadius: R.full,
-                    backgroundColor: anonymous ? C.accentBg : C.bg3,
+                    backgroundColor: C.accentBg,
                     borderWidth: 1,
-                    borderColor: anonymous ? C.accent : C.border,
+                    borderColor: C.accent,
                   }}
                 >
-                  {anonymous ? (
-                    <>
-                      <EyeOff size={13} color={C.accent} strokeWidth={2.2} />
-                      <Text style={[T.smallB, { color: C.accent }]}>匿名</Text>
-                    </>
-                  ) : (
-                    <>
-                      <Eye size={13} color={C.text2} strokeWidth={2.2} />
-                      <Text style={[T.smallM, { color: C.text2 }]}>公開</Text>
-                    </>
-                  )}
-                </PressableScale>
+                  <EyeOff size={13} color={C.accent} strokeWidth={2.2} />
+                  <Text style={[T.smallB, { color: C.accent }]}>匿名</Text>
+                </View>
               </View>
 
               {/* タイトル — Reddit風の太字 hero 入力 (任意) */}
