@@ -24,6 +24,7 @@ import { useReactionToggle } from '../../hooks/useReactions';
 import { useFeatureFlag } from '../../hooks/useFeatureFlag';
 import { invalidateFeedPage } from '../../lib/cacheUpdates/feedPagePatcher';
 import { MemeReactionPicker } from '../../components/feed/MemeReactionPicker';
+import { ReactionListSheet } from '../../components/feed/ReactionListSheet';
 import { LinkPreviewCard } from '../../components/feed/LinkPreviewCard';
 import { SP, R } from '../../design/tokens';
 import { useColors } from '../../hooks/useColors';
@@ -161,6 +162,8 @@ export default function PostDetailScreen() {
   );
   const { toggle: toggleReact } = useReactionToggle();
   const [memePickerOpen, setMemePickerOpen] = useState(false);
+  // 「…」タップで「押された全スタンプ」一覧シートを開く
+  const [reactionsDetailOpen, setReactionsDetailOpen] = useState(false);
 
   const { data: replies = [], isLoading: repliesLoading, refetch, isRefetching } = useQuery({
     queryKey: ['post-comments', id],
@@ -588,7 +591,7 @@ export default function PostDetailScreen() {
                 marginTop: 2,
               }}
             >
-              {reactions.slice(0, 12).map((r) => {
+              {reactions.slice(0, 5).map((r) => {
                 const mine = r.mine;
                 return (
                   // クリック応答監査: 旧版は hitSlop={6} + paddingVertical:5 で
@@ -633,6 +636,24 @@ export default function PostDetailScreen() {
                   </PressableScale>
                 );
               })}
+              {reactions.length > 5 && (
+                <PressableScale
+                  onPress={() => setReactionsDetailOpen(true)}
+                  haptic="tap"
+                  hitSlop={10}
+                  accessibilityLabel="押された全スタンプを見る"
+                  style={{
+                    paddingHorizontal: SP['3'],
+                    paddingVertical: 5,
+                    borderRadius: R.full,
+                    backgroundColor: C.bg3,
+                    borderWidth: 1.5,
+                    borderColor: C.border,
+                  }}
+                >
+                  <Text style={{ fontSize: 12, color: C.text2, fontWeight: '700' }}>…</Text>
+                </PressableScale>
+              )}
               <PressableScale
                 onPress={() => setMemePickerOpen(true)}
                 haptic="tap"
@@ -1002,6 +1023,14 @@ export default function PostDetailScreen() {
         onClose={() => setMemePickerOpen(false)}
         onPick={(meme) => toggleReact(id, meme)}
         picked={myMemes}
+      />
+
+      {/* 「…」から開く: 押された全スタンプの一覧 (閲覧 + タップでトグル) */}
+      <ReactionListSheet
+        visible={reactionsDetailOpen}
+        onClose={() => setReactionsDetailOpen(false)}
+        reactions={reactions}
+        onReact={(meme) => toggleReact(id, meme)}
       />
 
       {/* 画像ライトボックス — 本文の画像タップで拡大表示 (AnonPostCard と同じ component) */}

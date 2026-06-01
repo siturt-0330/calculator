@@ -129,14 +129,6 @@ export function useReactionToggle() {
   const mutation = useMutation<boolean, Error, Vars, { snapshot: Snapshot }>({
     mutationFn: ({ postId, meme }) => toggleReaction(postId, meme),
     onMutate: async ({ postId, meme }) => {
-      // ★ await を復活: in-flight refetch のキャンセル完了を待ってから
-      //   optimistic を書き込む。これをしないと refetch のレスポンスが
-      //   optimistic 値を上書きして「クリックしても反映されない」現象になる。
-      await Promise.all([
-        qc.cancelQueries({ queryKey: [KEY_PREFIX] }).catch(() => {}),
-        qc.cancelQueries({ queryKey: [FEED_PAGE_KEY] }).catch(() => {}),
-      ]);
-
       // snapshot は patch 前 (= mutation 適用前の真の値) で取る
       const snapshot: Snapshot = {
         reactions: qc.getQueriesData<ReactionsByPost | undefined>({
@@ -145,6 +137,11 @@ export function useReactionToggle() {
         feedPage: snapshotFeedPage(qc),
       };
 
+      // ★ 楽観パッチを「await より先に・同期で」当てる → クリック即反映。
+      //   旧版は冒頭で `await cancelQueries` してから patch していたが、Supabase は
+      //   AbortController 非対応で in-flight の feed-page RPC refetch の cancel 完了待ちが
+      //   数秒に及び、「クリックしてから反映まで時差(実測 ~3s)」の原因になっていた。
+      //   patch を await の前に出せば cancel の所要時間に関係なく UI は即時に反映される。
       // 1) legacy reactions cache (旧 useReactions 経路の fallback 用)
       const legacyEntries = qc.getQueriesData<ReactionsByPost | undefined>({
         queryKey: [KEY_PREFIX],
@@ -154,13 +151,22 @@ export function useReactionToggle() {
         const next: ReactionsByPost = { ...old, [postId]: applyToggle(old[postId] ?? [], meme) };
         qc.setQueryData(exactKey, next);
       }
-
-      // 2) ★ feed-page RPC cache (本番 feed の主要表示元)
-      //    helper 経由で exact-key 書き戻し。
+      // 2) ★ feed-page RPC cache (本番 feed の主要表示元) — helper 経由で exact-key 書き戻し。
       patchFeedPagePost(qc, postId, (p) => ({
         ...p,
         reactions: applyToggle(p.reactions ?? [], meme),
       }));
+
+      // in-flight refetch の結果が後から楽観値を v0 で上書きするのを防ぐため cancel する。
+      // ★ revert: false が要点 — default(true) だと、in-flight query の cancel 時に
+      //   データを fetch 開始前へ巻き戻し、たった今当てた楽観パッチまで打ち消してしまう。
+      //   revert:false なら「in-flight の結果は破棄するが現在の cache (=楽観値) は触らない」。
+      // cancelQueries の cancel 自体は同期発火するので、patch と同一 tick で in-flight は
+      // cancel 済み。patch は既に当たっているため、ここの await は UI 反映を遅らせない。
+      await Promise.all([
+        qc.cancelQueries({ queryKey: [KEY_PREFIX] }, { revert: false }).catch(() => {}),
+        qc.cancelQueries({ queryKey: [FEED_PAGE_KEY] }, { revert: false }).catch(() => {}),
+      ]);
 
       return { snapshot };
     },

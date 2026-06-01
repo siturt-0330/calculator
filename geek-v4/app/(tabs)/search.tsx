@@ -450,7 +450,10 @@ export default function SearchScreen() {
           onChangeText={setRawQuery}
           onSubmit={() => commit()}
           onFocus={() => setInputFocused(true)}
-          onBlur={() => setInputFocused(false)}
+          onBlur={() => {
+            // onPress(履歴タップ) より onBlur が先に発火して dropdown が消えるのを防ぐ
+            setTimeout(() => setInputFocused(false), 150);
+          }}
           onClear={clearInput}
           focusProgress={focusProgress}
           resultCount={resultCount}
