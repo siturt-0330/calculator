@@ -7,7 +7,7 @@
 // - 各カードは小型 (title + サムネ縮小版 + like count)
 // - tap → /post/[id]
 // ============================================================
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -25,7 +25,6 @@ import { R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { fetchPosts } from '../../lib/api/posts';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
-import { sanitizeUrl } from '../../lib/sanitize';
 import type { Post } from '../../types/models';
 
 const COLUMNS = 2;
@@ -166,15 +165,19 @@ function ForYouCard({
   const C = useColors();
 
   const firstMedia = post.media_urls?.[0];
-  const safeUrl = useMemo(
-    () => (firstMedia ? sanitizeUrl(firstMedia) : null),
+  // ★ sanitizeUrl は通さない (HotPostsRow と同理由): data: URL 等を弾いて「詳細では
+  //   出るのにカードだけ画像が出ない」原因になっていた。生 URL を thumbedUrl に通すだけにする。
+  const thumb = useMemo(
+    () => (firstMedia ? thumbedUrl(firstMedia, 240) : null),
     [firstMedia],
   );
-  const thumb = useMemo(
-    () => (safeUrl ? thumbedUrl(safeUrl, 240) : null),
-    [safeUrl],
+  // render 変換エンドポイント (thumbedUrl) が解決できない環境でも画像が出るよう、
+  // 読み込み失敗時は生 URL にフォールバックする。
+  const [thumbFailed, setThumbFailed] = useState(false);
+  const thumbSource = useMemo(
+    () => (firstMedia ? { uri: thumbFailed ? firstMedia : thumb ?? firstMedia } : null),
+    [firstMedia, thumb, thumbFailed],
   );
-  const thumbSource = useMemo(() => (thumb ? { uri: thumb } : null), [thumb]);
 
   const title = useMemo(() => {
     const firstLine = (post.content ?? '').split('\n')[0]?.trim() ?? '';
@@ -183,6 +186,9 @@ function ForYouCard({
 
   // height はおおよそ 4:5 比率 (Reddit For You カード比率) + footer
   const height = Math.round((width * 5) / 4);
+  // 画像はカードの約半分の固定高さに抑え、残りをタイトルに回す (画像が大きすぎ
+  // てタイトルが消える問題への対応)。
+  const thumbH = Math.round(height * 0.5);
 
   return (
     <PressableScale
@@ -203,32 +209,34 @@ function ForYouCard({
       ]}
       accessibilityLabel={`投稿を開く: ${title}`}
     >
-      {/* サムネ (あれば上半分) */}
+      {/* サムネ — 上部に小さめ固定高さ (カードの約半分) で。タイトルを潰さない。 */}
       {thumbSource ? (
-        <View style={{ flex: 1, backgroundColor: C.bg3 }}>
+        <View style={{ height: thumbH, backgroundColor: C.bg3 }}>
           <ExpoImage
             source={thumbSource}
             style={{ width: '100%', height: '100%' }}
             contentFit="cover"
             cachePolicy="memory-disk"
             transition={120}
+            recyclingKey={firstMedia ?? undefined}
+            onError={() => setThumbFailed(true)}
           />
         </View>
       ) : null}
 
-      {/* タイトル */}
+      {/* タイトル — flex:1 で残りを埋め、必ず表示する */}
       <View
         style={{
           paddingHorizontal: SP['2'] + 2,
           paddingTop: SP['2'],
           paddingBottom: 6,
-          flex: thumbSource ? 0 : 1,
+          flex: 1,
           justifyContent: thumbSource ? 'flex-start' : 'center',
         }}
       >
         <Text
           style={[T.smallB, { color: C.text }]}
-          numberOfLines={thumbSource ? 2 : 4}
+          numberOfLines={thumbSource ? 3 : 4}
         >
           {title}
         </Text>
