@@ -41,7 +41,7 @@ export default function FeedbackAdminScreen() {
   const [kind, setKind] = useState<KindFilter>('all');
   const { feedback, isLoading } = useAllFeedback({ status, kind });
   const updateFeedback = useUpdateFeedback();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
 
   const counts = useMemo(() => {
     const counts: Record<string, number> = { all: feedback.length };

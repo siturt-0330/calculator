@@ -155,24 +155,29 @@ export async function uploadPostVideo(
     try {
       const r = await fetch(uri);
       if (!r.ok) throw new Error(`fetch video failed (${r.status})`);
-      body = await r.blob();
+      const raw = await r.blob();
       // サイズ後検証 (fileSize が picker から無かったケースの最後の砦)
-      if ((body as Blob).size > MAX_VIDEO_BYTES) {
+      if (raw.size > MAX_VIDEO_BYTES) {
         throw new Error('動画サイズが 100MB を超えています');
       }
+      // ★ storage-js は Blob の .type を multipart の content-type に採用する
+      //   (options.contentType は Blob 経路では無視される)。blob: URL 由来の Blob は
+      //   .type が空 / application/octet-stream になりがちで、bucket の video MIME
+      //   許可に弾かれて upload が落ちる。検証済み mime で包み直して固定する。
+      body = raw.type === mime ? raw : new Blob([raw], { type: mime });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       throw new Error(`動画読み込みに失敗: ${msg}`);
     }
   } else {
-    // Native: FormData with file: { uri, name, type }
-    // 旧 image.ts と同じ pattern
+    // Native: FormData に { uri, name, type } を append (RN fetch が multipart 送信)。
+    // ★ フィールド名は必ず '' (空文字)。Supabase storage-js は FormData をそのまま内部
+    //   fetch に渡すため、サーバが取り出すのは name='' の最初のファイルエントリ。
+    //   'file' 等にすると取り出せず upload が失敗する (画像 lib/image.ts:430 と同じ規約)。
     const fd = new FormData();
-    // FormData.append の 3rd arg として { uri, name, type } を渡すと RN fetch が
-    // multipart で送信する。Supabase JS SDK はこの FormData を内部 fetch に渡す。
     (fd as unknown as {
       append: (k: string, v: { uri: string; name: string; type: string }) => void;
-    }).append('file', { uri, name: `video.${ext}`, type: mime });
+    }).append('', { uri, name: `video.${ext}`, type: mime });
     body = fd;
   }
 

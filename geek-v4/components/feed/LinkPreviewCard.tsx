@@ -1,5 +1,6 @@
 import { View, Text, Platform } from 'react-native';
 import { safeOpenUrl } from '../../lib/openUrl';
+import { sanitizeUrl } from '../../lib/sanitize';
 import { useQuery } from '@tanstack/react-query';
 import { fetchAndCachePreview } from '../../lib/api/linkPreview';
 import { PressableScale } from '../ui/PressableScale';
@@ -24,6 +25,11 @@ export function LinkPreviewCard({ url }: { url: string }) {
     staleTime: 60 * 60 * 1000,  // 1h
   });
 
+  // OG 画像 URL は http/https + SSRF/private-network ガードを通す (data:/javascript:/
+  // 内部ネットワークを排除)。検証 NG の画像は表示しない。
+  // 注: 外部ホストへの閲覧者 IP 露出の完全遮断には画像プロキシ(サーバ側)が必要 [TODO]。
+  const safeImageUrl = data?.image_url ? sanitizeUrl(data.image_url) : null;
+
   const open = () => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       window.open(url, '_blank', 'noopener,noreferrer');
@@ -33,7 +39,7 @@ export function LinkPreviewCard({ url }: { url: string }) {
   };
 
   // ローディング/失敗時はシンプルな出典バー
-  if (isLoading || !data || (!data.title && !data.image_url)) {
+  if (isLoading || !data || (!data.title && !safeImageUrl)) {
     return (
       <PressableScale onPress={open} haptic="tap" style={{
         marginHorizontal: SP['4'], marginTop: SP['2'],
@@ -64,13 +70,13 @@ export function LinkPreviewCard({ url }: { url: string }) {
       borderColor: C.border,
       overflow: 'hidden',
     }}>
-      {data.image_url ? (
+      {safeImageUrl ? (
         // 画像あり: バナー + タイトルのキャプションバーを重ねる。
         // (ProgressiveImage は width/height を取り内部 contentFit=cover。
         //  外側 PressableScale の overflow:hidden + R.lg で角が丸まる)
         <View style={{ position: 'relative' }}>
           <ProgressiveImage
-            uri={data.image_url}
+            uri={safeImageUrl}
             width={'100%'}
             height={190}
             radius={0}

@@ -25,7 +25,7 @@ export default function BlockedTagsSettingsScreen() {
   const insets = useSafeAreaInsets();
   const { likedTags, blockedTags, addBlocked, removeBlocked } = useTagFilterStore();
   const { nodes, rootIds, hydrate: hydrateGraph } = useTagGraphStore();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const [input, setInput] = useState('');
   const [resetOpen, setResetOpen] = useState(false);
 

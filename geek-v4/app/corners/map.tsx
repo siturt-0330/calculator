@@ -185,7 +185,7 @@ if (locations.length > 1) {
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
 
   const [mode, setMode] = useState<Mode>('all');
   const [center, setCenter] = useState<{ lat: number; lng: number; label: string } | null>(null);

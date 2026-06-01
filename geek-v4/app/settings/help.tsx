@@ -1,8 +1,7 @@
 import { useState } from 'react';
-import { View, Text, ScrollView, Platform } from 'react-native';
+import { View, Text, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Constants from 'expo-constants';
-import { safeOpenUrl } from '../../lib/openUrl';
+import { useRouter } from 'expo-router';
 import { TopBar } from '../../components/nav/TopBar';
 import { BackButton } from '../../components/nav/BackButton';
 import { PressableScale } from '../../components/ui/PressableScale';
@@ -10,87 +9,129 @@ import { Icon } from '../../constants/icons';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 
+// よくある質問。q は 【カテゴリ】見出し付き。設定刷新ワークフロー(2026-06)で
+// 現行機能に合わせて全面刷新。連絡導線は実在するアプリ内フォーム /support に統一
+// (旧実装の mailto:support@geek.app 等の架空ドメインは全廃)。
 const FAQ: { q: string; a: string }[] = [
   {
-    q: '投稿は誰に見られますか？',
-    a: '「誰でも閲覧可能」を選んだ場合はすべてのユーザーに表示されます。「自分だけ」を選ぶと自分だけが見られる下書きとして保存されます。',
+    q: "【アカウント】ログインできません / パスワードを忘れました",
+    a: "ログイン画面の「パスワードを忘れた方」からメールアドレスを入力すると、再設定用のメールが届きます。メールが見当たらない場合は、迷惑メールフォルダもご確認ください。\n\nそれでもログインできない場合は、このページのお問い合わせフォーム(カテゴリ「その他」)からご連絡ください。",
   },
   {
-    q: 'ニックネームやアイコンは他人に見える？',
-    a: '見えません。プロフィールに設定したニックネーム・アイコンは自分のマイページでのみ表示されます。他のユーザーからは常に「匿」マークの匿名表示です。',
+    q: "【アカウント】メールアドレスは何に使われますか？",
+    a: "メールアドレスは、ログイン認証と、パスワード再設定・重要なお知らせの連絡にのみ使用します。他のユーザーに公開されることはありません。\n\n詳しい取り扱いはプライバシーポリシーをご覧ください。",
   },
   {
-    q: '電話番号は何に使われますか？',
-    a: '不正利用防止のためにのみ使用します。他のユーザーには絶対に公開されません。',
+    q: "【匿名性】投稿すると身元はバレますか？",
+    a: "いいえ。Geek ではすべての投稿・コメント・リアクションが匿名で表示されます。\n\nあなたが設定したニックネームとアイコンは、自分のマイページなど本人だけが確認できる場所にのみ表示され、他のユーザーからは「匿」と表示されます。メールアドレスなどの登録情報が他のユーザーに公開されることもありません。\n\nなお、誰が書いたか分からない形でも、本文に個人を特定できる内容(本名・連絡先・住所・顔写真など)を自分で書けば特定につながります。投稿内容にはご注意ください。",
   },
   {
-    q: '気になるって何ですか？',
-    a: '投稿の信頼度に疑問がある時に押すボタンです。多くの人が押すと「⚠ 注意」が表示されます。デマや不確かな情報の拡散を防ぐ仕組みです。',
+    q: "【投稿】投稿は誰に見られますか？",
+    a: "投稿時に公開範囲を選べます。\n\n・「誰でも閲覧可能」… すべてのユーザーのフィードや検索に表示されます(匿名のまま)。\n・「自分だけ」… 自分だけが見られる下書きとして保存され、他のユーザーには表示されません。\n\nどちらの場合も、ニックネームやアイコンが他のユーザーに見えることはありません。",
   },
   {
-    q: '事実・意見・ネタ・WIPって？',
-    a: '投稿時に選ぶカテゴリです。「事実」を選ぶには出典URLが必要で、誤情報があれば信頼が大きく下がります。「WIP」は未完成作品用で、温かい目で見てもらえます。',
+    q: "【投稿】写真や動画は添付できますか？",
+    a: "はい。投稿に画像・動画を添付できます。\n\nプライバシー保護のため、アップロードされた画像は送信前に位置情報などの Exif(撮影メタデータ)を自動的に取り除いてから保存します。\n\n初回の写真・カメラ利用時には、端末からアクセス許可を求められます。許可は端末の設定からいつでも変更できます。",
   },
   {
-    q: '好きなタグとブロックタグの違いは？',
-    a: '好きなタグの投稿は優先表示されます。ブロックタグの投稿はフィードから完全に除外されます。同じタグを両方に登録することはできません。',
+    q: "【コミュニティ】タグとコミュニティ(掲示板)の違いは？",
+    a: "タグは投稿につける趣味のラベルです。タグをタップすると、そのタグに関する投稿が集まるコミュニティページに移動できます。コミュニティに参加すると、新着などの通知を受け取れます。\n\n掲示板(BBS)はスレッド形式で、ひとつの話題についてじっくり話したり実況したりするのに向いています。タイムラインに流れる通常の投稿と使い分けてください。",
   },
   {
-    q: 'タグの「コミュニティ」って？',
-    a: 'タグをタップすると、そのタグの投稿だけが見られるコミュニティページに飛びます。参加ボタンを押すとメンバーになり、新着通知が届きます。',
+    q: "【リアクション】テキストスタンプとは何ですか？",
+    a: "投稿には、絵文字や短いテキストの「スタンプ」でリアクションできます。いいねより気軽に気持ちを伝えられる機能です。\n\nよく使うスタンプは「マイスタンプ」に保存でき、自分だけのオリジナルのテキストスタンプを作ることもできます。リアクションも匿名で、誰が押したかは他のユーザーには分かりません。",
   },
   {
-    q: '掲示板と投稿の違いは？',
-    a: '投稿はタイムライン形式、掲示板はスレッド形式で議論用です。長く続く話題や実況に向いています。',
+    q: "【通報・ブロック】不適切な投稿を見つけたら？",
+    a: "投稿のメニューから「通報」を選び、理由を選んで送信してください。通報内容は運営が確認します。通報したことが相手や他のユーザーに知られることはありません。\n\n特定の相手やタグを今後見たくない場合は、ブロック機能をご利用ください。\n・ユーザーのブロック … 設定 → プライバシー →「ブロックしたユーザー」で管理できます。\n・タグのブロック … そのタグの投稿をフィードから除外します。設定 → プライバシー →「ブロックしたタグ」で管理できます。\n\n緊急性の高い内容や、通報だけでは伝えきれない事情がある場合は、このページのお問い合わせフォームからもご連絡いただけます。",
   },
   {
-    q: 'カレンダーの「10%同意」って？',
-    a: 'タグの参加者の10%が「同意」を押すと、提案された予定が全員のカレンダーに採用される仕組みです。タグ規模に応じて承認のしやすさが変わります。',
+    q: "【通報・ブロック】通報したあとはどうなりますか？",
+    a: "いただいた通報は運営が内容を確認し、ガイドラインに照らして必要な対応を判断します。\n\n対応の有無や結果は、件数や内容によって個別にお知らせできない場合があります。すべての通報に目を通すよう努めていますが、運営は個人のため、対応までにお時間をいただくことがあります。",
   },
   {
-    q: '大富豪のローカルルールは？',
-    a: '革命・8切り・5スキップ・7渡し・10捨て・11バック・12ボンバー・階段・スペ3返しなど、部屋ごとに設定できます。',
+    q: "【通報・ブロック】アカウントが制限・警告されました。理由を知りたいです",
+    a: "設定 →「アカウント状態」から、現在の状態(通常 / 注意 / 制限 / 警告 / 停止)と、受けている制限・復帰の目安を確認できます。\n\nアカウント状態は、自分の投稿に対する「気になる」評価の比率や運営の判断にもとづいて自動で算出されます。投稿数が少ないあいだ(おおむね5件未満)は対象外で、通常状態が保たれます。\n\n制限に納得できない場合は、「アカウント状態」画面の「異議申し立て」、またはお問い合わせフォームのカテゴリ「BAN 異議申立」からご連絡ください。運営が状況を再確認します。",
   },
   {
-    q: 'アカウントを削除したい',
-    a: '設定 → アカウントから削除できます。削除すると 30 日以内に個人情報がすべて消去されます。削除前に「データをエクスポート」で自分の投稿等を JSON 保存することも可能です。',
+    q: "【信頼スコア】信頼スコアとは何ですか？",
+    a: "信頼スコアは、Geek の安全性を保つために、あなたの活動傾向を 0〜100 の数値で表す内部的な指標です。\n\n・投稿・いいね・コメント・継続的な利用で加算されます。\n・他のユーザーからの報告(「気になる」評価など)を受けると減算されます。\n\nスコアは自分以外には公開されません。スパム対策として、一部の機能の利用条件に使われることがあります。スコアは設定 →「信頼スコア」で内訳とあわせて確認でき、活動に応じて数分以内に反映されます。",
   },
   {
-    q: 'パスワードを忘れた',
-    a: 'ログイン画面の「パスワードを忘れた方」からリセットメールを送信できます。',
+    q: "【通知】通知の種類を変えたい / 通知が多すぎます",
+    a: "設定 →「通知設定」から、通知の種類(いいね・コメント・返信・メンション・フォロー・友達・公式/イベント・モデレーション/システムなど)ごとに、端末へのプッシュ通知とアプリ内通知を別々にオン・オフできます。\n\n「全 Push OFF」などの一括操作や、指定した時間帯だけ通知をミュートする「おやすみ時間」も設定できます。\n\n端末側で通知自体をオフにしている場合は、お使いの OS の設定からも許可状況をご確認ください。",
+  },
+  {
+    q: "【おすすめ・翻訳】フィードの並びや自動処理を調整したい",
+    a: "Geek には、表示を便利にするためのいくつかの自動機能があります。\n\n・タグの自動グループ化 … 設定 →「おすすめ・自動化」でオン・オフを切り替えられます。オフ(初期設定)の場合は、関連タグを自分で確認して手動でまとめられます。\n・投稿の自動翻訳 … 設定 →「言語」で表示言語を選ぶと、他言語の投稿を選んだ言語に翻訳して表示します。「投稿を自動翻訳」のトグルから個別にオン・オフできます。日本語に戻すと自動翻訳もオフになります。\n\nこれらの機能は、いつでも設定から見直せます。",
+  },
+  {
+    q: "【広告・プラン】広告について教えてください / 広告を消せますか？",
+    a: "Geek には運営による広告が表示されることがあります。広告は、あなたが興味を持っているタグに合わせて選ばれますが、広告主に個人を特定できる情報が渡ることはありません。\n\nGeek は外部の広告ネットワーク(第三者の広告 SDK)を利用していません。\n\n有料の Pro プランにすると、広告を非表示にできます(プランについては次の項目をご覧ください)。",
+  },
+  {
+    q: "【広告・プラン】プランを変更・解約したい / 料金はかかりますか？",
+    a: "設定 →「プラン」から、無料の Free プランと、月額 ¥480 の Pro プラン(広告非表示などの特典付き)を切り替えられます。\n\n現在、決済システムは準備中です。そのため、プランの表示は切り替わりますが、実際の請求は発生しません。正式な課金の開始時期や、解約・返金の取り扱いについては、提供開始時に改めてご案内します(要確認: 課金開始時には、特定商取引法にもとづく表記の掲載が必要です)。\n\nご不明な点はお問い合わせフォームからご連絡ください。",
+  },
+  {
+    q: "【プライバシー・データ】自分のデータを取り出したい(開示・エクスポート)",
+    a: "設定 → プライバシー →「データとアカウント」を開き、「JSON でダウンロード」を選ぶと、あなたの投稿・コメント・いいね・タグ・通知などの活動データを JSON ファイルとして書き出せます。\n\nこれは、個人情報の開示請求やデータポータビリティ権の行使にもご利用いただけます。",
+  },
+  {
+    q: "【プライバシー・データ】データはどこに保存されますか？",
+    a: "Geek のデータは、クラウド上のサーバー(Supabase)に保存されます。サーバーは国外のリージョンに設置されている場合があります(要確認: 利用リージョンの詳細)。\n\n通信はすべて暗号化され、行レベルセキュリティ(RLS)により、他のユーザーのデータにアクセスできない設計になっています。詳しくはプライバシーポリシーをご覧ください。",
+  },
+  {
+    q: "【プライバシー・データ】アカウントを削除したい / 退会したい",
+    a: "設定 → プライバシー →「データとアカウント」、または設定下部の「アカウントを削除」から手続きできます。安全のため、削除の前にパスワードの再入力が必要です。\n\n削除すると、利用ログを含むあなたの個人情報は、原則として30日以内に消去されます。サービスの継続性のため、投稿コンテンツは匿名化された形で残る場合があります。一度削除すると元に戻せません。必要なデータは、削除前に「JSON でダウンロード」で保存しておくことをおすすめします。\n\n(要確認: 削除の即時性と投稿の残存範囲について、アプリ内の表記とプライバシーポリシーの記載をそろえる必要があります。)",
+  },
+  {
+    q: "【プライバシー・データ】年齢の制限はありますか？",
+    a: "13歳未満の方は Geek をご利用いただけません。18歳未満の方は、保護者の同意のうえでご利用ください。詳しくはプライバシーポリシーをご確認ください。",
   },
 ];
 
-// サポート問い合わせ時にユーザー操作が不要で済むよう、診断情報を mailto: の
-// body に pre-fill する。PII (email / nickname) は一切含めない。
-function buildDiagnosticsMailto(): string {
-  const version = Constants.expoConfig?.version ?? 'unknown';
-  const ios = Constants.expoConfig?.ios?.buildNumber ?? '-';
-  const android = Constants.expoConfig?.android?.versionCode ?? '-';
-  const lines = [
-    'お問い合わせありがとうございます。お困りの内容をできるだけ具体的にご記入ください。',
-    '',
-    '----- 以下は自動入力 (削除しないでください) -----',
-    `App version: ${version}`,
-    `iOS build: ${ios} / Android versionCode: ${android}`,
-    `Platform: ${Platform.OS} (${Platform.Version})`,
-    `Locale: ${typeof navigator !== 'undefined' ? navigator.language : '-'}`,
-  ];
-  const subject = encodeURIComponent(`[GEEK Support] ${version}`);
-  const body = encodeURIComponent(lines.join('\n'));
-  return `mailto:support@geek.app?subject=${subject}&body=${body}`;
-}
+// 著作権 / 権利侵害の申立ても専用カテゴリは設けず、規約 第16条と同じく
+// この問い合わせフォーム(該当しなければ「その他」)で受け付ける方針。専用カテゴリが
+// 必要になれば lib/api/support.ts の SupportThreadCategory に追加するか別途相談する。
+const CONTACT_TEXT = "Geek をご利用いただきありがとうございます。\n\n下のよくある質問で解決しない場合は、アプリ内のお問い合わせフォームからご連絡ください。\n\n■ 連絡方法\n設定 →「運営にお問い合わせ」(または このページ内のリンク)から、新規スレッドを作成できます。\n\n■ カテゴリは6種類から選べます\n・⚖️ BAN 異議申立 … 凍結や警告への異議\n・📖 ルール質問 … 禁止事項やガイドラインの確認\n・🏛️ コミュ運営 … 公式コミュニティ運営の質問\n・🐛 バグ報告 … アプリの不具合\n・✨ 機能要望 … 改善や追加のリクエスト\n・💬 その他 … 上記にあてはまらないご連絡\n\nお問い合わせ内容はアプリ内に履歴として残り、運営から返信があるとアプリの通知でお知らせします。不具合のご報告では、起きた状況・操作手順・スクリーンショット・該当の URL を添えていただけると調査がスムーズです。\n\nGeek は個人で開発・運営しているため、ご返信までお時間をいただく場合があります。あらかじめご了承ください。";
+// TODO(運営): 実運用のサポート窓口メールが確定したら [運営者メールアドレス] を差し替える。
+// 未確定のうちは架空アドレスをハードコードせず placeholder のままにする(規約 第16/18条も同様)。
+const FOOTER_TEXT = "お問い合わせは、原則としてアプリ内の「設定 →『運営にお問い合わせ』」フォームで受け付けています。\n\nメールでのご連絡が必要な場合は、[運営者メールアドレス] までお願いします。";
 
 export default function HelpScreen() {
   const insets = useSafeAreaInsets();
-  // 旧: index を持っていたが、FAQ の追加/削除/順序入替で開閉位置がズレる。
-  // 質問文 (q) は unique なので、それを開閉キーにする。
+  const router = useRouter();
+  // 質問文 (q) は unique なので開閉キーにする (順序入替で位置がズレない)。
   const [openQ, setOpenQ] = useState<string | null>(null);
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <TopBar title="ヘルプ・お問い合わせ" left={<BackButton />} />
       <ScrollView contentContainerStyle={{ padding: SP['4'], paddingBottom: insets.bottom + SP['10'], gap: SP['3'] }}>
-        <Text style={[T.h3, { color: C.text }]}>よくある質問</Text>
+        {/* お問い合わせ導線 — 実在するアプリ内フォーム (/support) へ */}
+        <PressableScale
+          haptic="select"
+          onPress={() => router.push('/support' as never)}
+          accessibilityRole="button"
+          accessibilityLabel="お問い合わせフォームを開く"
+          style={{
+            padding: SP['4'],
+            backgroundColor: C.accentBg,
+            borderRadius: R.lg,
+            borderWidth: 1,
+            borderColor: C.accentSoft,
+            gap: SP['2'],
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+            <Icon.help size={18} color={C.accentLight} strokeWidth={2.2} />
+            <Text style={[T.h4, { color: C.accentLight, flex: 1 }]}>お問い合わせ</Text>
+            <Icon.chevronR size={18} color={C.accentLight} strokeWidth={2.2} />
+          </View>
+          <Text style={[T.small, { color: C.text2 }]}>{CONTACT_TEXT}</Text>
+        </PressableScale>
+
+        <Text style={[T.h3, { color: C.text, marginTop: SP['2'] }]}>よくある質問</Text>
         {FAQ.map((item) => {
           const isOpen = openQ === item.q;
           return (
@@ -98,6 +139,8 @@ export default function HelpScreen() {
               key={item.q}
               onPress={() => setOpenQ(isOpen ? null : item.q)}
               haptic="tap"
+              accessibilityRole="button"
+              accessibilityState={{ expanded: isOpen }}
               style={{
                 padding: SP['4'],
                 backgroundColor: C.bg2,
@@ -108,58 +151,21 @@ export default function HelpScreen() {
               }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-                <Text style={[T.bodyMd, { color: C.text, flex: 1 }]}>Q. {item.q}</Text>
-                {isOpen
-                  ? <Icon.chevronU size={18} color={C.text2} strokeWidth={2.2} />
-                  : <Icon.chevronD size={18} color={C.text3} strokeWidth={2.2} />}
+                <Text style={[T.bodyMd, { color: C.text, flex: 1 }]}>{item.q}</Text>
+                {isOpen ? (
+                  <Icon.chevronU size={18} color={C.text2} strokeWidth={2.2} />
+                ) : (
+                  <Icon.chevronD size={18} color={C.text3} strokeWidth={2.2} />
+                )}
               </View>
-              {isOpen && (
-                <Text style={[T.body, { color: C.text2, marginTop: SP['1'] }]}>A. {item.a}</Text>
-              )}
+              {isOpen && <Text style={[T.body, { color: C.text2, marginTop: SP['1'] }]}>{item.a}</Text>}
             </PressableScale>
           );
         })}
 
-        <View style={{
-          marginTop: SP['6'], padding: SP['4'],
-          backgroundColor: C.accentBg, borderRadius: R.lg,
-          borderWidth: 1, borderColor: C.accentSoft, gap: SP['3'],
-        }}>
-          <Text style={[T.h4, { color: C.accentLight }]}>📧 お問い合わせ</Text>
-          <Text style={[T.small, { color: C.text2 }]}>
-            上記で解決しない場合は、以下からお問い合わせください。返信まで通常 1〜3 営業日かかります。
-          </Text>
-
-          {/* 診断情報付きメール起動 — 環境情報が自動で件名 / 本文に入るので
-              ユーザーは操作内容を書くだけで済む。PII は一切含めない。 */}
-          <PressableScale
-            haptic="select"
-            accessibilityLabel="診断情報付きでサポートにメールを送る"
-            hitSlop={8}
-            onPress={() => {
-              void safeOpenUrl(buildDiagnosticsMailto(), {
-                errorMessage: 'メールアプリを開けませんでした。support@geek.app へ直接ご連絡ください。',
-              });
-            }}
-            style={{
-              paddingVertical: SP['3'], paddingHorizontal: SP['4'],
-              backgroundColor: C.accent, borderRadius: R.md,
-              alignItems: 'center', justifyContent: 'center',
-            }}
-          >
-            <Text style={[T.bodyMd, { color: C.bg, fontWeight: '700' }]}>
-              📩 診断情報付きでメールを送る
-            </Text>
-          </PressableScale>
-
-          <Text style={[T.small, { color: C.text3 }]}>
-            または直接: <Text style={{ color: C.accent }}>support@geek.app</Text>
-          </Text>
-          <Text style={[T.caption, { color: C.text3 }]}>
-            セキュリティ脆弱性のご報告は security@geek.app、
-            著作権侵害申立は copyright@geek.app までお願いします。
-          </Text>
-        </View>
+        {FOOTER_TEXT ? (
+          <Text style={[T.caption, { color: C.text3, marginTop: SP['4'], lineHeight: 18 }]}>{FOOTER_TEXT}</Text>
+        ) : null}
       </ScrollView>
     </View>
   );

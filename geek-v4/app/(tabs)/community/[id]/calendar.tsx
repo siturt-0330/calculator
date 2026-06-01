@@ -53,7 +53,7 @@ export default function CalendarScreen() {
   const params = useLocalSearchParams();
   const id = typeof params.id === 'string' ? params.id : '';
   const userId = useAuthStore((s) => s.user?.id);
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const qc = useQueryClient();
 
   const [modalOpen, setModalOpen] = useState(false);

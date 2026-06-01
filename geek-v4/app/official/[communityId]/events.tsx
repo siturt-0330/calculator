@@ -47,7 +47,7 @@ export default function OfficialEventsScreen() {
   const params = useLocalSearchParams();
   const id = typeof params.communityId === 'string' ? params.communityId : '';
   const userId = useAuthStore((s) => s.user?.id);
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const qc = useQueryClient();
 
   const [modalOpen, setModalOpen] = useState(false);

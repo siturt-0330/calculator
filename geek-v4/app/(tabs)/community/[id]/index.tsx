@@ -125,7 +125,7 @@ export default function CommunityDetailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const id = typeof params.id === 'string' ? params.id : '';
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const qc = useQueryClient();
   // current user id — AdminBanner の owner fallback (created_by === user.id) で使う
   const currentUserId = useAuthStore((s) => s.user?.id) ?? null;
@@ -671,7 +671,7 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
   const [sort, setSort] = useState<FeedSort>('new');
   const onSortChange = useCallback((s: FeedSort) => setSort(s), []);
   const router = useRouter();
-  const { show: showToast } = useToastStore();
+  const showToast = useToastStore((s) => s.show);
   const { data, isLoading, isError } = useQuery({
     queryKey: ['community', communityId, 'feed', sort],
     queryFn: async () => {

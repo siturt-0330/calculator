@@ -48,8 +48,7 @@ export function ReactionListSheet({
         >
           {/* ヘッダー */}
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={{ fontSize: 18 }}>🪶</Text>
-            <Text style={[T.h4, { color: C.text, marginLeft: SP['1'], flex: 1 }]} numberOfLines={1}>
+            <Text style={[T.h4, { color: C.text, flex: 1 }]} numberOfLines={1}>
               リアクション {total}
             </Text>
             <PressableScale

@@ -166,11 +166,11 @@ export function computeTrustBreakdown(profile: ProfileLike): TrustBreakdown {
     },
     {
       key: 'concerns',
-      label: '通報',
+      label: '気になる',
       value: concernCount,
       contribution: Math.round(concernsPts * 10) / 10,
       cap: CAPS.concerns,
-      hint: '報告を受けると -3pt／件（最大 -30pt）',
+      hint: '他のユーザーから「気になる」を受けると -3pt／件（最大 -30pt）',
     },
   ];
 

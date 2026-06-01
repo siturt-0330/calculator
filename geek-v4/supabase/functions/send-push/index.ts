@@ -67,6 +67,7 @@ type PushSubRow = {
   endpoint: string;
   p256dh: string;
   auth_key: string;
+  platform: string;  // 'web' | 'ios' | 'android'
 };
 
 // VAPID 設定 — 起動時に一度だけ
@@ -127,6 +128,29 @@ function titleForNotification(n: NotificationRow): string {
     case 'follow':     return '👤 新しいフォロワー';
     default:           return '🔔 Geek';
   }
+}
+
+// ============================================================
+// 通知設定 (push) 判定 — lib/utils/notificationFilter.ts と同ロジックを移植
+// (Edge Function は外部 import をバンドルしないため同等ロジックをここに置く)
+// ============================================================
+const KNOWN_CATEGORIES = [
+  'like', 'comment', 'reply', 'mention', 'follow',
+  'friend_request', 'friend_accept', 'official_post',
+  'event', 'mod_action', 'system',
+];
+function notificationCategoryFor(type: string): string {
+  return KNOWN_CATEGORIES.includes(type) ? type : 'system';
+}
+// 該当カテゴリの pref が無ければ fail-open=true (設定漏れで重要通知を握りつぶさない)
+function shouldSendPushForType(
+  type: string,
+  prefs: { category: string; push: boolean }[],
+): boolean {
+  const category = notificationCategoryFor(type);
+  const pref = prefs.find((p) => p.category === category);
+  if (!pref) return true;
+  return pref.push;
 }
 
 serve(async (req) => {
@@ -198,9 +222,21 @@ serve(async (req) => {
     auth: { persistSession: false },
   });
 
+  // 通知設定 (push) を確認 — off のカテゴリは一切配信しない (#6)。
+  // prefs に該当カテゴリが無ければ fail-open=true (設定漏れで重要通知を握りつぶさない)。
+  const { data: prefRows } = await admin
+    .from('notification_preferences')
+    .select('category, push')
+    .eq('user_id', notif.user_id);
+  if (!shouldSendPushForType(notif.type, (prefRows ?? []) as { category: string; push: boolean }[])) {
+    return new Response(JSON.stringify({ delivered: 0, skipped: 'push-pref-off' }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   const { data: subs, error: subsError } = await admin
     .from('push_subscriptions')
-    .select('id, endpoint, p256dh, auth_key')
+    .select('id, endpoint, p256dh, auth_key, platform')
     .eq('user_id', notif.user_id);
 
   if (subsError) {
@@ -217,27 +253,32 @@ serve(async (req) => {
     });
   }
 
+  const title = titleForNotification(notif);
+  const url = urlForNotification(notif);
   const pushPayload = JSON.stringify({
-    title: titleForNotification(notif),
+    title,
     body: notif.message,
-    url: urlForNotification(notif),
+    url,
     tag: `geek-${notif.type}-${notif.id}`,
   });
 
-  // 並列送信。失敗 endpoint (410 Gone) は DB から消す。
-  const results = await Promise.allSettled(
-    subList.map(async (s) => {
+  // platform で分岐 (#7): web は Web Push、ios/android は Expo Push API。
+  // 旧実装は全 sub を webpush に渡していたため、native の Expo token は必ず失敗し、
+  // しかも失効削除条件 (404/410) にも当たらず dead row が残り続けていた。
+  const webSubs = subList.filter((s) => s.platform === 'web');
+  const nativeSubs = subList.filter((s) => s.platform === 'ios' || s.platform === 'android');
+
+  // ----- Web Push -----
+  const webResults = await Promise.allSettled(
+    webSubs.map(async (s) => {
       try {
         await webpush.sendNotification(
-          {
-            endpoint: s.endpoint,
-            keys: { p256dh: s.p256dh, auth: s.auth_key },
-          },
+          { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth_key } },
           pushPayload,
         );
-        return { id: s.id, ok: true };
+        return true;
       } catch (err: unknown) {
-        // 失効した endpoint は削除
+        // 失効した endpoint (404/410) は DB から消す
         const statusCode =
           typeof err === 'object' && err !== null && 'statusCode' in err
             ? (err as { statusCode: number }).statusCode
@@ -245,17 +286,56 @@ serve(async (req) => {
         if (statusCode === 404 || statusCode === 410) {
           await admin.from('push_subscriptions').delete().eq('id', s.id);
         }
-        return { id: s.id, ok: false, statusCode };
+        return false;
       }
     }),
   );
+  const webDelivered = webResults.filter((r) => r.status === 'fulfilled' && r.value).length;
 
-  const delivered = results.filter(
-    (r) => r.status === 'fulfilled' && r.value.ok,
-  ).length;
+  // ----- Native (Expo Push API) -----
+  let nativeDelivered = 0;
+  if (nativeSubs.length > 0) {
+    try {
+      const messages = nativeSubs.map((s) => ({
+        to: s.endpoint,
+        title,
+        body: notif.message,
+        data: { url },
+        sound: 'default',
+      }));
+      const resp = await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(messages),
+      });
+      if (resp.ok) {
+        const json = await resp.json();
+        const tickets = Array.isArray(json?.data) ? json.data : [];
+        for (let i = 0; i < tickets.length; i++) {
+          const t = tickets[i];
+          if (t?.status === 'ok') {
+            nativeDelivered++;
+          } else if (
+            t?.status === 'error' &&
+            t?.details?.error === 'DeviceNotRegistered' &&
+            nativeSubs[i]
+          ) {
+            // 失効した Expo token は削除
+            await admin.from('push_subscriptions').delete().eq('id', nativeSubs[i].id);
+          }
+        }
+      } else {
+        console.error('[send-push] expo push http error:', resp.status);
+      }
+    } catch (e) {
+      console.error('[send-push] expo push failed:', e);
+    }
+  }
+
+  const delivered = webDelivered + nativeDelivered;
 
   return new Response(
-    JSON.stringify({ delivered, total: subList.length }),
+    JSON.stringify({ delivered, total: subList.length, web: webDelivered, native: nativeDelivered }),
     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
   );
 });

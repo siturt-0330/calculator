@@ -54,7 +54,7 @@ export default function TagGraphScreen() {
 
   const { likedTags, addLiked } = useTagFilterStore();
   const { cooccur, tagPopularity, ensureFresh: ensureCooccur, loading: cooccurLoading, hydrate: hydrateCooccur } = useTagCooccurStore();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const likedSet = useMemo(() => new Set(likedTags), [likedTags]);
 
   // タグ自動グルーピング候補 (共起 + 同義 で抽出)

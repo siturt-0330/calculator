@@ -20,7 +20,7 @@ export default function NotificationsOnboarding() {
   // selector化: 全 settings store の購読をやめ、必要な action (update) のみ
   // subscribe する。他フィールド更新による無用な re-render を防止。
   const updateSetting = useSettingsStore((s) => s.update);
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const [saving, setSaving] = useState(false);
 
   const finish = async (allow: boolean) => {

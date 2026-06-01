@@ -18,6 +18,7 @@ import { Icon } from '../../constants/icons';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { formatRelative } from '../../lib/utils/date';
+import { useAuthStore } from '../../stores/authStore';
 
 type SavedPost = {
   id: string;
@@ -53,9 +54,12 @@ async function fetchSavedPostsList(): Promise<SavedPost[]> {
 
 export function SavedPostsList({ onBrowseFeed }: { onBrowseFeed?: () => void }) {
   const router = useRouter();
+  // 別ユーザーへ永続キャッシュ経由で前ユーザーの保存リストが漏れるのを防ぐ。
+  const userId = useAuthStore((s) => s.user?.id);
   const { data: items = [], isLoading } = useQuery({
-    queryKey: ['saved-posts'],
+    queryKey: ['saved-posts', userId],
     queryFn: fetchSavedPostsList,
+    enabled: !!userId,
     staleTime: 30_000,
   });
 

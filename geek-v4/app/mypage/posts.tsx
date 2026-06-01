@@ -14,6 +14,7 @@ import { Icon } from '../../constants/icons';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { formatRelative } from '../../lib/utils/date';
+import { invalidateFeedPage } from '../../lib/cacheUpdates/feedPagePatcher';
 import { useState } from 'react';
 import { ObsidianSaveButton } from '../../components/ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
@@ -42,7 +43,7 @@ export default function MyPosts() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const qc = useQueryClient();
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
@@ -59,6 +60,9 @@ export default function MyPosts() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['my-posts'] });
+      // マイページ本体タブ (['user-posts']) とフィードキャッシュも更新しないと削除済み投稿が残る。
+      qc.invalidateQueries({ queryKey: ['user-posts'] });
+      invalidateFeedPage(qc);
       show('投稿を削除しました', 'success');
     },
     onError: () => show('削除に失敗しました', 'error'),

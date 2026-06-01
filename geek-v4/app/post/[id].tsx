@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, ScrollView, Pressable, Image as RNImage,
+  View, Text, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, ScrollView, Pressable, StyleSheet, Image as RNImage,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -244,7 +244,7 @@ export default function PostDetailScreen() {
   // 画像ライトボックス (全画面表示) の対象 URL
   const [lightboxUri, setLightboxUri] = useState<string | null>(null);
 
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
 
   // Smart skeleton timing — Spinner only after 200ms of continuous loading.
   // <200ms loads (cache hits via TanStack staleTime) skip flash entirely.
@@ -443,7 +443,11 @@ export default function PostDetailScreen() {
   // renderReply は CommentThreadItem に切り出した (migration 0059)。
   // ツリー化されたコメント (commentTree) を再帰的に描画する。
 
-  const ListHeader = () => (
+  // render 内で定義した関数を `<ListHeader/>` で要素化すると、親が打鍵ごとに
+  // re-render する度に React が「新しいコンポーネント型」とみなしヘッダー全体を
+  // unmount/remount する (画像再読込・state喪失)。`{renderListHeader()}` と関数呼び出しで
+  // インライン展開し、コンポーネント境界を作らない (#12)。
+  const renderListHeader = () => (
     <View style={{ alignItems: 'center' }}>
       {/* ヘッダー */}
       <View style={{ width: '100%', maxWidth: MAX_W }}>
@@ -460,14 +464,14 @@ export default function PostDetailScreen() {
           <Text style={[T.smallM, { color: C.text3, marginLeft: SP['2'] }]}>投稿</Text>
         </View>
         {/* 投稿本体カード */}
-        <View style={{ paddingHorizontal: SP['4'], paddingBottom: SP['3'] }}>
-          <View style={{
-            padding: SP['4'],
-            backgroundColor: C.bg2,
-            borderRadius: R.lg,
-            borderWidth: 1, borderColor: C.border,
-            gap: SP['3'],
-          }}>
+        <View style={{
+          paddingHorizontal: SP['4'],
+          paddingTop: SP['2'],
+          paddingBottom: SP['4'],
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: C.divider,
+        }}>
+          <View style={{ gap: SP['3'] }}>
             {/* 投稿先コミュニティ — カード上部に表示 (📍 アイコンは廃止) */}
             {postCommunities.length > 0 && (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
@@ -684,9 +688,12 @@ export default function PostDetailScreen() {
         {/* 似たような投稿はコメントの下 (一番下) に移動した — ScrollView 末尾を参照 */}
 
         {replies.length > 0 && (
-          <Text style={[T.smallM, { color: C.text2, paddingHorizontal: SP['4'], paddingTop: SP['2'], paddingBottom: SP['1'], fontWeight: '700' }]}>
-            💬 {replies.length}件のコメント
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: SP['4'], paddingTop: SP['3'], paddingBottom: SP['1'] }}>
+            <Icon.comment size={15} color={C.text2} strokeWidth={2.2} />
+            <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>
+              {replies.length}件のコメント
+            </Text>
+          </View>
         )}
       </View>
     </View>
@@ -716,7 +723,7 @@ export default function PostDetailScreen() {
           <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={C.accent} />
         }
       >
-        <ListHeader />
+        {renderListHeader()}
         {repliesLoading ? (
           showRepliesSpinner ? (
             <View style={{ padding: SP['6'], alignItems: 'center' }}>
@@ -1023,6 +1030,7 @@ export default function PostDetailScreen() {
         onClose={() => setMemePickerOpen(false)}
         onPick={(meme) => toggleReact(id, meme)}
         picked={myMemes}
+        reactions={reactions}
       />
 
       {/* 「…」から開く: 押された全スタンプの一覧 (閲覧 + タップでトグル) */}

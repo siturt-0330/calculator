@@ -26,9 +26,15 @@ export async function addConcern(
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) throw new Error('Not authenticated');
+  // 冪等化: cache cold で既マーク投稿に再度押しても unique(user_id, post_id) 違反で
+  // 失敗トースト→誤ロールバックにならないよう upsert + ignoreDuplicates にする
+  // (useLike / useSave と同じ前提に揃える)。
   const { error } = await supabase
     .from('concerns')
-    .insert({ user_id: userId, post_id: postId, reason, is_private: isPrivate });
+    .upsert(
+      { user_id: userId, post_id: postId, reason, is_private: isPrivate },
+      { onConflict: 'user_id,post_id', ignoreDuplicates: true },
+    );
   if (error) throw error;
 }
 

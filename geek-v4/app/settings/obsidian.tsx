@@ -21,7 +21,7 @@ import {
 
 export default function ObsidianSettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const [vault, setVault] = useState('');
   const [enabled, setEnabled] = useState(false);
   const [loading, setLoading] = useState(true);

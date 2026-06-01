@@ -21,6 +21,7 @@ import { useToastStore } from '../../../stores/toastStore';
 import { useAuthStore } from '../../../stores/authStore';
 import { fetchCommunity } from '../../../lib/api/communities';
 import { createPost } from '../../../lib/api/posts';
+import { sanitizeUrl } from '../../../lib/sanitize';
 
 const MAX_BODY = 4000;
 const MAX_TAGS = 5;
@@ -31,7 +32,7 @@ export default function OfficialPostScreen() {
   const params = useLocalSearchParams();
   const communityId = typeof params.communityId === 'string' ? params.communityId : '';
   const userId = useAuthStore((s) => s.user?.id);
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const qc = useQueryClient();
 
   const [body, setBody] = useState('');
@@ -62,16 +63,25 @@ export default function OfficialPostScreen() {
   const removeTag = (t: string) => setTags(tags.filter((x) => x !== t));
 
   const submit = useMutation({
-    mutationFn: () =>
-      createPost({
+    mutationFn: () => {
+      // 手入力 URL を media_urls に直書きすると Storage/EXIF/MIME 検証を迂回し、
+      // javascript:/data:/内部ネットワーク等の不正 URL も保存され得る。
+      // sanitizeUrl (http/https + SSRF ガード) を通し、不正なら投稿を弾く。
+      const trimmedImage = imageUrl.trim();
+      const safeImage = trimmedImage ? sanitizeUrl(trimmedImage) : null;
+      if (trimmedImage && !safeImage) {
+        throw new Error('画像URLが不正です。http/https の画像URLを指定してください。');
+      }
+      return createPost({
         content: body.trim(),
-        mediaUris: imageUrl.trim() ? [imageUrl.trim()] : [],
+        mediaUris: safeImage ? [safeImage] : [],
         tagNames: tags,
         isAnonymous: false,
         kind: 'opinion',
         visibility: 'community_public',
         community_ids: [communityId],
-      }),
+      });
+    },
     onSuccess: () => {
       show('公式投稿を公開しました', 'success');
       void qc.invalidateQueries({ queryKey: ['community', communityId] });

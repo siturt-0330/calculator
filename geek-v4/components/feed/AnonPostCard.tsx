@@ -1513,6 +1513,7 @@ function AnonPostCardInner({
         onClose={() => setMemePickerOpen(false)}
         onPick={(meme) => onReact(meme)}
         picked={myReactionsForPost}
+        reactions={reactionsList}
       />
 
       {/* 「…」から開く: 押された全スタンプの一覧 (閲覧 + タップでトグル) */}

@@ -1,10 +1,23 @@
 // テキストスタンプ辞書 (リアクション用)
 // 「ただの面白い」じゃ嬉しくない → ユーモアを乗せた表現にする
 // カテゴリ別に整理: 感情ごとに、刺さるテキストスタンプを集めている
+//
+// ピッカー(タブ式)用に各カテゴリへ short(タブ短縮ラベル) を付与。
+// category は従来通り長いラベル(後方互換)。表示順はユーザー要望順:
+//   面白い → 嫉妬 → 共感 → 尊敬 → 感謝 → 驚き → ツッコミ → ネタ → 応援 → つぶやき
 
-export const MEMES: { category: string; items: string[] }[] = [
+export type MemeCategory = {
+  /** 正式な長いラベル(後方互換・見出し用) */
+  category: string;
+  /** タブ用の短いラベル */
+  short: string;
+  items: string[];
+};
+
+export const MEMES: MemeCategory[] = [
   {
     category: '面白い・笑える',
+    short: '面白い',
     items: [
       'おい、笑える',
       'いとおかし',
@@ -22,6 +35,7 @@ export const MEMES: { category: string; items: string[] }[] = [
   },
   {
     category: '嫉妬・羨望',
+    short: '嫉妬',
     items: [
       'でも幸せならOKです',
       '性の喜びを知りやがって',
@@ -36,6 +50,7 @@ export const MEMES: { category: string; items: string[] }[] = [
   },
   {
     category: '共感・あるある',
+    short: '共感',
     items: [
       'わかる',
       'それな',
@@ -51,11 +66,10 @@ export const MEMES: { category: string; items: string[] }[] = [
   },
   {
     category: '尊敬・感動',
+    short: '尊敬',
     items: [
       '尊い',
       'てぇてぇ',
-      '圧倒的感謝',
-      '感謝の極み',
       '天才では？',
       '控えめに言って神',
       '推せる',
@@ -66,7 +80,23 @@ export const MEMES: { category: string; items: string[] }[] = [
     ],
   },
   {
+    category: '感謝',
+    short: '感謝',
+    items: [
+      'ありがとう',
+      '圧倒的感謝',
+      '感謝しかない',
+      '助かる〜',
+      '神対応',
+      '拝んでおく',
+      '恩に着るで',
+      'あなたに幸あれ',
+      '頭が上がらない',
+    ],
+  },
+  {
     category: '驚き・衝撃',
+    short: '驚き',
     items: [
       'マジカヨ',
       '嘘やろ',
@@ -80,6 +110,7 @@ export const MEMES: { category: string; items: string[] }[] = [
   },
   {
     category: '皮肉・ツッコミ',
+    short: 'ツッコミ',
     items: [
       'それは悪手じゃろ',
       '判断が遅い',
@@ -93,11 +124,42 @@ export const MEMES: { category: string; items: string[] }[] = [
     ],
   },
   {
+    // 悪口/煽りへの「受け流し・守り・鎮静」系。煽り返しはあえて入れない
+    // (GEEK の「安心して続ける」価値に沿う)。
+    category: '悪口対応',
+    short: '悪口対応',
+    items: [
+      'まあ落ち着こう',
+      'スルー推奨',
+      '気にしないで',
+      'あなたは悪くない',
+      '深呼吸しよ',
+      '効いてないよ',
+      'お大事に',
+      '仲良くしよ？',
+      '通報しときます',
+    ],
+  },
+  {
+    category: 'ネタ・カオス',
+    short: 'ネタ',
+    items: [
+      '114514',
+      '三色チーズ牛丼の特盛に温玉付きをお願いします',
+      'おとわっか',
+      'まこも湯',
+      '自己防衛',
+      'ファッ！？',
+      'やめろよ(止めない)',
+      'なんやて工藤',
+    ],
+  },
+  {
     category: '応援・推し',
+    short: '応援',
     items: [
       '見守ってます',
       '応援してます',
-      '推せる',
       'ファンになりました',
       '次回も期待',
       '生きる活力',
@@ -107,6 +169,7 @@ export const MEMES: { category: string; items: string[] }[] = [
   },
   {
     category: '反応・つぶやき',
+    short: 'つぶやき',
     items: [
       'ぴえん',
       'エモい',
@@ -119,19 +182,6 @@ export const MEMES: { category: string; items: string[] }[] = [
       '事案',
       '案件',
       'たまげたなぁ',
-    ],
-  },
-  {
-    category: 'ネタ・カオス',
-    items: [
-      '114514',
-      '三色チーズ牛丼の特盛に温玉付きをお願いします',
-      'おとわっか',
-      'まこも湯',
-      '自己防衛',
-      'ファッ！？',
-      'やめろよ(止めない)',
-      'なんやて工藤',
     ],
   },
 ];

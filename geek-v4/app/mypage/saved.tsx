@@ -18,6 +18,7 @@ import { T } from '../../design/typography';
 import { formatRelative } from '../../lib/utils/date';
 import { useObsidianEnabled, postToObsidianNote } from '../../hooks/useObsidian';
 import { saveBatchToObsidian, OBSIDIAN_AVAILABLE } from '../../lib/obsidian';
+import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
 
 type Item = {
@@ -57,12 +58,15 @@ async function fetchSavedPosts(): Promise<Item[]> {
 export default function SavedPosts() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { show } = useToastStore();
+  const show = useToastStore((s) => s.show);
   const { enabled: obsidianEnabled } = useObsidianEnabled();
   const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number } | null>(null);
+  // 別ユーザーへ永続キャッシュ経由で前ユーザーの保存リストが漏れるのを防ぐ。
+  const userId = useAuthStore((s) => s.user?.id);
   const { data: items = [], isLoading } = useQuery({
-    queryKey: ['saved-posts'],
+    queryKey: ['saved-posts', userId],
     queryFn: fetchSavedPosts,
+    enabled: !!userId,
   });
 
   const handleBulkExport = async () => {

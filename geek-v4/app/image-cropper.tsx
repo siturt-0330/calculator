@@ -263,17 +263,24 @@ export default function ImageCropperScreen() {
       const srcPerScreenX = rotatedNatW / renderedW;
       const srcPerScreenY = rotatedNatH / renderedH;
 
-      // crop rect (rotation 適用後の座標系)
-      let cropX = offsetXOnImg * srcPerScreenX;
-      let cropY = offsetYOnImg * srcPerScreenY;
-      let cropW = cropDiameter * srcPerScreenX;
-      let cropH = cropDiameter * srcPerScreenY;
+      // crop rect (rotation 適用後の座標系)。raw は cropW === cropH の正方形。
+      const rawCropX = offsetXOnImg * srcPerScreenX;
+      const rawCropY = offsetYOnImg * srcPerScreenY;
+      const rawCropW = cropDiameter * srcPerScreenX;
+      const rawCropH = cropDiameter * srcPerScreenY;
 
-      // clamp — 画像外には出さない、最低 16px 確保
-      cropX = Math.max(0, Math.min(cropX, rotatedNatW - 16));
-      cropY = Math.max(0, Math.min(cropY, rotatedNatH - 16));
-      cropW = Math.max(16, Math.min(cropW, rotatedNatW - cropX));
-      cropH = Math.max(16, Math.min(cropH, rotatedNatH - cropY));
+      // ★ clamp は「正方形を保ったまま」画像内に収める (2026-06 修正)。
+      //   旧実装は W/H を独立に詰めていたため、ズームアウトで crop 矩形が画像より
+      //   大きくなった時 (負の origin / はみ出し) に非正方形 (例 800x1200) へ化け、
+      //   それを 512x512 に引き伸ばして「拡大 + 縦圧縮 (下ズレ)」する事故になっていた。
+      //   raw の中心を保ったまま、画像内に収まる最大正方形へ補正する。
+      const side = Math.max(16, Math.min(rawCropW, rotatedNatW, rotatedNatH));
+      const rawCenterX = rawCropX + rawCropW / 2;
+      const rawCenterY = rawCropY + rawCropH / 2;
+      const cropX = Math.min(Math.max(0, rawCenterX - side / 2), Math.max(0, rotatedNatW - side));
+      const cropY = Math.min(Math.max(0, rawCenterY - side / 2), Math.max(0, rotatedNatH - side));
+      const cropW = side;
+      const cropH = side;
 
       console.log('[image-cropper] crop rect:', { cropX, cropY, cropW, cropH, rotation, rotatedNatW, rotatedNatH });
 

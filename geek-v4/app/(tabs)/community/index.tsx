@@ -54,7 +54,7 @@ export default function CommunityScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const qc = useQueryClient();
-  const { show: showToast } = useToastStore();
+  const showToast = useToastStore((s) => s.show);
   // テーマ購読 — light/dark 切替で community 画面が自動再 render
   const { C, GRAD, SHADOW } = useTheme();
   // コミュタブ再タップで本体 FlashList を先頭にスクロール (X 流)。
@@ -238,8 +238,11 @@ export default function CommunityScreen() {
       };
     }
     return dict;
+    // myConcerns はハンドラ本体で未使用 (handler は id しか使わない)。deps に入れると
+    // 「気になる」トグルの度に全 handler が再生成され AnonPostCard memo が全崩壊するため除外。
+    // 最新の liked/concerned/saved 状態は renderItem 側が直接読む。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts, toggleLike, toggleConcern, toggleSave, toggleReact, share, router, handleAddTag, myConcerns]);
+  }, [posts, toggleLike, toggleConcern, toggleSave, toggleReact, share, router, handleAddTag]);
 
   // ★ FlashList extraData 用の合成 object。useReactionToggle 以外
   //   (useLike / useConcern / useSave / useAddTag) も legacy cache のみ更新する

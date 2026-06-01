@@ -34,6 +34,7 @@ import {
   TextInput,
   RefreshControl,
   Keyboard,
+  InteractionManager,
 } from 'react-native';
 import { useSharedValue, withTiming } from 'react-native-reanimated';
 import { useScrollToTop } from '@react-navigation/native';
@@ -54,6 +55,7 @@ import { EditorialPostCard } from '../../components/search/EditorialPostCard';
 import { EditorialCommunityRow } from '../../components/search/EditorialCommunityRow';
 import { EditorialSkeleton } from '../../components/search/EditorialSkeleton';
 import { EditorialEmpty } from '../../components/search/EditorialEmpty';
+import { withApiTimeout } from '../../lib/withApiTimeout';
 import {
   searchCommunities,
   discoverCommunities,
@@ -332,8 +334,12 @@ export default function SearchScreen() {
   // コミュニティ検索 — searchCommunities (既存 lib/api/communities.ts)
   const communitiesQuery = useQuery<CommunityHit[]>({
     queryKey: ['search-communities', debouncedQuery],
-    queryFn: () => searchCommunities({ query: debouncedQuery, limit: 20 }),
+    // ネットワーク停滞でスケルトンが無限に回らないよう 8s timeout + retry:1。
+    // 失敗しても投稿結果側は独立して表示される (このクエリは結果領域を直接ブロックしない)。
+    queryFn: () =>
+      withApiTimeout(searchCommunities({ query: debouncedQuery, limit: 20 }), 'communities.search', 8000),
     enabled: showResults,
+    retry: 1,
     staleTime: 60_000,
   });
 
@@ -758,10 +764,21 @@ function DiscoveryView() {
   //   - 二重タップは joiningIds の Set で O(1) ガード
   const { joiningIds, onJoin, onPressCommunity } = useJoinCommunity();
 
+  // ★ 検索タブ即表示: ネットワーク重いセクション (Hot / ForYou / コミュ3種) は
+  //   first paint 後 (タブ遷移が落ち着いてから) に走らせる。検索バーと軽いセクション
+  //   (Trending / ジャンル) は即時描画され、「タブ押下→即表示」になる。重い 5 本の
+  //   query を mount 同時 fan-out させないのが肝。
+  const [deferReady, setDeferReady] = useState(false);
+  useEffect(() => {
+    const handle = InteractionManager.runAfterInteractions(() => setDeferReady(true));
+    return () => handle.cancel();
+  }, []);
+
   // おすすめ — query 無し discoverCommunities = 人気順 (member_count desc)
   const recommended = useQuery({
     queryKey: ['discover-recommended'],
     queryFn: () => discoverCommunities({ limit: 8 }),
+    enabled: deferReady,
     staleTime: 60_000,
   });
 
@@ -769,6 +786,7 @@ function DiscoveryView() {
   const rising = useQuery({
     queryKey: ['discover-rising'],
     queryFn: () => fetchRisingCommunities(10),
+    enabled: deferReady,
     staleTime: 60_000,
   });
 
@@ -776,6 +794,7 @@ function DiscoveryView() {
   const official = useQuery({
     queryKey: ['discover-official'],
     queryFn: () => fetchOfficialCommunities(10),
+    enabled: deferReady,
     staleTime: 60_000,
   });
 
@@ -784,11 +803,12 @@ function DiscoveryView() {
       {/* 1) Trending — topic chip 行 (server-side acceleration) */}
       <TrendingTopicsRow />
 
-      {/* 2) 今日のホット — 横スクロールカード (動画サムネ対応) */}
-      <HotPostsRow />
+      {/* 2) 今日のホット — 横スクロールカード (動画サムネ対応)。
+          first paint 後に mount (内部 query を初回フレームで走らせない)。 */}
+      {deferReady && <HotPostsRow />}
 
-      {/* 3) あなたへのおすすめ — パーソナライズ (未ログインで non-render) */}
-      <ForYouShelf />
+      {/* 3) あなたへのおすすめ — パーソナライズ (未ログインで non-render)。first paint 後に mount。 */}
+      {deferReady && <ForYouShelf />}
 
       {/* 4) おすすめコミュニティ — 人気順の大カード */}
       <CommunityShelf
@@ -799,7 +819,7 @@ function DiscoveryView() {
         joiningIds={joiningIds}
         onJoin={onJoin}
         onPressCommunity={onPressCommunity}
-        isLoading={recommended.isLoading}
+        isLoading={!deferReady || recommended.isLoading}
         emptyText="まだコミュニティがありません"
       />
 
@@ -812,7 +832,7 @@ function DiscoveryView() {
         joiningIds={joiningIds}
         onJoin={onJoin}
         onPressCommunity={onPressCommunity}
-        isLoading={rising.isLoading}
+        isLoading={!deferReady || rising.isLoading}
         emptyText="まだ急上昇コミュニティがありません"
       />
 
@@ -825,7 +845,7 @@ function DiscoveryView() {
         joiningIds={joiningIds}
         onJoin={onJoin}
         onPressCommunity={onPressCommunity}
-        isLoading={official.isLoading}
+        isLoading={!deferReady || official.isLoading}
         emptyText="公式コミュニティはまだありません"
       />
 
