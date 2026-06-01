@@ -1,12 +1,13 @@
 // ============================================================
-// app/post/create.tsx — 投稿作成 Step 1: コンテンツ入力
+// app/post/create.tsx — 投稿作成 (1画面で完結)
 // ------------------------------------------------------------
-// 2-Step 投稿作成フローの Step 1。
-// ここではコンテンツ (タイトル / 本文 / 画像・動画 / 匿名設定 / 投票) のみ扱う。
-// タグ / 公開範囲 / コミュニティ / CW / 出典 URL は Step 2 (/post/create-settings) で設定。
-//
-// ヘッダー右の「次へ」ボタンで /post/create-settings に push する。
-// 状態は usePostDraftStore (Zustand) を経由して Step 2 と共有する。
+// 旧 2-Step (Step1=入力 / Step2=create-settings で設定) を 1 画面に統合。
+// この画面で完結する:
+//   - 投稿先コミュニティ選択 (必須・単一・Reddit 風の上部ピッカー)
+//   - 本文 (タイトルと分けない単一フィールド) / 画像・動画 / タグ (任意) / 投票
+//   - 常に匿名で投稿 (公開範囲・CW・出典は廃止)
+// ヘッダー右の「投稿」で直接送信する (create-settings は現在未使用)。
+// 状態は usePostDraftStore (Zustand)。
 // ============================================================
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -21,25 +22,30 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { X as IconX, EyeOff } from 'lucide-react-native';
 
 import { PressableScale } from '../../components/ui/PressableScale';
 import { Avatar } from '../../components/ui/Avatar';
-import { ComposerTitleField } from '../../components/post/composer/ComposerTitleField';
 import { ComposerBodyField } from '../../components/post/composer/ComposerBodyField';
 import { ComposerMediaGrid } from '../../components/post/composer/ComposerMediaGrid';
 import { ComposerBottomBar } from '../../components/post/composer/ComposerBottomBar';
 import { FormatToolbar, type FormatKind } from '../../components/post/composer/FormatToolbar';
 import { PollEditorSheet } from '../../components/post/composer/PollEditorSheet';
+import { CommunityPickerSheet } from '../../components/post/composer/CommunityPickerSheet';
 
 import { useToastStore } from '../../stores/toastStore';
 import { useAuthStore } from '../../stores/authStore';
 import { usePostDraftStore } from '../../stores/postDraftStore';
 import { useDraftsStore, newDraftId } from '../../stores/draftsStore';
 import { hap } from '../../design/haptics';
-import { fetchCommunity } from '../../lib/api/communities';
-import { validateVideoSource } from '../../lib/media';
+import { fetchCommunity, fetchMyCommunities, type Community } from '../../lib/api/communities';
+import { createPost } from '../../lib/api/posts';
+import { checkContent } from '../../lib/ai/checkContent';
+import { validateVideoSource, uploadPostImage, uploadPostVideo } from '../../lib/media';
 import { makeWebPreviewDataUrl } from '../../lib/image';
+import { sanitizeTag } from '../../lib/sanitize';
+import { Icon } from '../../constants/icons';
 import { SP, R } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { useColors } from '../../hooks/useColors';
@@ -48,16 +54,11 @@ import { useColors } from '../../hooks/useColors';
 // 定数
 // ============================================================
 
-// 本文プレースホルダ候補 (mount ごとにランダム — discussion framing)
-const PLACEHOLDER_POOL: string[] = [
-  '何について話したい?',
-  'みんなの意見を聞きたいことは?',
-  '議論したいトピックを書いてみよう',
-  '気になっていることをシェアしよう',
-  'みんなで話そう',
-];
-
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(n, hi));
+
+// タイトルと本文を分けない単一フィールドのプレースホルダ
+const PLACEHOLDER = '話したいトピックを書いてみよう';
+const MAX_TAGS = 5;
 
 // ============================================================
 // CreatePost — Step 1
@@ -81,13 +82,18 @@ export default function CreatePost() {
   // store selectors — 個別 selector で購読 (destructure 禁止)
   // -----------------------------------------------------------
   const title = usePostDraftStore((s) => s.title);
-  const setTitle = usePostDraftStore((s) => s.setTitle);
   const content = usePostDraftStore((s) => s.content);
   const setContent = usePostDraftStore((s) => s.setContent);
   const images = usePostDraftStore((s) => s.images);
   const setImages = usePostDraftStore((s) => s.setImages);
   const video = usePostDraftStore((s) => s.video);
   const setVideo = usePostDraftStore((s) => s.setVideo);
+  // タグ (任意) / コミュニティ (必須・単一選択) / 公開範囲
+  const tags = usePostDraftStore((s) => s.tags);
+  const setTags = usePostDraftStore((s) => s.setTags);
+  const selectedCommunityIds = usePostDraftStore((s) => s.selectedCommunityIds);
+  const setSelectedCommunities = usePostDraftStore((s) => s.setSelectedCommunities);
+  const setVisibility = usePostDraftStore((s) => s.setVisibility);
   // 投稿は常に匿名 (匿名トグルは廃止 — 匿名SNSの一貫性 #3)。
   // 実際の is_anonymous も create-settings 側で true 固定にしてある。
   const anonymous = true;
@@ -105,21 +111,34 @@ export default function CreatePost() {
   const [pickingVideo, setPickingVideo] = useState(false);
   const [formatActive, setFormatActive] = useState(false);
   const [showPollSheet, setShowPollSheet] = useState(false);
+  // 1画面化: コミュニティ選択シート / タグ入力 / 投稿中フラグ
+  const [showCommunitySheet, setShowCommunitySheet] = useState(false);
+  const [communityQuery, setCommunityQuery] = useState('');
+  const [tagInput, setTagInput] = useState('');
+  const [posting, setPosting] = useState(false);
+  const qc = useQueryClient();
+
+  // 参加コミュニティ一覧 (Reddit 風の「投稿先」ピッカー用)。
+  const { data: myCommunities = [], isLoading: communitiesLoading } = useQuery({
+    queryKey: ['my-communities', user?.id],
+    queryFn: fetchMyCommunities,
+    enabled: !!user,
+    staleTime: 30_000,
+  });
+  const selectedCommunity = useMemo<Community | undefined>(
+    () => myCommunities.find((c) => c.id === selectedCommunityIds[0]),
+    [myCommunities, selectedCommunityIds],
+  );
 
   // -----------------------------------------------------------
   // refs
   // -----------------------------------------------------------
   const draftRestored = useRef(false);
-  const titleRef = useRef<TextInput>(null);
   const bodyRef = useRef<TextInput>(null);
   // 本文の選択範囲 — FormatToolbar の markdown 挿入に使う
   const selectionRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
 
-  // mount 時に固定するランダム placeholder
-  const placeholder = useMemo<string>(() => {
-    const idx = Math.floor(Math.random() * PLACEHOLDER_POOL.length);
-    return PLACEHOLDER_POOL[idx] ?? PLACEHOLDER_POOL[0]!;
-  }, []);
+  const placeholder = PLACEHOLDER;
 
   // -----------------------------------------------------------
   // 下書き復元 — ?draftId=xxx で「下書き一覧」から再開 (mount 1 回)
@@ -369,14 +388,146 @@ export default function CreatePost() {
   };
 
   // -----------------------------------------------------------
-  // navigation
+  // コミュニティ選択 (単一選択・必須・Reddit 風)
   // -----------------------------------------------------------
-  const canGoNext = title.trim().length > 0 || content.trim().length > 0 || images.length > 0 || !!video;
-
-  const handleNext = () => {
-    if (!canGoNext) return;
+  const handleToggleCommunity = (id: string) => {
+    const community = myCommunities.find((c) => c.id === id);
+    if (selectedCommunityIds[0] === id) {
+      setSelectedCommunities([], []);
+      setVisibility('public');
+    } else {
+      setSelectedCommunities([id], community ? [community] : []);
+      setVisibility('community_public');
+      setShowCommunitySheet(false); // 単一選択なので選んだら閉じる
+    }
     hap.tap();
-    router.push('/post/create-settings' as never);
+  };
+
+  // -----------------------------------------------------------
+  // タグ (任意・最大 5)
+  // -----------------------------------------------------------
+  const addTag = () => {
+    const t = sanitizeTag(tagInput);
+    if (!t || tags.includes(t)) {
+      setTagInput('');
+      return;
+    }
+    if (tags.length >= MAX_TAGS) {
+      show(`タグは最大 ${MAX_TAGS} 個まで`, 'warn');
+      return;
+    }
+    setTags([...tags, t]);
+    setTagInput('');
+    hap.tap();
+  };
+  const removeTag = (t: string) => setTags(tags.filter((x) => x !== t));
+
+  // -----------------------------------------------------------
+  // 投稿 — 旧 Step2 (create-settings) の送信ロジックを 1 画面に統合
+  // -----------------------------------------------------------
+  const canPost =
+    (content.trim().length > 0 || images.length > 0 || !!video) &&
+    selectedCommunityIds.length > 0 &&
+    !posting;
+
+  const handlePost = async () => {
+    if (posting) return;
+    const s = usePostDraftStore.getState();
+    if (!s.content.trim() && s.images.length === 0 && !s.video) {
+      show('本文・画像・動画のいずれかを入力してください。', 'warn');
+      return;
+    }
+    if (s.selectedCommunityIds.length === 0) {
+      show('投稿するコミュニティを選んでください。', 'warn');
+      return;
+    }
+    setPosting(true);
+    try {
+      const userId = useAuthStore.getState().user?.id;
+      if (!userId) {
+        show('ログインし直してください', 'error');
+        return;
+      }
+      let uploadedImageUrls: string[] = [];
+      let uploadedVideoUrls: string[] = [];
+      try {
+        // 先に AI チェック → NG なら upload しない (orphan メディア防止)
+        const check = await checkContent({ content: s.content, tags: s.tags });
+        if (!check.ok) {
+          hap.error();
+          show(check.reason ?? 'コンテンツポリシーに反する可能性があります', 'error');
+          return;
+        }
+        [uploadedImageUrls, uploadedVideoUrls] = await Promise.all([
+          s.images.length > 0
+            ? Promise.all(s.images.map((uri) => uploadPostImage(uri, userId)))
+            : Promise.resolve<string[]>([]),
+          s.video
+            ? uploadPostVideo(s.video.uri, userId, { mime: s.video.mime, ext: s.video.ext }).then((url) => [url])
+            : Promise.resolve<string[]>([]),
+        ]);
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), 'error');
+        return;
+      }
+
+      const validOptions = s.pollOptions.filter((o) => o.trim());
+      const pollPayload =
+        s.showPoll && s.pollQuestion.trim() && validOptions.length >= 2
+          ? {
+              question: s.pollQuestion,
+              options: validOptions,
+              multiSelect: s.pollMulti,
+              expiresInHours: s.pollHours ?? undefined,
+            }
+          : undefined;
+
+      await createPost({
+        content: s.content,
+        title: null, // タイトルと本文を分けない (1画面化)
+        mediaUris: uploadedImageUrls,
+        videoUris: uploadedVideoUrls,
+        videoDurations: [],
+        videoPosters: [],
+        tagNames: s.tags, // 任意
+        isAnonymous: true, // 常に匿名
+        sourceUrl: null,
+        isPublic: true,
+        contentWarning: null,
+        cwCategory: null,
+        poll: pollPayload,
+        visibility: 'community_public',
+        community_ids: s.selectedCommunityIds,
+      });
+
+      hap.success();
+      show('投稿しました', 'success');
+      {
+        const did = usePostDraftStore.getState().draftId;
+        if (did) useDraftsStore.getState().remove(did);
+      }
+      void qc.invalidateQueries({ queryKey: ['my-community-feed'] });
+      void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'] });
+      void qc.invalidateQueries({ queryKey: ['my-communities'] });
+      for (const cid of s.selectedCommunityIds) {
+        void qc.invalidateQueries({ queryKey: ['community', cid, 'feed'] });
+        void qc.invalidateQueries({ queryKey: ['community', cid] });
+      }
+      void qc.invalidateQueries({ queryKey: ['feed'] });
+      usePostDraftStore.getState().reset();
+      router.replace('/(tabs)/feed' as never);
+    } catch (e: unknown) {
+      hap.error();
+      const msg = e instanceof Error ? e.message : String(e);
+      let userMsg = '投稿に失敗しました。再度お試しください。';
+      if (msg.includes('row-level security') || msg.includes('RLS')) userMsg = '権限エラー。ログインし直してください。';
+      else if (msg.includes('Not authenticated') || msg.includes('未ログイン')) userMsg = 'ログインし直してください。';
+      else if (msg.includes('Network') || msg.includes('Failed to fetch')) userMsg = '通信エラー。電波を確認してください。';
+      else if (msg.includes('速すぎ') || msg.includes('時間を置いて') || msg.includes('ペースが')) userMsg = msg;
+      show(userMsg, 'error');
+    } finally {
+      setPosting(false);
+    }
   };
 
   const handleClose = () => {
@@ -420,23 +571,25 @@ export default function CreatePost() {
         {/* spacer */}
         <View style={{ flex: 1 }} />
 
-        {/* 次へ pill */}
+        {/* 投稿 pill (1画面で完結) */}
         <PressableScale
-          onPress={handleNext}
+          onPress={handlePost}
           haptic="tap"
           accessibilityRole="button"
-          accessibilityLabel="次へ"
-          accessibilityState={{ disabled: !canGoNext }}
-          disabled={!canGoNext}
+          accessibilityLabel="投稿"
+          accessibilityState={{ disabled: !canPost }}
+          disabled={!canPost}
           style={{
             paddingHorizontal: SP['4'],
             paddingVertical: SP['2'],
             borderRadius: R.full,
-            backgroundColor: canGoNext ? C.accent : C.bg3,
-            opacity: canGoNext ? 1 : 0.5,
+            backgroundColor: canPost ? C.accent : C.bg3,
+            opacity: canPost ? 1 : 0.5,
           }}
         >
-          <Text style={[T.smallB, { color: canGoNext ? '#fff' : C.text3 }]}>次へ</Text>
+          <Text style={[T.smallB, { color: canPost ? '#fff' : C.text3 }]}>
+            {posting ? '投稿中…' : '投稿'}
+          </Text>
         </PressableScale>
       </View>
 
@@ -454,6 +607,43 @@ export default function CreatePost() {
           keyboardDismissMode="interactive"
           showsVerticalScrollIndicator={false}
         >
+          {/* ============================================================
+              投稿先コミュニティ (必須・Reddit 風の上部ピッカー)
+              ============================================================ */}
+          <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'] }}>
+            <PressableScale
+              onPress={() => {
+                setShowCommunitySheet(true);
+                hap.tap();
+              }}
+              haptic="tap"
+              accessibilityRole="button"
+              accessibilityLabel="投稿先のコミュニティを選ぶ"
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: SP['2'],
+                alignSelf: 'flex-start',
+                maxWidth: '100%',
+                paddingHorizontal: SP['3'],
+                paddingVertical: SP['2'],
+                borderRadius: R.full,
+                backgroundColor: selectedCommunity ? C.accentBg : C.bg2,
+                borderWidth: 1,
+                borderColor: selectedCommunity ? C.accent : C.border,
+              }}
+            >
+              <Icon.community size={16} color={selectedCommunity ? C.accent : C.text2} strokeWidth={2.2} />
+              <Text
+                style={[T.smallB, { color: selectedCommunity ? C.accent : C.text2, flexShrink: 1 }]}
+                numberOfLines={1}
+              >
+                {selectedCommunity ? selectedCommunity.name : 'コミュニティを選択'}
+              </Text>
+              <Icon.chevronD size={16} color={selectedCommunity ? C.accent : C.text3} strokeWidth={2.2} />
+            </PressableScale>
+          </View>
+
           {/* ============================================================
               2カラムレイアウト: [アバター列 | スレッドライン] + [コンテンツ列]
               ============================================================ */}
@@ -520,25 +710,16 @@ export default function CreatePost() {
                 </View>
               </View>
 
-              {/* タイトル — Reddit風の太字 hero 入力 (任意) */}
-              <ComposerTitleField
-                value={title}
-                onChangeText={setTitle}
-                inputRef={titleRef}
+              {/* 本文 — タイトルと本文を分けない単一フィールド (X / Threads 風) */}
+              <ComposerBodyField
+                value={content}
+                onChangeText={setContent}
+                placeholder={placeholder}
+                onSelectionChange={(sel) => {
+                  selectionRef.current = sel;
+                }}
+                inputRef={bodyRef}
               />
-
-              {/* 本文 — X / Threads 風の borderless 大型 textarea */}
-              <View style={{ marginTop: SP['2'] }}>
-                <ComposerBodyField
-                  value={content}
-                  onChangeText={setContent}
-                  placeholder={placeholder}
-                  onSelectionChange={(sel) => {
-                    selectionRef.current = sel;
-                  }}
-                  inputRef={bodyRef}
-                />
-              </View>
 
               {/* メディアグリッド */}
               {(images.length > 0 || video) && (
@@ -552,6 +733,62 @@ export default function CreatePost() {
                   />
                 </View>
               )}
+
+              {/* タグ (任意・最大5) */}
+              <View style={{ marginTop: SP['4'], gap: SP['2'] }}>
+                {tags.length > 0 && (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
+                    {tags.map((t) => (
+                      <PressableScale
+                        key={t}
+                        onPress={() => removeTag(t)}
+                        haptic="tap"
+                        accessibilityLabel={`タグ ${t} を削除`}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          paddingHorizontal: SP['3'],
+                          paddingVertical: 5,
+                          borderRadius: R.full,
+                          backgroundColor: C.accentBg,
+                          borderWidth: 1,
+                          borderColor: C.accentSoft,
+                        }}
+                      >
+                        <Text style={[T.smallB, { color: C.accentLight }]}>#{t}</Text>
+                        <IconX size={12} color={C.accentLight} strokeWidth={2.4} />
+                      </PressableScale>
+                    ))}
+                  </View>
+                )}
+                {tags.length < MAX_TAGS && (
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: SP['2'],
+                      paddingHorizontal: SP['3'],
+                      paddingVertical: SP['2'],
+                      borderRadius: R.md,
+                      backgroundColor: C.bg2,
+                      borderWidth: 1,
+                      borderColor: C.border,
+                    }}
+                  >
+                    <Icon.hash size={14} color={C.text3} strokeWidth={2.2} />
+                    <TextInput
+                      value={tagInput}
+                      onChangeText={setTagInput}
+                      onSubmitEditing={addTag}
+                      placeholder="タグを追加 (任意)"
+                      placeholderTextColor={C.text3}
+                      returnKeyType="done"
+                      style={[T.small, { color: C.text, flex: 1, padding: 0 }]}
+                    />
+                  </View>
+                )}
+              </View>
             </View>
           </View>
         </ScrollView>
@@ -599,6 +836,18 @@ export default function CreatePost() {
         hours={pollHours ?? 24}
         onHoursChange={(h) => setPoll(true, pollQuestion, pollOptions, pollMulti, h)}
         onClear={clearPoll}
+      />
+
+      {/* コミュニティ選択シート (Reddit 風の投稿先ピッカー・単一選択) */}
+      <CommunityPickerSheet
+        visible={showCommunitySheet}
+        onClose={() => setShowCommunitySheet(false)}
+        communities={myCommunities}
+        selectedIds={selectedCommunityIds}
+        onToggle={handleToggleCommunity}
+        loading={communitiesLoading}
+        query={communityQuery}
+        onQueryChange={setCommunityQuery}
       />
     </View>
   );
