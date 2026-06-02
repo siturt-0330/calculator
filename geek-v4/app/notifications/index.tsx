@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Platform } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -8,7 +8,6 @@ import Animated, {
   withSequence,
   Easing,
 } from 'react-native-reanimated';
-import { FlashList } from '@shopify/flash-list';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -43,6 +42,30 @@ function bucketFor(dateStr: string): Bucket {
   if (t >= startOfYesterday) return '昨日';
   if (t >= startOfWeek) return '1週間以内';
   return 'それ以前';
+}
+
+// ===== カテゴリ フィルタ =====
+type NFilter = 'all' | 'reactions' | 'community' | 'other';
+const FILTER_TABS: { key: NFilter; label: string }[] = [
+  { key: 'all', label: 'すべて' },
+  { key: 'reactions', label: '反応' },
+  { key: 'community', label: 'コミュニティ' },
+  { key: 'other', label: 'お知らせ' },
+];
+function matchesFilter(type: Notification['type'], f: NFilter): boolean {
+  if (f === 'all') return true;
+  if (f === 'reactions') {
+    return type === 'like' || type === 'comment' || type === 'reply' || type === 'mention';
+  }
+  if (f === 'community') {
+    return (
+      type === 'official_post' ||
+      type === 'join_request' ||
+      type === 'event' ||
+      type === 'announcement'
+    );
+  }
+  return type === 'follow' || type === 'system'; // other / お知らせ
 }
 
 // FlashList 用の行データ — section ヘッダーは別 type で混在させる
@@ -82,16 +105,21 @@ function visualFor(type: Notification['type']): NotifVisual {
 export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { notifications, loading: isLoading, markAllRead } = useNotifications();
+  const { notifications, loading: isLoading, markAllRead, markRead } = useNotifications();
+  const [filter, setFilter] = useState<NFilter>('all');
   // Smart skeleton timing — skeleton only after 200ms of continuous loading.
   // <200ms loads (cache hits) skip skeleton entirely to avoid flash.
   const showSkeleton = useDelayedLoading(isLoading && notifications.length === 0, 200);
 
-  // 通知画面を開いたタイミングで既読化
-  useEffect(() => {
-    void markAllRead();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // 旧版は画面を開いた瞬間に全件既読化していたが、未読ハイライトが一瞬で消えて
+  // 「何が新着か」が分からなくなる + 見逃しに繋がるため廃止。既読化は
+  // 「タップした通知」または明示的な「すべて既読」ボタンでのみ行う。
+
+  // アクティブなカテゴリで絞り込み
+  const filteredNotifs = useMemo(
+    () => notifications.filter((n) => matchesFilter(n.type, filter)),
+    [notifications, filter],
+  );
 
   // 通知 → セクション化された Row 配列
   const rows = useMemo<Row[]>(() => {
@@ -99,7 +127,7 @@ export default function NotificationsScreen() {
     const groups: Record<Bucket, Notification[]> = {
       '今日': [], '昨日': [], '1週間以内': [], 'それ以前': [],
     };
-    for (const n of notifications) groups[bucketFor(n.created_at)].push(n);
+    for (const n of filteredNotifs) groups[bucketFor(n.created_at)].push(n);
     const out: Row[] = [];
     for (const b of order) {
       if (groups[b].length === 0) continue;
@@ -107,7 +135,7 @@ export default function NotificationsScreen() {
       for (const n of groups[b]) out.push({ kind: 'item', n, id: n.id });
     }
     return out;
-  }, [notifications]);
+  }, [filteredNotifs]);
 
   if (isLoading && notifications.length === 0) {
     return (
@@ -193,6 +221,7 @@ export default function NotificationsScreen() {
   // notifications table に source_id が無いケースが多いので tag_name を最優先で利用。
   // 'official_post' だけは tag_name が「コミュニティ名」なので name→id を runtime ルックアップ。
   const handleTap = async (n: Notification) => {
+    void markRead(n.id); // タップした通知だけ既読化
     if (n.type === 'official_post' && n.tag_name) {
       // 公式コミュニティを name で fetch (LIMIT 1)。見つからなければフォールバック。
       const { data } = await supabase
@@ -218,6 +247,14 @@ export default function NotificationsScreen() {
         return;
       }
       router.push('/(tabs)/community' as never);
+      return;
+    }
+    // 投稿への反応 (いいね/コメント/リアクション/返信) — data.post_id があれば
+    // 該当投稿を直接開く。0008/0111 トリガが post_id を data に格納済み。
+    // (旧挙動はタグフィードへ飛ばしていて「自分の投稿が開けない」不便があった)
+    const withPost = (n.data ?? null) as { post_id?: unknown } | null;
+    if (withPost && typeof withPost.post_id === 'string' && withPost.post_id.length > 0) {
+      router.push(`/post/${withPost.post_id}` as never);
       return;
     }
     if (n.tag_name) {
@@ -263,23 +300,65 @@ export default function NotificationsScreen() {
           ) : null
         }
       />
-      <FlashList
-        data={rows}
-        keyExtractor={(r) => r.id}
-        estimatedItemSize={92}
-        drawDistance={250}
-        removeClippedSubviews
-        decelerationRate="fast"
+      {/* カテゴリ フィルタ (横スクロール pill) */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ flexGrow: 0 }}
+        contentContainerStyle={{
+          gap: SP['2'],
+          paddingHorizontal: SP['3'],
+          paddingTop: SP['2'],
+          paddingBottom: SP['1'],
+        }}
+      >
+        {FILTER_TABS.map((tab) => {
+          const active = filter === tab.key;
+          return (
+            <PressableScale
+              key={tab.key}
+              onPress={() => setFilter(tab.key)}
+              haptic="select"
+              accessibilityRole="button"
+              accessibilityLabel={`${tab.label}で絞り込む`}
+              style={{
+                paddingHorizontal: SP['3'],
+                paddingVertical: 6,
+                borderRadius: R.full,
+                backgroundColor: active ? C.accent : C.bg2,
+                borderWidth: 1,
+                borderColor: active ? C.accent : C.border,
+              }}
+            >
+              <Text style={[T.caption, { color: active ? '#fff' : C.text2, fontWeight: '700' }]}>
+                {tab.label}
+              </Text>
+            </PressableScale>
+          );
+        })}
+      </ScrollView>
+      {/* react-native-web では FlashList の高さが解決されず行が描画されないため
+          ScrollView + map で確実にレンダリングする (通知は最大 50 件取得なので
+          仮想化不要)。 */}
+      <ScrollView
+        style={{ flex: 1 }}
+        showsVerticalScrollIndicator={false}
         contentContainerStyle={{
           paddingTop: SP['2'],
           paddingHorizontal: SP['3'],
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
         }}
-        getItemType={(r) => r.kind}
-        renderItem={({ item }) => {
-          if (item.kind === 'header') {
-            return (
+      >
+        {rows.length === 0 ? (
+          <View style={{ paddingTop: SP['10'], alignItems: 'center', gap: SP['2'] }}>
+            <Icon.bell size={28} color={C.text3} strokeWidth={1.8} />
+            <Text style={[T.small, { color: C.text3 }]}>このカテゴリの通知はありません</Text>
+          </View>
+        ) : (
+          rows.map((item) =>
+            item.kind === 'header' ? (
               <View
+                key={item.id}
                 style={{
                   paddingTop: SP['4'],
                   paddingBottom: SP['2'],
@@ -287,25 +366,16 @@ export default function NotificationsScreen() {
                   backgroundColor: C.bg,
                 }}
               >
-                <Text
-                  style={[
-                    T.smallB,
-                    { color: C.text3, letterSpacing: 1.2, fontWeight: '700' },
-                  ]}
-                >
+                <Text style={[T.smallB, { color: C.text3, letterSpacing: 1.2, fontWeight: '700' }]}>
                   {item.bucket.toUpperCase()}
                 </Text>
               </View>
-            );
-          }
-          return (
-            <NotificationRow
-              n={item.n}
-              onPress={() => void handleTap(item.n)}
-            />
-          );
-        }}
-      />
+            ) : (
+              <NotificationRow key={item.id} n={item.n} onPress={() => void handleTap(item.n)} />
+            ),
+          )
+        )}
+      </ScrollView>
     </View>
   );
 }

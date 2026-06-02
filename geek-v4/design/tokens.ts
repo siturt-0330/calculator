@@ -13,7 +13,7 @@
 //     applyThemeC() で書き換える。 (palettes.ts と shape を完全一致させる)
 // ============================================================
 
-import type { ColorPalette } from '../lib/theme/palettes';
+import type { ColorPalette, GradientPalette } from '../lib/theme/palettes';
 
 // dark 既定値 (PALETTE_DARK と完全一致 — palettes.ts と二重定義だが循環回避のため)
 const _DARK: ColorPalette = {
@@ -84,10 +84,21 @@ export function applyThemeC(palette: ColorPalette): void {
   Object.assign(_C, palette);
 }
 
-// GRAD は dark 固定 (LinearGradient props の strict tuple type と相性悪く、
-// mutable 化すると大量の型エラー)。fadeBottom / fadeTop の bg 連動は諦め、
-// 主要 brand gradient (primary / warm / success / accent) は theme 非依存で
-// 統一感を維持する方が UX 上も自然。
+/**
+ * 現在のライブ palette がライトテーマかどうか。
+ * C は applyThemeC で破壊的にホットスワップされ、theme 変化時は tree が
+ * key remount される。よって render 時に _C.bg を見れば現テーマが分かる
+ * (hook を増やさずに「web の CSS gradient だけ theme 分岐」したい箇所で使う)。
+ */
+export function isLightActive(): boolean {
+  return _C.bg !== _DARK.bg;
+}
+
+// GRAD も C と同様に theme 連動で差し替える (applyThemeGRAD)。
+// 型は dark 既定の as const tuple で固定し (consumer は readonly tuple を維持)、
+// 実体配列だけを破壊的に差し替えることで「mutable 化で大量の型エラー」を回避する。
+// これで static `import { GRAD }` のロゴ / タブ / FAB 等もライトで自然な青に揃う。
+// storyRing / trust / goldBadge は theme 非依存なので据え置き。
 export const GRAD = {
   accent:      [_DARK.accent, _DARK.accentDeep] as const,
   accentSoft:  [_DARK.accentLight, _DARK.accent] as const,
@@ -104,6 +115,29 @@ export const GRAD = {
   glass:       ['rgba(124,106,247,0.15)', 'rgba(180,122,247,0.08)', 'rgba(0,0,0,0)'] as const,
   destructive: ['#F87A7A', '#F86B5A'] as const,
 } as const;
+
+/**
+ * brand gradient を theme に合わせて差し替える (C の applyThemeC と同方針)。
+ * 型は上の as const tuple のまま固定し、実体配列だけ破壊的に差し替えるので
+ * `colors={GRAD.primary}` の consumer は readonly tuple 型を維持できる。
+ * storyRing / trust / goldBadge は theme 非依存なので据え置き。
+ * _layout.tsx で applyThemeC と同じタイミングで呼ぶ + 全 tree を key remount。
+ */
+export function applyThemeGRAD(g: GradientPalette): void {
+  // 型は固定したまま実体だけ差し替えるため localized cast (unknown 経由)。
+  const m = GRAD as unknown as Record<string, readonly string[]>;
+  m.accent = g.accent;
+  m.accentSoft = g.accentSoft;
+  m.fadeBottom = g.fadeBottom;
+  m.fadeTop = g.fadeTop;
+  m.fadeBottomDark = g.fadeBottomDark;
+  m.primary = g.primary;
+  m.primarySoft = g.primarySoft;
+  m.warm = g.warm;
+  m.success = g.success;
+  m.glass = g.glass;
+  m.destructive = g.destructive;
+}
 
 export const SP = {
   '0': 0,

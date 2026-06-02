@@ -1,9 +1,10 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { View, Text, Platform, Dimensions, type ViewStyle } from 'react-native';
+import { View, Text, Platform, Dimensions, Pressable, StyleSheet, type ViewStyle } from 'react-native';
 import { PressableScale } from './PressableScale';
 import { Icon } from '../../constants/icons';
 import { R } from '../../design/tokens';
 import { T } from '../../design/typography';
+import { useVideoLightboxStore } from '../../stores/videoLightboxStore';
 
 // ============================================================
 // VideoPlayer — X / Instagram 風「ビューポート自動再生」プレイヤー
@@ -27,6 +28,11 @@ type Props = {
   shouldPlay?: boolean;
   /** 自動再生を無効化したい場合 false。default true (X / Instagram 風)。 */
   autoplay?: boolean;
+  /** タップで全画面ビューア (VideoLightbox) を開く。default true。
+   *  ミュート切替は右下バッジ側に集約する。lightbox 内の VideoPlayer は false で再帰展開を防ぐ。 */
+  expandable?: boolean;
+  /** 初期ミュート状態。default true (feed の muted 自動再生)。lightbox は false (音あり)。 */
+  initialMuted?: boolean;
 };
 
 const FRAME = {
@@ -37,22 +43,35 @@ const FRAME = {
   overflow: 'hidden' as const,
 };
 
-export function VideoPlayer({ uri, poster, style, shouldPlay, autoplay = true }: Props) {
+export function VideoPlayer({
+  uri,
+  poster,
+  style,
+  shouldPlay,
+  autoplay = true,
+  expandable = true,
+  initialMuted = true,
+}: Props) {
   if (Platform.OS === 'web') {
-    return <WebVideo uri={uri} poster={poster} style={style} shouldPlay={shouldPlay} autoplay={autoplay} />;
+    return <WebVideo uri={uri} poster={poster} style={style} shouldPlay={shouldPlay} autoplay={autoplay} expandable={expandable} initialMuted={initialMuted} />;
   }
-  return <NativeVideo uri={uri} poster={poster} style={style} shouldPlay={shouldPlay} autoplay={autoplay} />;
+  return <NativeVideo uri={uri} poster={poster} style={style} shouldPlay={shouldPlay} autoplay={autoplay} expandable={expandable} initialMuted={initialMuted} />;
 }
 
 // ============================================================
 // Web 経路 — <video> + IntersectionObserver
 // ============================================================
-function WebVideo({ uri, poster, style, shouldPlay, autoplay = true }: Props) {
+function WebVideo({ uri, poster, style, shouldPlay, autoplay = true, expandable = true, initialMuted = true }: Props) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const videoRef = useRef<any>(null);
-  const mutedRef = useRef(true);
-  const [muted, setMuted] = useState(true);
+  const mutedRef = useRef(initialMuted);
+  const [muted, setMuted] = useState(initialMuted);
   const [error, setError] = useState<string | null>(null);
+
+  // タップで全画面ビューア (VideoLightbox) を開く。expandable=false (lightbox 内) では使わない。
+  const onExpand = useCallback(() => {
+    useVideoLightboxStore.getState().open(uri, poster ?? null);
+  }, [uri, poster]);
 
   const applyMuted = useCallback((m: boolean) => {
     mutedRef.current = m;
@@ -63,8 +82,22 @@ function WebVideo({ uri, poster, style, shouldPlay, autoplay = true }: Props) {
   // ref は安定化 (毎 render で detach/attach されると再生が一瞬途切れる)
   const setVideoRef = useCallback((n: unknown) => {
     videoRef.current = n;
+    if (!n) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if (n) (n as any).muted = mutedRef.current;
+    const el = n as any;
+    el.muted = mutedRef.current;
+    // iOS Safari のインライン muted 自動再生を確実にするための保険:
+    //  - React は <video muted> の muted を「属性」に反映しない既知バグがあり、
+    //    iOS は属性/defaultMuted を見て自動再生可否を判定するため、DOM へ直接付与する。
+    //  - playsinline / webkit-playsinline が無いと iOS は全画面化 or 再生拒否する。
+    try {
+      el.defaultMuted = true;
+      el.setAttribute?.('muted', '');
+      el.setAttribute?.('playsinline', '');
+      el.setAttribute?.('webkit-playsinline', '');
+    } catch {
+      /* noop — 一部環境で setAttribute 不可でも致命ではない */
+    }
   }, []);
 
   // 明示 override (shouldPlay 指定時)
@@ -115,8 +148,8 @@ function WebVideo({ uri, poster, style, shouldPlay, autoplay = true }: Props) {
           loop: true,
           playsInline: true,
           preload: 'metadata',
-          // controls は出さず IG/X 風。tap で mute トグル。
-          onClick: () => applyMuted(!mutedRef.current),
+          // controls は出さず IG/X 風。tap = 全画面展開 (expandable 時)、ミュートは右下バッジ。
+          onClick: expandable ? onExpand : () => applyMuted(!mutedRef.current),
           style: {
             width: '100%',
             height: '100%',
@@ -136,10 +169,10 @@ function WebVideo({ uri, poster, style, shouldPlay, autoplay = true }: Props) {
 // ============================================================
 // Native 経路 — expo-av Video + measureInWindow 可視判定
 // ============================================================
-function NativeVideo({ uri, poster, style, shouldPlay, autoplay = true }: Props) {
+function NativeVideo({ uri, poster, style, shouldPlay, autoplay = true, expandable = true, initialMuted = true }: Props) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const containerRef = useRef<any>(null);
-  const [muted, setMuted] = useState(true);
+  const [muted, setMuted] = useState(initialMuted);
   const [error, setError] = useState<string | null>(null);
 
   // expo-av は native のみ。Web bundle に乗らないよう lazy require。
@@ -184,6 +217,15 @@ function NativeVideo({ uri, poster, style, shouldPlay, autoplay = true }: Props)
           setError(typeof e === 'string' ? e : '動画を読み込めませんでした');
         }}
       />
+      {/* タップで全画面ビューア。MuteBadge より前に置き、badge が上層でタップを拾えるようにする。 */}
+      {expandable && !error && (
+        <Pressable
+          onPress={() => useVideoLightboxStore.getState().open(uri, poster ?? null)}
+          style={StyleSheet.absoluteFill}
+          accessibilityRole="button"
+          accessibilityLabel="動画を全画面で開く"
+        />
+      )}
       {!error && <MuteBadge muted={muted} onPress={() => setMuted((m) => !m)} />}
       {error && <ErrorOverlay msg={error} />}
     </View>

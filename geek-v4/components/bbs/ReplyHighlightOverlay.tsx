@@ -109,7 +109,7 @@ export function ReplyHighlightOverlay({
     >
       <LinearGradient
         // 紫 → 透明 (左上から右下へ) — 「光が差した」風の演出
-        colors={[C.accentGlow, 'rgba(124,106,247,0.10)', 'rgba(124,106,247,0)']}
+        colors={[C.accentGlow, C.accent + '1A', C.accent + '00']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={StyleSheet.absoluteFillObject}

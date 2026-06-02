@@ -46,9 +46,9 @@ const TONE: Record<Exclude<AccountState, 'healthy'>, Tone> = {
   },
   // orange (amber と red の中間トーン) — 制限中
   restricted: {
-    bg: '#2a1810',
-    border: '#FB923C' + '55',
-    fg: '#FB923C',
+    bg: C.amberBg,
+    border: C.amber + '55',
+    fg: C.amber,
     badgeBg: 'rgba(251,146,60,0.18)',
   },
   // red — 停止予告
@@ -60,9 +60,9 @@ const TONE: Record<Exclude<AccountState, 'healthy'>, Tone> = {
   },
   // dark red — 停止
   suspended: {
-    bg: '#1a0606',
-    border: '#7f1d1d',
-    fg: '#FCA5A5',
+    bg: C.redBg,
+    border: C.red + '66',
+    fg: C.red,
     badgeBg: 'rgba(127,29,29,0.40)',
   },
 };

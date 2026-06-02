@@ -431,6 +431,7 @@ export default function CommunityDetailScreen() {
             <CompactSubscribeButton
               isMember={community.is_member}
               isRequestVisibility={community.visibility === 'request'}
+              hasPendingRequest={community.has_pending_request ?? false}
               loading={joining}
               onPress={onJoinLeave}
             />
@@ -526,14 +527,37 @@ export default function CommunityDetailScreen() {
 function CompactSubscribeButton({
   isMember,
   isRequestVisibility,
+  hasPendingRequest,
   loading,
   onPress,
 }: {
   isMember: boolean;
   isRequestVisibility: boolean;
+  hasPendingRequest: boolean;
   loading: boolean;
   onPress: () => void;
 }) {
+  // 申請中 (request 制で pending) — 承認待ちを明示し、二重申請を防ぐため非活性。
+  if (!isMember && hasPendingRequest) {
+    return (
+      <View
+        accessibilityLabel="参加申請中 — 承認待ちです"
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 4,
+          backgroundColor: C.accentBg,
+          borderRadius: R.full,
+          borderWidth: 1,
+          borderColor: C.accent,
+          paddingHorizontal: SP['3'],
+          paddingVertical: 6,
+        }}
+      >
+        <Text style={[T.smallM, { color: C.accent, fontWeight: '700' }]}>申請中</Text>
+      </View>
+    );
+  }
   if (isMember) {
     return (
       <PressableScale

@@ -12,8 +12,8 @@
 import { create } from 'zustand';
 import { useColorScheme as useRNColorScheme } from 'react-native';
 import { getString, setString } from '../storage';
-import { applyThemeC } from '../../design/tokens';
-import { PALETTE_DARK, PALETTE_LIGHT } from './palettes';
+import { applyThemeC, applyThemeGRAD } from '../../design/tokens';
+import { PALETTE_DARK, PALETTE_LIGHT, GRAD_DARK, GRAD_LIGHT } from './palettes';
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
@@ -83,10 +83,10 @@ export function useResolvedTheme(): ResolvedTheme {
  * key remount (例: <View key={theme}> で全 tree 再構築) も併用する。
  */
 export function syncStaticPaletteWithTheme(theme: ResolvedTheme): void {
-  const palette = theme === 'light' ? PALETTE_LIGHT : PALETTE_DARK;
-  applyThemeC(palette);
-  // GRAD は LinearGradient の strict tuple 型と相性悪く mutable 化を断念。
-  // brand 色 (primary / warm / success) は theme 非依存で OK、fadeBottom 等は
-  // dark 固定で残る (light モード時に bottom fade が黒寄りになる小さな違和感は
-  // 許容)。
+  const isLight = theme === 'light';
+  applyThemeC(isLight ? PALETTE_LIGHT : PALETTE_DARK);
+  // brand gradient も theme 連動で差し替える (light = 自然な青 / dark = 紫)。
+  // これで static `import { GRAD }` の consumer (ロゴ / タブ / FAB 等 約25箇所) も
+  // ライトモードで自然な青に揃い、「青UI + 紫グラデ」の混在を解消する。
+  applyThemeGRAD(isLight ? GRAD_LIGHT : GRAD_DARK);
 }

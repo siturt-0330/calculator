@@ -298,10 +298,10 @@ export default function PhotoDetailScreen() {
             zIndex: 100,
             borderRadius: R.lg,
             borderWidth: 1,
-            borderColor: 'rgba(255,255,255,0.14)',
+            borderColor: C.border,
             overflow: 'hidden',
             minWidth: 180,
-            backgroundColor: 'rgba(20,20,22,0.95)',
+            backgroundColor: C.bg2,
             ...SHADOW.md,
           }}
         >
@@ -319,7 +319,7 @@ export default function PhotoDetailScreen() {
             <Icon.edit size={16} color={C.text} strokeWidth={2.2} />
             <Text style={[T.smallM, { color: C.text }]}>編集</Text>
           </PressableScale>
-          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+          <View style={{ height: 1, backgroundColor: C.divider }} />
           <PressableScale
             onPress={() => {
               setMenuOpen(false);

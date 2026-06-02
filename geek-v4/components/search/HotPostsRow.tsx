@@ -17,6 +17,7 @@ import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { useColors } from '../../hooks/useColors';
 import { PressableScale } from '../ui/PressableScale';
+import { VideoPlayer } from '../ui/VideoPlayer';
 import { Icon } from '../../constants/icons';
 import { R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -161,6 +162,7 @@ function HotPostCard({ post, onPress }: { post: Post; onPress: () => void }) {
 
   // 動画判定: video_urls があるか、サムネが video_posters 由来
   const isVideo = (post.video_urls?.length ?? 0) > 0 || fromVideoPoster;
+  const videoUrl = post.video_urls?.[0] ?? null;
   const hasImage = !!thumbSource;
 
   // title = content 1 行目 (画像ありは 2 行 / 画像なしは 5 行まで表示)
@@ -188,9 +190,15 @@ function HotPostCard({ post, onPress }: { post: Post; onPress: () => void }) {
       ]}
       accessibilityLabel={`投稿を開く: ${title ?? ''}`}
     >
-      {/* 画像 banner (上) — cover crop。card の overflow:hidden で上角は自動で丸まる。
-          タイトルは下に置くので scrim は不要 (写真をクリーンに見せる)。 */}
-      {hasImage ? (
+      {/* メディア banner (上) — 動画は VideoPlayer で自動再生 (タップで全画面)、
+          画像は cover crop。card の overflow:hidden で上角は自動で丸まる。 */}
+      {isVideo && videoUrl ? (
+        <VideoPlayer
+          uri={videoUrl}
+          poster={firstMedia ?? undefined}
+          style={{ width: '100%', height: IMAGE_HEIGHT, borderRadius: 0 }}
+        />
+      ) : hasImage ? (
         <View
           style={{
             height: IMAGE_HEIGHT,
@@ -208,24 +216,6 @@ function HotPostCard({ post, onPress }: { post: Post; onPress: () => void }) {
             recyclingKey={firstMedia ?? undefined}
             onError={() => setThumbFailed(true)}
           />
-          {/* 動画なら ▶ 再生バッジ (右下) */}
-          {isVideo ? (
-            <View
-              style={{
-                position: 'absolute',
-                bottom: 8,
-                right: 8,
-                width: 30,
-                height: 30,
-                borderRadius: 15,
-                backgroundColor: 'rgba(0,0,0,0.55)',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Icon.play size={15} color="#fff" />
-            </View>
-          ) : null}
         </View>
       ) : null}
 

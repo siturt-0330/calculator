@@ -26,7 +26,7 @@ function hash32(s: string): number {
 }
 
 export type Pseudonym = {
-  /** 表示用ハンドル (例: "匿K7X2")。実名ではない。 */
+  /** 表示用ハンドル (例: "K7X2")。実名ではない。 */
   handle: string;
   /** アバター/アクセントに使う安定色 */
   color: string;
@@ -41,7 +41,7 @@ export function pseudonymFor(authorId: string | null | undefined): Pseudonym {
   const u = hash32(authorId);
   const token = u.toString(36).slice(0, 4).toUpperCase(); // 例 "K7X2"
   return {
-    handle: `匿${token}`,
+    handle: token,
     color: PALETTE[u % PALETTE.length] ?? PALETTE[0],
     initial: token.slice(0, 1) || '匿',
   };

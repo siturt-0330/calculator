@@ -44,7 +44,7 @@ import {
 import { useAuthStore } from '../../../stores/authStore';
 import { useToastStore } from '../../../stores/toastStore';
 import { Icon } from '../../../constants/icons';
-import { C, R, SP, SHADOW } from '../../../design/tokens';
+import { C, R, SP, SHADOW, isLightActive } from '../../../design/tokens';
 import { T } from '../../../design/typography';
 import { sanitizeUrl } from '../../../lib/sanitize';
 import { isValidUuid } from '../../../lib/validation';
@@ -231,7 +231,7 @@ export default function AlbumDetailScreen() {
             <Icon.edit size={16} color={C.text} strokeWidth={2.2} />
             <Text style={[T.smallM, { color: C.text }]}>アルバム編集</Text>
           </PressableScale>
-          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+          <View style={{ height: 1, backgroundColor: C.divider }} />
           <PressableScale
             onPress={() => {
               setMenuOpen(false);
@@ -523,18 +523,21 @@ function GlassMenu({
     zIndex: 100,
     borderRadius: R.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: C.border,
     overflow: 'hidden' as const,
     minWidth: 180,
     ...SHADOW.md,
   };
 
-  if (Platform.OS === 'web') {
+  // ライトテーマでは dark glass が白背景で沈むので、theme-aware な C.bg2 surface に切替。
+  const light = isLightActive();
+
+  if (Platform.OS === 'web' || light) {
     return (
       <View
         style={[
           containerStyle,
-          { backgroundColor: 'rgba(20,20,22,0.92)' },
+          { backgroundColor: C.bg2 },
         ]}
       >
         {children}

@@ -19,7 +19,13 @@ export function useReport() {
       notify(Haptics.NotificationFeedbackType.Success);
       show('通報しました。ご協力ありがとうございます。', 'success');
     },
-    onError: () => {
+    onError: (err: unknown) => {
+      // unique (reporter_id, post_id) 違反 = 既に通報済み (0036)。
+      const code = (err as { code?: string } | null)?.code;
+      if (code === '23505') {
+        show('この投稿は既に通報済みです。', 'info');
+        return;
+      }
       show('通報に失敗しました。', 'error');
     },
   });

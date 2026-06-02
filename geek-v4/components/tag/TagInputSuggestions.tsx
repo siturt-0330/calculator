@@ -103,9 +103,9 @@ export function TagInputSuggestions({
   if (trimmed.length < 1) return null;
   if (suggestions.length === 0 && !dymResult) return null;
 
-  const colorFor = variant === 'blocked' ? '#FF6B7A' : C.accent;
-  const bgFor    = variant === 'blocked' ? 'rgba(255,107,122,0.13)' : C.accentBg;
-  const borderFor= variant === 'blocked' ? 'rgba(255,107,122,0.4)' : C.accentSoft;
+  const colorFor = variant === 'blocked' ? C.red : C.accent;
+  const bgFor    = variant === 'blocked' ? C.redBg : C.accentBg;
+  const borderFor= variant === 'blocked' ? (C.red + '55') : C.accentSoft;
 
   return (
     <Animated.View

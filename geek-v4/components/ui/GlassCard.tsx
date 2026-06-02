@@ -24,7 +24,7 @@ export interface GlassCardProps extends ViewProps {
  *   "glass" の見た目を擬似的に作る。CSS の backdrop-filter を活かしたい
  *   呼び出し側は style に { backdropFilter: 'blur(20px)' } as any を足す手も
  *   あるが、any 禁止の lint を踏むのでここでは入れない。
- * - borderColor: 'rgba(255,255,255,0.1)' で 1px の細い縁取り
+ * - borderColor: C.glassBorder で 1px の細い縁取り (theme 追従)
  * - borderRadius: R.lg
  */
 export function GlassCard({
@@ -38,7 +38,7 @@ export function GlassCard({
     borderRadius: R.lg,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: C.glassBorder,
     padding: SP['4'],
   };
 
@@ -53,7 +53,7 @@ export function GlassCard({
               tint === 'light'
                 ? 'rgba(255,255,255,0.08)'
                 : tint === 'dark'
-                  ? 'rgba(0,0,0,0.45)'
+                  ? C.glassDark
                   : C.glass,
           },
           style,

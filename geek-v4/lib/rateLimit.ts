@@ -32,6 +32,11 @@ const limits: Record<string, { max: number; windowMs: number }> = {
   community_create: { max: 3, windowMs: 10 * 60 * 1000 },
   // 招待コード受諾: brute-force による invite code 総当たり防止
   friend_invite_accept: { max: 5, windowMs: 60 * 1000 },
+  // 認証: brute-force / credential-stuffing / spam-account の抑止。
+  // 在メモリ (再起動で reset) なので server-side 制限との多層防御の一段目。
+  login:          { max: 8,  windowMs: 5 * 60 * 1000 },
+  signup:         { max: 5,  windowMs: 10 * 60 * 1000 },
+  password_reset: { max: 5,  windowMs: 10 * 60 * 1000 },
 };
 
 const state = new Map<string, Window>();
@@ -75,6 +80,7 @@ export function rateLimitMessage(action: keyof typeof limits, retryAfterMs: numb
     tag_add: 'タグ追加', custom_stamp: 'カスタムスタンプ作成',
     bookmark: 'ブックマーク', feedback: 'フィードバック',
     friend_invite_accept: '招待コードの受諾',
+    login: 'ログイン', signup: 'アカウント登録', password_reset: 'パスワード再設定',
   };
   const name = labels[action] ?? action;
   if (sec > 60) {

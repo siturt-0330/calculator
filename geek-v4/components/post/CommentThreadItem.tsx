@@ -33,6 +33,12 @@ import { SPRING_SNAPPY } from '../../design/motion';
 import type { Comment } from '../../types/models';
 import { MemeReactionPicker } from '../feed/MemeReactionPicker';
 import type { ReactionsByComment, ReactionAgg } from '../../lib/api/commentReactions';
+import { Image as ExpoImage } from 'expo-image';
+import { VideoPlayer } from '../ui/VideoPlayer';
+import { thumbedUrl } from '../../lib/utils/imageUrl';
+
+// コメント添付メディア (migration 0104) の動画判定 — 拡張子ベース。それ以外は画像。
+const COMMENT_VIDEO_EXT_RE = /\.(mp4|mov|webm|m4v)(\?|#|$)/i;
 
 // ============================================================
 // CommentThreadItem — 階層コメントを再帰的に描画する component (GEEK-Rail)
@@ -529,6 +535,26 @@ export function CommentThreadItem({
                 </Animated.Text>
               )}
             </View>
+
+            {/* ②.5 添付メディア (migration 0104) — 画像 / 動画 */}
+            {Array.isArray(comment.media_urls) && comment.media_urls.length > 0 && (
+              <View style={{ marginTop: SP['2'], gap: SP['2'] }}>
+                {comment.media_urls.map((url) =>
+                  COMMENT_VIDEO_EXT_RE.test(url) ? (
+                    <VideoPlayer key={url} uri={url} style={{ borderRadius: R.md }} />
+                  ) : (
+                    <ExpoImage
+                      key={url}
+                      source={{ uri: thumbedUrl(url, 720) }}
+                      style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: R.md, backgroundColor: C.bg3 }}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                      transition={120}
+                    />
+                  ),
+                )}
+              </View>
+            )}
 
             {/* ③ 反応 + アクション行 (Threads 風) */}
             <View

@@ -91,16 +91,16 @@ export default function LanguageOnboarding() {
         {lang !== 'ja' && (
           <View style={{
             padding: SP['4'],
-            backgroundColor: 'rgba(124,177,255,0.13)',
+            backgroundColor: C.accentBg,
             borderRadius: R.lg,
             borderWidth: 1,
-            borderColor: 'rgba(124,177,255,0.4)',
+            borderColor: C.accentLight,
             gap: SP['3'],
           }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
               <Text style={{ fontSize: 22 }}>🤖</Text>
               <View style={{ flex: 1 }}>
-                <Text style={[T.bodyMd, { color: '#7CB1FF', fontWeight: '700' }]}>
+                <Text style={[T.bodyMd, { color: C.accent, fontWeight: '700' }]}>
                   Auto-translate posts
                 </Text>
                 <Text style={[T.caption, { color: C.text2 }]}>
@@ -115,11 +115,11 @@ export default function LanguageOnboarding() {
                 style={{
                   flex: 1,
                   paddingVertical: SP['2'],
-                  backgroundColor: autoTranslate ? '#7CB1FF' : C.bg3,
+                  backgroundColor: autoTranslate ? C.accent : C.bg3,
                   borderRadius: R.md,
                   alignItems: 'center',
                   borderWidth: 1,
-                  borderColor: autoTranslate ? '#7CB1FF' : C.border,
+                  borderColor: autoTranslate ? C.accent : C.border,
                 }}
               >
                 <Text style={{ fontSize: 13, fontWeight: '700', color: autoTranslate ? '#fff' : C.text2 }}>

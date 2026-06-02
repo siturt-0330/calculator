@@ -156,7 +156,7 @@ export function SearchBar({
           // outside the container (RN `shadow*` props don't paint on web
           // for non-iOS shadow stacks).
           Platform.OS === 'web' && focused && !reduceMotion
-            ? ({ boxShadow: '0 0 0 4px rgba(124,106,247,0.18)' } as object)
+            ? ({ boxShadow: '0 0 0 4px ' + C.accent + '2E' } as object)
             : null,
         ]}
       >

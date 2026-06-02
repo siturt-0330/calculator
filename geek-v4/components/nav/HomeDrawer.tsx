@@ -45,6 +45,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import {
   PenLine,
+  X,
   FileText,
   UserPlus2,
   Clock,
@@ -336,6 +337,35 @@ export const HomeDrawer = memo(function HomeDrawer({
             }}
             showsVerticalScrollIndicator={false}
           >
+            {/* 閉じる × — マウス環境 (スワイプ不可) や狭い PC 窓でも必ず閉じられる導線 */}
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'flex-end',
+                paddingHorizontal: SP['4'],
+                paddingBottom: SP['2'],
+              }}
+            >
+              <PressableScale
+                onPress={handleBackdropTap}
+                haptic="tap"
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="メニューを閉じる"
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: R.full,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: C.glass,
+                  borderWidth: 1,
+                  borderColor: C.glassBorder,
+                }}
+              >
+                <X size={20} color={C.text} strokeWidth={2.2} />
+              </PressableScale>
+            </View>
             {/* ===== Header (avatar + name + handle + counts + edit) ===== */}
             <View style={{ paddingHorizontal: SP['4'], paddingBottom: SP['4'] }}>
               <View

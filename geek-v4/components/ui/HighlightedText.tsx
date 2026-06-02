@@ -9,7 +9,7 @@ export function HighlightedText({
   numberOfLines,
   style,
   highlightColor = C.accent,
-  highlightBg = 'rgba(124,106,247,0.2)',
+  highlightBg = C.accentSoft,
 }: {
   text: string;
   terms: string[];
