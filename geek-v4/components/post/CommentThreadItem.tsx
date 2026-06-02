@@ -21,6 +21,8 @@ import { getDisplayCommentLikes } from '../../lib/utils/commentDisplay';
 import { ObsidianSaveButton } from '../ui/ObsidianSaveButton';
 import { commentToObsidianNote } from '../../hooks/useObsidian';
 import { Icon } from '../../constants/icons';
+import { useRouter } from 'expo-router';
+import { pseudonymFor } from '../../lib/utils/pseudonym';
 import { COMMENT_MAX_DEPTH } from '../../lib/utils/commentTree';
 import { ModActionMenu } from '../community/ModActionMenu';
 import { useIsCommunityMod } from '../../hooks/useIsCommunityMod';
@@ -29,6 +31,8 @@ import { useColors } from '../../hooks/useColors';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { SPRING_SNAPPY } from '../../design/motion';
 import type { Comment } from '../../types/models';
+import { MemeReactionPicker } from '../feed/MemeReactionPicker';
+import type { ReactionsByComment, ReactionAgg } from '../../lib/api/commentReactions';
 
 // ============================================================
 // CommentThreadItem — 階層コメントを再帰的に描画する component (GEEK-Rail)
@@ -114,6 +118,9 @@ export type CommentThreadItemProps = {
   // を渡してくる想定。null なら ModActionMenu は出ない。
   parentCommunityId?: string | null;
   onReply?: (comment: Comment) => void;
+  // コメントのテキストスタンプ反応 (comment_reactions)。post/[id] 側で配線する。
+  reactionsByComment?: ReactionsByComment;
+  onReact?: (commentId: string, meme: string) => void;
 };
 
 // 内部用の private 型 — 公開 CommentThreadItemProps は 1 文字も変えない。
@@ -211,6 +218,8 @@ export function CommentThreadItem({
   postId,
   parentCommunityId,
   onReply,
+  reactionsByComment,
+  onReact,
   _isLastChild = false,
 }: InternalProps) {
   const qc = useQueryClient();
@@ -221,6 +230,12 @@ export function CommentThreadItem({
   const currentUserId = useAuthStore((s) => s.user?.id);
   const commentAuthorId = (comment as Comment & { author_id?: string }).author_id;
   const isOwnComment = !!commentAuthorId && commentAuthorId === currentUserId;
+  // 匿名のまま「同じ人」を識別できる擬似名 (実名は出さない)。タップで擬似プロフィールへ。
+  const router = useRouter();
+  const pseudo = pseudonymFor(commentAuthorId);
+  const goToProfile = () => {
+    if (commentAuthorId) router.push(`/user/${commentAuthorId}` as never);
+  };
   const depth = Math.min(COMMENT_MAX_DEPTH, comment.depth ?? 0);
   const children = comment.children ?? [];
   // depth>0 のノードだけレール列 (縦線 + エルボー) を描く。
@@ -245,6 +260,18 @@ export function CommentThreadItem({
     if (raw.length <= COLLAPSED_SNIPPET_MAX) return raw;
     return raw.slice(0, COLLAPSED_SNIPPET_MAX) + '…';
   }, [comment.content]);
+
+  // テキストスタンプ反応 (Threads 風の反応行)。reactionsByComment から自分の comment 分を引く。
+  const myReactions = useMemo<ReactionAgg[]>(
+    () => reactionsByComment?.[comment.id] ?? [],
+    [reactionsByComment, comment.id],
+  );
+  const pickedMemes = useMemo(
+    () => myReactions.filter((r) => r.mine).map((r) => r.meme),
+    [myReactions],
+  );
+  const topReactions = myReactions.slice(0, 3);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   // ============================================================
   // shared values — 全て worklet 側で動かす。state を持たないので 100+ 行でも軽い。
@@ -370,12 +397,20 @@ export function CommentThreadItem({
           }}
         >
           <Animated.View style={[{ width: AV, alignItems: 'center', gap: 2 }, avatarAnimStyle]}>
-            <Avatar
-              size={AV}
-              color={comment.avatar_color}
-              name={String(rootIndex)}
-              ring={unread ? 'accent' : 'none'}
-            />
+            <PressableScale
+              onPress={goToProfile}
+              disabled={!commentAuthorId}
+              hitSlop={4}
+              accessibilityRole="button"
+              accessibilityLabel={`${pseudo.handle} のプロフィールを開く`}
+            >
+              <Avatar
+                size={AV}
+                color={pseudo.color}
+                name={pseudo.initial}
+                ring={unread ? 'accent' : 'none'}
+              />
+            </PressableScale>
             <View
               style={{
                 paddingHorizontal: 4,
@@ -403,8 +438,20 @@ export function CommentThreadItem({
                 flexWrap: 'wrap',
               }}
             >
+              {/* 擬似名ハンドル (実名ではない・タップで擬似プロフィール) */}
+              <PressableScale
+                onPress={goToProfile}
+                disabled={!commentAuthorId}
+                hitSlop={4}
+                accessibilityRole="button"
+                accessibilityLabel={`${pseudo.handle} のプロフィールを開く`}
+              >
+                <Text style={{ fontSize: 12, color: pseudo.color, fontWeight: '700' }}>
+                  {pseudo.handle}
+                </Text>
+              </PressableScale>
               <Text style={[T.caption, { color: C.text3 }]}>
-                {formatRelative(comment.created_at)}
+                · {formatRelative(comment.created_at)}
               </Text>
               {likesRaw !== undefined && (
                 // 読み取り専用のいいね件数。heart アイコン化しない / 塗りも足さない。
@@ -483,15 +530,72 @@ export function CommentThreadItem({
               )}
             </View>
 
-            {/* ③ アクション行 */}
+            {/* ③ 反応 + アクション行 (Threads 風) */}
             <View
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
+                flexWrap: 'wrap',
                 gap: SP['2'],
                 marginTop: 6,
               }}
             >
+              {/* テキストスタンプ反応の chip (上位3件・tap でトグル) */}
+              {topReactions.map((r) => (
+                <PressableScale
+                  key={r.meme}
+                  onPress={() => onReact?.(comment.id, r.meme)}
+                  disabled={!onReact}
+                  haptic="tap"
+                  hitSlop={4}
+                  accessibilityLabel={`スタンプ ${r.meme}${r.mine ? ' 選択中' : ''} ${r.count}件`}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    paddingHorizontal: SP['2'],
+                    paddingVertical: 3,
+                    borderRadius: R.full,
+                    backgroundColor: r.mine ? C.accentBg : C.bg3,
+                    borderWidth: 1,
+                    borderColor: r.mine ? C.accent : 'transparent',
+                  }}
+                >
+                  <Text style={{ fontSize: 11, color: r.mine ? C.accent : C.text2, fontWeight: '700' }}>
+                    {r.meme}
+                  </Text>
+                  {r.count > 1 && (
+                    <Text style={{ fontSize: 11, color: r.mine ? C.accent : C.text3, fontWeight: '700' }}>
+                      {r.count}
+                    </Text>
+                  )}
+                </PressableScale>
+              ))}
+
+              {/* スタンプで反応 (ピッカーを開く) */}
+              {onReact && (
+                <PressableScale
+                  onPress={() => setPickerOpen(true)}
+                  haptic="tap"
+                  hitSlop={6}
+                  accessibilityLabel="スタンプで反応する"
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 3,
+                    paddingHorizontal: SP['2'],
+                    paddingVertical: 3,
+                    borderRadius: R.full,
+                    backgroundColor: C.bg3,
+                  }}
+                >
+                  <Icon.sparkles size={12} color={C.text2} strokeWidth={2.2} />
+                  {topReactions.length === 0 && (
+                    <Text style={{ fontSize: 11, color: C.text2, fontWeight: '700' }}>反応</Text>
+                  )}
+                </PressableScale>
+              )}
+
               {onReply && depth < COMMENT_MAX_DEPTH && (
                 <PressableScale
                   onPress={() => onReply(comment)}
@@ -503,7 +607,7 @@ export function CommentThreadItem({
                     alignItems: 'center',
                     gap: 4,
                     paddingHorizontal: SP['2'],
-                    paddingVertical: 4,
+                    paddingVertical: 3,
                     borderRadius: R.full,
                     backgroundColor: C.bg3,
                   }}
@@ -577,10 +681,23 @@ export function CommentThreadItem({
               postId={postId}
               parentCommunityId={parentCommunityId}
               onReply={onReply}
+              reactionsByComment={reactionsByComment}
+              onReact={onReact}
               _isLastChild={i === children.length - 1}
             />
           ))}
         </Animated.View>
+      )}
+
+      {/* スタンプピッカー (このコメント専用・反応行の「反応」/chip から開く) */}
+      {onReact && (
+        <MemeReactionPicker
+          visible={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          onPick={(meme) => onReact(comment.id, meme)}
+          picked={pickedMemes}
+          reactions={myReactions}
+        />
       )}
     </View>
   );
