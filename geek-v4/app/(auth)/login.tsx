@@ -13,6 +13,7 @@ import { PressableScale } from '../../components/ui/PressableScale';
 import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
+import { checkRate, rateLimitMessage } from '../../lib/rateLimit';
 import { useT } from '../../hooks/useT';
 import { Icon } from '../../constants/icons';
 
@@ -80,26 +81,17 @@ export default function LoginScreen() {
       setLoading(false);
     }
     if (result.error) {
-      // アカウント停止系 — buildUser + signIn 側で文字列をそのまま返してる
-      if (result.error.includes('利用停止') || result.error.includes('制限中')) {
-        show(result.error, 'error');
-      } else if (result.error.includes('Invalid login credentials')) {
+      // signIn 側で error.code により分類済 + 文言は日本語に一般化済 (PII 漏れ無し)。
+      // ここでは code に応じてバナー/トーストを出し分けるだけ。
+      if (result.code === 'invalid_credentials') {
         setCredErrorBanner(true);
-        show('メールアドレスまたはパスワードが違います。', 'warn');
-      } else if (result.error.includes('Email not confirmed') || result.error.includes('confirm')) {
+        show(result.error, 'warn');
+      } else if (result.code === 'email_not_confirmed') {
         setNeedsConfirmBanner(true);
-        show('確認メールのリンクをクリックしてからログインしてください。', 'error');
-      } else if (result.error.includes('Too many') || result.error.includes('rate')) {
-        show('短時間に試行しすぎました。少し待ってから再度お試しください。', 'warn');
-      } else if (result.error.includes('network') || result.error.includes('Network') || result.error.includes('ネットワーク')) {
-        show('ネットワークエラー。接続を確認してください。', 'error');
+        show(result.error, 'error');
       } else {
-        // ★ 旧コードは raw `result.error` を UI に表示 → Supabase が返す未来の
-        // メッセージ次第で PII (email 等) が画面に出るリスクがあった。
-        // ユーザー向けは一般メッセージに固定し、詳細は console.warn でのみ残す
-        // (Sentry breadcrumb に乗る — beforeSend で redact 済み)。
-        console.warn('[login] unhandled signIn error:', result.error);
-        show('ログインに失敗しました。しばらくしてからもう一度お試しください。', 'error');
+        // rate_limited / network / unknown / レート制限 — 既に日本語の安全な文言
+        show(result.error, 'error');
       }
       return;
     }
@@ -118,20 +110,33 @@ export default function LoginScreen() {
       show('メールアドレスを入力してください。', 'warn');
       return;
     }
+    if (!online) {
+      show('オフラインです。インターネット接続を確認してください。', 'error');
+      return;
+    }
+    const rl = checkRate('password_reset');
+    if (!rl.ok) {
+      show(rateLimitMessage('password_reset', rl.retryAfterMs), 'warn');
+      return;
+    }
     setResending(true);
+    let networkFailed = false;
     try {
       const { error } = await supabase.auth.resend({ type: 'signup', email: e });
-      if (error) {
-        // 旧: raw error.message を表示 → PII risk。ユーザー向け一般化、詳細は console。
-        console.warn('[login] resend confirmation failed:', error.message);
-        show('再送信に失敗しました。少し待ってからもう一度お試しください。', 'error');
-      } else {
-        show('確認メールを再送しました。受信箱を確認してください。', 'success');
-      }
+      if (error) console.warn('[login] resend confirmation failed:', error.message);
     } catch (err) {
-      show('再送信に失敗しました。少し時間を置いてください。', 'error');
+      networkFailed = true;
+      console.warn('[login] resend confirmation threw:', err);
     } finally {
       setResending(false);
+      if (networkFailed) {
+        // 通信失敗は端末側の問題でアカウント有無を漏らさない → ネットワークエラーを明示
+        // (旧実装は finally で常に「再送しました」を出し、オフラインでも成功と誤表示していた)
+        show('再送信に失敗しました。回線を確認してください。', 'error');
+      } else {
+        // enumeration 回避: アカウント有無に関わらず中立メッセージ
+        show('登録済みで未確認の場合は、確認メールを再送しました。受信箱をご確認ください。', 'info');
+      }
     }
   };
 
@@ -288,8 +293,8 @@ export default function LoginScreen() {
             onSubmitEditing={handleLogin}
             keyboardAppearance="dark"
             selectionColor={C.accent}
-            // bcrypt 上限 72 文字 + 余裕 (memory DoS 対策)
-            maxLength={128}
+            // bcrypt 上限 = 72 byte。事前 reject (>72) と入力上限を一致させる
+            maxLength={72}
             right={
               <PressableScale
                 onPress={() => setShowPass((v) => !v)}

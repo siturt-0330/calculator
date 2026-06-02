@@ -155,8 +155,8 @@ export const PALETTE_DARK: ColorPalette = {
 // 設計指針:
 //   - bg は純白 (#fff) ではなく僅かに灰色寄り (#fafafa) — 純白は眩しすぎ
 //   - text は #1a1a1a (純黒 #000 はコントラスト過剰)
-//   - accent は light 専用で「青 + 水色」系。F5 で blue+cyan に統一済み。
-//     白背景に同じ #3B82F6 だとコントラスト不足のため light は深め (#2563EB)。
+//   - accent は light 専用で「自然な青」(彩度控えめ)。鮮やかな blue/cyan は白背景で
+//     浮くため、落ち着いた青 (#3E6DA3) を採用 (旧: 鮮やかな #2563EB + 水色 cyan)。
 //   - 警告色 (red/amber/green) は WCAG AA を満たす濃いめの色を選択
 //   - glass は黒 base に変更 (白背景に rgba(255,255,255,*) は見えない)
 // ============================================================
@@ -182,12 +182,12 @@ export const PALETTE_LIGHT: ColorPalette = {
   border2: '#d4d4d8',
   divider: '#ececef',
 
-  accent: '#2563EB',   // blue-600 — 白背景でコントラスト十分かつ過剰でない
-  accentDeep: '#1D4ED8', // blue-700
-  accentLight: '#60A5FA', // blue-400
-  accentSoft: '#E0F2FE',  // sky-100 — 水色寄りの薄い背景
-  accentGlow: 'rgba(37,99,235,0.25)',
-  accentBg: '#EFF6FF',    // blue-50
+  accent: '#3E6DA3',   // 自然な青 — 鮮やかな blue-600 をやめ彩度を落とした落ち着いた青 (白で 5.3:1)
+  accentDeep: '#2F5784', // 押下/グラデ終端用の深い青
+  accentLight: '#7FA3CE', // 淡い自然な青 (装飾/枠線用)
+  accentSoft: '#E8EFF7',  // ごく薄い青グレーの背景 (水色寄りの sky をやめた)
+  accentGlow: 'rgba(62,109,163,0.22)',
+  accentBg: '#EEF3F9',    // 控えめな青グレー背景
 
   green: '#059669',
   greenBg: '#ECFDF5',
@@ -197,15 +197,15 @@ export const PALETTE_LIGHT: ColorPalette = {
   redBg: '#FEE2E2',
   pink: '#DB2777',
   pinkBg: '#FCE7F3',
-  blue: '#2563EB',
-  blueBg: '#DBEAFE',
+  blue: '#3E6DA3',
+  blueBg: '#E8EFF7',
 
   block: '#B91C1C',
   blockBg: '#FEE2E2',
   blockBorder: '#FECACA',
 
-  liked: '#2563EB',
-  likedBg: '#EFF6FF',
+  liked: '#3E6DA3',
+  likedBg: '#EEF3F9',
 
   related: '#15803D',
   relatedBg: '#ECFDF5',
@@ -267,14 +267,14 @@ export const GRAD_LIGHT: GradientPalette = {
   fadeBottom: ['rgba(255,255,255,0)', PALETTE_LIGHT.bg] as const,
   fadeTop: [PALETTE_LIGHT.bg, 'rgba(255,255,255,0)'] as const,
   fadeBottomDark: ['rgba(255,255,255,0)', 'rgba(255,255,255,0.95)'] as const,
-  // light 専用 brand grad は「青 → 水色」(dark は紫→桃)。
-  // 白背景で紫+ピンクは違和感があるため、爽やかな blue-cyan に統一。
-  primary: ['#2563EB', '#0EA5E9', '#22D3EE'] as const, // blue-600 → sky-500 → cyan-400
-  primarySoft: ['#2563EB', '#06B6D4'] as const,        // blue-600 → cyan-500
-  // CTA 強調も「青系」で統一 (dark の warm はピンク→オレンジだが light は scrap)
-  warm: ['#0EA5E9', '#22D3EE'] as const,               // sky-500 → cyan-400
+  // light 専用 brand grad は「自然な青」で統一 (鮮やかな cyan/sky をやめた)。
+  // 白背景で電飾的な blue-cyan は浮くため、彩度を抑えた青の濃淡にする。
+  primary: ['#3E6DA3', '#5288B9', '#6FA3CC'] as const, // 自然な青の濃淡
+  primarySoft: ['#3E6DA3', '#5A8BC0'] as const,        // 落ち着いた青
+  // CTA 強調も同じ自然な青系で統一
+  warm: ['#4E84B8', '#7FA3CE'] as const,               // やわらかい青
   success: ['#3DBE88', '#3DAEBA'] as const,
-  glass: ['rgba(37,99,235,0.10)', 'rgba(14,165,233,0.06)', 'rgba(0,0,0,0)'] as const,
+  glass: ['rgba(62,109,163,0.10)', 'rgba(62,109,163,0.05)', 'rgba(0,0,0,0)'] as const,
   destructive: ['#E55B5B', '#E0533F'] as const,
 };
 
@@ -391,14 +391,14 @@ export const SHADOW_LIGHT: ShadowSet = {
     elevation: 4,
   },
   accentGlow: {
-    shadowColor: '#2563EB',
+    shadowColor: '#3E6DA3',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.20,
     shadowRadius: 14,
     elevation: 3,
   },
   glow: {
-    shadowColor: '#2563EB',
+    shadowColor: '#3E6DA3',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.18,
     shadowRadius: 16,

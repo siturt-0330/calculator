@@ -20,16 +20,22 @@ import { useQuery } from '@tanstack/react-query';
 import { useColors } from '../../hooks/useColors';
 import { useAuthStore } from '../../stores/authStore';
 import { PressableScale } from '../ui/PressableScale';
+import { VideoPlayer } from '../ui/VideoPlayer';
 import { Icon } from '../../constants/icons';
 import { R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { fetchPosts } from '../../lib/api/posts';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
+import { getEvents, computeProfile, computePostScore, diversifyFeed } from '../../lib/personalize';
+import type { FeedEvent } from '../../lib/personalize';
+import { deepNormalize } from '../../lib/search/tokenize';
 import type { Post } from '../../types/models';
 
 const COLUMNS = 2;
 const ROWS = 3;
 const LIMIT = COLUMNS * ROWS;
+// 個人化再ランク用に広めの候補プールを取得（hot 上位の素並びと差別化する余白）
+const POOL = 24;
 const GAP = SP['2']; // 8px
 
 export function ForYouShelf() {
@@ -37,28 +43,77 @@ export function ForYouShelf() {
   const router = useRouter();
   const { width: screenWidth } = useWindowDimensions();
   const userId = useAuthStore((s) => s.user?.id ?? null);
+  const userCreatedAt = useAuthStore((s) => s.user?.created_at);
 
   // 親 padding は paddingHorizontal: SP['4'] (16) を想定
   const cardWidth = Math.floor(
     (screenWidth - SP['4'] * 2 - GAP * (COLUMNS - 1)) / COLUMNS,
   );
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['for-you-shelf', userId, LIMIT],
+  // 候補プール: hot 候補を広め (POOL) に取得し、下でローカルの興味プロフィールで再ランクする。
+  const { data: pool, isLoading } = useQuery({
+    queryKey: ['for-you-shelf-pool', userId, POOL],
     queryFn: async () => {
       if (!userId) return [] as Post[];
       const r = await fetchPosts({
         sort: 'for-you',
         likedTags: [],
         blockedTags: [],
-        limit: LIMIT,
+        limit: POOL,
         home: true,
       });
-      return r.posts.slice(0, LIMIT);
+      return r.posts;
     },
     enabled: !!userId,
     staleTime: 60_000,
   });
+
+  // 端末ローカルのイベントログ → 興味プロフィール（フィードと同じ ['feed-events'] キャッシュを共有）
+  const { data: events } = useQuery<FeedEvent[]>({
+    queryKey: ['feed-events'],
+    queryFn: () => getEvents(),
+    staleTime: 30_000,
+    enabled: !!userId,
+  });
+
+  // アカウント作成日からの日数（新規ユーザーの探索ノイズ用）。Date.now() は memo 内で。
+  const myAccountAgeDays = useMemo(() => {
+    if (!userCreatedAt) return 0;
+    const t = new Date(userCreatedAt).getTime();
+    if (!Number.isFinite(t)) return 0;
+    return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+  }, [userCreatedAt]);
+
+  // ★ 本物のパーソナライズ:
+  //   フィードの Phase-3 再ランク (computePostScore=タグ親和性+エンゲージメント+時間減衰,
+  //   diversifyFeed=同 author/同タグ連続の抑制) をそのまま共有して候補プールを再並び替え。
+  //   これで「いま盛り上がっている(hot)」の素の並びと別物になる。
+  const posts = useMemo<Post[]>(() => {
+    const candidates = pool ?? [];
+    if (candidates.length === 0) return [];
+    const profile = computeProfile(events ?? []);
+    const userLikedTagsFreq = new Map<string, number>(Object.entries(profile.tagAffinity));
+    const globalTagFreq = new Map<string, number>();
+    for (const p of candidates) {
+      for (const t of p.tag_names ?? []) {
+        const n = deepNormalize(t);
+        if (n) globalTagFreq.set(n, (globalTagFreq.get(n) ?? 0) + 1);
+      }
+    }
+    const now = new Date();
+    const scored = candidates.map((p) => ({
+      post: p,
+      score: computePostScore({
+        post: p,
+        userLikedTagsFreq,
+        globalTagFreq,
+        now,
+        myAccountAgeDays,
+        totalPosts: candidates.length,
+      }),
+    }));
+    return diversifyFeed(scored, 2).slice(0, LIMIT);
+  }, [pool, events, myAccountAgeDays]);
 
   // 未ログイン → 描画しない (親はこの section の高さを 0 で扱える)
   if (!userId) return null;
@@ -96,7 +151,6 @@ export function ForYouShelf() {
     );
   }
 
-  const posts = data ?? [];
   if (posts.length === 0) return null;
 
   return (
@@ -179,6 +233,12 @@ function ForYouCard({
     [firstMedia, thumb, thumbFailed],
   );
 
+  // 動画は VideoPlayer で自動再生 (タップで全画面)。poster は静止画 or video_posters。
+  const isVideo = (post.video_urls?.length ?? 0) > 0;
+  const videoUrl = post.video_urls?.[0] ?? null;
+  const posterUrl = post.media_urls?.[0] ?? post.video_posters?.[0] ?? undefined;
+  const hasMedia = !!thumbSource || (isVideo && !!videoUrl);
+
   const title = useMemo(() => {
     const firstLine = (post.content ?? '').split('\n')[0]?.trim() ?? '';
     return firstLine.length > 0 ? firstLine.slice(0, 60) : '';
@@ -210,7 +270,13 @@ function ForYouCard({
       accessibilityLabel={`投稿を開く: ${title}`}
     >
       {/* サムネ — 上部に小さめ固定高さ (カードの約半分) で。タイトルを潰さない。 */}
-      {thumbSource ? (
+      {isVideo && videoUrl ? (
+        <VideoPlayer
+          uri={videoUrl}
+          poster={posterUrl}
+          style={{ width: '100%', height: thumbH, borderRadius: 0 }}
+        />
+      ) : thumbSource ? (
         <View style={{ height: thumbH, backgroundColor: C.bg3 }}>
           <ExpoImage
             source={thumbSource}
@@ -231,12 +297,12 @@ function ForYouCard({
           paddingTop: SP['2'],
           paddingBottom: 6,
           flex: 1,
-          justifyContent: thumbSource ? 'flex-start' : 'center',
+          justifyContent: hasMedia ? 'flex-start' : 'center',
         }}
       >
         <Text
           style={[T.smallB, { color: C.text }]}
-          numberOfLines={thumbSource ? 3 : 4}
+          numberOfLines={hasMedia ? 3 : 4}
         >
           {title}
         </Text>

@@ -870,9 +870,9 @@ function ThreadRow({
         style={{
           flexDirection: 'row',
           borderRadius: R.lg,
-          backgroundColor: isHot ? 'rgba(248,122,180,0.06)' : 'rgba(255,255,255,0.04)',
+          backgroundColor: isHot ? 'rgba(248,122,180,0.06)' : themeC.glass,
           borderWidth: 1,
-          borderColor: isHot ? 'rgba(248,122,180,0.22)' : 'rgba(255,255,255,0.08)',
+          borderColor: isHot ? 'rgba(248,122,180,0.22)' : themeC.glassBorder,
           overflow: 'hidden',
           ...(isHot ? SHADOW.sm : SHADOW.xs),
         }}

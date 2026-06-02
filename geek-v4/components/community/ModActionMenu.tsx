@@ -82,9 +82,14 @@ export type ModActionMenuProps = {
 // import 戻り値を unknown 経由でガードする。
 
 type CommunityModsApi = {
-  deletePostAsMod?: (args: { postId: string; communityId: string; reason: string }) => Promise<unknown>;
-  deleteCommentAsMod?: (args: { commentId: string; communityId: string; reason: string }) => Promise<unknown>;
-  deleteBBSReplyAsMod?: (args: { replyId: string; communityId: string; reason: string }) => Promise<unknown>;
+  // ★ 実体 (lib/api/communityMods.ts) は **位置引数** (id, reason?) で受ける。
+  //   community_id は各関数が内部で post_communities から逆引きするので渡さない。
+  //   (旧型は object 引数 { postId, communityId, reason } を宣言していたため、
+  //    実際の呼び出しで object が第 1 引数 postId に渡り assertUuid が必ず throw
+  //    → mod 削除が常に失敗するバグになっていた。)
+  deletePostAsMod?: (postId: string, reason?: string) => Promise<unknown>;
+  deleteCommentAsMod?: (commentId: string, reason?: string) => Promise<unknown>;
+  deleteBBSReplyAsMod?: (replyId: string, reason?: string) => Promise<unknown>;
   kickMember?: (communityId: string, userId: string, reason: string) => Promise<unknown>;
   banMember?: (communityId: string, userId: string, reason: string) => Promise<unknown>;
 };
@@ -190,13 +195,13 @@ export function ModActionMenu({
       if (action === 'delete') {
         if (target.kind === 'post') {
           if (!api?.deletePostAsMod) return runFallback();
-          await api.deletePostAsMod({ postId: target.postId, communityId, reason });
+          await api.deletePostAsMod(target.postId, reason);
         } else if (target.kind === 'comment') {
           if (!api?.deleteCommentAsMod) return runFallback();
-          await api.deleteCommentAsMod({ commentId: target.commentId, communityId, reason });
+          await api.deleteCommentAsMod(target.commentId, reason);
         } else {
           if (!api?.deleteBBSReplyAsMod) return runFallback();
-          await api.deleteBBSReplyAsMod({ replyId: target.replyId, communityId, reason });
+          await api.deleteBBSReplyAsMod(target.replyId, reason);
         }
       } else if (action === 'kick') {
         if (!api?.kickMember) return runFallback();
@@ -257,10 +262,10 @@ export function ModActionMenu({
             entering={ZoomIn.duration(180)}
             exiting={ZoomOut.duration(140)}
             style={{
-              backgroundColor: 'rgba(20,20,22,0.95)',
+              backgroundColor: C.bg2,
               borderRadius: R.lg,
               borderWidth: 1,
-              borderColor: 'rgba(255,255,255,0.14)',
+              borderColor: C.border,
               overflow: 'hidden',
               ...SHADOW.md,
             }}
@@ -495,5 +500,5 @@ function MenuItem({
 }
 
 function Divider() {
-  return <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.08)' }} />;
+  return <View style={{ height: 1, backgroundColor: C.divider }} />;
 }

@@ -108,6 +108,7 @@ import { useLanguageStore } from '../stores/languageStore';
 import { useTagFilterStore } from '../stores/tagFilterStore';
 import { useAdPreferencesStore } from '../stores/adPreferencesStore';
 import { ToastHost } from '../components/ui/ToastHost';
+import { VideoLightbox } from '../components/ui/VideoLightbox';
 import { ErrorBoundary } from '../components/ui/ErrorBoundary';
 // ★ パフォーマンス: IntroAnimation / FeedbackFAB は first paint 直後に必須ではない。
 //   - IntroAnimation: 同セッション 2 回目以降は sessionStorage で skip
@@ -394,8 +395,14 @@ export default function RootLayout() {
     const sub = AppState.addEventListener('change', (state) => {
       try {
         if (state === 'background' || state === 'inactive') {
+          // native は OS が JS スレッドを凍結し auto-refresh の setInterval が止まるため、
+          // 明示的に停止/再開する (library は native の visibility hook を持たない)。
+          supabase.auth.stopAutoRefresh();
           supabase.realtime.disconnect();
         } else if (state === 'active') {
+          // foreground 復帰: startAutoRefresh は即時 tick で期限間近 token を catch-up
+          // refresh するので、realtime.connect より先に呼んで stale JWT での 401 を防ぐ。
+          supabase.auth.startAutoRefresh();
           supabase.realtime.connect();
         }
       } catch { /* ignore */ }
@@ -561,6 +568,15 @@ export default function RootLayout() {
                       animation: 'slide_from_bottom',
                     }}
                   />
+                  {/* 全画面コメント作成 (Instagram/Threads 風の遷移)。
+                      静的セグメント "comment" は post/[id] (UUID) より優先される。 */}
+                  <Stack.Screen
+                    name="post/comment"
+                    options={{
+                      presentation: 'modal',
+                      animation: 'slide_from_bottom',
+                    }}
+                  />
                   {/* post 詳細は iOS-native の modal slide-up で表示 (別ページ感を解消)。
                       タップした投稿カードが画面下から「上に来る」演出 + 戻ると feed そのまま。
                       gestureDirection: 'vertical' で下スワイプ close 有効。
@@ -653,6 +669,8 @@ export default function RootLayout() {
                   <Stack.Screen name="settings/license" />
                 </Stack>
                 <ToastHost />
+                {/* 全画面動画ビューア (画像 ImageLightbox の動画版・アプリ全体で 1 つ常駐) */}
+                <VideoLightbox />
                 {/* FeedbackFAB は lazy で起動チャンクから外す — feature flag 経由でしか
                     rendered されない上、初期描画クリティカルパスに不要。Suspense fallback
                     は何も描画しない (FAB なので空でも UX 影響なし)。 */}

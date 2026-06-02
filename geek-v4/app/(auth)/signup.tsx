@@ -26,10 +26,12 @@ export default function SignupScreen() {
   const [step, setStep] = useState<Step>('credentials');
   const [email, setEmail] = useState(presetEmail);
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const passwordRef = useRef<TextInput>(null);
+  const confirmRef = useRef<TextInput>(null);
   const signUp = useAuthStore((s) => s.signUp);
   const show = useToastStore((s) => s.show);
   const { online } = useNetworkStatus();
@@ -52,6 +54,11 @@ export default function SignupScreen() {
     const pwCheck = validatePassword(password);
     if (!pwCheck.ok) {
       show(pwCheck.reason ?? 'パスワードがセキュリティ要件を満たしていません。', 'warn');
+      return;
+    }
+    // 確認用パスワードと一致するか (打ち間違いによる即ロックアウトを防ぐ)
+    if (password !== confirmPassword) {
+      show('パスワードが一致しません。もう一度ご確認ください。', 'warn');
       return;
     }
     // ステップ切替前にキーボードを閉じる (iOS でジャンクなアニメ防止)
@@ -196,8 +203,8 @@ export default function SignupScreen() {
                 secureTextEntry={!showPass}
                 autoComplete="new-password"
                 textContentType="newPassword"
-                returnKeyType="go"
-                onSubmitEditing={goToPhoneStep}
+                returnKeyType="next"
+                onSubmitEditing={() => confirmRef.current?.focus()}
                 keyboardAppearance="dark"
                 selectionColor={C.accent}
                 // bcrypt 上限 72 文字 + 余裕 (memory DoS 対策)
@@ -213,6 +220,22 @@ export default function SignupScreen() {
                     <EyeIcon size={20} color={C.text3} strokeWidth={2.2} />
                   </PressableScale>
                 }
+              />
+              {/* 確認用パスワード — 打ち間違いによる即ロックアウト防止 */}
+              <Input
+                ref={confirmRef}
+                label="パスワード（確認）"
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                placeholder="もう一度入力"
+                secureTextEntry={!showPass}
+                autoComplete="new-password"
+                textContentType="newPassword"
+                returnKeyType="go"
+                onSubmitEditing={goToPhoneStep}
+                keyboardAppearance="dark"
+                selectionColor={C.accent}
+                maxLength={128}
               />
             </View>
 
@@ -250,7 +273,16 @@ export default function SignupScreen() {
               maxLength={32}
             />
 
-            <View style={{ marginTop: SP['8'], gap: SP['3'] }}>
+            {/* 利用規約・プライバシー同意 — アカウント作成 (登録) の直前に明示 */}
+            <Text style={[T.caption, { color: C.text3, marginTop: SP['6'], textAlign: 'center', lineHeight: 18 }]}>
+              「登録」または「スキップして登録」を押すと、
+              <Text onPress={() => router.push('/settings/terms' as never)} style={{ color: C.accent, fontWeight: '700' }}>利用規約</Text>
+              と
+              <Text onPress={() => router.push('/settings/privacy-policy' as never)} style={{ color: C.accent, fontWeight: '700' }}>プライバシーポリシー</Text>
+              に同意したものとみなします。
+            </Text>
+
+            <View style={{ marginTop: SP['4'], gap: SP['3'] }}>
               <Button
                 label="登録"
                 onPress={handleSubmitWithPhone}

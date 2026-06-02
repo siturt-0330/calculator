@@ -49,6 +49,8 @@ export type Community = {
 export type CommunityWithMembership = Community & {
   is_member: boolean;
   role: MemberRole | null;
+  /** request 制コミュで、自分の保留中(pending)申請があるか (fetchCommunity が判定) */
+  has_pending_request?: boolean;
   tags: string[];
 };
 
@@ -581,7 +583,7 @@ export async function fetchCommunity(id: string): Promise<CommunityWithMembershi
     .maybeSingle();
   if (error || !comm) return null;
 
-  const [tagRes, membRes] = await Promise.all([
+  const [tagRes, membRes, reqRes] = await Promise.all([
     supabase.from('community_tags').select('tag').eq('community_id', id),
     user
       ? supabase
@@ -591,16 +593,30 @@ export async function fetchCommunity(id: string): Promise<CommunityWithMembershi
           .eq('user_id', user.id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
+    // request 制コミュのときだけ、自分の保留中(pending)申請を確認する。
+    // RLS (0017) で本人の join_request 行は読めるので、これで「申請中」を反映できる。
+    // (旧: members しか見ておらず、申請してもボタンが「申請」のまま=反映されない不具合)
+    user && comm.visibility === 'request'
+      ? supabase
+          .from('community_join_requests')
+          .select('status')
+          .eq('community_id', id)
+          .eq('user_id', user.id)
+          .eq('status', 'pending')
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const tags = (tagRes.data ?? []).map((r) => r.tag);
   const role = (membRes.data as { role: MemberRole } | null)?.role ?? null;
+  const hasPendingRequest = !!(reqRes.data as { status?: string } | null);
 
   return {
     ...comm,
     tags,
     is_member: role !== null,
     role,
+    has_pending_request: hasPendingRequest,
   };
 }
 

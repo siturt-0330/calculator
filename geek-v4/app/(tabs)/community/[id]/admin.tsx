@@ -14,7 +14,7 @@
 // mutation は hooks/useCommunityMods.ts (= 既に実装済) を経由。
 // ============================================================
 import { View, Text, ScrollView } from 'react-native';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -25,9 +25,9 @@ import { BackButton } from '../../../../components/nav/BackButton';
 import { PressableScale } from '../../../../components/ui/PressableScale';
 import { Spinner } from '../../../../components/ui/Spinner';
 import { ConfirmDialog } from '../../../../components/ui/ConfirmDialog';
-import { Divider } from '../../../../components/ui/Divider';
 import { SegmentedControl } from '../../../../components/ui/SegmentedControl';
 import { Icon } from '../../../../constants/icons';
+import type { LucideIcon } from 'lucide-react-native';
 import { CommunitySubTabs } from '../../../../components/community/CommunitySubTabs';
 import { MemberRow, type MemberRowItem } from '../../../../components/community/MemberRow';
 import { useAuthStore } from '../../../../stores/authStore';
@@ -225,12 +225,12 @@ export default function CommunityAdminScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* TopBar */}
+      {/* ヘッダー — 盾アイコンチップ + ダッシュボードタイトル + コミュ名 */}
       <View
         style={{
           paddingTop: insets.top + SP['2'],
           paddingHorizontal: SP['4'],
-          paddingBottom: SP['2'],
+          paddingBottom: SP['3'],
           flexDirection: 'row',
           alignItems: 'center',
           gap: SP['2'],
@@ -239,16 +239,29 @@ export default function CommunityAdminScreen() {
         }}
       >
         <BackButton />
-        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <View
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: 17,
+            backgroundColor: C.amberBg,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderWidth: 1,
+            borderColor: C.amber + '55',
+          }}
+        >
           <Icon.shield size={18} color={C.amber} strokeWidth={2.4} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[T.h3, { color: C.text }]} numberOfLines={1}>
-            管理人
+            管理ダッシュボード
           </Text>
-          {community.name && (
-            <Text style={[T.small, { color: C.text3 }]} numberOfLines={1}>
-              · {community.name}
+          {community.name ? (
+            <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
+              {community.name}
             </Text>
-          )}
+          ) : null}
         </View>
       </View>
 
@@ -259,134 +272,65 @@ export default function CommunityAdminScreen() {
         contentContainerStyle={{
           paddingTop: SP['3'],
           paddingBottom: TABBAR.height + insets.bottom + SP['16'],
-          gap: SP['5'],
+          gap: SP['4'],
         }}
       >
-        {/* ============= Section 0: 参加申請 (request 制のみ) ============= */}
+        {/* サマリー — メンバー / 申請 / BAN を一目で */}
+        <View style={{ flexDirection: 'row', gap: SP['2'], paddingHorizontal: SP['4'] }}>
+          <StatCard label="メンバー" value={members.length} tone="neutral" />
+          {showJoinRequests ? (
+            <StatCard
+              label="申請"
+              value={joinRequests.length}
+              tone={joinRequests.length > 0 ? 'accent' : 'neutral'}
+            />
+          ) : null}
+          <StatCard
+            label="BAN"
+            value={bans.length}
+            tone={bans.length > 0 ? 'danger' : 'neutral'}
+          />
+        </View>
+
+        {/* ============= 参加申請 (request 制のみ) ============= */}
         {showJoinRequests && (
-          <>
-            <View style={{ paddingHorizontal: SP['4'], gap: SP['3'] }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Icon.bell size={18} color={C.accent} strokeWidth={2.4} />
-                  <Text style={[T.h3, { color: C.text }]}>参加申請</Text>
-                </View>
-                {joinRequests.length > 0 ? (
-                  <View
-                    style={{
-                      backgroundColor: C.accent,
-                      paddingHorizontal: SP['2'],
-                      paddingVertical: 2,
-                      borderRadius: R.full,
-                      minWidth: 24,
-                      alignItems: 'center',
-                    }}
-                  >
-                    <Text style={[T.caption, { color: '#fff', fontWeight: '700' }]}>
-                      {joinRequests.length}
-                    </Text>
-                  </View>
-                ) : (
-                  <Text style={[T.caption, { color: C.text3 }]}>0 件</Text>
-                )}
+          <SectionCard
+            icon={Icon.bell}
+            color={C.accent}
+            chipBg={C.accentBg}
+            title="参加申請"
+            count={joinRequests.length}
+            badge
+          >
+            {requestsLoading ? (
+              <SectionLoading />
+            ) : joinRequests.length === 0 ? (
+              <EmptyState icon={Icon.bell} text="保留中の申請はありません" />
+            ) : (
+              <View style={{ gap: SP['2'] }}>
+                {joinRequests.map((req) => (
+                  <RequestCard
+                    key={req.user_id}
+                    req={req}
+                    submitting={approveReq.isPending || rejectReq.isPending}
+                    onApprove={() => approveReq.mutate(req.user_id)}
+                    onReject={() => rejectReq.mutate(req.user_id)}
+                  />
+                ))}
               </View>
-              {requestsLoading ? (
-                <View style={{ paddingVertical: SP['6'], alignItems: 'center' }}>
-                  <Spinner size="large" />
-                </View>
-              ) : joinRequests.length === 0 ? (
-                <View style={{ paddingVertical: SP['6'], alignItems: 'center', gap: SP['2'] }}>
-                  <Icon.bell size={28} color={C.text3} strokeWidth={1.6} />
-                  <Text style={[T.small, { color: C.text3 }]}>保留中の申請はありません</Text>
-                </View>
-              ) : (
-                <View style={{ gap: SP['2'] }}>
-                  {joinRequests.map((req) => {
-                    const submitting = approveReq.isPending || rejectReq.isPending;
-                    return (
-                      <View
-                        key={req.user_id}
-                        style={{
-                          padding: SP['3'],
-                          backgroundColor: C.bg2,
-                          borderRadius: R.md,
-                          borderWidth: 1,
-                          borderColor: C.border,
-                          gap: SP['3'],
-                        }}
-                      >
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-                          <Avatar
-                            size={36}
-                            uri={req.avatar_url ?? undefined}
-                            emoji={req.avatar_emoji ?? undefined}
-                            name={req.nickname}
-                          />
-                          <View style={{ flex: 1, minWidth: 0 }}>
-                            <Text style={[T.smallB, { color: C.text }]} numberOfLines={1}>
-                              {req.nickname}
-                            </Text>
-                            <Text style={[T.caption, { color: C.text3 }]}>
-                              {formatRelative(req.created_at)}
-                            </Text>
-                          </View>
-                        </View>
-                        {req.message ? (
-                          <Text style={[T.small, { color: C.text2 }]} numberOfLines={3}>
-                            {req.message}
-                          </Text>
-                        ) : null}
-                        <View style={{ flexDirection: 'row', gap: SP['2'] }}>
-                          <PressableScale
-                            onPress={() => rejectReq.mutate(req.user_id)}
-                            haptic="tap"
-                            disabled={submitting}
-                            accessibilityLabel={`${req.nickname} の申請を拒否`}
-                            style={{
-                              flex: 1,
-                              paddingVertical: SP['2'],
-                              borderRadius: R.md,
-                              borderWidth: 1,
-                              borderColor: C.border2,
-                              alignItems: 'center',
-                              opacity: submitting ? 0.5 : 1,
-                            }}
-                          >
-                            <Text style={[T.smallB, { color: C.text2 }]}>拒否</Text>
-                          </PressableScale>
-                          <PressableScale
-                            onPress={() => approveReq.mutate(req.user_id)}
-                            haptic="confirm"
-                            disabled={submitting}
-                            accessibilityLabel={`${req.nickname} の申請を承認`}
-                            style={{
-                              flex: 2,
-                              paddingVertical: SP['2'],
-                              borderRadius: R.md,
-                              backgroundColor: C.accent,
-                              alignItems: 'center',
-                              opacity: submitting ? 0.5 : 1,
-                            }}
-                          >
-                            <Text style={[T.smallB, { color: '#fff' }]}>承認</Text>
-                          </PressableScale>
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-              )}
-            </View>
-            <Divider />
-          </>
+            )}
+          </SectionCard>
         )}
 
-        {/* ============= Section 1: メンバー一覧 ============= */}
-        <View style={{ paddingHorizontal: SP['4'], gap: SP['3'] }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={[T.h3, { color: C.text }]}>メンバー一覧</Text>
-            <Text style={[T.caption, { color: C.text3 }]}>{members.length} 名</Text>
-          </View>
+        {/* ============= メンバー ============= */}
+        <SectionCard
+          icon={Icon.community}
+          color={C.accent}
+          chipBg={C.accentBg}
+          title="メンバー"
+          count={members.length}
+          unit="名"
+        >
           <SegmentedControl<MembersFilter>
             value={filter}
             onChange={setFilter}
@@ -396,20 +340,9 @@ export default function CommunityAdminScreen() {
             ]}
           />
           {membersLoading ? (
-            <View style={{ paddingVertical: SP['6'], alignItems: 'center' }}>
-              <Spinner size="large" />
-            </View>
+            <SectionLoading />
           ) : filteredMembers.length === 0 ? (
-            <View
-              style={{
-                paddingVertical: SP['6'],
-                alignItems: 'center',
-                gap: SP['2'],
-              }}
-            >
-              <Icon.community size={32} color={C.text3} strokeWidth={1.6} />
-              <Text style={[T.small, { color: C.text3 }]}>該当するメンバーがいません</Text>
-            </View>
+            <EmptyState icon={Icon.community} text="該当するメンバーがいません" />
           ) : (
             <View style={{ gap: SP['2'] }}>
               {filteredMembers.map((m) => {
@@ -429,25 +362,21 @@ export default function CommunityAdminScreen() {
               })}
             </View>
           )}
-        </View>
+        </SectionCard>
 
-        <Divider />
-
-        {/* ============= Section 2: BAN リスト ============= */}
-        <View style={{ paddingHorizontal: SP['4'], gap: SP['3'] }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={[T.h3, { color: C.text }]}>BAN リスト</Text>
-            <Text style={[T.caption, { color: C.text3 }]}>{bans.length} 件</Text>
-          </View>
+        {/* ============= BAN リスト ============= */}
+        <SectionCard
+          icon={Icon.block}
+          color={C.red}
+          chipBg={C.redBg}
+          title="BAN リスト"
+          count={bans.length}
+          unit="件"
+        >
           {bansLoading ? (
-            <View style={{ paddingVertical: SP['6'], alignItems: 'center' }}>
-              <Spinner size="large" />
-            </View>
+            <SectionLoading />
           ) : bans.length === 0 ? (
-            <View style={{ paddingVertical: SP['6'], alignItems: 'center', gap: SP['2'] }}>
-              <Icon.block size={32} color={C.text3} strokeWidth={1.6} />
-              <Text style={[T.small, { color: C.text3 }]}>BAN されたメンバーはいません</Text>
-            </View>
+            <EmptyState icon={Icon.block} text="BAN されたメンバーはいません" />
           ) : (
             <View style={{ gap: SP['2'] }}>
               {bans.map((b) => (
@@ -459,25 +388,21 @@ export default function CommunityAdminScreen() {
               ))}
             </View>
           )}
-        </View>
+        </SectionCard>
 
-        <Divider />
-
-        {/* ============= Section 3: モデログ ============= */}
-        <View style={{ paddingHorizontal: SP['4'], gap: SP['3'] }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={[T.h3, { color: C.text }]}>モデログ</Text>
-            <Text style={[T.caption, { color: C.text3 }]}>直近 {logs.length} 件</Text>
-          </View>
+        {/* ============= モデログ ============= */}
+        <SectionCard
+          icon={Icon.shield}
+          color={C.text2}
+          chipBg={C.bg3}
+          title="モデログ"
+          count={logs.length}
+          unit="件"
+        >
           {logsLoading ? (
-            <View style={{ paddingVertical: SP['6'], alignItems: 'center' }}>
-              <Spinner size="large" />
-            </View>
+            <SectionLoading />
           ) : logs.length === 0 ? (
-            <View style={{ paddingVertical: SP['6'], alignItems: 'center', gap: SP['2'] }}>
-              <Icon.info size={32} color={C.text3} strokeWidth={1.6} />
-              <Text style={[T.small, { color: C.text3 }]}>まだ操作履歴がありません</Text>
-            </View>
+            <EmptyState icon={Icon.info} text="まだ操作履歴がありません" />
           ) : (
             <View style={{ gap: SP['2'] }}>
               {logs.map((l) => (
@@ -485,7 +410,7 @@ export default function CommunityAdminScreen() {
               ))}
             </View>
           )}
-        </View>
+        </SectionCard>
       </ScrollView>
 
       {/* destructive confirm */}
@@ -498,6 +423,224 @@ export default function CommunityAdminScreen() {
         onConfirm={onConfirm}
         onCancel={() => setPending(null)}
       />
+    </View>
+  );
+}
+
+// ============================================================
+// 内部 component — サマリー / セクションカード / 申請カード / 空・読込
+// ============================================================
+
+// サマリー 1 マス (メンバー / 申請 / BAN の件数)
+function StatCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: 'neutral' | 'accent' | 'danger';
+}) {
+  const color = tone === 'accent' ? C.accent : tone === 'danger' ? C.red : C.text;
+  return (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: C.bg2,
+        borderRadius: R.lg,
+        borderWidth: 1,
+        borderColor: C.border,
+        paddingVertical: SP['3'],
+        alignItems: 'center',
+        gap: 2,
+      }}
+    >
+      <Text style={[T.h2, { color, fontWeight: '800' }]}>{value.toLocaleString('ja-JP')}</Text>
+      <Text style={[T.caption, { color: C.text3 }]}>{label}</Text>
+    </View>
+  );
+}
+
+// セクションのカード枠 — アイコンチップ + タイトル + 件数/バッジ + 中身
+function SectionCard({
+  icon: IconCmp,
+  color,
+  chipBg,
+  title,
+  count,
+  unit,
+  badge = false,
+  children,
+}: {
+  icon: LucideIcon;
+  color: string;
+  chipBg: string;
+  title: string;
+  count: number;
+  unit?: string;
+  badge?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <View
+      style={{
+        marginHorizontal: SP['4'],
+        backgroundColor: C.bg2,
+        borderRadius: R.lg,
+        borderWidth: 1,
+        borderColor: C.border,
+        padding: SP['4'],
+        gap: SP['3'],
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+        <View
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 15,
+            backgroundColor: chipBg,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <IconCmp size={16} color={color} strokeWidth={2.4} />
+        </View>
+        <Text style={[T.bodyB, { color: C.text, flex: 1 }]}>{title}</Text>
+        {badge && count > 0 ? (
+          <View
+            style={{
+              backgroundColor: C.accent,
+              paddingHorizontal: SP['2'],
+              paddingVertical: 2,
+              borderRadius: R.full,
+              minWidth: 22,
+              alignItems: 'center',
+            }}
+          >
+            <Text style={[T.caption, { color: '#fff', fontWeight: '800' }]}>{count}</Text>
+          </View>
+        ) : (
+          <Text style={[T.caption, { color: C.text3 }]}>
+            {count.toLocaleString('ja-JP')}
+            {unit ? ` ${unit}` : ''}
+          </Text>
+        )}
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function SectionLoading() {
+  return (
+    <View style={{ paddingVertical: SP['6'], alignItems: 'center' }}>
+      <Spinner size="large" />
+    </View>
+  );
+}
+
+function EmptyState({ icon: IconCmp, text }: { icon: LucideIcon; text: string }) {
+  return (
+    <View style={{ paddingVertical: SP['5'], alignItems: 'center', gap: SP['2'] }}>
+      <IconCmp size={26} color={C.text3} strokeWidth={1.6} />
+      <Text style={[T.small, { color: C.text3 }]}>{text}</Text>
+    </View>
+  );
+}
+
+// 参加申請 1 件 — アバター + 名前 + 申請文 + 拒否/承認 (大きめタップ領域)
+function RequestCard({
+  req,
+  submitting,
+  onApprove,
+  onReject,
+}: {
+  req: {
+    user_id: string;
+    nickname: string;
+    avatar_url?: string | null;
+    avatar_emoji?: string | null;
+    message?: string | null;
+    created_at: string;
+  };
+  submitting: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  return (
+    <View
+      style={{
+        padding: SP['3'],
+        backgroundColor: C.bg,
+        borderRadius: R.md,
+        borderWidth: 1,
+        borderColor: C.border,
+        gap: SP['3'],
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+        <Avatar
+          size={38}
+          uri={req.avatar_url ?? undefined}
+          emoji={req.avatar_emoji ?? undefined}
+          name={req.nickname}
+        />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={[T.smallB, { color: C.text }]} numberOfLines={1}>
+            {req.nickname}
+          </Text>
+          <Text style={[T.caption, { color: C.text3 }]}>{formatRelative(req.created_at)}</Text>
+        </View>
+      </View>
+      {req.message ? (
+        <Text style={[T.small, { color: C.text2 }]} numberOfLines={3}>
+          {req.message}
+        </Text>
+      ) : null}
+      <View style={{ flexDirection: 'row', gap: SP['2'] }}>
+        <PressableScale
+          onPress={onReject}
+          haptic="tap"
+          disabled={submitting}
+          accessibilityLabel={`${req.nickname} の申請を拒否`}
+          style={{
+            flex: 1,
+            flexDirection: 'row',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 4,
+            paddingVertical: SP['2'] + 2,
+            borderRadius: R.md,
+            borderWidth: 1,
+            borderColor: C.border2,
+            opacity: submitting ? 0.5 : 1,
+          }}
+        >
+          <Icon.close size={13} color={C.text2} strokeWidth={2.6} />
+          <Text style={[T.smallB, { color: C.text2 }]}>拒否</Text>
+        </PressableScale>
+        <PressableScale
+          onPress={onApprove}
+          haptic="confirm"
+          disabled={submitting}
+          accessibilityLabel={`${req.nickname} の申請を承認`}
+          style={{
+            flex: 2,
+            flexDirection: 'row',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 4,
+            paddingVertical: SP['2'] + 2,
+            borderRadius: R.md,
+            backgroundColor: C.accent,
+            opacity: submitting ? 0.5 : 1,
+          }}
+        >
+          <Icon.check size={14} color="#fff" strokeWidth={2.8} />
+          <Text style={[T.smallB, { color: '#fff' }]}>承認</Text>
+        </PressableScale>
+      </View>
     </View>
   );
 }

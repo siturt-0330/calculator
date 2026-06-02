@@ -227,9 +227,12 @@ export default function ResetPasswordScreen() {
     // 成功: session が一旦有効なまま残るが、ユーザーには明示的に再ログインさせる
     setPhase('done');
     show('パスワードを更新しました。再度ログインしてください。', 'success');
-    // local の auth store もクリアして、_layout の auto-redirect に乗せる
+    // local の auth store もクリアして、_layout の auto-redirect に乗せる。
+    // ★ raw supabase.auth.signOut() だと signOutInFlight が立たず、続く SIGNED_OUT が
+    //   tryRecoverSession に渡って session が蘇る (再ログイン指示なのにアプリ内に戻る) ため、
+    //   store 経由で signOut する (signOutInFlight=true + lastKnownTokens=null をセット)。
     try {
-      await supabase.auth.signOut();
+      await useAuthStore.getState().signOut();
     } catch { /* signOut 失敗はセッション期限切れ等。ローカル状態のみクリアして続行 */ }
     setUser(null);
     // user email が分かれば prefill して login に飛ばす

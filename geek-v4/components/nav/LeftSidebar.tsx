@@ -37,7 +37,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { supabase } from '../../lib/supabase';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useTheme } from '../../hooks/useColors';
-import { R, SP } from '../../design/tokens';
+import { R, SP, isLightActive } from '../../design/tokens';
 import { T, LOGO_FONT, LOGO_FONT_WEIGHT } from '../../design/typography';
 import { NotificationBadge } from '../ui/NotificationBadge';
 
@@ -103,14 +103,16 @@ export function LeftSidebar() {
             },
             Platform.OS === 'web'
               ? ({
-                  backgroundImage:
-                    'linear-gradient(110deg, #b794f4 0%, #7c6af7 35%, #67c1ff 75%, #6ee7b7 100%)',
+                  backgroundImage: isLightActive()
+                    ? 'linear-gradient(110deg, #2f5784 0%, #3e6da3 45%, #5288b9 100%)'
+                    : 'linear-gradient(110deg, #b794f4 0%, #7c6af7 35%, #67c1ff 75%, #6ee7b7 100%)',
                   backgroundClip: 'text',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
                   color: 'transparent',
-                  textShadow:
-                    '0 0 14px rgba(124,106,247,0.55), 0 0 28px rgba(103,193,255,0.25)',
+                  textShadow: isLightActive()
+                    ? 'none'
+                    : '0 0 14px rgba(124,106,247,0.55), 0 0 28px rgba(103,193,255,0.25)',
                   transform: 'skewX(-4deg)',
                 } as object)
               : {

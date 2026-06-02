@@ -163,7 +163,7 @@ export const Input = forwardRef<TextInput, Props>(function Input(
             // …だったが、Reanimated の shadowOpacity アニメは native でも追従するので
             // web 側だけ box-shadow を残し、native は aBorder の shadowOpacity に任せる.
             Platform.OS === 'web' && focused && !showError
-              ? ({ boxShadow: '0 0 0 4px rgba(124,106,247,0.18)' } as object)
+              ? ({ boxShadow: '0 0 0 4px ' + C.accent + '2E' } as object)
               : null,
           ]}
         >

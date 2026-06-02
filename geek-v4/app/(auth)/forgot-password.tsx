@@ -8,6 +8,7 @@ import { Input } from '../../components/ui/Input';
 import { BackButton } from '../../components/nav/BackButton';
 import { supabase } from '../../lib/supabase';
 import { useToastStore } from '../../stores/toastStore';
+import { checkRate, rateLimitMessage } from '../../lib/rateLimit';
 import { Icon } from '../../constants/icons';
 
 // パスワードリセット完了画面の URL を組み立てる。
@@ -49,6 +50,12 @@ export default function ForgotPasswordScreen() {
     const e = email.trim();
     if (!/\S+@\S+\.\S+/.test(e)) {
       show('メールアドレスの形式が正しくありません。', 'warn');
+      return;
+    }
+    // クライアント側レート制限 (reset メール爆撃の抑止・login/signup と統一)
+    const rl = checkRate('password_reset');
+    if (!rl.ok) {
+      show(rateLimitMessage('password_reset', rl.retryAfterMs), 'warn');
       return;
     }
     setLoading(true);

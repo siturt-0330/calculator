@@ -83,8 +83,8 @@ function describeState(state: AccountState): { restrictions: string[]; resolutio
     case 'suspended':
       return {
         restrictions: [
-          'アカウントは停止されており、すべての機能が使えません',
-          'ログインはできますが、書き込み・閲覧の一部に制限があります',
+          'アカウントは停止されており、投稿・コメント・リアクション等の書き込みはできません',
+          'ログインと閲覧は可能です（この画面で状態の確認と異議申し立てができます）',
         ],
         resolutionHint:
           '異議申し立てフォームから停止理由の確認と再審査を依頼できます。',

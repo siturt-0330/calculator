@@ -22,3 +22,15 @@ export async function markAllRead(): Promise<void> {
     .update({ read: true })
     .eq('user_id', user.id);
 }
+
+// 単一通知だけ既読化 (タップ時)。user_id も条件に入れて他人の行を触れないようにする
+// (RLS でも担保されているが defense-in-depth)。
+export async function markRead(id: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  await supabase
+    .from('notifications')
+    .update({ read: true })
+    .eq('id', id)
+    .eq('user_id', user.id);
+}

@@ -15,6 +15,7 @@ import { Icon } from '../../../constants/icons';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { CommunityAvatarBar } from '../../../components/community/CommunityAvatarBar';
 import { AnonPostCard } from '../../../components/feed/AnonPostCard';
+import { ReportSheet } from '../../../components/post/ReportSheet';
 import { thumbedUrl, squareThumbedUrl } from '../../../lib/utils/imageUrl';
 import { filterPostsByCommunity } from '../../../lib/utils/communityFilter';
 import {
@@ -34,12 +35,14 @@ import { usePolls } from '../../../hooks/usePolls';
 import { useToastStore } from '../../../stores/toastStore';
 import type { Post } from '../../../types/models';
 import type { ReactionAgg } from '../../../lib/api/reactions';
+import type { PostCommunityRef } from '../../../lib/api/posts';
 
 // パフォーマンス監査: renderItem で `??[]` を使うと毎回新 array が生成され
 // AnonPostCard memo が壊れる (props 比較で false 判定 → 全カード re-render)。
 // モジュール定数を共有することで参照安定化、re-render を 15-22% 削減。
 const EMPTY_REACTIONS: ReactionAgg[] = [];
 const EMPTY_ADDED_TAGS: string[] = [];
+const EMPTY_COMMUNITIES: PostCommunityRef[] = [];
 const VIEWABILITY_CONFIG = { viewAreaCoveragePercentThreshold: 30 } as const;
 
 // FlashList の data 型 — Post に community メタを同梱
@@ -204,6 +207,9 @@ export default function CommunityScreen() {
     [addTag, showToast],
   );
 
+  // 通報シート (運営への通報) — 対象 post id を持つ間だけ開く
+  const [reportPostId, setReportPostId] = useState<string | null>(null);
+
   // Per-post handler cache (feed.tsx と同じパターン)
   // posts が変わらない限り handler 参照は安定 → AnonPostCard memo が機能する
   const handlersByPostId = useMemo(() => {
@@ -229,7 +235,7 @@ export default function CommunityScreen() {
         onSave: () => toggleSave(id),
         onShare: () => share(`Geek の投稿 #${tagNames[0] ?? '雑談'}`, `/post/${id}`),
         onTagPress: (name: string) => router.push(`/tag/${encodeURIComponent(name)}` as never),
-        onMore: () => { /* report flow: 別途実装 */ },
+        onMore: () => setReportPostId(id),
         onReact: (meme: string) => toggleReact(id, meme),
         onAddTag: (tag: string) => handleAddTag(id, tag),
         onCommunityPress: (communityId: string) => {
@@ -292,87 +298,45 @@ export default function CommunityScreen() {
       const community = item.community;
       const h = handlersByPostId[p.id];
       if (!h) return null;
+      // ホームと同じく、コミュ情報はカード内インラインラベルで表示する。
+      // (旧: カード上に外付けの囲みピルを置いていたが「箱っぽくて古い」ため廃止し、
+      //  home の AnonPostCard `communities` プロップ経由のインライン表示に統一)
+      const communityRefs: PostCommunityRef[] = community
+        ? [
+            {
+              community_id: community.id,
+              name: community.name,
+              icon_emoji: community.icon_emoji,
+              icon_url: community.icon_url,
+              is_official: community.is_official,
+            },
+          ]
+        : EMPTY_COMMUNITIES;
       return (
-        <View>
-          {/* どのコミュ経由か分かるよう、カード上にミニピル表示 */}
-          {community && (
-            <PressableScale
-              onPress={() => router.push(`/community/${community.id}` as never)}
-              haptic="tap"
-              hitSlop={6}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-                marginHorizontal: SP['4'],
-                marginTop: SP['3'],
-                marginBottom: -SP['1'],
-                paddingHorizontal: SP['2'],
-                paddingVertical: 4,
-                backgroundColor: community.is_official ? C.accentBg : C.bg3,
-                borderRadius: R.full,
-                alignSelf: 'flex-start',
-                borderWidth: 1,
-                borderColor: community.is_official ? C.accent : C.border,
-              }}
-            >
-              {community.icon_url ? (
-                // 14px @4x = 56 → 64 で retina 余裕。
-                // squareThumbedUrl でサーバ側 center-crop され、
-                // 横長集合写真でも顔が押し込まれて拡大されない。
-                <ExpoImage
-                  source={{ uri: squareThumbedUrl(community.icon_url, 64) }}
-                  style={{ width: 14, height: 14, borderRadius: 7 }}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                  recyclingKey={community.icon_url}
-                  transition={120}
-                />
-              ) : (
-                <Text style={{ fontSize: 11 }}>{community.icon_emoji}</Text>
-              )}
-              <Text style={[T.caption, {
-                color: community.is_official ? C.accent : C.text2,
-                fontWeight: '700',
-                fontSize: 10,
-              }]}>
-                {community.name}
-              </Text>
-              {community.is_official && (
-                <View style={{
-                  width: 12, height: 12, borderRadius: 6,
-                  backgroundColor: C.accent,
-                  alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <Icon.check size={8} color="#fff" strokeWidth={3} />
-                </View>
-              )}
-            </PressableScale>
-          )}
-          <AnonPostCard
-            post={p}
-            liked={!!myLikes[p.id]}
-            concerned={!!myConcerns[p.id]}
-            saved={!!mySaves[p.id]}
-            reactions={reactionsByPost[p.id] ?? EMPTY_REACTIONS}
-            addedTags={addedTagsByPost[p.id] ?? EMPTY_ADDED_TAGS}
-            poll={polls[p.id]}
-            onLike={h.onLike}
-            onConcern={h.onConcern}
-            onComment={h.onComment}
-            onSave={h.onSave}
-            onShare={h.onShare}
-            onTagPress={h.onTagPress}
-            onMore={h.onMore}
-            onReact={h.onReact}
-            onAddTag={h.onAddTag}
-            onCommunityPress={h.onCommunityPress}
-          />
-        </View>
+        <AnonPostCard
+          post={p}
+          liked={!!myLikes[p.id]}
+          concerned={!!myConcerns[p.id]}
+          saved={!!mySaves[p.id]}
+          reactions={reactionsByPost[p.id] ?? EMPTY_REACTIONS}
+          addedTags={addedTagsByPost[p.id] ?? EMPTY_ADDED_TAGS}
+          poll={polls[p.id]}
+          communities={communityRefs}
+          onLike={h.onLike}
+          onConcern={h.onConcern}
+          onComment={h.onComment}
+          onSave={h.onSave}
+          onShare={h.onShare}
+          onTagPress={h.onTagPress}
+          onMore={h.onMore}
+          onReact={h.onReact}
+          onAddTag={h.onAddTag}
+          onCommunityPress={h.onCommunityPress}
+        />
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- C.* は module-level constants (変化しない)
-    [handlersByPostId, myLikes, myConcerns, mySaves, reactionsByPost, addedTagsByPost, polls, router],
+    [handlersByPostId, myLikes, myConcerns, mySaves, reactionsByPost, addedTagsByPost, polls],
   );
 
   const keyExtractor = useCallback((item: CommunityFeedItem) => item.key, []);
@@ -464,11 +428,11 @@ export default function CommunityScreen() {
               haptic="tap"
               style={{
                 paddingVertical: SP['3'],
-                backgroundColor: 'rgba(255,255,255,0.04)',
+                backgroundColor: C.glass,
                 borderRadius: R.full,
                 alignItems: 'center',
                 borderWidth: 1,
-                borderColor: 'rgba(255,255,255,0.10)',
+                borderColor: C.glassBorder,
               }}
             >
               <Text style={[T.bodyMd, { color: C.text, fontWeight: '600' }]}>
@@ -485,11 +449,11 @@ export default function CommunityScreen() {
               haptic="tap"
               style={{
                 paddingVertical: SP['3'],
-                backgroundColor: 'rgba(255,255,255,0.04)',
+                backgroundColor: C.glass,
                 borderRadius: R.full,
                 alignItems: 'center',
                 borderWidth: 1,
-                borderColor: 'rgba(255,255,255,0.10)',
+                borderColor: C.glassBorder,
               }}
             >
               <Text style={[T.bodyMd, { color: C.text, fontWeight: '600' }]}>
@@ -530,9 +494,9 @@ export default function CommunityScreen() {
           style={{
             width: 40, height: 40, borderRadius: 20,
             alignItems: 'center', justifyContent: 'center',
-            // 軽い glass 風: 半透明 + 1px 縁
-            backgroundColor: 'rgba(255,255,255,0.06)',
-            borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+            // 軽い glass 風: 半透明 + 1px 縁 (light でも見えるよう theme-aware glass)
+            backgroundColor: C.glass,
+            borderWidth: 1, borderColor: C.glassBorder,
           }}
           accessibilityLabel="コミュニティを検索"
         >
@@ -591,6 +555,13 @@ export default function CommunityScreen() {
         contentContainerStyle={{
           paddingBottom: insets.bottom + TABBAR.height + SP['6'],
         }}
+      />
+
+      {/* 通報シート (運営への通報・理由選択) */}
+      <ReportSheet
+        visible={!!reportPostId}
+        postId={reportPostId}
+        onClose={() => setReportPostId(null)}
       />
     </View>
   );

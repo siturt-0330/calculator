@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchNotifications, markAllRead } from '../lib/api/notifications';
+import { fetchNotifications, markAllRead, markRead as markReadApi } from '../lib/api/notifications';
 import { fetchMyNotificationPreferences } from '../lib/api/notificationPreferences';
 import { shouldShowInApp } from '../lib/utils/notificationFilter';
 import { useAuthStore } from '../stores/authStore';
@@ -87,6 +87,22 @@ export function useNotifications() {
           'error',
         );
         throw e;
+      }
+    },
+    // ============================================================
+    // markRead — 単一通知の既読化 (タップ時)。optimistic + 静かに revert。
+    // ============================================================
+    // 失敗時は toast を出さない: タップは遷移を伴うので、軽微な既読同期失敗で
+    // ユーザーの導線を邪魔しない (次回 fetch / realtime で server-truth に収束)。
+    markRead: async (id: string) => {
+      const prev = qc.getQueryData<Notification[]>(NOTIF_KEY);
+      qc.setQueryData<Notification[]>(NOTIF_KEY, (old) =>
+        (old ?? []).map((n) => (n.id === id ? { ...n, read: true } : n)),
+      );
+      try {
+        await markReadApi(id);
+      } catch {
+        if (prev !== undefined) qc.setQueryData<Notification[]>(NOTIF_KEY, prev);
       }
     },
   };

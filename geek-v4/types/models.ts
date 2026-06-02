@@ -69,6 +69,9 @@ export type Comment = {
   // ============================================================
   parent_comment_id?: string | null;
   reply_to_comment_id?: string | null;
+  // コメント添付メディア (migration 0104)。posts-media bucket の公開 URL 配列。
+  // 画像/動画は拡張子 (.mp4/.mov/.webm/.m4v) で判別する。列が無い環境では undefined。
+  media_urls?: string[] | null;
   children?: Comment[];
   depth?: number;
 };
@@ -122,7 +125,10 @@ export type Notification = {
     | 'official_post'
     | 'mention'
     | 'announcement'
-    | 'join_request';
+    | 'join_request'
+    // 'system' はアカウント状態変更通知 (警告 / 停止 / 解除 等、migration 0060 の
+    // account_state_history AFTER INSERT トリガー由来)。
+    | 'system';
   tag_name: string | null;
   message: string;
   read: boolean;

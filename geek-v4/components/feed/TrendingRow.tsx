@@ -99,25 +99,25 @@ function TrendingRowInner() {
               style={{
                 paddingHorizontal: SP['3'],
                 paddingVertical: SP['2'],
-                backgroundColor: i === 0 ? 'rgba(255,140,48,0.18)' : C.bg2,
+                backgroundColor: i === 0 ? C.accentBg : C.bg2,
                 borderRadius: R.full,
                 borderWidth: 1,
-                borderColor: i === 0 ? 'rgba(255,140,48,0.5)' : C.border,
+                borderColor: i === 0 ? C.accent : C.border,
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 6,
               }}
             >
               {i === 0 && <Text style={{ fontSize: 11 }}>👑</Text>}
-              <Text style={[T.smallM, { color: i === 0 ? '#FF8C30' : C.text, fontWeight: '700' }]}>
+              <Text style={[T.smallM, { color: i === 0 ? C.accent : C.text, fontWeight: '700' }]}>
                 #{t.name}
               </Text>
               <View style={{
                 paddingHorizontal: 6, paddingVertical: 1,
-                backgroundColor: i === 0 ? 'rgba(255,140,48,0.3)' : C.bg3,
+                backgroundColor: i === 0 ? C.accentSoft : C.bg3,
                 borderRadius: R.sm,
               }}>
-                <Text style={{ fontSize: 10, color: i === 0 ? '#FF8C30' : C.text3, fontWeight: '700' }}>
+                <Text style={{ fontSize: 10, color: i === 0 ? C.accent : C.text3, fontWeight: '700' }}>
                   +{t.postCount}
                 </Text>
               </View>

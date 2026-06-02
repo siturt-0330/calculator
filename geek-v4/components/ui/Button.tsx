@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { SP } from '../../design/tokens';
 import { SPRING_SNAPPY } from '../../design/motion';
-import { useColors, useShadows } from '../../hooks/useColors';
+import { useColors, useGradients, useShadows } from '../../hooks/useColors';
 import { hapticPresets } from '../../lib/haptics';
 
 // ============================================================
@@ -113,6 +113,7 @@ export function Button({
 
   // テーマ購読 — secondary / danger / destructive / success 背景色がライト/ダーク両対応
   const C = useColors();
+  const GRAD = useGradients();
   const SHADOW = useShadows();
 
   // ----- color resolution -----
@@ -154,9 +155,9 @@ export function Button({
   const primaryGlow = usesGradient && !isDisabled ? SHADOW.accentGlow : null;
   const gradientColors: readonly [string, string] | null = usesGradient
     ? variant === 'success'
-      ? (['#52D49B', '#3FB880'] as const)
+      ? GRAD.success
       : variant === 'destructive' || variant === 'danger'
-        ? (['#F87A7A', '#E24B4A'] as const)
+        ? GRAD.destructive
         : // primary
           ([C.accent, C.accentDeep] as const)
     : null;

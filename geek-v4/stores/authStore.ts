@@ -7,6 +7,7 @@ import { detachAllChannels } from '../lib/realtime';
 import { setUnauthorizedHandler } from '../lib/resilient';
 import { swallow } from '../lib/swallow';
 import { getBool, setBool, remove as storageRemove, contains as storageContains } from '../lib/storage';
+import { checkRate, rateLimitMessage } from '../lib/rateLimit';
 import { useOfflineQueueStore } from './offlineQueueStore';
 
 // onboarded 状態のローカルキャッシュ — プロフィール取得失敗時のフォールバック
@@ -52,6 +53,8 @@ type AppUser = User & {
 
 type SignInResult = {
   error: string | null;
+  /** エラー分類コード (UI が文言/導線を分岐するため。raw Supabase メッセージは出さない) */
+  code?: 'invalid_credentials' | 'email_not_confirmed' | 'rate_limited' | 'network' | 'unknown';
   user?: AppUser;
   next?: 'feed' | 'onboarding';
 };
@@ -113,10 +116,11 @@ async function buildUser(authUser: User): Promise<AppUser> {
 //   - サーバ側トリガー (refresh_account_state) が ratio>=1.0 でフラグするので、
 //     クライアント側は厳格な凍結のみに反応するよう緩和する。
 function checkAccountState(user: AppUser): string | null {
-  if (user.account_state === 'suspended') {
-    return 'このアカウントは利用停止中です。サポートにお問い合わせください。';
-  }
-  // 'restricted' / 'warned' / 'caution' は通す
+  // 方針 (2026-06): ハードブロックは廃止。suspended でもログインは許可し、
+  // アプリ内の AccountStateBanner で「停止中・異議申し立て」を表示する方針に変更。
+  // (誤発火による締め出しを避ける。実際の書き込み等の機能制限はサーバ側 RLS/トリガで担保)。
+  // 将来「確実にログイン拒否」したい state (法的 ban 等) が出たらここで文字列を返す。
+  void user;
   return null;
 }
 
@@ -280,8 +284,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       console.warn('[authStore] 401 detected and refresh failed, forcing signOut');
       await get().signOut();
     });
-    // ★ Safety: 7 秒以内に返らなければ hydrated:true で起動継続
-    // (旧 5s だと低速回線で false logout する事故が起きていた)
+    // ★ Safety: 一定時間返らなければ hydrated:true で起動継続。
+    // 値は hydrate の最悪逐次コスト getSession(3s)+refreshSession(6s)+buildUser(3s)=12s を
+    // 上回る 13s にする。7s だと低速回線で「refresh は成功したのにタイマーが先に
+    // user:null を確定 → false logout」になっていた (各 await は個別 timeout 済なので
+    // 実際に 13s 超ハングはしない。UI は別途 forceReady 500ms で先に出る)。
     let hydrationDone = false;
     const safetyTimer = setTimeout(() => {
       if (!hydrationDone) {
@@ -289,7 +296,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         hydrationDone = true;
         set({ user: null, hydrated: true });
       }
-    }, 7000);
+    }, 13000);
     try {
       // ★ getSession() は web で稀に内部 lock/refresh が stall して永遠に返らない
       //   ことがある (backend 健全・token 有効でも発生)。3 秒で race し、stall 時は
@@ -363,6 +370,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
   signIn: async (email, password) => {
+    // クライアント側レート制限 (brute-force 抑止の一段目)
+    const rl = checkRate('login');
+    if (!rl.ok) return { error: rateLimitMessage('login', rl.retryAfterMs) };
     try {
       // signInWithPassword 自体に 10 秒タイムアウト
       const signInRes = await withTimeout(
@@ -376,7 +386,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return { error: 'ネットワークが遅すぎます。接続を確認してもう一度お試しください。' };
       }
       const { data, error } = signInRes;
-      if (error) return { error: error.message };
+      if (error) {
+        // error.message の英語完全一致に頼らず error.code でも分類する
+        // (GoTrue のバージョン/ロケール差で message が変わっても死に導線にしない)。
+        const ecode = (error as { code?: string }).code ?? '';
+        const raw = (error.message ?? '').toLowerCase();
+        if (ecode === 'email_not_confirmed' || raw.includes('not confirmed') || raw.includes('confirm')) {
+          return { error: 'メールアドレスが未確認です。確認メールのリンクから認証してください。', code: 'email_not_confirmed' };
+        }
+        if (ecode === 'invalid_credentials' || raw.includes('invalid login credentials') || raw.includes('invalid credentials')) {
+          return { error: 'メールアドレスまたはパスワードが正しくありません。', code: 'invalid_credentials' };
+        }
+        if (ecode === 'over_request_rate_limit' || raw.includes('rate limit') || raw.includes('too many')) {
+          return { error: '試行回数が多すぎます。しばらくしてからお試しください。', code: 'rate_limited' };
+        }
+        console.warn('[signIn] unhandled error:', ecode || error.message);
+        return { error: 'ログインに失敗しました。しばらくしてからお試しください。', code: 'unknown' };
+      }
       if (!data?.session?.user) {
         return { error: 'セッションを取得できませんでした。もう一度お試しください。' };
       }
@@ -417,6 +443,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
   signUp: async (email, password, phone) => {
+    // クライアント側レート制限 (spam-account 抑止の一段目)
+    const rl = checkRate('signup');
+    if (!rl.ok) {
+      return { error: rateLimitMessage('signup', rl.retryAfterMs), autoLoggedIn: false, needsConfirmEmail: false };
+    }
     try {
       const cleanEmail = email.trim().toLowerCase();
       // signUp 自体に 12 秒タイムアウト (ハング防止)
@@ -550,11 +581,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       signOutInFlight = false;
     }
   },
-  setUser: (user) => set({ user }),
+  setUser: (user) => {
+    // オンボ完了 (onboarded=true) は同期キャッシュにも焼く。これが無いと次回 cold start
+    // で profile fetch がタイムアウトした際、buildUser のフォールバックが古い false を
+    // 返し、完了済みユーザーがオンボに戻される (再オンボループ) 原因になっていた。
+    if (user?.onboarded === true && user.id) {
+      setCachedOnboardedSync(user.id, true);
+    }
+    set({ user });
+  },
   refreshProfile: async () => {
     const { user } = get();
     if (!user) return;
     const profile = await fetchProfile(user.id).catch(() => null);
-    if (profile) set({ user: { ...user, ...profile } });
+    if (!profile) return;
+    const merged = { ...user, ...profile };
+    // セッション中に suspended へ移行していたら、ここでも確実にログアウトさせる
+    // (signIn / tryRecoverSession は gate するが refreshProfile は素通りだった)
+    if (checkAccountState(merged)) {
+      await get().signOut();
+      return;
+    }
+    set({ user: merged });
   },
 }));

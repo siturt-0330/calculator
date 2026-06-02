@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, ScrollView, Pressable, StyleSheet, Image as RNImage,
+  View, Text, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, ScrollView, Pressable, StyleSheet, Image as RNImage,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -17,7 +17,7 @@ import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { getLastViewed, setLastViewed } from '../../lib/utils/lastViewed';
 import { fetchPostById, fetchCommunitiesForPosts } from '../../lib/api/posts';
 import { fetchSimilarPosts } from '../../lib/api/similarPosts';
-import { fetchComments, createComment } from '../../lib/api/comments';
+import { fetchComments } from '../../lib/api/comments';
 import { attachChannel } from '../../lib/realtime';
 import { useFeedPage } from '../../hooks/useFeedPage';
 import { useReactionToggle } from '../../hooks/useReactions';
@@ -38,13 +38,14 @@ import { ImageLightbox } from '../../components/ui/ImageLightbox';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { extractFirstUrl } from '../../lib/utils/extractUrl';
 import { Spinner } from '../../components/ui/Spinner';
-import { useToastStore } from '../../stores/toastStore';
 import { formatRelative } from '../../lib/utils/date';
 import type { Comment } from '../../types/models';
 import { Icon } from '../../constants/icons';
 import { ObsidianSaveButton } from '../../components/ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
 import { CommentThreadItem } from '../../components/post/CommentThreadItem';
+import { ReportSheet } from '../../components/post/ReportSheet';
+import { MoreHorizontal } from 'lucide-react-native';
 import { useCommentReactions, useCommentReactionToggle } from '../../hooks/useCommentReactions';
 import { CollapsedComment } from '../../components/post/CollapsedComment';
 import { buildCommentTree } from '../../lib/utils/commentTree';
@@ -52,13 +53,8 @@ import {
   shouldCollapseComment,
   groupConsecutiveCollapsed,
 } from '../../lib/utils/commentCollapse';
-import * as Haptics from 'expo-haptics';
 import { isValidUuid } from '../../lib/validation';
-
-function safeHaptic(type: Haptics.NotificationFeedbackType) {
-  if (Platform.OS === 'web') return;
-  Haptics.notificationAsync(type).catch(() => {});
-}
+import { pseudonymFor } from '../../lib/utils/pseudonym';
 
 const MAX_W = 720;
 
@@ -69,8 +65,6 @@ export default function PostDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
-  const [text, setText] = useState('');
-  const SendIcon = Icon.send;
   const BackIcon = Icon.arrowL;
   // テーマ購読 — light/dark 切替で post 詳細が自動再 render
   const C = useColors();
@@ -129,15 +123,8 @@ export default function PostDetailScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   // ============================================================
-  // 返信モード (migration 0059)
-  // ------------------------------------------------------------
-  // 「このコメントに返信」をタップしたら replyTo に Comment をセットする。
-  //   - 送信時: parentId = replyTo.id, replyToId = replyTo.id を attach
-  //   - 返信先は「#N さんに返信中」バナー + ツリーのレール/エルボーで示す。
-  //     本文には何も差し込まない (旧: 「↳ #N さんへ」自動挿入は本文を汚すため廃止)。
-  //   - キャンセル ✕ ボタンで replyTo を null に戻す
-  // ============================================================
-  const [replyTo, setReplyTo] = useState<Comment | null>(null);
+  // 返信は全画面コメント作成画面 (app/post/comment) へ遷移して行う
+  // (旧: インライン replyTo バナー + 下部入力欄。Instagram/Threads 風に全画面化)。
 
   const { data: post, isLoading: postLoading, isError: postError } = useQuery({
     queryKey: ['post', id],
@@ -244,34 +231,14 @@ export default function PostDetailScreen() {
 
   // 画像ライトボックス (全画面表示) の対象 URL
   const [lightboxUri, setLightboxUri] = useState<string | null>(null);
-
-  const show = useToastStore((s) => s.show);
+  // 運営への通報シート (この投稿が対象)
+  const [reportOpen, setReportOpen] = useState(false);
 
   // Smart skeleton timing — Spinner only after 200ms of continuous loading.
   // <200ms loads (cache hits via TanStack staleTime) skip flash entirely.
   const showPostSpinner = useDelayedLoading(postLoading, 200);
   const showRepliesSpinner = useDelayedLoading(repliesLoading, 200);
 
-  const { mutateAsync: submitReply, isPending } = useMutation({
-    // 返信モード時は parent_comment_id / reply_to_comment_id をセット
-    mutationFn: (args: { content: string; parentId?: string; replyToId?: string }) =>
-      createComment(id!, args.content, {
-        parentId: args.parentId ?? null,
-        replyToId: args.replyToId ?? null,
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['post-comments', id] });
-      setText('');
-      setReplyTo(null);
-      safeHaptic(Haptics.NotificationFeedbackType.Success);
-    },
-    onError: (e: unknown) => {
-      // 失敗時は haptic だけだとユーザーには無反応に見える — トーストでも明示
-      safeHaptic(Haptics.NotificationFeedbackType.Error);
-      const msg = e instanceof Error ? e.message : '';
-      show(msg ? `送信に失敗しました: ${msg}` : '送信に失敗しました', 'error');
-    },
-  });
 
   // lastViewed: post を開いた瞬間の snapshot を取り、3 秒後 + unmount 時に save。
   // - mount 時 1 回だけ snapshot を読む (id 変更で reset)
@@ -294,21 +261,21 @@ export default function PostDetailScreen() {
     };
   }, [id]);
 
-  // 未読コメント (snapshot 基準 + 自分の post-comments 結果) の id 集合と先頭 index
-  const { unreadIds, firstUnreadIndex } = useMemo(() => {
-    if (lastViewedSnapshot === null) return { unreadIds: new Set<string>(), firstUnreadIndex: -1 };
+  // 未読コメント (snapshot 基準) の id 集合 — 未読コメントの軽いハイライト用。
+  // ※「新着 N 件」フローティング pill は廃止 (セッション中 lastViewedSnapshot が
+  //   固定で件数が減らず「消えない」ため)。未読ハイライトのみ残す。
+  const unreadIds = useMemo(() => {
+    if (lastViewedSnapshot === null) return new Set<string>();
     const set = new Set<string>();
-    let firstIdx = -1;
     for (let i = 0; i < replies.length; i++) {
       const c = replies[i];
       if (!c) continue;
       const created = Date.parse(c.created_at);
       if (Number.isFinite(created) && created > lastViewedSnapshot) {
         set.add(c.id);
-        if (firstIdx === -1) firstIdx = i;
       }
     }
-    return { unreadIds: set, firstUnreadIndex: firstIdx };
+    return set;
   }, [replies, lastViewedSnapshot]);
 
   // ============================================================
@@ -325,24 +292,6 @@ export default function PostDetailScreen() {
   const { data: commentReactions } = useCommentReactions(allCommentIds);
   const { toggle: toggleCommentReact } = useCommentReactionToggle();
 
-  const { rootIndexById, rootOfId } = useMemo(() => {
-    const idx = new Map<string, number>();
-    const rootOf = new Map<string, string>();
-    commentTree.forEach((root, i) => {
-      idx.set(root.id, i);
-      rootOf.set(root.id, root.id);
-      const visit = (nodes: Comment[]) => {
-        for (const n of nodes) {
-          rootOf.set(n.id, root.id);
-          if (n.children && n.children.length > 0) visit(n.children);
-        }
-      };
-      if (root.children && root.children.length > 0) visit(root.children);
-    });
-    return { rootIndexById: idx, rootOfId: rootOf };
-  }, [commentTree]);
-
-  const rootOfCommentId = (cid: string): string => rootOfId.get(cid) ?? cid;
 
   // Realtime: 同じ投稿への新規コメント + 投稿カウンター更新 + リアクション
   //
@@ -380,26 +329,25 @@ export default function PostDetailScreen() {
     };
   }, [id, qc]);
 
-  const handleSend = async () => {
-    if (!text.trim() || isPending) return;
-    // 返信モードなら parent_comment_id / reply_to_comment_id を attach
-    const args = replyTo
-      ? { content: text.trim(), parentId: replyTo.id, replyToId: replyTo.id }
-      : { content: text.trim() };
-    // mutateAsync は失敗時に reject するが、onError でトーストを出すので
-    // ここでは握り潰して UI を壊さない (unhandled rejection 防止)
-    await submitReply(args).catch((e: unknown) => {
-      console.warn('[post/handleSend] submit failed:', e);
-    });
+  // 返信ボタン押下: 全画面コメント作成画面へ遷移。
+  // parent / 返信先 comment id と、表示用の擬似名・本文プレビューを params で渡す。
+  const handleReply = (c: Comment) => {
+    const ps = pseudonymFor(c.author_id);
+    router.push({
+      pathname: '/post/comment',
+      params: {
+        postId: id!,
+        parentId: c.id,
+        replyToId: c.id,
+        replyHandle: ps.handle,
+        replyPreview: (c.content ?? '').slice(0, 80),
+      },
+    } as never);
   };
 
-  // 返信ボタン押下: replyTo をセットするだけ。
-  // 返信先は「#N さんに返信中」バナー + ツリーのレール/エルボーで示し、DB は
-  // handleSend が parent_comment_id / reply_to_comment_id を attach する。
-  // 本文には何も差し込まない (旧実装の「↳ #N (hash) さんへ」自動挿入は、その
-  // テキストがそのまま投稿本文に混ざってしまうため廃止)。
-  const handleReply = (c: Comment) => {
-    setReplyTo(c);
+  // 下部「コメントを入力」バー → 全画面コメント作成画面 (root コメント) へ遷移。
+  const openCommentComposer = () => {
+    router.push({ pathname: '/post/comment', params: { postId: id! } } as never);
   };
 
   // route param validation 失敗 → cache 汚染を防ぐため早期 return
@@ -468,6 +416,17 @@ export default function PostDetailScreen() {
             <BackIcon size={22} color={C.text} strokeWidth={2.2} />
           </PressableScale>
           <Text style={[T.smallM, { color: C.text3, marginLeft: SP['2'] }]}>投稿</Text>
+          <View style={{ flex: 1 }} />
+          {/* ⋯ → 運営に通報 (理由選択シート) */}
+          <PressableScale
+            onPress={() => setReportOpen(true)}
+            haptic="tap"
+            hitSlop={12}
+            accessibilityLabel="この投稿を通報"
+            style={{ padding: SP['2'] }}
+          >
+            <MoreHorizontal size={20} color={C.text2} strokeWidth={2.2} />
+          </PressableScale>
         </View>
         {/* 投稿本体カード */}
         <View style={{
@@ -890,150 +849,47 @@ export default function PostDetailScreen() {
         )}
       </ScrollView>
 
-      {/* 新着 N 件アンカー (issue #18) — 未読が 1 件以上ある時のみ表示。
-          tap で最初の未読までスクロール。Modal ではないので入力欄の上に
-          浮かぶ floating pill として配置 (pointerEvents は box-none で
-          周辺のタップを邪魔しない)。 */}
-      {unreadIds.size > 0 && firstUnreadIndex >= 0 && (
-        <View
-          pointerEvents="box-none"
+      {/* 「新着 N 件」フローティング pill は廃止 (セッション中ずっと残り「消えない」
+          UX だったため)。未読ハイライト (unreadIds) は各コメント側で維持。 */}
+      <View style={{ width: '100%', alignItems: 'center', borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.bg2 }}>
+        {/* 全画面コメント作成への誘導バー (Instagram/Threads 風)。
+            タップで /post/comment へ遷移し、本文 + 画像/動画を全画面で作成する。
+            入力自体はこのバーでは行わない (インライン入力は廃止)。 */}
+        <PressableScale
+          onPress={openCommentComposer}
+          haptic="tap"
+          accessibilityRole="button"
+          accessibilityLabel="コメントを作成"
           style={{
-            position: 'absolute',
-            // 入力欄の上に配置 (insets.bottom + 入力欄高さ ~60 + 余白)
-            bottom: insets.bottom + 76,
-            left: 0,
-            right: 0,
+            width: '100%', maxWidth: MAX_W,
+            paddingHorizontal: SP['3'],
+            paddingTop: SP['2'],
+            paddingBottom: insets.bottom + SP['2'],
+            flexDirection: 'row',
             alignItems: 'center',
+            gap: SP['2'],
           }}
         >
-          <PressableScale
-            onPress={() => {
-              try {
-                // ScrollView では index 指定の scroll が無い。コメントツリー化で
-                // 各 row の高さが不定なので、ここでは end まで飛ばす近似 (best-effort)。
-                // FlashList 時代の scrollToIndex に比べ精度は落ちるが、未読 UX
-                // 自体は維持できる (画面下に新着のはず)。
-                scrollRef.current?.scrollToEnd({ animated: true });
-              } catch {
-                /* swallow — scroll は best-effort */
-              }
-            }}
-            haptic="tap"
-            hitSlop={8}
-            accessibilityLabel={`新着コメント ${unreadIds.size} 件へスクロール`}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              paddingHorizontal: SP['4'],
-              paddingVertical: SP['2'],
-              backgroundColor: C.accent,
-              borderRadius: R.full,
-              borderWidth: 1.5,
-              borderColor: C.accentLight,
-              shadowColor: C.accent,
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.4,
-              shadowRadius: 10,
-              elevation: 6,
-            }}
-          >
-            <Icon.chevronD size={14} color="#fff" strokeWidth={2.6} />
-            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>
-              新着 {unreadIds.size} 件
-            </Text>
-          </PressableScale>
-        </View>
-      )}
-      <View style={{ width: '100%', alignItems: 'center', borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.bg2 }}>
-        {/* 返信モードバナー (migration 0059) — replyTo がセットされてる時のみ */}
-        {replyTo && (
-          <View style={{
-            width: '100%', maxWidth: MAX_W,
-            paddingHorizontal: SP['3'], paddingTop: SP['2'],
-          }}>
-            <View style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: SP['2'],
-              paddingHorizontal: SP['3'],
-              paddingVertical: 6,
-              backgroundColor: C.accentBg,
-              borderRadius: R.md,
-              borderWidth: 1, borderColor: C.accent,
-            }}>
-              <Icon.arrowUL size={14} color={C.accent} strokeWidth={2.4} />
-              <Text style={[T.caption, { color: C.accent, fontWeight: '700' }]} numberOfLines={1}>
-                #{(rootIndexById.get(rootOfCommentId(replyTo.id)) ?? 0) + 1} さんに返信中
-              </Text>
-              <View style={{ flex: 1 }} />
-              <PressableScale
-                onPress={() => setReplyTo(null)}
-                haptic="tap"
-                hitSlop={8}
-                accessibilityLabel="返信モードを解除"
-                style={{ padding: 2 }}
-              >
-                <Icon.close size={14} color={C.accent} strokeWidth={2.4} />
-              </PressableScale>
-            </View>
-          </View>
-        )}
-        <View style={{
-          width: '100%', maxWidth: MAX_W,
-          paddingHorizontal: SP['3'],
-          paddingTop: SP['2'],
-          paddingBottom: insets.bottom + SP['2'],
-          flexDirection: 'row',
-          alignItems: 'flex-end',
-          gap: SP['2'],
-        }}>
-          {/* 自分の匿名アバター (Threads 風の返信コンポーザ) */}
+          {/* 自分の匿名アバター */}
           <Avatar size={32} anonymous />
           <View style={{
             flex: 1,
             backgroundColor: C.bg3,
-            borderRadius: R.lg,
+            borderRadius: R.full,
             borderWidth: 1,
-            borderColor: text.trim() ? C.accent : C.border,
-            paddingHorizontal: SP['3'],
-            paddingVertical: 6,
+            borderColor: C.border,
+            paddingHorizontal: SP['4'],
+            paddingVertical: 10,
           }}>
-            <TextInput
-              value={text}
-              onChangeText={setText}
-              placeholder={replyTo ? '返信内容を入力…' : 'コメントを入力…'}
-              placeholderTextColor={C.text3}
-              multiline
-              maxLength={500}
-              keyboardAppearance="dark"
-              selectionColor={C.accent}
-              style={[T.body, { color: C.text, maxHeight: 100, minHeight: 24, paddingVertical: 0 }]}
-            />
-            {text.length > 0 && (
-              <Text style={{ fontSize: 10, color: text.length > 450 ? C.amber : C.text3, textAlign: 'right' }}>
-                {text.length} / 500
-              </Text>
-            )}
+            <Text style={[T.body, { color: C.text3 }]} numberOfLines={1}>
+              コメントを入力…
+            </Text>
           </View>
-          <PressableScale
-            onPress={handleSend}
-            disabled={!text.trim() || isPending}
-            haptic="confirm"
-            style={{
-              width: 44, height: 44, borderRadius: 22,
-              backgroundColor: text.trim() && !isPending ? C.accent : C.bg4,
-              alignItems: 'center', justifyContent: 'center',
-              borderWidth: 2, borderColor: text.trim() && !isPending ? C.accent : C.border,
-            }}
-          >
-            {isPending ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <SendIcon size={20} color={text.trim() ? '#fff' : C.text3} strokeWidth={2.4} />
-            )}
-          </PressableScale>
-        </View>
+          {/* 画像/動画も添付できることを示すヒント */}
+          <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon.image size={22} color={C.text2} strokeWidth={2} />
+          </View>
+        </PressableScale>
       </View>
 
       {/* テキストスタンプ Picker — フィードカードと同じ component を再利用 */}
@@ -1058,6 +914,13 @@ export default function PostDetailScreen() {
         visible={!!lightboxUri}
         uri={lightboxUri}
         onClose={() => setLightboxUri(null)}
+      />
+
+      {/* 通報シート (運営への通報・理由選択) */}
+      <ReportSheet
+        visible={reportOpen}
+        postId={id}
+        onClose={() => setReportOpen(false)}
       />
     </KeyboardAvoidingView>
     </Animated.View>

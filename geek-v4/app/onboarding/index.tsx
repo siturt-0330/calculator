@@ -8,32 +8,28 @@ import { Button } from '../../components/ui/Button';
 import { Icon } from '../../constants/icons';
 import type { LucideIcon } from 'lucide-react-native';
 
-const CARDS: { icon: LucideIcon; color: string; bg: string; title: string; desc: string }[] = [
+const CARDS: { icon: LucideIcon; color: string; title: string; desc: string }[] = [
   {
     icon: Icon.lock,
     color: '#7C6AF7',
-    bg: '#2D2940',
     title: '完全匿名',
     desc: '投稿は匿名表示。発信ハードルが下がり、本音で語れます。',
   },
   {
     icon: Icon.hash,
     color: '#22D3A4',
-    bg: '#0d2a22',
     title: 'タグで繋がる',
     desc: '好きなタグだけ表示。嫌なタグは除外。自分専用のタイムライン。',
   },
   {
     icon: Icon.shield,
     color: '#3B82F6',
-    bg: '#0d1f3a',
     title: '構造的な安全',
     desc: '炎上・誹謗中傷を起きにくく設計。安心して発信できます。',
   },
   {
     icon: Icon.sparkles,
     color: '#F472B6',
-    bg: '#2a1525',
     title: '推し活が捗る',
     desc: 'カレンダー・聖地マップ・ゲームで趣味を深めるコーナーを用意。',
   },
@@ -93,7 +89,7 @@ export default function OnboardingIndex() {
               >
                 <View style={{
                   width: 48, height: 48, borderRadius: 12,
-                  backgroundColor: c.bg,
+                  backgroundColor: c.color + '22',
                   alignItems: 'center', justifyContent: 'center',
                   borderWidth: 1, borderColor: c.color + '44',
                 }}>

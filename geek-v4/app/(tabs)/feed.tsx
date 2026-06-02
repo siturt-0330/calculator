@@ -49,7 +49,8 @@ import { useLike, useLikes } from '../../hooks/useLike';
 import { useConcern, useConcerns } from '../../hooks/useConcern';
 import { useSave, useSaves } from '../../hooks/useSave';
 import { useShare } from '../../hooks/useShare';
-import { useReport } from '../../hooks/useReport';
+import { ReportSheet } from '../../components/post/ReportSheet';
+import { AccountStateBanner } from '../../components/account/AccountStateBanner';
 import { useReactions, useReactionToggle } from '../../hooks/useReactions';
 import { useAddedTags, useAddTag } from '../../hooks/useAddedTags';
 import { usePolls } from '../../hooks/usePolls';
@@ -143,9 +144,8 @@ import { TrendingRow } from '../../components/feed/TrendingRow';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { Menu as MenuIcon } from 'lucide-react-native';
 import { EmptyState } from '../../components/ui/EmptyState';
-import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Icon } from '../../constants/icons';
-import { SP } from '../../design/tokens';
+import { SP, isLightActive } from '../../design/tokens';
 import { useTheme } from '../../hooks/useColors';
 import { LOGO_FONT, LOGO_FONT_WEIGHT } from '../../design/typography';
 import { TABBAR } from '../../design/tabbar';
@@ -180,6 +180,10 @@ export default function FeedScreen() {
   //     (左端 grab 以外は FlashList の縦 scroll を邪魔しない)
   // ============================================================
   const { width: WW } = useWindowDimensions();
+  // デスクトップ (Web ≥1100) は LeftSidebar がナビを担うので ☰ + HomeDrawer は出さない。
+  // (旧: ☰ が常時表示で HomeDrawer を開けるが、PC では × もスワイプ閉じも無く
+  //  「サイドバーを押すと戻れない」状態になっていた)
+  const isDesktop = Platform.OS === 'web' && WW >= 1100;
   const DRAWER_WIDTH = getHomeDrawerWidth(WW);
   const drawerProgress = useSharedValue(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -199,6 +203,7 @@ export default function FeedScreen() {
   const openGesture = useMemo(
     () =>
       Gesture.Pan()
+        .enabled(!isDesktop) // デスクトップは LeftSidebar を使うため開くスワイプを無効化
         .activeOffsetX([-9999, 10]) // 右方向に 10pt 以上動いたら active
         .failOffsetY([-15, 15])       // 縦に 15pt 以上動いたら fail (scroll に道を譲る)
         // 左端 grab 範囲外で開始した swipe は onChange / onEnd の startX 判定で無視。
@@ -250,7 +255,7 @@ export default function FeedScreen() {
             });
           }
         }),
-    [DRAWER_WIDTH, drawerProgress],
+    [DRAWER_WIDTH, drawerProgress, isDesktop],
   );
 
   // feed content を drawer width 分 右に push する animated style
@@ -310,7 +315,6 @@ export default function FeedScreen() {
   const { toggle: toggleReact } = useReactionToggle();
   const { unreadCount } = useNotifications();
   const { share } = useShare();
-  const { report } = useReport();
   const listRef = useRef<FlashList<FeedItem>>(null);
   // ホームタブを再タップで listRef を先頭にスクロール (X / Instagram と同等の挙動)。
   // TabBar 側で focused 時に router.navigate で root へ戻すのと合わせて、
@@ -685,6 +689,7 @@ export default function FeedScreen() {
   // ★ BlockedTagBanner はユーザー要望でホームから削除済み (フィルタ画面 /filter で確認可能)
   const ListHeader = useMemo(() => (
     <View>
+      <AccountStateBanner />
       <TrendingRow />
     </View>
   ), []);
@@ -721,27 +726,30 @@ export default function FeedScreen() {
           flexDirection: 'row',
           alignItems: 'center',
         }}>
-          {/* ★ 左上ハンバーガー = ドロワーを開くボタン。
-              アバター表示だと「メニュー」と分かりにくいフィードバックを受け
-              三本横棒の見慣れた menu アイコンに変更 (2026-05-31)。
-              右スワイプできない環境 (デスクトップ Web 等) の主要導線。 */}
-          <PressableScale
-            onPress={openDrawer}
-            hitSlop={10}
-            haptic="tap"
-            accessibilityRole="button"
-            accessibilityLabel="メニューを開く"
-            style={{
-              width: 38,
-              height: 38,
-              borderRadius: 19,
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginRight: SP['2'],
-            }}
-          >
-            <MenuIcon size={24} color={C.text} strokeWidth={2.2} />
-          </PressableScale>
+          {/* ★ 左上ハンバーガー = ドロワーを開くボタン (モバイルのみ)。
+              三本横棒の menu アイコン。右スワイプできない環境向けの導線。
+              デスクトップ (≥1100) は LeftSidebar がナビを担うため非表示にする
+              (旧: 常時表示で HomeDrawer を開けてしまい、PC では閉じる手段が乏しく
+               「サイドバーを押すと戻れない」状態になっていた)。 */}
+          {!isDesktop && (
+            <PressableScale
+              onPress={openDrawer}
+              hitSlop={10}
+              haptic="tap"
+              accessibilityRole="button"
+              accessibilityLabel="メニューを開く"
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 19,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: SP['2'],
+              }}
+            >
+              <MenuIcon size={24} color={C.text} strokeWidth={2.2} />
+            </PressableScale>
+          )}
           {/* 新規投稿 FAB はグローバル TabBar の「+」に一本化したため削除 (2026-05-29)。
               投稿作成導線は画面下の TabBar 右隣「+」円ボタンへ集約。 */}
           {/* Geek brand wordmark — Orbitron Black + accent gradient (web) + glow */}
@@ -760,14 +768,17 @@ export default function FeedScreen() {
               Platform.OS === 'web'
                 ? // RN-web 経由で CSS gradient text を効かせる (as object キャストで十分通る)
                   ({
-                    backgroundImage:
-                      'linear-gradient(110deg, #b794f4 0%, #7c6af7 35%, #67c1ff 75%, #6ee7b7 100%)',
+                    // ライトは自然な青の濃淡 (白背景で判読可)、ダークは従来の紫→水色→ミント。
+                    backgroundImage: isLightActive()
+                      ? 'linear-gradient(110deg, #2f5784 0%, #3e6da3 45%, #5288b9 100%)'
+                      : 'linear-gradient(110deg, #b794f4 0%, #7c6af7 35%, #67c1ff 75%, #6ee7b7 100%)',
                     backgroundClip: 'text',
                     WebkitBackgroundClip: 'text',
                     WebkitTextFillColor: 'transparent',
                     color: 'transparent',
-                    textShadow:
-                      '0 0 14px rgba(124,106,247,0.55), 0 0 28px rgba(103,193,255,0.25)',
+                    textShadow: isLightActive()
+                      ? 'none'
+                      : '0 0 14px rgba(124,106,247,0.55), 0 0 28px rgba(103,193,255,0.25)',
                     transform: 'skewX(-4deg)',
                   } as object)
                 : {
@@ -903,18 +914,11 @@ export default function FeedScreen() {
         }
       />
 
-      <ConfirmDialog
+      {/* 通報シート (運営への通報・理由選択) */}
+      <ReportSheet
         visible={!!reportPostId}
-        title="この投稿を通報しますか？"
-        message="運営に通報されます。誤った情報・スパム・誹謗中傷などが対象です。"
-        confirmLabel="通報する"
-        cancelLabel="キャンセル"
-        destructive
-        onCancel={() => setReportPostId(null)}
-        onConfirm={() => {
-          if (reportPostId) report({ postId: reportPostId, reason: 'other' });
-          setReportPostId(null);
-        }}
+        postId={reportPostId}
+        onClose={() => setReportPostId(null)}
       />
         </Animated.View>
       </GestureDetector>
