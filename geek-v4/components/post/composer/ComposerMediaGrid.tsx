@@ -20,7 +20,8 @@
 //     absolute 配置 (top6 right6) して角の内側に浮かせる。
 // ============================================================
 
-import { View, Text, useWindowDimensions } from 'react-native';
+import { useState } from 'react';
+import { View, Text, Platform, useWindowDimensions } from 'react-native';
 import Animated, { FadeIn, FadeOut, Layout } from 'react-native-reanimated';
 import { X as IconX } from 'lucide-react-native';
 import { SP, R } from '../../../design/tokens';
@@ -65,6 +66,9 @@ export function ComposerMediaGrid({
   containerPaddingH = SP['4'],
 }: ComposerMediaGridProps): JSX.Element | null {
   const { width: winW } = useWindowDimensions();
+  // 親カラムの実測幅。create.tsx ではアバター列分インデントされたカラムの中に置かれる
+  // ため、winW から計算すると右にはみ出して「画面内に収まらない」。onLayout で実測する。
+  const [measuredW, setMeasuredW] = useState(0);
 
   // 画像 + 動画 を 1 列に並べ、視覚レイアウトは 4 タイルで cap する。
   const allTiles: Tile[] = [
@@ -82,20 +86,27 @@ export function ComposerMediaGrid({
   if (count === 0) return null;
 
   // ----- サイズ算出 -----
-  // コンテンツ幅 = 画面幅 - 左右 padding。負にならないよう floor。
-  const contentW = Math.max(0, winW - 2 * containerPaddingH);
+  // 実測幅があればそれを使う (= 必ず親カラム/画面内に収まる)。未測定の間は winW から概算。
+  const contentW = measuredW > 0 ? measuredW : Math.max(0, winW - 2 * containerPaddingH);
   // 2 カラムのときの 1 タイル幅 (列間 1 gap を差し引いて 2 等分)
   const halfW = Math.floor((contentW - GAP) / 2);
 
   const multiIndex = images.length > 1; // 画像が複数のとき index バッジを出す
 
   return (
-    <Animated.View
-      entering={FadeIn.duration(180)}
-      exiting={FadeOut.duration(140)}
-      layout={Layout.springify().damping(20)}
-      style={{ width: contentW, borderRadius: OUTER_RADIUS, overflow: 'hidden' }}
+    <View
+      style={{ width: '100%' }}
+      onLayout={(e) => {
+        const lw = e.nativeEvent.layout.width;
+        if (lw > 0 && Math.abs(lw - measuredW) > 0.5) setMeasuredW(lw);
+      }}
     >
+      <Animated.View
+        entering={FadeIn.duration(180)}
+        exiting={FadeOut.duration(140)}
+        layout={Layout.springify().damping(20)}
+        style={{ width: contentW, borderRadius: OUTER_RADIUS, overflow: 'hidden', alignSelf: 'flex-start' }}
+      >
       {count === 1 && (
         <SingleLayout
           tile={tiles[0]!}
@@ -141,7 +152,8 @@ export function ComposerMediaGrid({
           onRemoveVideo={onRemoveVideo}
         />
       )}
-    </Animated.View>
+      </Animated.View>
+    </View>
   );
 }
 
@@ -301,7 +313,7 @@ function MediaTile({
       style={{ width, height, borderRadius: TILE_RADIUS }}
     >
       {isVideo ? (
-        // ----- 動画タイル: 黒地 + 中央 play badge + 左下サイズ pill -----
+        // ----- 動画タイル: 実映像の先頭フレーム + 中央 play badge + 左下サイズ pill -----
         <View
           style={{
             width,
@@ -309,21 +321,36 @@ function MediaTile({
             borderRadius: TILE_RADIUS,
             backgroundColor: '#000',
             overflow: 'hidden',
-            alignItems: 'center',
-            justifyContent: 'center',
           }}
         >
+          {/* 実際の動画プレビュー (Web=<video>, Native=expo-av の先頭フレーム)。
+              これが無いと「投稿する動画が見えない」(黒い箱のまま) になる。 */}
+          <VideoPreview uri={tile.uri} width={width} height={height} />
+          {/* 中央の再生バッジ (オーバーレイ) */}
           <View
+            pointerEvents="none"
             style={{
-              width: PLAY_BADGE,
-              height: PLAY_BADGE,
-              borderRadius: PLAY_BADGE / 2,
-              backgroundColor: 'rgba(0,0,0,0.55)',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <Icon.play size={22} color="#fff" />
+            <View
+              style={{
+                width: PLAY_BADGE,
+                height: PLAY_BADGE,
+                borderRadius: PLAY_BADGE / 2,
+                backgroundColor: 'rgba(0,0,0,0.55)',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Icon.play size={22} color="#fff" />
+            </View>
           </View>
           <View
             style={{
@@ -396,5 +423,57 @@ function MediaTile({
         <IconX size={14} color="#fff" strokeWidth={2.6} />
       </PressableScale>
     </Animated.View>
+  );
+}
+
+// ============================================================
+// VideoPreview — 投稿前の動画プレビュー (先頭フレームを実映像で表示)
+// ------------------------------------------------------------
+// Web は <video preload="metadata"> で先頭フレーム。Native は expo-av Video を
+// 停止状態 (shouldPlay=false) で置いて先頭フレームを描く。expo-av は lazy require
+// して Web bundle に乗せない。失敗時は黒地のまま (退行しない)。
+// ============================================================
+function VideoPreview({
+  uri,
+  width,
+  height,
+}: {
+  uri: string;
+  width: number;
+  height: number;
+}): JSX.Element | null {
+  if (Platform.OS === 'web') {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const React = require('react') as typeof import('react');
+    return React.createElement('video', {
+      src: uri,
+      muted: true,
+      playsInline: true,
+      preload: 'metadata',
+      style: { width, height, objectFit: 'cover', display: 'block', backgroundColor: '#000' },
+    });
+  }
+  // Native: expo-av を lazy require
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let VideoCmp: any = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let ResizeMode: any = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const av = require('expo-av') as typeof import('expo-av');
+    VideoCmp = av.Video;
+    ResizeMode = av.ResizeMode;
+  } catch {
+    /* expo-av 不在環境 — 黒地のままにする */
+  }
+  if (!VideoCmp) return null;
+  return (
+    <VideoCmp
+      source={{ uri }}
+      shouldPlay={false}
+      isMuted
+      resizeMode={ResizeMode?.COVER ?? 'cover'}
+      style={{ width, height }}
+    />
   );
 }

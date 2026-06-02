@@ -171,10 +171,13 @@ export function useCommentReactionToggle() {
   // 加算するだけ。settle 時に (count - 1) が奇数なら net toggle を再 dispatch
   // することで「N 連打した結果の parity」が server-truth に反映される。
   // これにより picker XOR (localFlips) の visual と server が必ず最終一致する。
+  // mutation オブジェクトは毎 render 新 ref。安定参照の mutation.mutate にのみ依存させ、
+  // toggle を安定化して CommentThreadItem の再 render を抑える (#21 と同方針)。
+  const mutate = mutation.mutate;
   const fire = useCallback((vars: Vars) => {
     const k = `${vars.commentId}:${vars.meme}`;
     pending.current.set(k, 1);
-    mutation.mutate(vars, {
+    mutate(vars, {
       onSettled: (_data, error) => {
         const total = pending.current.get(k) ?? 1;
         pending.current.delete(k);
@@ -189,7 +192,7 @@ export function useCommentReactionToggle() {
         if (extra % 2 === 1) fire(vars); // 余剰が奇数 → もう一度 toggle
       },
     });
-  }, [mutation]);
+  }, [mutate]);
 
   const toggle = useCallback((commentId: string, meme: string) => {
     const k = `${commentId}:${meme}`;

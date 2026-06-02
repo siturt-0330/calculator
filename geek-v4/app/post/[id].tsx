@@ -45,6 +45,7 @@ import { Icon } from '../../constants/icons';
 import { ObsidianSaveButton } from '../../components/ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
 import { CommentThreadItem } from '../../components/post/CommentThreadItem';
+import { useCommentReactions, useCommentReactionToggle } from '../../hooks/useCommentReactions';
 import { CollapsedComment } from '../../components/post/CollapsedComment';
 import { buildCommentTree } from '../../lib/utils/commentTree';
 import {
@@ -318,6 +319,11 @@ export default function PostDetailScreen() {
   //   同じ index を貼って表示に使う。 _rootOfId は子孫 id → root id を引く逆引き map。
   // ============================================================
   const commentTree = useMemo(() => buildCommentTree(replies), [replies]);
+
+  // コメントのテキストスタンプ反応 (comment_reactions を配線して Threads 風の反応行を出す)。
+  const allCommentIds = useMemo(() => replies.map((r) => r.id), [replies]);
+  const { data: commentReactions } = useCommentReactions(allCommentIds);
+  const { toggle: toggleCommentReact } = useCommentReactionToggle();
 
   const { rootIndexById, rootOfId } = useMemo(() => {
     const idx = new Map<string, number>();
@@ -773,6 +779,8 @@ export default function PostDetailScreen() {
                         postId={post.id}
                         parentCommunityId={postCommunities[0]?.community_id ?? null}
                         onReply={handleReply}
+                        reactionsByComment={commentReactions}
+                        onReact={toggleCommentReact}
                       />
                     );
                   }
@@ -789,6 +797,8 @@ export default function PostDetailScreen() {
                           postId={post.id}
                           parentCommunityId={postCommunities[0]?.community_id ?? null}
                           onReply={handleReply}
+                          reactionsByComment={commentReactions}
+                          onReact={toggleCommentReact}
                         />
                       ))}
                     </CollapsedComment>
@@ -978,6 +988,8 @@ export default function PostDetailScreen() {
           alignItems: 'flex-end',
           gap: SP['2'],
         }}>
+          {/* 自分の匿名アバター (Threads 風の返信コンポーザ) */}
+          <Avatar size={32} anonymous />
           <View style={{
             flex: 1,
             backgroundColor: C.bg3,
