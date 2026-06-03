@@ -40,7 +40,7 @@ import { EASE_OUT_QUART, TIMING_NORM, clampHandoff } from '../../design/motion';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useFeed } from '../../hooks/useFeed';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 // useTagFilter は BlockedTagBanner と一緒に削除済み (banner をホームから外した)
@@ -369,6 +369,15 @@ export default function FeedScreen() {
     }, 1500);
     return () => clearTimeout(id);
   }, [loading, userId, qc]);
+
+  // ★ リロード/タブ復帰のたびに最新投稿を反映 (ユーザー要望: 投稿push通知ではなく
+  //   「リロードするたびに新着が出る」)。focus 時に ['feed'] を invalidate → page1 を
+  //   取り直し新着が出る (staleTime:0 と協調)。コミュタブと同じ手法。
+  useFocusEffect(
+    useCallback(() => {
+      void qc.invalidateQueries({ queryKey: ['feed'] });
+    }, [qc]),
+  );
 
   // posts は毎 render で新しい配列参照になる (data?.pages.flatMap 経由)。
   // ID リストの中身が変わらない限り再計算したくないので、id を join したハッシュで

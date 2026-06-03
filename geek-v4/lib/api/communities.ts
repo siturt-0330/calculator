@@ -1229,37 +1229,44 @@ export async function fetchMyCommunityPostsRich(
       community_id: string | null;
       author_nickname?: string | null;
       official_author?: { name: string; organization: string } | null;
+      // 0112: RPC が community 表示メタを inline で返す (未適用 DB では undefined)
+      community?: CommunityMetaLite | null;
     };
     const payload = (data ?? { posts: [] }) as { posts?: RpcPostRow[] };
     const rpcPosts = Array.isArray(payload.posts) ? payload.posts : [];
 
     if (rpcPosts.length === 0) return { posts: [], communityByPost: {} };
 
-    // community_id → CommunityMetaLite を組み立てるための icon/name lookup
-    // RPC では community の icon 情報を全部 inline していないので別 query で取得。
-    // ただし「投稿 post に紐付いた community 集合」は最大数十件で、index 引きの
-    // 単一 .in() なので無視できるコスト。
-    const usedCommunityIds = Array.from(
-      new Set(
-        rpcPosts
-          .map((p) => p.community_id)
-          .filter((id): id is string => typeof id === 'string' && id.length > 0),
-      ),
-    );
-
+    // community メタの解決:
+    //   - 0112 適用済: RPC が per-post 'community' を inline 返却 → 追加 query 不要 (1 RTT)。
+    //   - 未適用: 従来どおり communities を 1 回だけ .in() で引く (fallback)。
     const communityByPost: Record<string, CommunityMetaLite> = {};
-    if (usedCommunityIds.length > 0) {
-      const { data: commRows } = await supabase
-        .from('communities')
-        .select('id, name, icon_emoji, icon_color, icon_url, is_official')
-        .in('id', usedCommunityIds);
-      const commMap = new Map(
-        ((commRows ?? []) as CommunityMetaLite[]).map((c) => [c.id, c]),
-      );
+    const hasInlineMeta = rpcPosts.some((p) => p.community);
+    if (hasInlineMeta) {
       for (const p of rpcPosts) {
-        const cid = p.community_id;
-        const c = cid ? commMap.get(cid) : undefined;
-        if (c) communityByPost[p.id] = c;
+        if (p.community && p.community.id) communityByPost[p.id] = p.community;
+      }
+    } else {
+      const usedCommunityIds = Array.from(
+        new Set(
+          rpcPosts
+            .map((p) => p.community_id)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        ),
+      );
+      if (usedCommunityIds.length > 0) {
+        const { data: commRows } = await supabase
+          .from('communities')
+          .select('id, name, icon_emoji, icon_color, icon_url, is_official')
+          .in('id', usedCommunityIds);
+        const commMap = new Map(
+          ((commRows ?? []) as CommunityMetaLite[]).map((c) => [c.id, c]),
+        );
+        for (const p of rpcPosts) {
+          const cid = p.community_id;
+          const c = cid ? commMap.get(cid) : undefined;
+          if (c) communityByPost[p.id] = c;
+        }
       }
     }
 
@@ -1268,7 +1275,7 @@ export async function fetchMyCommunityPostsRich(
     // (UI 側は communityByPost / post.official_author のみを参照する)
     const posts: Post[] = rpcPosts.map((p) => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { community_id: _cid, author_nickname: _nick, ...rest } = p;
+      const { community_id: _cid, author_nickname: _nick, community: _comm, ...rest } = p;
       return rest as Post;
     });
 

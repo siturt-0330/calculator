@@ -14,10 +14,10 @@ import {
   Text,
   ScrollView,
   RefreshControl,
-  Image,
   Pressable,
   ActivityIndicator,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -54,6 +54,7 @@ import { useReactions, useReactionToggle } from '../../../../hooks/useReactions'
 import { useAddedTags, useAddTag } from '../../../../hooks/useAddedTags';
 import { usePolls } from '../../../../hooks/usePolls';
 import { sanitizeUrl } from '../../../../lib/sanitize';
+import { squareThumbedUrl } from '../../../../lib/utils/imageUrl';
 import type { Post } from '../../../../types/models';
 import type { ReactionAgg } from '../../../../lib/api/reactions';
 import type { Poll } from '../../../../lib/api/polls';
@@ -96,6 +97,8 @@ function CommunityAvatar({
   size: number;
 }) {
   const safeIconUrl = icon_url ? sanitizeUrl(icon_url) : null;
+  // 他のコミュニティアイコンと同じく expo-image + 正方形サムネ(size@3x)に統一
+  const thumb = safeIconUrl ? squareThumbedUrl(safeIconUrl, Math.round(size * 3)) : null;
   return (
     <View
       style={{
@@ -108,8 +111,15 @@ function CommunityAvatar({
         justifyContent: 'center',
       }}
     >
-      {safeIconUrl ? (
-        <Image source={{ uri: safeIconUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+      {thumb ? (
+        <ExpoImage
+          source={{ uri: thumb }}
+          style={{ width: '100%', height: '100%' }}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          recyclingKey={safeIconUrl ?? undefined}
+          transition={120}
+        />
       ) : (
         <Text style={{ fontSize: size * 0.55 }}>{icon_emoji}</Text>
       )}

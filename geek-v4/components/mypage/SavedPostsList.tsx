@@ -18,6 +18,7 @@ import { Icon } from '../../constants/icons';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { formatRelative } from '../../lib/utils/date';
+import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { useAuthStore } from '../../stores/authStore';
 
 type SavedPost = {
@@ -136,13 +137,16 @@ function SavedCard({ post, onPress }: { post: SavedPost; onPress: () => void }) 
         borderColor: C.divider,
       }}
     >
+      {/* 72px 表示なので retina 144px の正方形サムネを要求。recyclingKey で
+          recycler の画像残像を防ぐ。 */}
       {cover ? (
         <ExpoImage
-          source={{ uri: cover }}
+          source={{ uri: thumbedUrl(cover, 144, { height: 144 }) }}
           style={{ width: 72, height: 72, borderRadius: R.md, backgroundColor: C.bg3 }}
           contentFit="cover"
           transition={140}
           cachePolicy="memory-disk"
+          recyclingKey={post.id}
         />
       ) : (
         <View

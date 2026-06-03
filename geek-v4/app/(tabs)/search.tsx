@@ -413,6 +413,21 @@ export default function SearchScreen() {
     }
   }, [showResults, searchV4, postsQuery, communitiesQuery, qc]);
 
+  // ★ タブ復帰のたびに discovery(特集) を最新化 — 検索中(showResults)は触らない。
+  //   pull-to-refresh と同じ key を invalidate して「いま盛り上がっている」等に新着を反映。
+  useFocusEffect(
+    useCallback(() => {
+      if (showResults) return;
+      void Promise.allSettled([
+        qc.invalidateQueries({ queryKey: ['hot-posts-row'] }),
+        qc.invalidateQueries({ queryKey: ['discover-recommended'] }),
+        qc.invalidateQueries({ queryKey: ['discover-rising'] }),
+        qc.invalidateQueries({ queryKey: ['discover-official'] }),
+        qc.invalidateQueries({ queryKey: ['for-you-shelf-pool'] }),
+      ]);
+    }, [showResults, qc]),
+  );
+
   // ============= 派生 =============
   const posts = postsQuery.data ?? [];
   const communities = communitiesQuery.data ?? [];
@@ -786,25 +801,28 @@ function DiscoveryView() {
   // おすすめ — query 無し discoverCommunities = 人気順 (member_count desc)
   const recommended = useQuery({
     queryKey: ['discover-recommended'],
-    queryFn: () => discoverCommunities({ limit: 8 }),
+    queryFn: () => withApiTimeout(discoverCommunities({ limit: 8 }), 'discover.recommended', 8000),
     enabled: deferReady,
     staleTime: 60_000,
+    retry: 1,
   });
 
   // 急上昇 — last_post_at の新しい順 (最近投稿が活発)
   const rising = useQuery({
     queryKey: ['discover-rising'],
-    queryFn: () => fetchRisingCommunities(10),
+    queryFn: () => withApiTimeout(fetchRisingCommunities(10), 'discover.rising', 8000),
     enabled: deferReady,
     staleTime: 60_000,
+    retry: 1,
   });
 
   // 公式 — is_official のみ (member_count desc)
   const official = useQuery({
     queryKey: ['discover-official'],
-    queryFn: () => fetchOfficialCommunities(10),
+    queryFn: () => withApiTimeout(fetchOfficialCommunities(10), 'discover.official', 8000),
     enabled: deferReady,
     staleTime: 60_000,
+    retry: 1,
   });
 
   return (

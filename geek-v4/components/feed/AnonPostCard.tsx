@@ -50,6 +50,8 @@ import { sanitizeUrl } from '../../lib/sanitize';
 import { ObsidianSaveButton } from '../ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
 import type { PostCommunityRef } from '../../lib/api/posts';
+import type { FeedPagePost } from '../../lib/api/feedPage';
+import { stableKeyFor } from '../../lib/utils/queryKey';
 import { OfficialBadge } from '../community/OfficialBadge';
 import { ModActionMenu } from '../community/ModActionMenu';
 import { MediaWithCWGuard } from '../post/MediaWithCWGuard';
@@ -113,6 +115,15 @@ function measureAspect(url: string, measureUri: string, cb: (ratio: number) => v
   };
   if (_pending.size < _MAX_CONCURRENT) start();
   else _queue.push(start);
+}
+
+// 投稿詳細 (app/post/[id].tsx) からも同じアスペクト比キャッシュを使えるよう公開する。
+// フィードカードで一度測った比率を詳細画面の初期 state にシードして、
+// 4:3 (1.333) プレースホルダ → 実比率 のレイアウトシフトを消す (TTL 切れ/未測定は undefined)。
+export function getCachedAspect(url: string): number | undefined {
+  const cached = _aspectCache.get(url);
+  if (cached && Date.now() - cached.ts < _ASPECT_TTL_MS) return cached.ratio;
+  return undefined;
 }
 
 function shortHost(url: string): string {
@@ -1035,6 +1046,56 @@ function AnonPostCardInner({
     [post.id, post.author_id],
   );
 
+  // ============================================================
+  // 投稿詳細を「即開く」prefetch + seed (latency 改善 / spinner 撲滅)
+  // ------------------------------------------------------------
+  // カードタップで /post/:id へ遷移する瞬間、詳細画面が再 fetch する
+  // ['post', id] と ['feed-page', userId, [id]] の 2 cache を、カードが
+  // 既に持っているデータ (post / reactions / communities / liked 等) から
+  // 先回りでシードする。これにより PostDetail は mount 時に cache hit で
+  // 即描画でき、postLoading spinner と 2 RTT (fetchPostById + get_feed_page)
+  // が critical path から消える。
+  //   - setQueryData は `(prev) => prev ?? seed` で既存 (より新しい) cache を
+  //     上書きしない。詳細側は staleTime 経過後に background revalidate するので
+  //     初期描画は即時、データ鮮度も保たれる。
+  //   - ['feed-page'] の key は useFeedPage と完全一致させる
+  //     ([prefix, userId ?? 'anon', stableKeyFor([id])])。
+  const handleOpenDetail = useCallback(() => {
+    try {
+      // 1) 投稿本文 — fetchPostById は Post を返すので post prop をそのままシード
+      qc.setQueryData<Post | null>(['post', post.id], (prev) => prev ?? post);
+      // 2) 周辺データ (reactions / my_* / communities / poll) — 単一 id 用 feed-page cache
+      const feedPageSeed: FeedPagePost = {
+        ...post,
+        communities,
+        official_author: post.official_author ?? null,
+        my_like: liked,
+        my_concern: concerned,
+        my_save: saved,
+        reactions: reactionsList,
+        added_tags: _addedTags,
+        poll: poll ?? null,
+      };
+      const feedPageKey = ['feed-page', currentUserId ?? 'anon', stableKeyFor([post.id])];
+      qc.setQueryData<FeedPagePost[]>(feedPageKey, (prev) => prev ?? [feedPageSeed]);
+    } catch {
+      // seed は best-effort。失敗しても通常遷移にフォールバックする (UX 影響なし)
+    }
+    onComment();
+  }, [
+    qc,
+    post,
+    communities,
+    liked,
+    concerned,
+    saved,
+    reactionsList,
+    _addedTags,
+    poll,
+    currentUserId,
+    onComment,
+  ]);
+
   // ── 動的 style: props/state に依存するもののみ useMemo 化 ──
   // ルート Container — X(旧Twitter)/Threads 風の「フラットな全幅行」。
   //   - 背景: transparent (カード面 bg2 を撤廃。地 (C.bg) に溶ける。light でも正)
@@ -1260,7 +1321,7 @@ function AnonPostCardInner({
           tap で post detail へ遷移 (本文 PressableScale と同じ behavior)。 */}
       {post.title && !isCwHidden ? (
         <View style={{ paddingTop: SP['3'], paddingBottom: post.content ? SP['1'] : SP['3'] }}>
-          <PressableScale onPress={onComment} haptic="tap" scaleValue={1}>
+          <PressableScale onPress={handleOpenDetail} haptic="tap" scaleValue={1}>
             <Text style={bbsTitleStyle} numberOfLines={3}>
               {post.title}
             </Text>
@@ -1277,7 +1338,7 @@ function AnonPostCardInner({
       {post.content && !isCwHidden ? (
         <View>
           <PressableScale
-            onPress={onComment}
+            onPress={handleOpenDetail}
             onLongPress={useQuickReaction ? () => setMemePickerOpen(true) : undefined}
             haptic="tap"
             scaleValue={1}
@@ -1417,7 +1478,7 @@ function AnonPostCardInner({
           countTextStyle={{ ...T.smallM, ...likeCountTextStyle }}
         />
         <PressableScale
-          onPress={onComment}
+          onPress={handleOpenDetail}
           haptic="tap"
           hitSlop={10}
           accessibilityLabel="コメントを開く"

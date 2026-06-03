@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Platform } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -24,6 +24,7 @@ import { formatRelative } from '../../lib/utils/date';
 import { TABBAR } from '../../design/tabbar';
 import { NotificationSkeleton } from '../../components/ui/Skeleton';
 import { supabase } from '../../lib/supabase';
+import { withApiTimeout } from '../../lib/withApiTimeout';
 import type { Notification } from '../../types/models';
 import { useColors } from '../../hooks/useColors';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
@@ -106,6 +107,12 @@ export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { notifications, loading: isLoading, markAllRead, markRead } = useNotifications();
+  // markRead は useNotifications() が毎 render 再生成するため、handleTap を
+  // 安定参照 (useCallback) にできるよう ref 経由で最新版を参照する。これにより
+  // memo 化した各 NotificationRow に渡す onPress の identity が固定され、
+  // 通知 cache 更新ごとの全行 re-render を防ぐ。
+  const markReadRef = useRef(markRead);
+  markReadRef.current = markRead;
   const [filter, setFilter] = useState<NFilter>('all');
   // Smart skeleton timing — skeleton only after 200ms of continuous loading.
   // <200ms loads (cache hits) skip skeleton entirely to avoid flash.
@@ -136,6 +143,69 @@ export default function NotificationsScreen() {
     }
     return out;
   }, [filteredNotifs]);
+
+  // 通知タップ時 — 関連 surface (タグ feed など) へ遷移する。
+  // notifications table に source_id が無いケースが多いので tag_name を最優先で利用。
+  // 'official_post' だけは tag_name が「コミュニティ名」なので name→id を runtime ルックアップ。
+  // memo 化した行に渡すため安定参照 (useCallback)。早期 return より前に定義する
+  // (Rules of Hooks)。
+  const handleTap = useCallback((n: Notification) => {
+    void markReadRef.current(n.id); // タップした通知だけ既読化
+    if (n.type === 'official_post' && n.tag_name) {
+      // 旧版は communities lookup (name→id) の RTT を await してから push して
+      // いたため、タップ後に画面が止まって見えた。即座に公式コミュ一覧 (corners)
+      // へ遷移し、name→id の解決はバックグラウンドで行う。解決できたら該当
+      // コミュニティを drill-down で開く (corners→community は自然な掘り下げ)。
+      // tag_name は closure 内で narrowing が外れるため const に退避してから渡す。
+      const communityName = n.tag_name;
+      router.push('/(tabs)/corners' as never);
+      void (async () => {
+        try {
+          const { data } = await withApiTimeout(
+            supabase
+              .from('communities')
+              .select('id')
+              .eq('name', communityName)
+              .eq('is_official', true)
+              .limit(1)
+              .maybeSingle(),
+            'notifications.officialLookup',
+            4000,
+          );
+          if (data?.id) router.push(`/community/${data.id}` as never);
+        } catch {
+          // 解決失敗時は corners 一覧のままにする (フォールバック済み)。
+        }
+      })();
+      return;
+    }
+    // 参加申請通知 (migration 0101) — data.community_id を読んで admin 画面へ
+    if (n.type === 'join_request') {
+      const data = n.data as { community_id?: unknown } | null;
+      const cid = data && typeof data.community_id === 'string' ? data.community_id : null;
+      if (cid) {
+        router.push(`/community/${cid}/admin` as never);
+        return;
+      }
+      router.push('/(tabs)/community' as never);
+      return;
+    }
+    // 投稿への反応 (いいね/コメント/リアクション/返信) — data.post_id があれば
+    // 該当投稿を直接開く。0008/0111 トリガが post_id を data に格納済み。
+    // (旧挙動はタグフィードへ飛ばしていて「自分の投稿が開けない」不便があった)
+    const withPost = (n.data ?? null) as { post_id?: unknown } | null;
+    if (withPost && typeof withPost.post_id === 'string' && withPost.post_id.length > 0) {
+      router.push(`/post/${withPost.post_id}` as never);
+      return;
+    }
+    if (n.tag_name) {
+      router.push(`/tag/${encodeURIComponent(n.tag_name)}` as never);
+    } else if (n.type === 'follow') {
+      router.push('/(tabs)/mypage' as never);
+    } else {
+      router.push('/(tabs)/feed' as never);
+    }
+  }, [router]);
 
   if (isLoading && notifications.length === 0) {
     return (
@@ -216,55 +286,6 @@ export default function NotificationsScreen() {
   }
 
   const unreadCount = notifications.filter((n) => !n.read).length;
-
-  // 通知タップ時 — 関連 surface (タグ feed など) へ遷移する。
-  // notifications table に source_id が無いケースが多いので tag_name を最優先で利用。
-  // 'official_post' だけは tag_name が「コミュニティ名」なので name→id を runtime ルックアップ。
-  const handleTap = async (n: Notification) => {
-    void markRead(n.id); // タップした通知だけ既読化
-    if (n.type === 'official_post' && n.tag_name) {
-      // 公式コミュニティを name で fetch (LIMIT 1)。見つからなければフォールバック。
-      const { data } = await supabase
-        .from('communities')
-        .select('id')
-        .eq('name', n.tag_name)
-        .eq('is_official', true)
-        .limit(1)
-        .maybeSingle();
-      if (data?.id) {
-        router.push(`/community/${data.id}` as never);
-      } else {
-        router.push('/(tabs)/corners' as never);
-      }
-      return;
-    }
-    // 参加申請通知 (migration 0101) — data.community_id を読んで admin 画面へ
-    if (n.type === 'join_request') {
-      const data = n.data as { community_id?: unknown } | null;
-      const cid = data && typeof data.community_id === 'string' ? data.community_id : null;
-      if (cid) {
-        router.push(`/community/${cid}/admin` as never);
-        return;
-      }
-      router.push('/(tabs)/community' as never);
-      return;
-    }
-    // 投稿への反応 (いいね/コメント/リアクション/返信) — data.post_id があれば
-    // 該当投稿を直接開く。0008/0111 トリガが post_id を data に格納済み。
-    // (旧挙動はタグフィードへ飛ばしていて「自分の投稿が開けない」不便があった)
-    const withPost = (n.data ?? null) as { post_id?: unknown } | null;
-    if (withPost && typeof withPost.post_id === 'string' && withPost.post_id.length > 0) {
-      router.push(`/post/${withPost.post_id}` as never);
-      return;
-    }
-    if (n.tag_name) {
-      router.push(`/tag/${encodeURIComponent(n.tag_name)}` as never);
-    } else if (n.type === 'follow') {
-      router.push('/(tabs)/mypage' as never);
-    } else {
-      router.push('/(tabs)/feed' as never);
-    }
-  };
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -371,7 +392,7 @@ export default function NotificationsScreen() {
                 </Text>
               </View>
             ) : (
-              <NotificationRow key={item.id} n={item.n} onPress={() => void handleTap(item.n)} />
+              <NotificationRow key={item.id} n={item.n} onPress={handleTap} />
             ),
           )
         )}
@@ -390,12 +411,14 @@ export default function NotificationsScreen() {
 // - mount 時の entrance: opacity 0→1 + translateX -8→0 (220ms ease-out)
 // - reduceMotion 時は即時表示 (pulse / entrance とも skip)
 // ============================================================
-function NotificationRow({
+const NotificationRow = memo(function NotificationRow({
   n,
   onPress,
 }: {
   n: Notification;
-  onPress: () => void;
+  // 安定参照の handleTap を直接受け取り、行内で n を渡して呼ぶ。これにより
+  // 親が毎 render でインライン関数を生成せず、memo が効く。
+  onPress: (n: Notification) => void;
 }) {
   const C = useColors();
   const reduceMotion = useReducedMotion();
@@ -486,7 +509,7 @@ function NotificationRow({
   return (
     <Animated.View style={enterStyle}>
       <PressableScale
-        onPress={onPress}
+        onPress={() => onPress(n)}
         haptic="tap"
         scaleValue={0.97}
         accessibilityRole="button"
@@ -614,4 +637,4 @@ function NotificationRow({
       </PressableScale>
     </Animated.View>
   );
-}
+});

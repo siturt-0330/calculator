@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { withApiTimeout } from '../withApiTimeout';
 import type { Post, PostVisibility } from '../../types/models';
 
 export type { PostVisibility } from '../../types/models';
@@ -259,7 +260,7 @@ export async function fetchPosts({
     }
   }
 
-  let { data, error } = await query;
+  let { data, error } = await withApiTimeout(query, 'posts.fetchPosts', 8000);
 
   // ----------------------------------------------------------------
   // embed fallback: post_communities embed が PostgREST schema cache 上で
@@ -320,7 +321,7 @@ export async function fetchPosts({
         }
       }
     }
-    const r = await fb;
+    const r = await withApiTimeout(fb, 'posts.fetchPosts.embedFallback', 8000);
     // legacy SELECT 結果を embed 型に注入する (post_communities 列が無いだけで
     // 後段の usedEmbedFallback 分岐で素通しされるので安全)
     data = r.data as unknown as typeof data;
@@ -375,9 +376,13 @@ export async function fetchPosts({
           );
         }
       }
-      const fbResult = await q;
+      const fbResult = await withApiTimeout<{ data: unknown; error: unknown }>(
+        q,
+        'posts.fetchPosts.hotFallback',
+        8000,
+      );
       data = fbResult.data as unknown as typeof data;
-      error = fbResult.error;
+      error = fbResult.error as typeof error;
       usedHotFallback = true;
       if (!error) {
         console.warn('[posts] hot_score column missing — using legacy likes_count fallback');
@@ -462,7 +467,7 @@ export async function fetchDiscoverMediaPosts(opts: {
     query = query.lt('created_at', opts.beforeCreatedAt);
   }
 
-  const { data, error } = await query;
+  const { data, error } = await withApiTimeout(query, 'posts.fetchDiscoverMediaPosts', 8000);
   if (error) {
     console.warn('[posts] fetchDiscoverMediaPosts failed:', error.message);
     return [];
@@ -646,7 +651,11 @@ export async function fetchCommunityPosts({
     pcQuery = pcQuery.lt('created_at', cursor);
   }
 
-  const { data: pcRows, error: pcErr } = await pcQuery;
+  const { data: pcRows, error: pcErr } = await withApiTimeout(
+    pcQuery,
+    'posts.fetchCommunityPosts.junction',
+    8000,
+  );
   if (pcErr) {
     console.warn('[fetchCommunityPosts] junction fetch failed:', pcErr.message);
     return { posts: [], nextCursor: null };
@@ -675,7 +684,7 @@ export async function fetchCommunityPosts({
     postsQuery = postsQuery.order('created_at', { ascending: false });
   }
 
-  let { data, error } = await postsQuery;
+  let { data, error } = await withApiTimeout(postsQuery, 'posts.fetchCommunityPosts', 8000);
   let usedFallback = false;
   if (error && isEmbedFailure(error)) {
     console.warn(
@@ -688,7 +697,7 @@ export async function fetchCommunityPosts({
     } else {
       fb = fb.order('created_at', { ascending: false });
     }
-    const r = await fb;
+    const r = await withApiTimeout(fb, 'posts.fetchCommunityPosts.embedFallback', 8000);
     // legacy SELECT 結果を embed 型に注入する (後段 usedFallback=true で素通し)
     data = r.data as unknown as typeof data;
     error = r.error;
@@ -719,21 +728,29 @@ export async function fetchPostById(id: string): Promise<Post | null> {
   if (!id || !UUID_RE.test(id)) return null;
   // 1 RTT で post + 公式コミュ管理者情報を取得 (post_communities embed)。
   // embed 失敗時は legacy 2-RTT に fallback。
-  const { data, error } = await supabase
-    .from('posts')
-    .select(POSTS_SELECT_COLS_WITH_COMM)
-    .eq('id', id)
-    .maybeSingle();
+  const { data, error } = await withApiTimeout(
+    supabase
+      .from('posts')
+      .select(POSTS_SELECT_COLS_WITH_COMM)
+      .eq('id', id)
+      .maybeSingle(),
+    'posts.fetchPostById',
+    8000,
+  );
   if (error && isEmbedFailure(error)) {
     console.warn(
       '[fetchPostById] embed failed — fallback to legacy:',
       (error as { message?: string }).message,
     );
-    const fb = await supabase
-      .from('posts')
-      .select(POSTS_SELECT_COLS)
-      .eq('id', id)
-      .maybeSingle();
+    const fb = await withApiTimeout(
+      supabase
+        .from('posts')
+        .select(POSTS_SELECT_COLS)
+        .eq('id', id)
+        .maybeSingle(),
+      'posts.fetchPostById.fallback',
+      8000,
+    );
     if (fb.error) {
       console.warn('[fetchPostById] error:', fb.error.message);
       return null;
@@ -764,12 +781,16 @@ export async function fetchPostById(id: string): Promise<Post | null> {
 async function attachOfficialAuthor<T extends Post>(posts: T[]): Promise<T[]> {
   if (posts.length === 0) return posts;
   const postIds = posts.map((p) => p.id);
-  const { data, error } = await supabase
-    .from('post_communities')
-    .select(
-      'post_id, community:communities(is_official, official_admin_user_id, official_admin_display_name, official_organization)',
-    )
-    .in('post_id', postIds);
+  const { data, error } = await withApiTimeout(
+    supabase
+      .from('post_communities')
+      .select(
+        'post_id, community:communities(is_official, official_admin_user_id, official_admin_display_name, official_organization)',
+      )
+      .in('post_id', postIds),
+    'posts.attachOfficialAuthor',
+    8000,
+  );
   if (error) {
     // 致命的ではない — 公式表示が出ないだけで anon 表示にフォールバック
     console.warn('[attachOfficialAuthor] join failed:', error.message);
@@ -823,10 +844,14 @@ export async function fetchCommunitiesForPosts(
   postIds: string[],
 ): Promise<Record<string, PostCommunityRef[]>> {
   if (postIds.length === 0) return {};
-  const { data, error } = await supabase
-    .from('post_communities')
-    .select('post_id, community:communities(id, name, icon_emoji, icon_url, is_official)')
-    .in('post_id', postIds);
+  const { data, error } = await withApiTimeout(
+    supabase
+      .from('post_communities')
+      .select('post_id, community:communities(id, name, icon_emoji, icon_url, is_official)')
+      .in('post_id', postIds),
+    'posts.fetchCommunitiesForPosts',
+    8000,
+  );
   if (error) {
     console.warn('[fetchCommunitiesForPosts] error:', error.message);
     return {};

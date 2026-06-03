@@ -24,6 +24,7 @@ import { T, FONT } from '../../design/typography';
 import { TIMING_NORM } from '../../design/motion';
 import { PressableScale } from '../ui/PressableScale';
 import { Icon } from '../../constants/icons';
+import { squareThumbedUrl } from '../../lib/utils/imageUrl';
 import type { Community } from '../../lib/api/communities';
 
 interface SimilarCommunityNoticeProps {
@@ -99,6 +100,8 @@ interface CommunityRowProps {
 
 function CommunityRow({ community, onPress }: CommunityRowProps) {
   const hasImage = !!community.icon_url;
+  // 32px 円アイコン → 96px(32@3x)正方形サムネ。打鍵ごとの再描画でも cache 再利用
+  const iconThumb = community.icon_url ? squareThumbedUrl(community.icon_url, 96) : null;
   const memberCount = community.member_count ?? 0;
 
   return (
@@ -111,11 +114,13 @@ function CommunityRow({ community, onPress }: CommunityRowProps) {
     >
       {/* 小円アイコン */}
       <View style={styles.iconWrap}>
-        {hasImage ? (
+        {hasImage && iconThumb ? (
           <ExpoImage
-            source={{ uri: community.icon_url ?? undefined }}
+            source={{ uri: iconThumb }}
             contentFit="cover"
             transition={TIMING_NORM.duration}
+            cachePolicy="memory-disk"
+            recyclingKey={community.icon_url ?? undefined}
             style={styles.iconImage}
             accessible={false}
           />

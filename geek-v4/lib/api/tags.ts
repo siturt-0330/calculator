@@ -53,7 +53,8 @@ export async function fetchPostAddedTags(postId: string): Promise<PostAddedTag[]
     .from('post_added_tags')
     .select('id, post_id, tag_name, added_by, created_at')
     .eq('post_id', postId)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true })
+    .limit(200); // 防御的上限 (1 post の追加タグは現実的に少数)
   if (error) throw error;
   return (data ?? []) as PostAddedTag[];
 }
@@ -113,7 +114,8 @@ export async function fetchTagRelations(tagName: string): Promise<TagRelation[]>
     .from('tag_relations')
     .select('id, tag_a, tag_b, relation_type, votes, created_at')
     .or(`tag_a.eq.${tagName},tag_b.eq.${tagName}`)
-    .order('votes', { ascending: false });
+    .order('votes', { ascending: false })
+    .limit(200); // 防御的上限 (1 タグの関連は現実的に少数)
   if (error) throw error;
   return (data ?? []) as TagRelation[];
 }

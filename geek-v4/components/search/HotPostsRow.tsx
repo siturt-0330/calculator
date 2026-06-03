@@ -23,12 +23,13 @@ import { R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { fetchPosts } from '../../lib/api/posts';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
+import { withApiTimeout } from '../../lib/withApiTimeout';
 import type { Post } from '../../types/models';
 
 const CARD_WIDTH = 280;
-const CARD_HEIGHT = 210;
+const CARD_HEIGHT = 260;
 // 画像 banner の高さ。残り (= CARD_HEIGHT - IMAGE_HEIGHT) がタイトル + 統計領域。
-const IMAGE_HEIGHT = 120;
+const IMAGE_HEIGHT = 165;
 const LIMIT = 10;
 // iOS-native: card 間 gap を含めた snap 単位
 const SNAP_INTERVAL = CARD_WIDTH + SP['3'];
@@ -60,16 +61,23 @@ export function HotPostsRow() {
   const { data, isLoading } = useQuery({
     queryKey: ['hot-posts-row', LIMIT],
     queryFn: async () => {
-      const r = await fetchPosts({
-        sort: 'hot',
-        likedTags: [],
-        blockedTags: [],
-        limit: LIMIT,
-        home: true,
-      });
+      const r = await withApiTimeout(
+        fetchPosts({
+          sort: 'hot',
+          likedTags: [],
+          blockedTags: [],
+          limit: LIMIT,
+          home: true,
+        }),
+        'hotPostsRow',
+        8000,
+      );
       return r.posts;
     },
-    staleTime: 60_000,
+    // staleTime 0 + 検索タブの focus invalidate で、タブを開くたびに新着 hot を反映。
+    // retry:1 + withApiTimeout で「ソケット停止 → 永久スケルトン」を回避。
+    staleTime: 0,
+    retry: 1,
   });
 
   const posts = data ?? [];

@@ -20,12 +20,12 @@ import { Icon } from '../../constants/icons';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { formatRelative } from '../../lib/utils/date';
+import { thumbedUrl } from '../../lib/utils/imageUrl';
 
 type UserPost = {
   id: string;
   content: string;
   title: string | null;
-  tag_names: string[];
   media_urls: string[] | null;
   likes_count: number;
   comments_count: number;
@@ -36,12 +36,15 @@ type UserPost = {
 async function fetchPostsByAuthor(authorId: string): Promise<UserPost[]> {
   // 自分視点 (= 自分の RLS) では is_public=false も見える。他人視点では RLS が
   // 自動で is_public=true / community_public のみに絞る (DB ポリシー側で保護)。
+  // カード描画に使う列のみ select (tag_names はカードで未使用なので除外)。
+  // 埋め込みタブは最初の画面で 30 件もあれば十分なので limit を 30 に抑えて初回
+  // ペイロード/描画を軽くする (専用 /mypage/posts はより多く取得する想定)。
   const { data } = await supabase
     .from('posts')
-    .select('id, content, title, tag_names, media_urls, likes_count, comments_count, is_public, created_at')
+    .select('id, content, title, media_urls, likes_count, comments_count, is_public, created_at')
     .eq('author_id', authorId)
     .order('created_at', { ascending: false })
-    .limit(50);
+    .limit(30);
   return (data ?? []) as UserPost[];
 }
 
@@ -117,14 +120,16 @@ function PostCard({ post, onPress }: { post: UserPost; onPress: () => void }) {
         borderColor: C.divider,
       }}
     >
-      {/* 左: 画像サムネ (なければ accent dot) */}
+      {/* 左: 画像サムネ (なければ accent dot)。72px 表示なので retina 144px の
+          正方形サムネを要求して帯域削減。recyclingKey で recycler の画像残像を防ぐ。 */}
       {cover ? (
         <ExpoImage
-          source={{ uri: cover }}
+          source={{ uri: thumbedUrl(cover, 144, { height: 144 }) }}
           style={{ width: 72, height: 72, borderRadius: R.md, backgroundColor: C.bg3 }}
           contentFit="cover"
           transition={140}
           cachePolicy="memory-disk"
+          recyclingKey={post.id}
         />
       ) : (
         <View

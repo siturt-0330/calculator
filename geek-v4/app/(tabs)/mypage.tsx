@@ -28,6 +28,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useProfileVisibilityStore } from '../../stores/profileVisibilityStore';
 import { supabase } from '../../lib/supabase';
 import { fetchMyPhotos } from '../../lib/api/albums';
+import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { MypageSkeleton } from '../../components/ui/Skeleton';
 import { AccountStateCard } from '../../components/mypage/AccountStateCard';
 import { AlbumPhotoGrid } from '../../components/mypage/AlbumPhotoGrid';
@@ -96,11 +97,12 @@ export default function MypageScreen() {
 
   // ---- カバー画像: 本人が設定した cover_url を最優先、無ければ最新 shared 写真、
   //      それも無ければ null (masthead が accent gradient fallback)
+  //      カバーは横幅いっぱい (高さ 220) なので retina 1080px の transformation
+  //      サムネを要求して帯域を削減 (Supabase 以外/変換済み URL はそのまま返る)。
   const coverUri = useMemo(() => {
-    if (stats?.cover_url) return stats.cover_url;
-    if (sharedPhotos.length === 0) return null;
-    const top = sharedPhotos[0];
-    return top?.image_url ?? null;
+    const raw = stats?.cover_url ?? sharedPhotos[0]?.image_url ?? null;
+    if (!raw) return null;
+    return thumbedUrl(raw, 1080);
   }, [stats?.cover_url, sharedPhotos]);
 
   // ---- Pull-to-refresh ----

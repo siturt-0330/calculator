@@ -137,6 +137,7 @@ import { initAnalytics } from '../lib/analytics';
 import { initSentry, setSentryUser, clearSentryUser } from '../lib/sentry';
 import { initWebVitals } from '../lib/webVitals';
 import { useThemeStore, useResolvedTheme, syncStaticPaletteWithTheme } from '../lib/theme/themeStore';
+import type { ResolvedTheme } from '../lib/theme/themeStore';
 import { useColors } from '../hooks/useColors';
 import { AppState } from 'react-native';
 import { supabase } from '../lib/supabase';
@@ -182,6 +183,19 @@ const qc = new QueryClient({
 });
 
 const persister = createAsyncStoragePersister({ storage: AsyncStorage });
+
+// ★ 起動時の re-render storm 対策:
+//   syncStaticPaletteWithTheme は render body で毎 render 呼ばれる (commit-time
+//   correctness のため)。だが起動中 RootLayout は fontsLoaded / authHydrated /
+//   settingsHydrated / forceReady / lang / user が flip するたびに 5-6 回 re-render
+//   され、その都度 palette を Object.assign + gradient 10 本書き換えるのは無駄。
+//   module-level の last-applied ref で theme が「実際に変わった時」だけ実行する。
+let _lastSyncedTheme: ResolvedTheme | null = null;
+function syncStaticPaletteIfChanged(theme: ResolvedTheme): void {
+  if (_lastSyncedTheme === theme) return; // theme 不変 → no-op
+  _lastSyncedTheme = theme;
+  syncStaticPaletteWithTheme(theme);
+}
 
 // 永続 React Query cache の buster。query の cache shape (返り値の形) を変えたら
 // この文字列を必ず bump する → 古い dehydrated cache を 1 度だけ破棄させ、
@@ -244,17 +258,30 @@ export default function RootLayout() {
   const playIntro = useIntroStore((s) => s.play);
 
   // Web のみ: "I" キー押下でイントロ再生 (ログイン前でも何度でも見られるショートカット)
+  //   ★ これは dev/power-user 向けの affordance で first-interactive には不要。
+  //     初回 commit に window listener を足さないよう、idle (requestIdleCallback /
+  //     fallback setTimeout) で first paint 後に登録する。
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-    const onKey = (e: KeyboardEvent) => {
-      // 入力中の textarea/input には反応させない
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName?.toLowerCase();
-      if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return;
-      if (e.key === 'i' || e.key === 'I') playIntro();
+    let cleanup: (() => void) | undefined;
+    const arm = () => {
+      const onKey = (e: KeyboardEvent) => {
+        // 入力中の textarea/input には反応させない
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName?.toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return;
+        if (e.key === 'i' || e.key === 'I') playIntro();
+      };
+      window.addEventListener('keydown', onKey);
+      cleanup = () => window.removeEventListener('keydown', onKey);
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const ric = (globalThis as { requestIdleCallback?: (cb: () => void) => number })
+      .requestIdleCallback;
+    const handle = ric ? ric(arm) : setTimeout(arm, 200);
+    return () => {
+      cleanup?.();
+      if (!ric) clearTimeout(handle as ReturnType<typeof setTimeout>);
+    };
   }, [playIntro]);
 
   const hydrateLang = useLanguageStore((s) => s.hydrate);
@@ -276,7 +303,8 @@ export default function RootLayout() {
   //
   //   commit 段階 (render の前) で同期実行することで、初回 paint から
   //   正しい色になる。useEffect だと一瞬古い色でフラッシュする。
-  syncStaticPaletteWithTheme(resolvedTheme);
+  //   ★ ただし theme が変わっていない再 render では skip (起動 storm 対策)。
+  syncStaticPaletteIfChanged(resolvedTheme);
 
   // ★ 言語切替反映 (Web):
   // `document.documentElement.lang` を更新することで:
@@ -339,7 +367,7 @@ export default function RootLayout() {
   }, [lang]);
   useEffect(() => {
     // hydrate 改修 (MMKV 化):
-    //   - settings / tagFilter は MMKV 同期化されて 1ms 以下に
+    //   - settings / tagFilter / theme は MMKV 同期化されて 1ms 以下に
     //   - auth は supabase.auth.getSession() で 50-200ms 残る (network 込み)
     //   - lang / adPrefs は AsyncStorage のまま (cold start クリティカルパスに
     //     乗らないため改修対象外)

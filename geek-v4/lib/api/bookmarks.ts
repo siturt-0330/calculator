@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { withApiTimeout } from '../withApiTimeout';
 
 export type BookmarkCollection = {
   id: string;
@@ -19,12 +20,16 @@ export async function fetchMyCollections(): Promise<BookmarkCollection[]> {
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) return [];
-  const { data, error } = await supabase
-    .from('bookmark_collections')
-    .select('id, user_id, name, emoji, is_public, bookmark_count, created_at')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(FETCH_MY_COLLECTIONS_LIMIT);
+  const { data, error } = await withApiTimeout(
+    supabase
+      .from('bookmark_collections')
+      .select('id, user_id, name, emoji, is_public, bookmark_count, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(FETCH_MY_COLLECTIONS_LIMIT),
+    'bookmarks.fetchMyCollections',
+    8000,
+  );
   if (error) return [];
   return (data ?? []) as BookmarkCollection[];
 }
@@ -93,6 +98,6 @@ export async function fetchPostsInCollection(
       q = q.lt('created_at', opts.beforeCreatedAt);
     }
   }
-  const { data } = await q;
+  const { data } = await withApiTimeout(q, 'bookmarks.fetchPostsInCollection', 8000);
   return ((data ?? []) as Array<{ post_id: string }>).map((r) => r.post_id);
 }

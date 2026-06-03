@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { withApiTimeout } from '../withApiTimeout';
 
 export type UserStamp = {
   id: string;
@@ -29,7 +30,7 @@ export async function fetchUserStamps(): Promise<UserStamp[]> {
   q = userId
     ? q.or(`is_public.eq.true,creator_id.eq.${userId}`)
     : q.eq('is_public', true);
-  const { data, error } = await q;
+  const { data, error } = await withApiTimeout(q, 'userStamps.fetch', 8000);
   if (error) return [];
   return (data ?? []) as UserStamp[];
 }

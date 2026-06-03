@@ -25,6 +25,7 @@ import { useFeatureFlag } from '../../hooks/useFeatureFlag';
 import { invalidateFeedPage } from '../../lib/cacheUpdates/feedPagePatcher';
 import { MemeReactionPicker } from '../../components/feed/MemeReactionPicker';
 import { ReactionListSheet } from '../../components/feed/ReactionListSheet';
+import { getCachedAspect } from '../../components/feed/AnonPostCard';
 import { LinkPreviewCard } from '../../components/feed/LinkPreviewCard';
 import { SP, R } from '../../design/tokens';
 import { useColors } from '../../hooks/useColors';
@@ -162,10 +163,14 @@ export default function PostDetailScreen() {
   });
 
   // 似た投稿
+  // ★ waterfall 解消: tag_names が分かれば即発射 (post object 全体の解決を待たない)。
+  //   フィードからの遷移で ['post', id] が seed 済なら mount 時に tag_names が揃い、
+  //   post 本文 RTT の裏で並行起動できる。cold deep-link 時は従来どおり post 本文
+  //   到着と同時に tag_names が揃うので挙動は不変。
   const { data: similarPosts = [] } = useQuery({
     queryKey: ['similar-posts', id, post?.tag_names ?? []],
     queryFn: () => fetchSimilarPosts(id!, post?.tag_names ?? [], 3),
-    enabled: !!id && !!post && (post?.tag_names?.length ?? 0) > 0,
+    enabled: !!id && (post?.tag_names?.length ?? 0) > 0,
     staleTime: 60_000,
   });
 
@@ -208,13 +213,31 @@ export default function PostDetailScreen() {
 
   // 画像アスペクト比 — 240px サムネで getSize し比率だけ測る (帯域節約)。
   // 解決前は 4:3 (1.333) 仮置き。失敗時もそのまま。
-  const [imgAspects, setImgAspects] = useState<Record<string, number>>({});
+  // ★ レイアウトシフト解消: フィードカード (AnonPostCard) が module-level
+  //   _aspectCache に同 URL の比率を測って残しているので、初期 state を共有
+  //   キャッシュからシードする。フィードから開いた画像は 1.333 仮置き → 実比率
+  //   の reflow が起きず、初回描画から正しいアスペクト比で表示される。
+  const [imgAspects, setImgAspects] = useState<Record<string, number>>(() => {
+    const seed: Record<string, number> = {};
+    for (const url of mediaUrls) {
+      if (!url) continue;
+      const r = getCachedAspect(url);
+      if (r !== undefined) seed[url] = r;
+    }
+    return seed;
+  });
   const mediaUrlsKey = mediaUrls.join('|');
   useEffect(() => {
     if (mediaUrls.length === 0) return undefined;
     let alive = true;
     for (const url of mediaUrls) {
       if (!url) continue;
+      // 共有キャッシュ hit 済なら getSize を呼ばない (miss のときだけ実測)
+      const cached = getCachedAspect(url);
+      if (cached !== undefined) {
+        setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: cached }));
+        continue;
+      }
       RNImage.getSize(
         thumbedUrl(url, 240),
         (w, h) => {

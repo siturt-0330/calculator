@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { withApiTimeout } from '../withApiTimeout';
 import type { BBSThread, BBSReply, ThreadVisibility } from '../../types/models';
 import { sanitizeContent } from '../sanitize';
 import { checkRate, rateLimitMessage } from '../rateLimit';
@@ -24,11 +25,15 @@ export async function fetchThread(id: string): Promise<BBSThread | null> {
   // UUID 形式チェック (古い URL や壊れた ID への対策)
   const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!uuidRe.test(id)) return null;
-  const { data, error } = await supabase
-    .from('bbs_threads')
-    .select(BBS_THREAD_SELECT_COLS)
-    .eq('id', id)
-    .maybeSingle();
+  const { data, error } = await withApiTimeout(
+    supabase
+      .from('bbs_threads')
+      .select(BBS_THREAD_SELECT_COLS)
+      .eq('id', id)
+      .maybeSingle(),
+    'bbs.fetchThread',
+    8000,
+  );
   if (error) {
     console.warn('[fetchThread] error:', error.message);
     throw error;
@@ -41,12 +46,16 @@ export async function fetchThread(id: string): Promise<BBSThread | null> {
 // (community_id があっても visibility=public なら出る = community_public 相当の挙動)
 // community_only は community 詳細の BBS タブでのみ表示
 export async function fetchThreads(): Promise<BBSThread[]> {
-  const { data, error } = await supabase
-    .from('bbs_threads')
-    .select(BBS_THREAD_SELECT_COLS)
-    .eq('visibility', 'public')
-    .order('last_reply_at', { ascending: false, nullsFirst: false })
-    .limit(50);
+  const { data, error } = await withApiTimeout(
+    supabase
+      .from('bbs_threads')
+      .select(BBS_THREAD_SELECT_COLS)
+      .eq('visibility', 'public')
+      .order('last_reply_at', { ascending: false, nullsFirst: false })
+      .limit(50),
+    'bbs.fetchThreads',
+    8000,
+  );
   if (error) throw error;
   return (data ?? []).map((t: { title: string }) => ({ ...t, title: cleanTitle(t.title) })) as BBSThread[];
 }
@@ -68,10 +77,14 @@ export async function fetchMyJoinedCommunityThreads(
   if (!user) return { threads: [], hasJoinedCommunities: false };
 
   // 1) 自分の所属 community_id
-  const { data: memberRows, error: memErr } = await supabase
-    .from('community_members')
-    .select('community_id')
-    .eq('user_id', user.id);
+  const { data: memberRows, error: memErr } = await withApiTimeout(
+    supabase
+      .from('community_members')
+      .select('community_id')
+      .eq('user_id', user.id),
+    'bbs.fetchMyJoinedCommunityThreads.members',
+    8000,
+  );
   if (memErr) {
     console.warn('[bbs] fetchMyJoinedCommunityThreads (members) failed:', memErr.message);
     return { threads: [], hasJoinedCommunities: false };
@@ -82,12 +95,16 @@ export async function fetchMyJoinedCommunityThreads(
   }
 
   // 2) その community_id に属するスレッド (visibility 制御は RLS)
-  const { data: threadRows, error: threadErr } = await supabase
-    .from('bbs_threads')
-    .select(BBS_THREAD_SELECT_COLS)
-    .in('community_id', myCommunityIds)
-    .order('last_reply_at', { ascending: false, nullsFirst: false })
-    .limit(limit);
+  const { data: threadRows, error: threadErr } = await withApiTimeout(
+    supabase
+      .from('bbs_threads')
+      .select(BBS_THREAD_SELECT_COLS)
+      .in('community_id', myCommunityIds)
+      .order('last_reply_at', { ascending: false, nullsFirst: false })
+      .limit(limit),
+    'bbs.fetchMyJoinedCommunityThreads.threads',
+    8000,
+  );
   if (threadErr) {
     console.warn('[bbs] fetchMyJoinedCommunityThreads (threads) failed:', threadErr.message);
     return { threads: [], hasJoinedCommunities: true };
@@ -122,7 +139,7 @@ export async function fetchCommunityThreads(
     query = query.order('last_reply_at', { ascending: false, nullsFirst: false });
   }
 
-  const { data, error } = await query;
+  const { data, error } = await withApiTimeout(query, 'bbs.fetchCommunityThreads', 8000);
   if (error) {
     console.warn('[fetchCommunityThreads] error:', error.message);
     return [];
@@ -193,12 +210,23 @@ export async function fetchReplies(threadId: string): Promise<BBSReply[]> {
   // 1st try: 著者の trust_score + author_id も一緒に取る (FK 明示)
   // author_id は RLS bbs_replies_read for select using(true) で公開済なので
   // SELECT に含めても新規 disclosure ではない。スレ内 ID hash 表示のため必須。
-  const withAuthor = await supabase
-    .from('bbs_replies')
-    .select('id, thread_id, content, color, created_at, author_id, author:profiles!bbs_replies_author_id_fkey(trust_score)')
-    .eq('thread_id', threadId)
-    .order('created_at', { ascending: true })
-    .limit(500);  // DoS 防止: 巨大スレッドで OOM/UI フリーズ防止
+  // timeout-throw は author join 失敗と同じ扱いにして fallback に流す。
+  let withAuthor: { data: RawReply[] | null; error: { message?: string } | null };
+  try {
+    const res = await withApiTimeout(
+      supabase
+        .from('bbs_replies')
+        .select('id, thread_id, content, color, created_at, author_id, author:profiles!bbs_replies_author_id_fkey(trust_score)')
+        .eq('thread_id', threadId)
+        .order('created_at', { ascending: true })
+        .limit(500),  // DoS 防止: 巨大スレッドで OOM/UI フリーズ防止
+      'bbs.fetchReplies.withAuthor',
+      8000,
+    );
+    withAuthor = { data: res.data as unknown as RawReply[] | null, error: res.error };
+  } catch (e) {
+    withAuthor = { data: null, error: e as { message?: string } };
+  }
 
   if (!withAuthor.error) {
     return (withAuthor.data ?? []).map((r: RawReply) => {
@@ -217,12 +245,16 @@ export async function fetchReplies(threadId: string): Promise<BBSReply[]> {
 
   // 著者 join が失敗 → 返信本文だけは絶対に表示できるよう trust_score 抜きで再取得
   console.warn('[fetchReplies] author join failed, falling back without trust_score:', withAuthor.error.message);
-  const fallback = await supabase
-    .from('bbs_replies')
-    .select('id, thread_id, content, color, created_at, author_id')
-    .eq('thread_id', threadId)
-    .order('created_at', { ascending: true })
-    .limit(500);  // DoS 防止: 巨大スレッドで OOM/UI フリーズ防止
+  const fallback = await withApiTimeout(
+    supabase
+      .from('bbs_replies')
+      .select('id, thread_id, content, color, created_at, author_id')
+      .eq('thread_id', threadId)
+      .order('created_at', { ascending: true })
+      .limit(500),  // DoS 防止: 巨大スレッドで OOM/UI フリーズ防止
+    'bbs.fetchReplies.fallback',
+    8000,
+  );
   if (fallback.error) throw fallback.error;
   return (fallback.data ?? []).map((r) => ({
     id: r.id,
