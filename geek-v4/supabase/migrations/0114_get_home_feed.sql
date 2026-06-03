@@ -40,33 +40,14 @@
 --   本 RPC は1ページ目専用 (入力 cursor 無し); 2ページ目以降は client が現行
 --   fetchPosts(cursor) + get_feed_page 経路へ。
 --
--- 冪等: to_regclass/to_regprocedure ガード + CREATE OR REPLACE。
+-- 冪等: CREATE OR REPLACE (top-level 定義。do $$..$$ で包むと一部 SQL editor の statement
+--   splitter が nested dollar-quote を誤分割し "syntax error at uuid" になるため非使用)。
 -- 未適用/失敗/timeout 時は client が現行3経路へ完全 fallback (lib/api/homeFeed.ts,
 -- flag EXPO_PUBLIC_HOME_FEED_RPC 既定 OFF)。
 -- ============================================================
 
-do $$
-begin
-  if to_regclass('public.posts') is null
-     or to_regclass('public.likes') is null
-     or to_regclass('public.concerns') is null
-     or to_regclass('public.saves') is null
-     or to_regclass('public.post_reactions') is null
-     or to_regclass('public.post_added_tags') is null
-     or to_regclass('public.polls') is null
-     or to_regclass('public.poll_options') is null
-     or to_regclass('public.poll_votes') is null
-     or to_regclass('public.post_communities') is null
-     or to_regclass('public.communities') is null then
-    raise notice '0114: prerequisite tables missing, skip get_home_feed creation';
-    return;
-  end if;
-  -- 可視性ヘルパが無い環境ではスキップ (誤って未定義関数で home feed RPC を壊さない)
-  if to_regprocedure('public.can_view_post(uuid)') is null
-     or to_regprocedure('public.author_visible(uuid)') is null then
-    raise notice '0114: visibility helpers missing, skip get_home_feed creation';
-    return;
-  end if;
+-- ★ 関数は top-level で定義 (do $$..$$ で包むと SQL editor の splitter が nested
+--   dollar-quote を誤分割するため)。plpgsql body は遅延束縛なので前提 table/helper は実行時解決。
 
   create or replace function public.get_home_feed(
     p_user_id uuid default null,
@@ -376,6 +357,5 @@ begin
   $fn$;
 
   grant execute on function public.get_home_feed(uuid, int) to authenticated;
-end $$;
 
 select '0114_get_home_feed 完了 — home feed 1ページ目を 1 RTT 集約 (0107可視性述語+周辺データ+nextCursor, author_id 非マスク=0107準拠)' as note;

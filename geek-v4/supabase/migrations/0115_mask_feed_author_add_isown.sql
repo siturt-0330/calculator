@@ -22,37 +22,17 @@
 --   official_author は両 RPC とも CTE/case で「マスク前の実 author_id」で解決済なので、
 --   出力 author_id をマスクしても公式投稿の表示は壊れない (検証済)。
 --
--- 冪等: to_regclass/to_regprocedure ガード + CREATE OR REPLACE。
+-- 冪等: CREATE OR REPLACE (top-level 定義。do $$..$$ で包むと一部 SQL editor の statement
+--   splitter が nested dollar-quote を誤分割し "syntax error at uuid" になるため非使用)。
 -- ============================================================
 
-do $$
-begin
-  if to_regclass('public.posts') is null
-     or to_regclass('public.likes') is null
-     or to_regclass('public.concerns') is null
-     or to_regclass('public.saves') is null
-     or to_regclass('public.post_reactions') is null
-     or to_regclass('public.post_added_tags') is null
-     or to_regclass('public.polls') is null
-     or to_regclass('public.poll_options') is null
-     or to_regclass('public.poll_votes') is null
-     or to_regclass('public.post_communities') is null
-     or to_regclass('public.communities') is null
-     or to_regclass('public.community_members') is null
-     or to_regclass('public.profiles') is null then
-    raise notice '0115: prerequisite tables missing, skip feed RPC re-mask';
-    return;
-  end if;
-  if to_regprocedure('public.can_view_post(uuid)') is null
-     or to_regprocedure('public.author_visible(uuid)') is null then
-    raise notice '0115: visibility helpers missing, skip feed RPC re-mask';
-    return;
-  end if;
+-- ★ 関数は top-level で定義 (do $$..$$ で包むと SQL editor の splitter が nested
+--   dollar-quote を誤分割するため)。plpgsql body は遅延束縛なので前提 table/helper は実行時解決。
 
-  -- ==========================================================
-  -- get_feed_page — 0107 body を踏襲 + author_id マスク + is_own
-  -- ==========================================================
-  create or replace function public.get_feed_page(
+-- ==========================================================
+-- get_feed_page — 0107 body を踏襲 + author_id マスク + is_own
+-- ==========================================================
+create or replace function public.get_feed_page(
     p_post_ids uuid[],
     p_user_id uuid
   )
@@ -509,6 +489,5 @@ begin
   $fn$;
 
   grant execute on function public.get_community_feed(uuid, int) to authenticated;
-end $$;
 
 select '0115_mask_feed_author_add_isown 完了 — get_feed_page / get_community_feed の匿名 author_id をマスク + is_own 追加 (0113 と統一)' as note;
