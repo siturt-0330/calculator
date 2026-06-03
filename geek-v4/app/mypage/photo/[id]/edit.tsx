@@ -348,10 +348,10 @@ export default function PhotoEditScreen() {
                 gap: SP['2'],
                 paddingHorizontal: SP['3'],
                 paddingVertical: SP['3'],
-                backgroundColor: 'rgba(255,255,255,0.04)',
+                backgroundColor: C.glass,
                 borderRadius: R.md,
                 borderWidth: 1,
-                borderColor: 'rgba(255,255,255,0.08)',
+                borderColor: C.glassBorder,
               }}
             >
               <Icon.image size={18} color={C.text3} strokeWidth={2} />
@@ -384,10 +384,10 @@ export default function PhotoEditScreen() {
                 <View
                   style={{
                     padding: SP['4'],
-                    backgroundColor: 'rgba(255,255,255,0.04)',
+                    backgroundColor: C.glass,
                     borderRadius: R.md,
                     borderWidth: 1,
-                    borderColor: 'rgba(255,255,255,0.08)',
+                    borderColor: C.glassBorder,
                     alignItems: 'center',
                     gap: SP['1'],
                   }}

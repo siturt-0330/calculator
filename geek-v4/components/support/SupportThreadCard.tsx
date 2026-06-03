@@ -46,7 +46,7 @@ export function SupportThreadCard({ thread, authorNickname, asAdmin = false, onP
         style={[
           {
             // accent border を unread 状態のとき軽く強調
-            borderColor: hasUnread ? C.accent + '55' : 'rgba(255,255,255,0.1)',
+            borderColor: hasUnread ? C.accent + '55' : C.glassBorder,
             gap: SP['2'],
           },
           hasUnread ? SHADOW.sm : null,

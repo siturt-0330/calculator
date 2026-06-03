@@ -131,9 +131,9 @@ export function PolishedButton({
     variantStyle = { backgroundColor: C.accent };
   } else if (variant === 'glass') {
     variantStyle = {
-      backgroundColor: 'rgba(255,255,255,0.08)',
+      backgroundColor: C.glass,
       borderWidth: 1,
-      borderColor: 'rgba(255,255,255,0.12)',
+      borderColor: C.glassBorder,
     };
   } else if (variant === 'outline') {
     variantStyle = {
