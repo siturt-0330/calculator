@@ -35,7 +35,7 @@ import { Avatar } from '../ui/Avatar';
 import { PressableScale } from '../ui/PressableScale';
 import { useAuthStore } from '../../stores/authStore';
 import { supabase } from '../../lib/supabase';
-import { useNotifications } from '../../hooks/useNotifications';
+import { useUnreadCount } from '../../hooks/useNotifications';
 import { useTheme } from '../../hooks/useColors';
 import { R, SP, isLightActive } from '../../design/tokens';
 import { T, LOGO_FONT, LOGO_FONT_WEIGHT } from '../../design/typography';
@@ -54,7 +54,7 @@ export function LeftSidebar() {
 
   const userId = useAuthStore((s) => s.user?.id);
   const fallbackNickname = useAuthStore((s) => s.user?.nickname);
-  const { unreadCount } = useNotifications();
+  const unreadCount = useUnreadCount();
 
   // feed.tsx / HomeDrawer と同じ queryKey / fn で cache 共有
   const { data: stats } = useQuery<MeProfileLite | null>({

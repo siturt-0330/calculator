@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'expo-router';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { TabIcon, type TabKey } from './TabIcon';
 import { HapticTab } from './HapticTab';
-import { useNotifications } from '../../hooks/useNotifications';
+import { useUnreadCount } from '../../hooks/useNotifications';
 import { NotificationBadge } from '../ui/NotificationBadge';
 import { useResolvedTheme } from '../../lib/theme/themeStore';
 import { useColors } from '../../hooks/useColors';
@@ -71,7 +71,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const pathname = usePathname();
-  const { unreadCount } = useNotifications();
+  const unreadCount = useUnreadCount();
   const theme = useResolvedTheme();
   const C = useColors();
   const isDark = theme === 'dark';

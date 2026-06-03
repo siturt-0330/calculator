@@ -39,13 +39,15 @@ import { attachChannel } from '../lib/realtime';
 import { useAuthStore } from '../stores/authStore';
 import type { Notification } from '../types/models';
 
-const NOTIF_KEY = ['notifications'] as const;
 const FEATURE_FLAGS_KEY = ['feature-flags'] as const;
 const BOOKMARK_COLLECTIONS_KEY = ['bookmark-collections'] as const;
 const SAVED_SEARCHES_KEY = ['saved-searches'] as const;
 const USER_STAMPS_KEY = ['user-stamps'] as const;
 
 function bindUserChannel(userId: string, qc: QueryClient) {
+  // userId スコープ付き通知 key。useNotifications.ts の notifKey(userId) と形を一致させる
+  // こと (不一致だと realtime の prepend/invalidate が UI 側の cache entry に当たらない)。
+  const NOTIF_KEY = ['notifications', userId] as const;
   return attachChannel(
     `user:${userId}`,
     (ch) =>

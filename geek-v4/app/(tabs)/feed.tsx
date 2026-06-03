@@ -347,7 +347,7 @@ export default function FeedScreen() {
       // 通知 top N — fetchNotifications は内部で .limit(50) しているため
       // 「最新通知バッジ + 一覧の最初の chunk」をまとめて温められる。
       void qc.prefetchQuery({
-        queryKey: ['notifications'],
+        queryKey: ['notifications', userId],
         queryFn: fetchNotifications,
         staleTime: 60_000,
       });
