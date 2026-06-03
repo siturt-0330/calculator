@@ -34,10 +34,9 @@ import {
   TextInput,
   RefreshControl,
   Keyboard,
-  InteractionManager,
 } from 'react-native';
 import { useSharedValue, withTiming } from 'react-native-reanimated';
-import { useScrollToTop } from '@react-navigation/native';
+import { useScrollToTop, useIsFocused } from '@react-navigation/native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -403,7 +402,7 @@ export default function SearchScreen() {
           qc.invalidateQueries({ queryKey: ['discover-recommended'] }),
           qc.invalidateQueries({ queryKey: ['discover-rising'] }),
           qc.invalidateQueries({ queryKey: ['discover-official'] }),
-          qc.invalidateQueries({ queryKey: ['for-you-shelf'] }),
+          qc.invalidateQueries({ queryKey: ['for-you-shelf-pool'] }),
           qc.invalidateQueries({ queryKey: ['trendingTopics'] }),
           qc.invalidateQueries({ queryKey: ['trending-tags'] }),
         ]);
@@ -783,26 +782,18 @@ function DiscoveryView() {
   //   first paint 後 (タブ遷移が落ち着いてから) に走らせる。検索バーと軽いセクション
   //   (Trending / ジャンル) は即時描画され、「タブ押下→即表示」になる。重い 5 本の
   //   query を mount 同時 fan-out させないのが肝。
-  const [deferReady, setDeferReady] = useState(false);
-  useEffect(() => {
-    // first paint 後に重いセクションを解禁する。
-    // ★ ただし Web では InteractionManager.runAfterInteractions が未解放の
-    //   interaction handle (アニメーション等) のせいで発火しないことがあり、その場合
-    //   「おすすめ」等のセクションが永久にスケルトンのまま固まる (= 投稿が表示されない)。
-    //   150ms の setTimeout フォールバックで必ず解禁し、ハングを防ぐ。
-    const handle = InteractionManager.runAfterInteractions(() => setDeferReady(true));
-    const timer = setTimeout(() => setDeferReady(true), 150);
-    return () => {
-      handle.cancel();
-      clearTimeout(timer);
-    };
-  }, []);
+  // ★ 重いセクション (Hot / For-You / コミュ3種) は検索タブが実際に focus された
+  //   ときだけ発火させる。lazyPreloadDistance:2 で起動時に background mount される
+  //   間は撃たない → 起動時のホームフィードとの帯域競合と 150ms 固定待ちを除去。
+  //   useIsFocused は Web でも発火するので、旧 InteractionManager 経路の
+  //   「おすすめ永久スケルトン」回帰も起きない (タブを開いた瞬間に解禁)。
+  const isFocused = useIsFocused();
 
   // おすすめ — query 無し discoverCommunities = 人気順 (member_count desc)
   const recommended = useQuery({
     queryKey: ['discover-recommended'],
     queryFn: () => withApiTimeout(discoverCommunities({ limit: 8 }), 'discover.recommended', 8000),
-    enabled: deferReady,
+    enabled: isFocused,
     staleTime: 60_000,
     retry: 1,
   });
@@ -811,7 +802,7 @@ function DiscoveryView() {
   const rising = useQuery({
     queryKey: ['discover-rising'],
     queryFn: () => withApiTimeout(fetchRisingCommunities(10), 'discover.rising', 8000),
-    enabled: deferReady,
+    enabled: isFocused,
     staleTime: 60_000,
     retry: 1,
   });
@@ -820,7 +811,7 @@ function DiscoveryView() {
   const official = useQuery({
     queryKey: ['discover-official'],
     queryFn: () => withApiTimeout(fetchOfficialCommunities(10), 'discover.official', 8000),
-    enabled: deferReady,
+    enabled: isFocused,
     staleTime: 60_000,
     retry: 1,
   });
@@ -832,10 +823,10 @@ function DiscoveryView() {
 
       {/* 2) 今日のホット — 横スクロールカード (動画サムネ対応)。
           first paint 後に mount (内部 query を初回フレームで走らせない)。 */}
-      {deferReady && <HotPostsRow />}
+      {isFocused && <HotPostsRow />}
 
       {/* 3) あなたへのおすすめ — パーソナライズ (未ログインで non-render)。first paint 後に mount。 */}
-      {deferReady && <ForYouShelf />}
+      {isFocused && <ForYouShelf />}
 
       {/* 4) おすすめコミュニティ — 人気順の大カード */}
       <CommunityShelf
@@ -846,7 +837,7 @@ function DiscoveryView() {
         joiningIds={joiningIds}
         onJoin={onJoin}
         onPressCommunity={onPressCommunity}
-        isLoading={!deferReady || recommended.isLoading}
+        isLoading={!isFocused || recommended.isLoading}
         emptyText="まだコミュニティがありません"
       />
 
@@ -859,7 +850,7 @@ function DiscoveryView() {
         joiningIds={joiningIds}
         onJoin={onJoin}
         onPressCommunity={onPressCommunity}
-        isLoading={!deferReady || rising.isLoading}
+        isLoading={!isFocused || rising.isLoading}
         emptyText="まだ急上昇コミュニティがありません"
       />
 
@@ -872,7 +863,7 @@ function DiscoveryView() {
         joiningIds={joiningIds}
         onJoin={onJoin}
         onPressCommunity={onPressCommunity}
-        isLoading={!deferReady || official.isLoading}
+        isLoading={!isFocused || official.isLoading}
         emptyText="公式コミュニティはまだありません"
       />
 

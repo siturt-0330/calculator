@@ -36,7 +36,7 @@ const COLUMNS = 2;
 const ROWS = 3;
 const LIMIT = COLUMNS * ROWS;
 // 個人化再ランク用に広めの候補プールを取得（hot 上位の素並びと差別化する余白）
-const POOL = 24;
+const POOL = 12;
 const GAP = SP['2']; // 8px
 
 export function ForYouShelf() {
