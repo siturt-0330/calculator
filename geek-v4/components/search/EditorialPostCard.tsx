@@ -28,6 +28,7 @@ import { Image as ExpoImage } from 'expo-image';
 
 import type { Post } from '../../types/models';
 import { formatRelative } from '../../lib/utils/date';
+import { thumbedUrl } from '../../lib/utils/imageUrl';
 
 type Props = {
   post: Post;
@@ -76,8 +77,9 @@ export function EditorialPostCard({ post, rank, terms, onPress, onExplain }: Pro
   const extraTagCount = allTags.length - shownTags.length;
 
   // サムネ: media_urls[0] が http(s) のときのみ(undefined 含めて型ガード)
+  // 88px 角に対し full-res は過剰なので thumbedUrl(264 = 88@3x) で軽量化
   const rawThumb = post.media_urls?.[0];
-  const thumbUrl: string | null = isHttpUrl(rawThumb) ? rawThumb : null;
+  const thumbUrl: string | null = isHttpUrl(rawThumb) ? thumbedUrl(rawThumb, 264) : null;
 
   // 巻頭特集の accent 下線: マウント時に opacity 0→1→0.6 を1パルスのみ
   const pulse = useSharedValue(isLead ? 0 : 0.6);

@@ -7,16 +7,10 @@
  */
 import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchThreads, createThread, fetchMyJoinedCommunityThreads, fetchReplies } from '../lib/api/bbs';
+import { fetchThreads, createThread, fetchMyJoinedCommunityThreads } from '../lib/api/bbs';
 import { attachChannel } from '../lib/realtime';
 import { useAuthStore } from '../stores/authStore';
 import { useToastStore } from '../stores/toastStore';
-
-// スレ一覧 → スレ詳細タップ時に「即座に開く」UX のため上位 N 件の replies を背景 prefetch する。
-// - 5 件: 大半のユーザーが一覧の最初に出てくる上位スレを開く統計を想定 (=ヒット率高い)
-// - 過剰な数は network / cache を圧迫するので低めに置く
-// - prefetchQuery は staleTime 内なら no-op (再リクエストしない) のため副作用無し
-const PREFETCH_TOP_N = 5;
 
 export function useBBS() {
   const qc = useQueryClient();
@@ -30,23 +24,11 @@ export function useBBS() {
     // 新規スレッド検知は realtime subscription (下の attachChannel) でカバー済み。
   });
 
-  // ★ Prefetch: スレ一覧が解決したら、上位 PREFETCH_TOP_N スレの replies を背景取得する。
-  //   ユーザーが一覧上位スレを開いたとき、['bbs-replies', id] cache が既に温まっているため
-  //   詳細画面で即座に内容が出る (=画面遷移時のローディングフラッシュが消える)。
-  //   staleTime 15s 内なら useBBSThread 側で同じ key を使うので no-op。
-  useEffect(() => {
-    if (!data || data.length === 0) return;
-    const topIds = data.slice(0, PREFETCH_TOP_N).map((t) => t.id).filter(Boolean);
-    for (const id of topIds) {
-      qc.prefetchQuery({
-        queryKey: ['bbs-replies', id],
-        queryFn: () => fetchReplies(id),
-        staleTime: 15_000,
-      }).catch(() => {
-        // prefetch 失敗は silent: 実際の遷移時に通常の fetch が走るので UX に影響なし
-      });
-    }
-  }, [data, qc]);
+  // 旧: 上位 N スレの replies を ['bbs-replies', id] に背景 prefetch していたが、
+  //   スレタップ先 (/bbs/{id} → /post/{id} redirect) は ['post', id] / ['post-comments', id]
+  //   しか読まず ['bbs-replies'] を一切参照しないため、結果は 100% 破棄されていた。
+  //   この無駄 fetch (profiles join + limit(500), 失敗時 fallback SELECT) を撤去。
+  //   実際の遷移先を温める prefetch は bbs.tsx の onPressIn 側に移設済み。
 
   const { mutateAsync: create } = useMutation({
     mutationFn: ({ title, category }: { title: string; category: string }) =>
@@ -120,22 +102,8 @@ export function useMyCommunityBBS() {
     enabled: !!userId,
   });
 
-  // ★ Prefetch: コミュニティスコープでも同じく上位 N スレの replies を背景取得。
-  //   useBBS と独立の effect (data shape が異なるため)。
-  useEffect(() => {
-    const threads = data?.threads;
-    if (!threads || threads.length === 0) return;
-    const topIds = threads.slice(0, PREFETCH_TOP_N).map((t) => t.id).filter(Boolean);
-    for (const id of topIds) {
-      qc.prefetchQuery({
-        queryKey: ['bbs-replies', id],
-        queryFn: () => fetchReplies(id),
-        staleTime: 15_000,
-      }).catch(() => {
-        // prefetch 失敗は silent
-      });
-    }
-  }, [data, qc]);
+  // 旧: コミュニティスコープでも上位 N スレの replies を ['bbs-replies'] に prefetch していたが、
+  //   useBBS と同じ理由 (遷移先が ['bbs-replies'] を読まない) で破棄されていたため撤去。
 
   // useBBS と同じ realtime: bbs_threads 変更で debounce invalidate
   // bbs_replies INSERT は filter 不可で fanout が痛いので撤去 (Audit E#5)。

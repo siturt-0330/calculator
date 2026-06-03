@@ -1,10 +1,10 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
 import { View, Text, ScrollView, TextInput, useWindowDimensions, RefreshControl } from 'react-native';
 import { FlashList, type ListRenderItem } from '@shopify/flash-list';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -38,6 +38,8 @@ import { useSearchClickStore } from '../../stores/searchClickStore';
 import { useT } from '../../hooks/useT';
 import { logEvent } from '../../lib/personalize';
 import { supabase } from '../../lib/supabase';
+import { fetchPostById } from '../../lib/api/posts';
+import { fetchComments } from '../../lib/api/comments';
 
 type SortMode = 'recent' | 'popular';
 // 掲示板タブのスコープ — LINE のトーク/友だち と同じ感覚で 2 択切替
@@ -60,6 +62,41 @@ export default function BBSScreen() {
   const allBbs = useBBS();
   // 「コミュニティ」スコープ用 — 自分の参加コミュ横断
   const myBbs = useMyCommunityBBS();
+  const qc = useQueryClient();
+
+  // ★ Prefetch-on-press: スレタップ先 (/bbs/{id} → /post/{id} redirect) が実際に読む
+  //   cache key を温める。これにより遷移完了時には ['post', id] / ['post-comments', id] が
+  //   既にキャッシュ済みで、詳細画面が spinner を出さず即座に内容を描画できる。
+  //   key / staleTime は app/post/[id].tsx と完全一致させる (=遷移先が cache hit になる)。
+  //   prefetchQuery は staleTime 内なら no-op なので連打しても無駄 fetch しない。
+  const prefetchThread = useCallback(
+    (threadId: string) => {
+      void qc
+        .prefetchQuery({
+          queryKey: ['post', threadId],
+          queryFn: () => fetchPostById(threadId),
+          staleTime: 60_000, // app/post/[id].tsx:135 と一致
+        })
+        .catch(() => {});
+      void qc
+        .prefetchQuery({
+          queryKey: ['post-comments', threadId],
+          queryFn: () => fetchComments(threadId),
+          staleTime: 30_000, // app/post/[id].tsx:161 と一致
+        })
+        .catch(() => {});
+    },
+    [qc],
+  );
+
+  // ★ Reload-freshness: タブ再フォーカス時に BBS 一覧を invalidate (feed/community と同じ挙動)。
+  //   'bbs-threads' prefix は ['bbs-threads'] と ['bbs-threads','my-communities',userId] の
+  //   両 scope を覆う。staleTime 30s が連続フォーカスの dedupe を担うので過剰 refetch にならない。
+  useFocusEffect(
+    useCallback(() => {
+      void qc.invalidateQueries({ queryKey: ['bbs-threads'] });
+    }, [qc]),
+  );
 
   // scope: ユーザーが明示的に切り替えるまでは「動的 default」=
   //   参加コミュあり → 'community' / なし → 'all'
@@ -86,6 +123,14 @@ export default function BBSScreen() {
   const [debounced, setDebounced] = useState('');
   const [category, setCategory] = useState<string>('すべて');
   const [sort, setSort] = useState<SortMode>('recent');
+
+  // debounced を ref 経由で参照 — 行 press ハンドラを useCallback で安定化しても
+  // 最新の検索語で CTR を記録できるようにする (debounced を deps に入れると
+  // キーストロークごとにハンドラ identity が変わり ThreadRow の memo が効かない)。
+  const debouncedRef = useRef(debounced);
+  useEffect(() => {
+    debouncedRef.current = debounced;
+  }, [debounced]);
 
   useEffect(() => {
     // 短いクエリは早く応答 (autocomplete のテンポを上げる)
@@ -263,6 +308,36 @@ export default function BBSScreen() {
   const scrollToTop = () => {
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
   };
+
+  // 行ハンドラを安定化 (useCallback) — ThreadRow は React.memo なので
+  // ハンドラ identity が render ごとに変わると memo が無効化される。
+  // threadId を引数で受け取り、router / recordCtr / prefetchThread (全て安定) のみ依存。
+  const handleRowPrefetch = useCallback(
+    (threadId: string) => {
+      prefetchThread(threadId);
+    },
+    [prefetchThread],
+  );
+  const handleRowPress = useCallback(
+    (threadId: string, threadCategory: string | null | undefined) => {
+      const q = debouncedRef.current;
+      if (q) recordCtr(q, threadId);
+      void logEvent({
+        kind: 'thread_open',
+        tags: [],
+        category: threadCategory ?? undefined,
+        thread_id: threadId,
+      });
+      router.push(`/bbs/${threadId}` as never);
+    },
+    [recordCtr, router],
+  );
+  const handlePressCommunity = useCallback(
+    (communityId: string) => {
+      router.push(`/community/${communityId}` as never);
+    },
+    [router],
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -506,19 +581,9 @@ export default function BBSScreen() {
             containerMaxWidth={containerMaxWidth}
             showResults={showResults}
             highlightTerms={highlightTerms}
-            onPress={() => {
-              if (debounced) recordCtr(debounced, row.item.id);
-              void logEvent({
-                kind: 'thread_open',
-                tags: [],
-                category: row.item.category ?? undefined,
-                thread_id: row.item.id,
-              });
-              router.push(`/bbs/${row.item.id}` as never);
-            }}
-            onPressCommunity={(communityId) => {
-              router.push(`/community/${communityId}` as never);
-            }}
+            onPress={handleRowPress}
+            onPrefetch={handleRowPrefetch}
+            onPressCommunity={handlePressCommunity}
           />
         )) as ListRenderItem<{ item: BBSThread; score: number }>}
         ListEmptyComponent={
@@ -771,11 +836,13 @@ type ThreadRowProps = {
   containerMaxWidth: number;
   showResults: boolean;
   highlightTerms: string[];
-  onPress: () => void;
+  // 安定化のため id を引数で受ける (親側で useCallback 化、ThreadRow は React.memo)
+  onPress: (threadId: string, threadCategory: string | null | undefined) => void;
+  onPrefetch: (threadId: string) => void;
   onPressCommunity: (communityId: string) => void;
 };
 
-function ThreadRow({
+function ThreadRowBase({
   item,
   community,
   isDesktop,
@@ -783,6 +850,7 @@ function ThreadRow({
   showResults,
   highlightTerms,
   onPress,
+  onPrefetch,
   onPressCommunity,
 }: ThreadRowProps) {
   const themeC = useColors();
@@ -861,7 +929,10 @@ function ThreadRow({
       ]}
     >
       <PressableScale
-        onPress={onPress}
+        onPress={() => onPress(item.id, item.category)}
+        // onPressIn で遷移先 (/post/{id}) の cache を先読み。press → router.push の間
+        // (~100-300ms) に warm されるので詳細画面が cache hit で即描画される。
+        onPressIn={() => onPrefetch(item.id)}
         haptic="tap"
         scaleValue={0.97}
         // glass 風: 半透明 background + 細い縁 + ふんわり shadow.xs
@@ -1008,3 +1079,9 @@ function ThreadRow({
     </Animated.View>
   );
 }
+
+// React.memo — FlashList の再 render / extraData 変化 (communityMeta 遅延 fetch) や
+// 検索キーストロークで親が再 render しても、props が変わらない行は再 render を skip。
+// callback は親側で useCallback 安定化済み、item は query data の安定参照なので
+// default の shallow 比較で十分機能する。
+const ThreadRow = memo(ThreadRowBase);

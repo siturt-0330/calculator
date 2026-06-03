@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { withApiTimeout } from '../withApiTimeout';
 import { checkRate, rateLimitMessage } from '../rateLimit';
 
 export type ReactionRow = { post_id: string; user_id: string; meme: string };
@@ -18,28 +19,32 @@ export async function fetchReactionsForPosts(postIds: string[]): Promise<Reactio
   const myId = session.session?.user.id;
 
   // 他ユーザーの user_id をクライアントへ出さない (名寄せ防止 #27)。集計は post_id + meme のみ。
-  const { data, error } = await supabase
-    .from('post_reactions')
-    .select('post_id, meme')
-    .in('post_id', postIds);
+  // 集計 (agg) と「自分の行」(mine) は互いに独立なので Promise.all で並列化し、
+  // どちらも withApiTimeout で 8s に bound する (旧: 2 awaits 直列で無 timeout)。
+  const [aggRes, mineRes] = await Promise.all([
+    withApiTimeout(
+      supabase.from('post_reactions').select('post_id, meme').in('post_id', postIds),
+      'reactions.fetchForPosts.agg',
+      8000,
+    ),
+    myId
+      ? withApiTimeout(
+          supabase.from('post_reactions').select('post_id, meme').eq('user_id', myId).in('post_id', postIds),
+          'reactions.fetchForPosts.mine',
+          8000,
+        )
+      : Promise.resolve({ data: [] as { post_id: string; meme: string }[], error: null }),
+  ]);
   // 取得失敗を空マップで握り潰すと「リアクション0」を誤って成功表示し retry も走らない。
   // throw して React Query の retry/isError 経路に乗せる (呼び出し側は data ?? [] でフォールバック)。
-  if (error) throw error;
+  if (aggRes.error) throw aggRes.error;
 
-  // mine 判定は「自分の行」だけ別途取得 (自分の user_id は露出して問題ない)。
-  let mineSet = new Set<string>();
-  if (myId) {
-    const { data: mineRows } = await supabase
-      .from('post_reactions')
-      .select('post_id, meme')
-      .eq('user_id', myId)
-      .in('post_id', postIds);
-    mineSet = new Set(
-      ((mineRows ?? []) as { post_id: string; meme: string }[]).map((r) => `${r.post_id}:${r.meme}`),
-    );
-  }
+  // mine 判定は「自分の行」だけ (自分の user_id は露出して問題ない)。失敗時は mineSet 空のまま。
+  const mineSet = new Set(
+    ((mineRes.data ?? []) as { post_id: string; meme: string }[]).map((r) => `${r.post_id}:${r.meme}`),
+  );
 
-  const rows = (data ?? []) as { post_id: string; meme: string }[];
+  const rows = (aggRes.data ?? []) as { post_id: string; meme: string }[];
   // postId → meme → count
   const map: Record<string, Record<string, number>> = {};
   for (const r of rows) {

@@ -545,10 +545,11 @@ export function CommentThreadItem({
                   ) : (
                     <ExpoImage
                       key={url}
-                      source={{ uri: thumbedUrl(url, 720) }}
+                      source={{ uri: thumbedUrl(url, 480) }}
                       style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: R.md, backgroundColor: C.bg3 }}
                       contentFit="cover"
                       cachePolicy="memory-disk"
+                      recyclingKey={url}
                       transition={120}
                     />
                   ),

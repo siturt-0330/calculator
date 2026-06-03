@@ -1,10 +1,12 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { View, Text, Linking, Image, Platform } from 'react-native';
+import { View, Text, Linking, Platform } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { Icon } from '../../constants/icons';
 import { C, R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { PressableScale } from '../ui/PressableScale';
 import { sanitizeUrl } from '../../lib/sanitize';
+import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { logAdClick, logAdDismiss, logAdImpression } from '../../lib/api/ads';
 import type { Ad } from '../../lib/api/ads';
 
@@ -130,16 +132,19 @@ function AdCardInner({ ad, position, matchedTags }: AdCardProps) {
         </PressableScale>
       </View>
 
-      {/* Image (任意) */}
+      {/* Image (任意) — expo-image で memory-disk cache + (Supabase ホストなら) thumbnail */}
       {ad.image_url ? (
-        <Image
-          source={{ uri: ad.image_url }}
+        <ExpoImage
+          source={{ uri: thumbedUrl(ad.image_url, 960) }}
           style={{
             width: '100%',
             aspectRatio: 16 / 9,
             backgroundColor: C.bg3,
           }}
-          resizeMode="cover"
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          recyclingKey={ad.image_url}
+          transition={120}
         />
       ) : null}
 

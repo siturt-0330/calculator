@@ -26,6 +26,7 @@ import {
   type DiscoverMediaPost,
 } from '../../lib/api/posts';
 import { sanitizeUrl } from '../../lib/sanitize';
+import { thumbedUrl } from '../../lib/utils/imageUrl';
 
 const COLUMN_COUNT = 3;
 const GAP = 2; // タイトな間隔 — Instagram っぽく
@@ -142,6 +143,8 @@ function PhotoCell({
 }) {
   const firstMedia = post.media_urls[0];
   const safeUrl = firstMedia ? sanitizeUrl(firstMedia) : null;
+  // セルサイズ(retina 3x)の thumbnail を要求 — 1600px 原本を ~125px 枠に流さない
+  const resolvedUrl = safeUrl ? thumbedUrl(safeUrl, Math.round(size * 3)) : null;
   const hasMultiple = post.media_urls.length > 1;
 
   return (
@@ -158,13 +161,13 @@ function PhotoCell({
         overflow: 'hidden',
       }}
     >
-      {safeUrl ? (
+      {resolvedUrl ? (
         <Image
-          source={{ uri: safeUrl }}
+          source={{ uri: resolvedUrl }}
           style={{ width: '100%', height: '100%' }}
           contentFit="cover"
           cachePolicy="memory-disk"
-          recyclingKey={safeUrl}
+          recyclingKey={resolvedUrl}
           transition={120}
         />
       ) : (

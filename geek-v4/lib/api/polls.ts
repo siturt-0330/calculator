@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { withApiTimeout } from '../withApiTimeout';
 
 export type PollOption = {
   id: string;
@@ -25,28 +26,39 @@ export async function fetchPolls(postIds: string[]): Promise<Record<string, Poll
   const { data: session } = await supabase.auth.getSession();
   const myId = session.session?.user.id;
 
-  const { data: polls } = await supabase
-    .from('polls')
-    .select('id, post_id, question, expires_at, multi_select, is_anonymous, total_votes')
-    .in('post_id', postIds);
+  const { data: polls } = await withApiTimeout(
+    supabase
+      .from('polls')
+      .select('id, post_id, question, expires_at, multi_select, is_anonymous, total_votes')
+      .in('post_id', postIds),
+    'polls.fetch.polls',
+    8000,
+  );
   if (!polls || polls.length === 0) return {};
 
   const pollIds = polls.map((p) => (p as { id: string }).id);
-  const { data: options } = await supabase
-    .from('poll_options')
-    .select('id, poll_id, label, ordinal, vote_count')
-    .in('poll_id', pollIds)
-    .order('ordinal', { ascending: true });
-
-  let myVotes: Array<{ poll_id: string; option_id: string }> = [];
-  if (myId) {
-    const { data } = await supabase
-      .from('poll_votes')
-      .select('poll_id, option_id')
-      .eq('user_id', myId)
-      .in('poll_id', pollIds);
-    myVotes = (data ?? []) as typeof myVotes;
-  }
+  // poll_options と「自分の票」(poll_votes) は共に pollIds のみに依存し互いに独立なので
+  // Promise.all で並列化 (旧: 直列 await で 3 RTT → 2 RTT)。各読み取りを 8s に bound する。
+  const [optRes, voteRes] = await Promise.all([
+    withApiTimeout(
+      supabase
+        .from('poll_options')
+        .select('id, poll_id, label, ordinal, vote_count')
+        .in('poll_id', pollIds)
+        .order('ordinal', { ascending: true }),
+      'polls.fetch.options',
+      8000,
+    ),
+    myId
+      ? withApiTimeout(
+          supabase.from('poll_votes').select('poll_id, option_id').eq('user_id', myId).in('poll_id', pollIds),
+          'polls.fetch.myVotes',
+          8000,
+        )
+      : Promise.resolve({ data: [] as Array<{ poll_id: string; option_id: string }>, error: null }),
+  ]);
+  const options = optRes.data;
+  const myVotes = (voteRes.data ?? []) as Array<{ poll_id: string; option_id: string }>;
 
   const byPoll: Record<string, Poll> = {};
   for (const p of polls as Array<Omit<Poll, 'options' | 'my_vote_option_ids'>>) {

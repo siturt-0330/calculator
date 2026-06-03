@@ -13,6 +13,7 @@
 // ============================================================
 
 import { supabase } from '../supabase';
+import { withApiTimeout } from '../withApiTimeout';
 import type { Comment } from '../../types/models';
 import { sanitizeContent } from '../sanitize';
 import { checkRate, rateLimitMessage } from '../rateLimit';
@@ -54,35 +55,59 @@ function mapRow(c: RawComment): Comment {
 // DoS 防止: 1 post に対する comment は上限 500 件で打ち切り。
 const FETCH_COMMENTS_LIMIT = 500;
 
+// withApiTimeout は timeout 時に throw する ({error} を返さない)。tier cascade を壊さない
+// よう、throw を既存の {data,error} フローへ正規化する小 helper。timeout は「その tier が
+// 失敗した」と同義に扱い、次の tier へ fall-through させる (tier3 は呼び出し側で rethrow)。
+async function safeRead<T>(
+  p: PromiseLike<{ data: T | null; error: { message?: string } | null }>,
+  label: string,
+): Promise<{ data: T | null; error: { message?: string } | null }> {
+  try {
+    return await withApiTimeout(p, label, 8000);
+  } catch (e) {
+    return { data: null, error: e as { message?: string } };
+  }
+}
+
 // 投稿へのコメント取得 — 3 段 fallback:
 //   1) media + author(trust_score) join
 //   2) media のみ (author join が PGRST201 で壊れた時も media は保つ)
 //   3) base のみ (media_urls 列が無い = migration 0104 未適用 の環境)
+// 各 tier を withApiTimeout(8s) で bound し、timeout も「その tier 失敗」として次へ流す。
 export async function fetchComments(postId: string): Promise<Comment[]> {
-  const t1 = await supabase
-    .from('comments')
-    .select(`${COMMENT_SELECT_COLS_MEDIA}, author:profiles!comments_author_id_fkey(trust_score)`)
-    .eq('post_id', postId)
-    .order('created_at', { ascending: true })
-    .limit(FETCH_COMMENTS_LIMIT);
+  const t1 = await safeRead<RawComment[]>(
+    supabase
+      .from('comments')
+      .select(`${COMMENT_SELECT_COLS_MEDIA}, author:profiles!comments_author_id_fkey(trust_score)`)
+      .eq('post_id', postId)
+      .order('created_at', { ascending: true })
+      .limit(FETCH_COMMENTS_LIMIT),
+    'comments.fetch.tier1',
+  );
   if (!t1.error) return (t1.data ?? []).map((c: RawComment) => mapRow(c));
 
   console.warn('[fetchComments] tier1 (media+author) failed → media-only:', t1.error.message);
-  const t2 = await supabase
-    .from('comments')
-    .select(COMMENT_SELECT_COLS_MEDIA)
-    .eq('post_id', postId)
-    .order('created_at', { ascending: true })
-    .limit(FETCH_COMMENTS_LIMIT);
+  const t2 = await safeRead<RawComment[]>(
+    supabase
+      .from('comments')
+      .select(COMMENT_SELECT_COLS_MEDIA)
+      .eq('post_id', postId)
+      .order('created_at', { ascending: true })
+      .limit(FETCH_COMMENTS_LIMIT),
+    'comments.fetch.tier2',
+  );
   if (!t2.error) return (t2.data ?? []).map((c: RawComment) => mapRow(c));
 
   console.warn('[fetchComments] tier2 (media) failed → base-only:', t2.error.message);
-  const t3 = await supabase
-    .from('comments')
-    .select(COMMENT_SELECT_COLS_BASE)
-    .eq('post_id', postId)
-    .order('created_at', { ascending: true })
-    .limit(FETCH_COMMENTS_LIMIT);
+  const t3 = await safeRead<RawComment[]>(
+    supabase
+      .from('comments')
+      .select(COMMENT_SELECT_COLS_BASE)
+      .eq('post_id', postId)
+      .order('created_at', { ascending: true })
+      .limit(FETCH_COMMENTS_LIMIT),
+    'comments.fetch.tier3',
+  );
   if (t3.error) throw t3.error;
   return (t3.data ?? []).map((c: RawComment) => mapRow(c));
 }

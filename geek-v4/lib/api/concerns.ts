@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { withApiTimeout } from '../withApiTimeout';
 import type { ConcernReason } from '../../types/models';
 
 export async function getMyConcerns(postIds: string[]): Promise<Record<string, boolean>> {
@@ -6,11 +7,11 @@ export async function getMyConcerns(postIds: string[]): Promise<Record<string, b
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) return {};
-  const { data } = await supabase
-    .from('concerns')
-    .select('post_id')
-    .eq('user_id', userId)
-    .in('post_id', postIds);
+  const { data } = await withApiTimeout(
+    supabase.from('concerns').select('post_id').eq('user_id', userId).in('post_id', postIds),
+    'concerns.getMine',
+    8000,
+  );
   const map: Record<string, boolean> = {};
   for (const row of (data ?? []) as Array<{ post_id: string }>) {
     map[row.post_id] = true;

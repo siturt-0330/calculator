@@ -41,7 +41,8 @@ export async function fetchTourismSpots(): Promise<MapLocation[]> {
   const { data } = await supabase
     .from('tourism_spots')
     .select('*')
-    .order('rating', { ascending: false });
+    .order('rating', { ascending: false })
+    .limit(500); // 防御的上限 — tourism_spots は現状小さいが将来の無制限スキャンを防ぐ
   return ((data ?? []) as Array<{ id: string; name: string; description: string | null; lat: number; lng: number; address: string | null; tag_name: string | null; category: string; rating: number | null }>)
     .map((s) => ({ ...s, event_date: null, kind: 'spot' as const }));
 }

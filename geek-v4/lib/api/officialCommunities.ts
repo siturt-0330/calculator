@@ -14,7 +14,8 @@ export async function fetchMyOfficialCommunities(): Promise<Community[]> {
     .select('*')
     .eq('is_official', true)
     .eq('official_admin_user_id', user.id)
-    .order('last_post_at', { ascending: false, nullsFirst: false });
+    .order('last_post_at', { ascending: false, nullsFirst: false })
+    .limit(200); // 防御的上限 (admin/curated データ、現状少件数)
   if (error) {
     console.warn('[officialCommunities] fetchMyOfficialCommunities failed:', error.message);
     return [];
@@ -106,7 +107,8 @@ export async function fetchMyApplications(communityId: string): Promise<Official
     .from('official_community_applications')
     .select('*')
     .eq('community_id', communityId)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(200); // 防御的上限 (admin/curated データ、現状少件数)
   if (error) throw error;
   return (data ?? []) as OfficialApplication[];
 }
@@ -132,7 +134,8 @@ export async function fetchApplication(applicationId: string): Promise<OfficialA
 export async function fetchPendingOfficialApps(): Promise<AdminPendingApp[]> {
   const { data, error } = await supabase
     .from('admin_pending_official_apps_v')
-    .select('*');
+    .select('*')
+    .limit(200); // 防御的上限 (admin/curated データ、現状少件数)
   if (error) throw error;
   return (data ?? []) as AdminPendingApp[];
 }
@@ -174,7 +177,8 @@ export async function fetchQnaDocuments(communityId: string): Promise<QnaDocumen
     .from('community_qna_documents')
     .select('*')
     .eq('community_id', communityId)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(200); // 防御的上限 (admin/curated データ、現状少件数)
   if (error) throw error;
   return (data ?? []) as QnaDocument[];
 }
@@ -335,7 +339,8 @@ export async function fetchCalendarEvents(communityId: string, opts?: { upcoming
     .from('community_calendar_events')
     .select('*')
     .eq('community_id', communityId)
-    .order('starts_at', { ascending: true });
+    .order('starts_at', { ascending: true })
+    .limit(200); // 防御的上限 (admin/curated データ、現状少件数)
   if (opts?.upcoming) {
     q = q.gte('starts_at', new Date().toISOString());
   }
@@ -380,7 +385,8 @@ export async function fetchMapLocations(communityId: string): Promise<MapLocatio
   const { data, error } = await supabase
     .from('community_map_locations')
     .select('*')
-    .eq('community_id', communityId);
+    .eq('community_id', communityId)
+    .limit(200); // 防御的上限 (admin/curated データ、現状少件数)
   if (error) throw error;
   return (data ?? []) as MapLocation[];
 }
