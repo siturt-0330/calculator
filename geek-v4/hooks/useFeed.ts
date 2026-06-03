@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { fetchPosts, fetchCommunitiesForPosts } from '../lib/api/posts';
+import {
+  fetchHomeFeedFirstPage,
+  seedHomeFeedSurroundingCaches,
+  HOME_FEED_RPC_ENABLED,
+} from '../lib/api/homeFeed';
 import { supabase } from '../lib/supabase';
 import { attachChannel } from '../lib/realtime';
 import { useTagFilterStore } from '../stores/tagFilterStore';
@@ -59,6 +64,8 @@ export function useFeed() {
   const sort = useFeedStore((s) => s.sort);
   const scope = useFeedStore((s) => s.scope);
   const qc = useQueryClient();
+  // get_home_feed RPC の p_user_id / seed key 用 (['feed'] key には含めない=従来どおり viewer 非依存)
+  const userId = useAuthStore((s) => s.user?.id ?? null);
 
   const filterTags = scope === 'closed' && likedTags.length > 0 ? likedTags : undefined;
 
@@ -67,8 +74,23 @@ export function useFeed() {
   // private / community_only はサーバー側で弾かれる。
   const { data, isLoading, isFetching, fetchNextPage, hasNextPage, refetch } = useInfiniteQuery({
     queryKey: ['feed', sort, scope, likedTags, blockedTags],
-    queryFn: ({ pageParam }) =>
-      fetchPosts({ sort, likedTags, blockedTags, filterTags, cursor: pageParam as string | undefined, home: true }),
+    queryFn: async ({ pageParam }) => {
+      const cursor = pageParam as string | undefined;
+      // ★ get_home_feed (0114): 既定 (for-you + open) の1ページ目だけ、ベース posts +
+      //   周辺データ + nextCursor を 1 RTT で取得し、周辺 cache を seed して get_feed_page /
+      //   fetchCommunitiesForPosts の二重 fetch を抑止する (cache 戦略 B)。flag OFF / RPC 失敗 /
+      //   0件 / 非該当 (2ページ目以降・別 sort・closed scope) は現行 fetchPosts へ完全 fallback。
+      if (cursor === undefined && sort === 'for-you' && scope === 'open' && HOME_FEED_RPC_ENABLED) {
+        const home = await fetchHomeFeedFirstPage(userId);
+        if (home) {
+          seedHomeFeedSurroundingCaches(qc, userId, home.posts);
+          // FeedPagePost は Post の superset なので ['feed'] page1 にそのまま入れて良い
+          // (余分フィールドは下流で無視。base 表示は ['feed'] post / 周辺は ['feed-page'] から読む)。
+          return { posts: home.posts as Post[], nextCursor: home.nextCursor };
+        }
+      }
+      return fetchPosts({ sort, likedTags, blockedTags, filterTags, cursor, home: true });
+    },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     // staleTime 0: リロード/再フォーカスのたびに page1 を取り直して新着を反映する
