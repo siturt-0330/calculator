@@ -422,7 +422,7 @@ Native module を触ったら必ず通常 build & submit。
 - `useFeedRealtime(postIds)` — feed 全体の realtime subscription (★ 必ず feed.tsx から起動)
 - `useReactions(postIds)` / `useReactionToggle()` — legacy reactions (RPC fallback)
 - `useLike` / `useConcern` / `useSave` / `useBookmarks` — 各 mutation hook
-- `useBBS()` / `useBBSThread(id)` / `useBBSReplyReactions()`
+- `useBBS()`
 - `useNotifications()` / `useTagRecommendations()` / `useTagSearchV3()` / `useTagFilter()`
 - `useUserStamps()` / `useCommunityStamps()` — テキスト stamp
 - `useAuth()` (= `useAuthStore`) / `useAdmin()` / `useT()`
