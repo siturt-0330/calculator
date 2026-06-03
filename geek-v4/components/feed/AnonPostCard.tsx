@@ -309,6 +309,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.bg2,
     borderRadius: 16,
     overflow: 'hidden',
+    // web の recycled FlashList セルで aspectRatio 解決前に高さ 0 へ潰れるのを防ぐ floor
+    minHeight: 200,
   },
 
   // 本文 — Apple News 寄り: fontSize 15 / lineHeight 22 (1.47, iOS 標準 1.4-1.5 域)

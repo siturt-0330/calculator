@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchFeatureFlags, userInRollout, type FeatureFlag } from '../lib/api/featureFlags';
 import { useAuthStore } from '../stores/authStore';
@@ -28,8 +29,11 @@ export function useFeatureFlags() {
 export function useFeatureFlag(name: string): boolean {
   const flags = useFeatureFlags();
   const userId = useAuthStore((s) => s.user?.id);
-  const flag = flags.find((f: FeatureFlag) => f.name === name);
-  if (!flag) return false;
-  if (!flag.enabled) return false;
-  return userInRollout(userId, name, flag.percentage);
+  // flags は session 中ほぼ不変。カード 1 枚で 3 回呼ばれるため、find +
+  // userInRollout(FNV ハッシュ loop) を毎 render 走らせない (memo 化)。
+  return useMemo(() => {
+    const flag = flags.find((f: FeatureFlag) => f.name === name);
+    if (!flag || !flag.enabled) return false;
+    return userInRollout(userId, name, flag.percentage);
+  }, [flags, userId, name]);
 }

@@ -548,7 +548,7 @@ export default function CommunityScreen() {
         //   多発させ「めっちゃ切れる」(コンテンツ瞬間消失/位置ズレ) が出る。
         extraData={feedExtra}
         ListHeaderComponent={ListHeader}
-        ListEmptyComponent={ListEmpty}
+        ListEmptyComponent={loading ? null : ListEmpty}
         refreshControl={
           <RefreshControl tintColor={C.text2} refreshing={refreshing} onRefresh={onRefresh} />
         }

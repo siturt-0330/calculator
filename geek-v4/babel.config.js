@@ -1,3 +1,73 @@
+// ============================================================
+// lucide-react-native tree-shake (production bundle のみ)
+// ------------------------------------------------------------
+// Metro は default config で barrel を tree-shake しないため、全 import の
+//   import { Foo } from 'lucide-react-native'
+// を per-icon deep import
+//   import Foo from 'lucide-react-native/dist/esm/icons/<kebab>'
+// に書き換え、未使用 ~1460 icon を bundle から落とす (web entry を大幅縮小)。
+// 旧名 (Home/AlertTriangle/CheckCircle2 等) は alias で個別ファイルが無いので
+// canonical 名へ map する (2026-06-03 全件 dist 実在を確認済)。
+// ※ production (expo export / EAS build) のみ適用。dev/test は無変換 (ゲート安全)。
+// ============================================================
+const LUCIDE_ALIAS = {
+  Home: 'house',
+  HelpCircle: 'circle-help',
+  AlertTriangle: 'triangle-alert',
+  CheckCircle2: 'circle-check-big',
+  XCircle: 'circle-x',
+  MoreHorizontal: 'ellipsis',
+  Edit3: 'pen-line',
+  Globe2: 'earth',
+  Users2: 'users-round',
+  UserPlus2: 'user-round-plus',
+  BarChart3: 'chart-column',
+};
+function lucideKebab(name) {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/([a-zA-Z])([0-9])/g, '$1-$2')
+    .toLowerCase();
+}
+function lucideDeepImportsPlugin({ types: t }) {
+  return {
+    name: 'lucide-deep-imports',
+    visitor: {
+      ImportDeclaration(path) {
+        const node = path.node;
+        if (node.source.value !== 'lucide-react-native') return;
+        if (node.importKind === 'type') return; // `import type {...}` は型のみ → 触らない
+        const deep = [];
+        const keep = [];
+        for (const spec of node.specifiers) {
+          if (
+            t.isImportSpecifier(spec) &&
+            spec.importKind !== 'type' &&
+            t.isIdentifier(spec.imported)
+          ) {
+            const file = LUCIDE_ALIAS[spec.imported.name] || lucideKebab(spec.imported.name);
+            deep.push(
+              t.importDeclaration(
+                [t.importDefaultSpecifier(t.identifier(spec.local.name))],
+                t.stringLiteral('lucide-react-native/dist/esm/icons/' + file),
+              ),
+            );
+          } else {
+            keep.push(spec); // type-only / default / namespace は barrel に残す
+          }
+        }
+        if (deep.length === 0) return;
+        const out = [];
+        if (keep.length > 0) {
+          out.push(t.importDeclaration(keep, t.stringLiteral('lucide-react-native')));
+        }
+        out.push(...deep);
+        path.replaceWithMultiple(out);
+      },
+    },
+  };
+}
+
 module.exports = function (api) {
   // ============================================================
   // cache strategy
@@ -41,6 +111,8 @@ module.exports = function (api) {
       ...(isProduction && hasRemoveConsole
         ? [['transform-remove-console', { exclude: ['error', 'warn'] }]]
         : []),
+      // lucide barrel → per-icon deep import (production bundle のみ / reanimated より前)
+      ...(isProduction ? [lucideDeepImportsPlugin] : []),
       'react-native-reanimated/plugin',
     ],
     // ============================================================
