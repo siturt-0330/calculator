@@ -26,6 +26,7 @@ import { R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { fetchPosts } from '../../lib/api/posts';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
+import { withApiTimeout } from '../../lib/withApiTimeout';
 import { getEvents, computeProfile, computePostScore, diversifyFeed } from '../../lib/personalize';
 import type { FeedEvent } from '../../lib/personalize';
 import { deepNormalize } from '../../lib/search/tokenize';
@@ -55,17 +56,22 @@ export function ForYouShelf() {
     queryKey: ['for-you-shelf-pool', userId, POOL],
     queryFn: async () => {
       if (!userId) return [] as Post[];
-      const r = await fetchPosts({
-        sort: 'for-you',
-        likedTags: [],
-        blockedTags: [],
-        limit: POOL,
-        home: true,
-      });
+      const r = await withApiTimeout(
+        fetchPosts({
+          sort: 'for-you',
+          likedTags: [],
+          blockedTags: [],
+          limit: POOL,
+          home: true,
+        }),
+        'forYouShelf',
+        8000,
+      );
       return r.posts;
     },
     enabled: !!userId,
     staleTime: 60_000,
+    retry: 1,
   });
 
   // 端末ローカルのイベントログ → 興味プロフィール（フィードと同じ ['feed-events'] キャッシュを共有）
@@ -246,9 +252,9 @@ function ForYouCard({
 
   // height はおおよそ 4:5 比率 (Reddit For You カード比率) + footer
   const height = Math.round((width * 5) / 4);
-  // 画像はカードの約半分の固定高さに抑え、残りをタイトルに回す (画像が大きすぎ
-  // てタイトルが消える問題への対応)。
-  const thumbH = Math.round(height * 0.5);
+  // 画像をカードの約 62% まで大きくして「メディアを大きく見せる」。残りで
+  // タイトル(2 行) + like footer を確保する。
+  const thumbH = Math.round(height * 0.62);
 
   return (
     <PressableScale
@@ -302,7 +308,7 @@ function ForYouCard({
       >
         <Text
           style={[T.smallB, { color: C.text }]}
-          numberOfLines={hasMedia ? 3 : 4}
+          numberOfLines={hasMedia ? 2 : 4}
         >
           {title}
         </Text>

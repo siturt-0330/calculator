@@ -94,7 +94,8 @@ export default function CommunityScreen() {
     queryKey: ['my-community-feed-rich', user?.id],
     queryFn: () => fetchMyCommunityPostsRich(40),
     enabled: !!user,
-    staleTime: 30_000,
+    // staleTime 0: リロード/タブ復帰のたびに最新を取り直す (focus invalidate と協調)
+    staleTime: 0,
     gcTime: 5 * 60_000,
   });
 

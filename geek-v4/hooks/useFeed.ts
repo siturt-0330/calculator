@@ -71,7 +71,9 @@ export function useFeed() {
       fetchPosts({ sort, likedTags, blockedTags, filterTags, cursor: pageParam as string | undefined, home: true }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-    staleTime: 30_000,
+    // staleTime 0: リロード/再フォーカスのたびに page1 を取り直して新着を反映する
+    // (refetchOnMount:true + feed.tsx の focus invalidate と協調)。keepPreviousData で空 flicker は無し。
+    staleTime: 0,
     // ★ パフォーマンス改善: sort / scope / liked/blocked タグ切替時に
     //   前回 page を表示しながら裏 fetch — 空 list flicker を回避。
     //   v5 では keepPreviousData を placeholderData に渡すのが標準。
