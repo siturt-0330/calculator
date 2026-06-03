@@ -1042,8 +1042,8 @@ function AnonPostCardInner({
   // MemeReactionPicker の onPick は JSX で直接インライン化
   // ModActionMenu の target は post 変化時のみ
   const modActionTarget = useMemo(
-    () => ({ kind: 'post' as const, postId: post.id, authorId: post.author_id ?? '' }),
-    [post.id, post.author_id],
+    () => ({ kind: 'post' as const, postId: post.id }),
+    [post.id],
   );
 
   // ============================================================
@@ -1281,11 +1281,12 @@ function AnonPostCardInner({
         <PressableScale onPress={onMore} hitSlop={HIT_SLOP_10} style={STYLES.morePress}>
           <More size={20} color={C.text3} strokeWidth={2.2} />
         </PressableScale>
-        {/* mod 専用 3-dot menu — mod でない / 自分の投稿のときは null render */}
-        {primaryCommunityId && post.author_id && (
+        {/* mod 専用 3-dot menu — mod でない / 自分の投稿のときは null render。
+            ★ author_id 非依存 (匿名マスクで他人の author_id は null になるため、
+              isMod で gate し kick/ban は content ベース RPC へ)。 */}
+        {primaryCommunityId && isMod && (
           <ModActionMenu
             target={modActionTarget}
-            communityId={primaryCommunityId}
             isMod={isMod}
             isOwn={isOwnPost}
             onActionComplete={onModActionComplete}

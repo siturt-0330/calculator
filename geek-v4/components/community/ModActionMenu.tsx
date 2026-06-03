@@ -55,18 +55,19 @@ import {
 // Types
 // ------------------------------------------------------------
 
+// ★ content ベース (authorId を持たない)。匿名性のため content の mod メニューは「削除」のみ
+//   (削除は id ベースで author 不要)。投稿者の kick/ban は匿名 author の de-anon を招くため
+//   content からは行わず、member 一覧 (既知の非匿名 member) からのみ実施する。
 export type ModActionTarget =
-  | { kind: 'post'; postId: string; authorId: string }
-  | { kind: 'comment'; commentId: string; authorId: string; postId: string }
-  | { kind: 'bbs_reply'; replyId: string; authorId: string; threadId: string };
+  | { kind: 'post'; postId: string }
+  | { kind: 'comment'; commentId: string; postId: string }
+  | { kind: 'bbs_reply'; replyId: string; threadId: string };
 
 export type ModAction = 'delete' | 'kick' | 'ban';
 
 export type ModActionMenuProps = {
   /** 対象 (post / comment / bbs_reply) */
   target: ModActionTarget;
-  /** mod 権限を持つコミュ ID */
-  communityId: string;
   /** 現在のユーザーが mod かどうか */
   isMod: boolean;
   /** 自分のコンテンツかどうか (自分のは別経路で削除されるので非表示) */
@@ -90,8 +91,6 @@ type CommunityModsApi = {
   deletePostAsMod?: (postId: string, reason?: string) => Promise<unknown>;
   deleteCommentAsMod?: (commentId: string, reason?: string) => Promise<unknown>;
   deleteBBSReplyAsMod?: (replyId: string, reason?: string) => Promise<unknown>;
-  kickMember?: (communityId: string, userId: string, reason: string) => Promise<unknown>;
-  banMember?: (communityId: string, userId: string, reason: string) => Promise<unknown>;
 };
 
 function loadCommunityModsApi(): CommunityModsApi | null {
@@ -140,7 +139,6 @@ function actionToSuccessMsg(action: ModAction): string {
 
 export function ModActionMenu({
   target,
-  communityId,
   isMod,
   isOwn,
   onActionComplete,
@@ -203,12 +201,6 @@ export function ModActionMenu({
           if (!api?.deleteBBSReplyAsMod) return runFallback();
           await api.deleteBBSReplyAsMod(target.replyId, reason);
         }
-      } else if (action === 'kick') {
-        if (!api?.kickMember) return runFallback();
-        await api.kickMember(communityId, target.authorId, reason);
-      } else {
-        if (!api?.banMember) return runFallback();
-        await api.banMember(communityId, target.authorId, reason);
       }
 
       show(actionToSuccessMsg(action), 'success');
@@ -281,20 +273,6 @@ export function ModActionMenu({
               }
               danger
               onPress={() => openConfirm('delete')}
-            />
-            <Divider />
-            <MenuItem
-              icon={<Icon.logout size={18} color={C.red} strokeWidth={2.2} />}
-              label="投稿者をキック"
-              danger
-              onPress={() => openConfirm('kick')}
-            />
-            <Divider />
-            <MenuItem
-              icon={<Icon.block size={18} color={C.red} strokeWidth={2.2} />}
-              label="投稿者を BAN"
-              danger
-              onPress={() => openConfirm('ban')}
             />
             <Divider />
             <MenuItem
