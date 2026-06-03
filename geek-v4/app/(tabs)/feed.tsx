@@ -56,7 +56,7 @@ import { useAddedTags, useAddTag } from '../../hooks/useAddedTags';
 import { usePolls } from '../../hooks/usePolls';
 import { useFeedPage } from '../../hooks/useFeedPage';
 import { useFeedRealtime } from '../../hooks/useFeedRealtime';
-import { useNotifications } from '../../hooks/useNotifications';
+import { useUnreadCount } from '../../hooks/useNotifications';
 import { NotificationBadge } from '../../components/ui/NotificationBadge';
 import { useToastStore } from '../../stores/toastStore';
 import { useFeedStore } from '../../stores/feedStore';
@@ -313,7 +313,7 @@ export default function FeedScreen() {
   const { toggle: toggleConcern } = useConcern();
   const { toggle: toggleSave } = useSave();
   const { toggle: toggleReact } = useReactionToggle();
-  const { unreadCount } = useNotifications();
+  const unreadCount = useUnreadCount();
   const { share } = useShare();
   const listRef = useRef<FlashList<FeedItem>>(null);
   // ホームタブを再タップで listRef を先頭にスクロール (X / Instagram と同等の挙動)。
