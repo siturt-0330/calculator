@@ -29,26 +29,14 @@
 --     official    = is_official = true / member_count desc, created_at desc  (visibility 制限なし=現行通り)
 --   ※ invite コミュは recommended/rising から除外され続ける (private コミュの存在漏えい防止)。
 --
--- 冪等: to_regclass/to_regprocedure ガード + CREATE OR REPLACE。
+-- 冪等: CREATE OR REPLACE (top-level 定義。do $$..$$ で包むと一部 SQL editor の statement
+--   splitter が nested dollar-quote を誤分割し "syntax error at uuid" になるため非使用)。
 -- クライアントは RPC 不在/失敗時に従来の per-shelf 経路へ fallback するので、
 -- この migration 未適用でも壊れない (lib/api/discovery.ts)。
 -- ============================================================
 
-do $$
-begin
-  if to_regclass('public.posts') is null
-     or to_regclass('public.communities') is null
-     or to_regclass('public.community_members') is null
-     or to_regclass('public.post_communities') is null then
-    raise notice '0113: prerequisite tables missing, skip get_discovery_payload creation';
-    return;
-  end if;
-  -- 可視性ヘルパが無い環境では skip (未定義関数で discovery RPC を壊さない)
-  if to_regprocedure('public.can_view_post(uuid)') is null
-     or to_regprocedure('public.author_visible(uuid)') is null then
-    raise notice '0113: visibility helpers missing, skip get_discovery_payload creation';
-    return;
-  end if;
+-- ★ 関数は top-level で定義 (do $$..$$ で包むと SQL editor の splitter が nested
+--   dollar-quote を誤分割するため)。plpgsql body は遅延束縛なので前提 table/helper は実行時解決。
 
   create or replace function public.get_discovery_payload(
     p_user_id           uuid default null,
@@ -209,6 +197,5 @@ begin
   $fn$;
 
   grant execute on function public.get_discovery_payload(uuid, int, int, int, int) to authenticated;
-end $$;
 
 select '0113_get_discovery_payload 完了: 検索 discovery を 1 RTT 集約 (0107 可視性述語+匿名マスク+3条件フィルタ)' as note;

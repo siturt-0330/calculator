@@ -19,19 +19,14 @@
 --   - クライアントは 'community' があればそれを使い、無ければ従来の .in() に fallback
 --     するので、この migration が未適用の DB でも壊れない。
 --
--- 冪等性: to_regclass で前提テーブル不在ならスキップ / create or replace。
+-- 冪等性: create or replace (top-level 定義。do $$..$$ で包むと一部 SQL editor の statement
+--   splitter が nested dollar-quote を誤分割し "syntax error" になるため非使用)。
+-- ★ なお get_community_feed の最新定義は 0115 (マスク+is_own 付き)。0115 を適用するなら本 0112 は不要
+--   (0115 が本 body をマスク込みで上書きする)。手動適用では 0115 を優先すること。
 -- ============================================================
 
-do $$
-begin
-  if to_regclass('public.community_members') is null
-     or to_regclass('public.post_communities') is null
-     or to_regclass('public.posts') is null
-     or to_regclass('public.communities') is null
-     or to_regclass('public.profiles') is null then
-    raise notice '0112: prerequisite tables missing, skip get_community_feed update';
-    return;
-  end if;
+-- ★ 関数は top-level で定義 (do $$..$$ で包むと SQL editor の splitter が nested
+--   dollar-quote を誤分割するため)。plpgsql body は遅延束縛なので前提 table は実行時解決。
 
   create or replace function public.get_community_feed(
     p_user_id uuid,
@@ -184,6 +179,5 @@ begin
   $fn$;
 
   grant execute on function public.get_community_feed(uuid, int) to authenticated;
-end $$;
 
 select '0112_community_feed_inline_meta 完了: get_community_feed に community メタを inline (1 round-trip / 0079 の IDOR ガード・shape は完全保持)' as result;
