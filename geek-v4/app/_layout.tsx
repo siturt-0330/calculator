@@ -125,6 +125,9 @@ const FeedbackFAB = lazy(() =>
   import('../components/feedback/FeedbackFAB').then((m) => ({ default: m.FeedbackFAB })),
 );
 import { useIntroStore } from '../stores/introStore';
+import { getBool, setBool } from '../lib/storage';
+import { Image as ExpoImage } from 'expo-image';
+import { thumbedUrl } from '../lib/utils/imageUrl';
 import { OfflineBanner } from '../components/ui/OfflineBanner';
 // useOfflineQueue は legacy useOfflineQueueProcessor を内部で wrap し、
 // 新規 lib/offline/queue.ts の flush + networkMonitor 購読も一括で起動する。
@@ -191,17 +194,33 @@ const PERSIST_BUSTER = 'geek-rqcache-v1';
 //   - SSR 時: 再生しない
 // sessionStorage を使うので、ブラウザを閉じれば次回また再生される。
 const INTRO_SEEN_KEY = 'geek:intro_seen_session';
+// native は毎 cold start でイントロ全編 (~3s) を再生していた (sessionStorage は
+// web 専用ガードのため、native では shouldShowIntro が常に true を返していた)。
+// 起動を「すぐ操作可能」にするため、native では永続フラグ (MMKV 同期読み) で
+// 「一度見たら以降の起動ではスキップ」にする。key を bump すると再表示できる。
+const INTRO_SEEN_PERSIST_KEY = 'geek:intro_seen_v4';
 function shouldShowIntro(): boolean {
-  if (Platform.OS !== 'web') return true;
-  if (typeof window === 'undefined') return false;
+  if (Platform.OS === 'web') {
+    if (typeof window === 'undefined') return false;
+    try {
+      if (sessionStorage.getItem(INTRO_SEEN_KEY) === '1') return false;
+    } catch { /* sessionStorage が使えない環境 (ITP / private mode) */ }
+    return true;
+  }
+  // native: 一度見たら以降の cold start ではスキップ (= feed が即操作可能)
   try {
-    if (sessionStorage.getItem(INTRO_SEEN_KEY) === '1') return false;
-  } catch { /* sessionStorage が使えない環境 (ITP / private mode) */ }
-  return true;
+    return getBool(INTRO_SEEN_PERSIST_KEY) !== true;
+  } catch {
+    return true;
+  }
 }
 function markIntroSeenForSession() {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-  try { sessionStorage.setItem(INTRO_SEEN_KEY, '1'); } catch { /* ignore */ }
+  if (Platform.OS === 'web') {
+    if (typeof window === 'undefined') return;
+    try { sessionStorage.setItem(INTRO_SEEN_KEY, '1'); } catch { /* ignore */ }
+    return;
+  }
+  try { setBool(INTRO_SEEN_PERSIST_KEY, true); } catch { /* ignore */ }
 }
 
 export default function RootLayout() {
@@ -363,16 +382,43 @@ export default function RootLayout() {
   //   prefetchQuery は staleTime 30s と整合し、二重 fetch にならない。
   useEffect(() => {
     if (!authHydrated || !user?.id) return;
-    void qc.prefetchQuery({
-      queryKey: ['my-communities', user.id],
-      queryFn: fetchMyCommunities,
-      staleTime: 30_000,
-    });
-    void qc.prefetchQuery({
-      queryKey: ['my-community-feed-rich', user.id],
-      queryFn: () => fetchMyCommunityPostsRich(40),
-      staleTime: 30_000,
-    });
+    const uid = user.id;
+    // ★ first paint と帯域/メインスレッドを奪い合わないよう、コミュ tab の
+    //   pre-warm は初回描画が落ち着く ~300ms 後に回す (landing は feed なので
+    //   コミュの 40 件 rich fetch を feed の初回 fetch とぶつけない)。
+    const h = setTimeout(() => {
+      void qc.prefetchQuery({
+        queryKey: ['my-communities', uid],
+        queryFn: fetchMyCommunities,
+        staleTime: 30_000,
+      });
+      // コミュ feed: データを温めた上で、先頭投稿のメディアサムネを expo-image へ
+      // 先読み → コミュタブを開いた瞬間に画像が出る (thumbWidth=480 は
+      // ProgressiveImage と一致させて cache hit させる)。
+      void qc
+        .fetchQuery({
+          queryKey: ['my-community-feed-rich', uid],
+          queryFn: () => fetchMyCommunityPostsRich(40),
+          staleTime: 30_000,
+        })
+        .then((data) => {
+          const urls = (data?.posts ?? [])
+            .flatMap((p) => p.media_urls ?? [])
+            .filter(Boolean)
+            .slice(0, 8);
+          for (const url of urls) {
+            try {
+              void ExpoImage.prefetch(thumbedUrl(url, 480), 'memory-disk');
+            } catch {
+              /* ignore — タブ表示時に通常 fetch される */
+            }
+          }
+        })
+        .catch(() => {
+          /* prewarm 失敗は無視 */
+        });
+    }, 300);
+    return () => clearTimeout(h);
   }, [authHydrated, user?.id]);
 
   // Web Vitals 初期化 — cleanup 関数を握って unmount 時に observer + listener を解放

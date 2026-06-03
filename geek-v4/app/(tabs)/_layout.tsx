@@ -8,7 +8,9 @@
 //   - 右   : RightSearchPanel (固定 340) — 検索バー + トレンド
 // PC のとき下部 TabBar は非表示 (LeftSidebar に統合済み)。
 //
-// パフォーマンス: lazy: true / lazyPreloadDistance: 1 で起動時の同時 mount を 1 に。
+// タブ切替を即時化 (IG/YouTube 風): lazy: true + lazyPreloadDistance: 2 で、feed の
+// 隣接タブ (search / community) を first paint 後にバックグラウンド mount しておく。
+// → データ + リスト先頭のメディアが事前ロードされ、タブを開いた瞬間に表示される。
 // =============================================================================
 
 import { useWindowDimensions, View, Platform } from 'react-native';
@@ -36,7 +38,8 @@ export default function TabsLayout() {
       screenOptions={{
         headerShown: false,
         lazy: true,
-        lazyPreloadDistance: 1,
+        // 1 → 2: feed から search / community を背景 preload してタブ即時表示
+        lazyPreloadDistance: 2,
       } as object}
     >
       <Tabs.Screen name="feed" />

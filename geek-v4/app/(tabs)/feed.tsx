@@ -858,7 +858,7 @@ export default function FeedScreen() {
       <FlashList
         ref={listRef}
         data={feedItems}
-        drawDistance={250}
+        drawDistance={600}
         // drawer open 中は scroll を lock — drawer の左 swipe close と FlashList の
         // 垂直 scroll が両方走ると親 GestureDetector との競合が出るため。
         scrollEnabled={!drawerOpen}
@@ -883,7 +883,7 @@ export default function FeedScreen() {
         extraData={fullPosts}
         keyExtractor={(item) => (isAdItem(item) ? item.key : item.id)}
         getItemType={(item) => (isAdItem(item) ? 'ad' : 'post')}
-        estimatedItemSize={300}
+        estimatedItemSize={520}
         ListHeaderComponent={ListHeader}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.accent} />
