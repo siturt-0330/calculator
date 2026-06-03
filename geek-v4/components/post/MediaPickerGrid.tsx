@@ -461,9 +461,9 @@ const STYLES = StyleSheet.create({
     borderRadius: REMOVE_BUTTON_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    // subtle ring で薄い背景にも輪郭が出る
+    // subtle ring で薄い背景にも輪郭が出る (static StyleSheet なので theme token 不可 → リテラル)
     borderWidth: Platform.OS === 'ios' ? 0 : 1,
-    borderColor: 'rgba(0,0,0,0.06)',
+    borderColor: 'rgba(0,0,0,0.2)',
   },
   addWrap: {
     width: THUMB_SIZE,

@@ -148,7 +148,7 @@ export function TopBar({
 
   const hairlineColor = isDark
     ? 'rgba(255,255,255,0.10)'
-    : 'rgba(0,0,0,0.10)';
+    : 'rgba(0,0,0,0.12)';
 
   const webBgColor = isDark ? 'rgba(0,0,0,0.70)' : 'rgba(255,255,255,0.70)';
   const fallbackBg = isDark ? 'rgba(20,20,23,0.92)' : 'rgba(250,250,252,0.88)';

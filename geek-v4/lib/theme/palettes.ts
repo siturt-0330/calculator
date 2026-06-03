@@ -170,7 +170,7 @@ export const PALETTE_LIGHT: ColorPalette = {
 
   glass: 'rgba(0,0,0,0.04)',
   glassStrong: 'rgba(0,0,0,0.08)',
-  glassBorder: 'rgba(0,0,0,0.08)',
+  glassBorder: 'rgba(0,0,0,0.16)',
   glassDark: 'rgba(255,255,255,0.70)',
 
   text: '#1a1a1a',
@@ -178,9 +178,9 @@ export const PALETTE_LIGHT: ColorPalette = {
   text3: '#71717a',
   text4: '#a1a1aa',
 
-  border: '#e4e4e7',
-  border2: '#d4d4d8',
-  divider: '#ececef',
+  border: '#c4c4c9',   // 白背景で視認できる既定の罫線 (旧 #e4e4e7 は薄すぎて枠が見えなかった)
+  border2: '#9a9aa3',  // 強調用の濃いめの線 (コメントスレのレール等) — 「ときどき黒」の主役
+  divider: '#d4d4d8',  // 行区切り — 控えめだが白でも見える (旧 #ececef はほぼ不可視だった)
 
   accent: '#3E6DA3',   // 自然な青 — 鮮やかな blue-600 をやめ彩度を落とした落ち着いた青 (白で 5.3:1)
   accentDeep: '#2F5784', // 押下/グラデ終端用の深い青

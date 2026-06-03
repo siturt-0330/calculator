@@ -119,7 +119,8 @@ export const Input = forwardRef<TextInput, Props>(function Input(
     borderColor: interpolateColor(
       focusProgress.value,
       [0, 1, 2],
-      ['rgba(0,0,0,0)', C.accent, C.red],
+      // idle (0) を透明ではなく border2 にする → 白背景でも未フォーカスの入力欄の輪郭が見える
+      [C.border2, C.accent, C.red],
     ),
     backgroundColor: interpolateColor(bgProgress.value, [0, 1], [C.bg3, C.bg2]),
     // RN-Native は Animated shadowOpacity を受け取れる. Web は別途 boxShadow を使う

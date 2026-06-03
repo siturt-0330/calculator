@@ -162,9 +162,11 @@ const qc = new QueryClient({
       refetchOnWindowFocus: false,
       // 接続復帰時は必ず最新を取りに行く
       refetchOnReconnect: 'always',
-      // mount 時の再 fetch を抑制 — cache があれば fresh fetch しない
-      // (画面切り替え時の重複 round-trip を削減し、connection 数も削減)
-      refetchOnMount: false,
+      // mount 時: stale (staleTime 超過) の query だけ裏で再 fetch する (RQ 既定値)。
+      // 永続 cache から復元した dehydrated データは必ず stale 扱いになるため、
+      // cold open 時に自動で最新を取り直し「起動すると古い画面が残る」を解消する。
+      // fresh (30s 以内) な query は再 fetch しないので連打にはならない。
+      refetchOnMount: true,
       // error 時の retry を 1 回まで (3 回はうるさい / サーバ負荷の元)
       retry: 1,
       retryDelay: (attemptIndex: number) =>
@@ -177,6 +179,11 @@ const qc = new QueryClient({
 });
 
 const persister = createAsyncStoragePersister({ storage: AsyncStorage });
+
+// 永続 React Query cache の buster。query の cache shape (返り値の形) を変えたら
+// この文字列を必ず bump する → 古い dehydrated cache を 1 度だけ破棄させ、
+// 「アプリ更新後も古い画面/データが残る」事故を防ぐ (起動時に clean slate)。
+const PERSIST_BUSTER = 'geek-rqcache-v1';
 
 // イントロ再生制御
 //   - 初回ロード: 再生
@@ -533,7 +540,7 @@ export default function RootLayout() {
         <SafeAreaProvider>
           <PersistQueryClientProvider
             client={qc}
-            persistOptions={{ persister, maxAge: 1000 * 60 * 60 * 2 }}
+            persistOptions={{ persister, maxAge: 1000 * 60 * 60 * 2, buster: PERSIST_BUSTER }}
           >
             <BottomSheetModalProvider>
               {/* ★ key={resolvedTheme} で theme 切替時に全 navigation tree を

@@ -81,7 +81,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   //   light: ほぼ白の panel 色
   const pillBg = isDark ? 'rgba(20,20,22,0.95)' : 'rgba(255,255,255,0.95)';
   // pill の border — 浮遊感を出す薄い stroke
-  const pillBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+  const pillBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.16)';
 
   // shadow — 仕様: opacity 0.12, radius 24, offset {0, 8}
   const shadowStyle = {
