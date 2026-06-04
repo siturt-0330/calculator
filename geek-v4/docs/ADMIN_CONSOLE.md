@@ -411,7 +411,11 @@ is_admin() を後方互換で再定義:
   （流入元別配信が実フィードに反映。0119未適用時は v1 へ内部fallback）。
 - **流入元取得**: 現状 signup 画面 mount で URL クエリを capture。ルート経由の確実な取得は
   `app/_layout.tsx` 起動時 capture が将来TODO（§5.5）。
-- **RBAC Phase2**: 個別 RLS / `report_cases` を `is_moderator()` に開放（現状は admin gate）。
-- **PII マスキング**: viewer/moderator 向けの `phone` 等のマスク表示は UI 側で今後適用。
-- **異議申し立て(appeals) / strike(enforcement_actions)**: データモデルは §5.2/§5.3 で設計済、
-  migration 実装は次フェーズ。
+- ~~**異議申し立て(appeals) / strike(enforcement_actions)**~~: ✅ migration `0122` +
+  `lib/api/enforcement.ts` で実装済（`apply_enforcement`/`active_strike_count`/`review_appeal`、
+  90日失効strike + 重大即BANバイパス + append-only）。措置適用UI(`user/[id].tsx`)は次段階。
+- **RBAC Phase2**: `report_cases`/通報RPC の gate を `is_moderator()` に開放（現状 admin gate）。
+  `get_report_queue` 等の関数再定義が必要なため慎重に別 migration(`0123`)で。
+- **PII**: `phone` は `lib/api/admin.ts` で取得しておらず admin 画面には露出していない（調査で確認）。
+  一般公開(`profiles_read=using(true)`)の是正は column GRANT 絞り migration が必要だが、
+  本人の phone 読取経路への影響調査が前提のため別 PR で慎重に。
