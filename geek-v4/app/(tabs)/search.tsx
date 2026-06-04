@@ -119,6 +119,15 @@ export default function SearchScreen() {
   const [expandPosts, setExpandPosts] = useState<boolean>(false);
   const [expandCommunities, setExpandCommunities] = useState<boolean>(false);
   const inputRef = useRef<TextInput | null>(null);
+  // onBlur が onPress より先に発火して dropdown が消えるのを防ぐための ref。
+  // blur timer を ref で持つことで onPressIn 時に明示的にキャンセルできる。
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelBlurTimer = useCallback(() => {
+    if (blurTimerRef.current !== null) {
+      clearTimeout(blurTimerRef.current);
+      blurTimerRef.current = null;
+    }
+  }, []);
   // RankingExplainer modal — どの post の説明を開いているか
   const [explainPost, setExplainPost] = useState<{ id: string; query: string } | null>(null);
   // URL ?community=<id> で community scope filter を効かせる
@@ -458,8 +467,13 @@ export default function SearchScreen() {
           onSubmit={() => commit()}
           onFocus={() => setInputFocused(true)}
           onBlur={() => {
-            // onPress(履歴タップ) より onBlur が先に発火して dropdown が消えるのを防ぐ
-            setTimeout(() => setInputFocused(false), 150);
+            // onBlur は onPress より先に発火する。blurTimerRef でタイマーを管理し、
+            // 履歴アイテムの onPressIn でキャンセルできるようにする (タイミング依存なし)。
+            cancelBlurTimer();
+            blurTimerRef.current = setTimeout(() => {
+              blurTimerRef.current = null;
+              setInputFocused(false);
+            }, 150);
           }}
           onClear={clearInput}
           focusProgress={focusProgress}
@@ -497,6 +511,7 @@ export default function SearchScreen() {
                 最近の検索
               </Text>
               <PressableScale
+                onPressIn={cancelBlurTimer}
                 onPress={() => {
                   clearAll();
                 }}
@@ -525,6 +540,7 @@ export default function SearchScreen() {
                   }}
                 >
                   <PressableScale
+                    onPressIn={cancelBlurTimer}
                     onPress={() => commit(h)}
                     haptic="select"
                     accessibilityLabel={`${h} で再検索`}
@@ -544,6 +560,7 @@ export default function SearchScreen() {
                     </Text>
                   </PressableScale>
                   <PressableScale
+                    onPressIn={cancelBlurTimer}
                     onPress={() => removeQuery(h)}
                     haptic="warn"
                     hitSlop={8}
