@@ -366,6 +366,52 @@ is_admin() を後方互換で再定義:
 ## 10. 成果物チェックリスト（指示書 §7）
 
 - [x] 設計ノート（本書）— モデレーション/広告設計の根拠 + 参考PF知見
-- [ ] 動作するソースコード（フェーズ1〜4で段階的に）
-- [ ] README（セットアップ/技術選定/機能一覧）— 本書 §2/§9 を基に統合
-- [ ] シードデータ（ダミーユーザー/投稿/通報/広告）— フェーズ5
+- [x] 動作するソースコード（フェーズ1〜4 + 既存 admin 10画面）
+  - migration: `0118_report_cases` / `0119_traffic_source_and_ads` / `0120_admin_rbac` / `0121_admin_notifications`
+  - lib/api: `admin.ts`(監査ログ修正) / `adminReports.ts` / `ads.ts`(v2) / `acquisition.ts`
+  - hooks: `useAdminReports.ts`
+  - 画面: `app/admin/reports.tsx`(通報キュー) / `ads.tsx`(入稿UI拡張) / `index.tsx`(導線)
+  - signup 流入取得: `app/(auth)/signup.tsx`
+- [x] README（セットアップ/技術選定/機能一覧）→ 本書 §11
+- [x] シードデータ → `scripts/seed_admin_console.sql`
+
+---
+
+## 11. セットアップ & 運用（README 相当）
+
+### 11.1 技術選定（要約 / 詳細は §2）
+- フロント: 既存 `geek-v4`（React Native + Expo + TS, Web 出力）の `app/admin/` に統合。
+- バックエンド: Supabase（PostgreSQL + RLS + Edge + Realtime）。RLS が RBAC/最小権限を DB で強制。
+- リアルタイム: Supabase Realtime（WebSocket）。`lib/realtime.ts` の `attachChannel`。
+
+### 11.2 機能一覧
+| 領域 | 実装 |
+|---|---|
+| ダッシュボード概要 | `app/admin/index.tsx`（KPI + health + 通報/ユーザー/投稿タブ）|
+| ユーザー管理 | `index.tsx`(一覧) + `user/[id].tsx`(詳細・措置) + `users.tsx`(Shadowban) |
+| 投稿管理 | `index.tsx`(一覧) + `post/[id].tsx`(詳細・モデレーション) |
+| 通報キュー（中核） | `reports.tsx` + `useReportQueue` + `report_cases`/`get_report_queue` |
+| リアルタイム通報通知 | `admin_notifications` + publication + `admin-feed` 購読 |
+| 監査ログ | `moderation_log`（append-only）+ 全 mutation 記録 |
+| 広告配信 | `ads`/`ad_events` + `fetchTargetedAdsV2`（流入元別）+ `ads.tsx`(入稿) |
+| 流入元計測 | `user_acquisition` + `acquisition.ts`（signup 取得）|
+| RBAC | `admin_role`（viewer/moderator/admin）+ `is_admin()`/`is_moderator()` |
+
+### 11.3 セットアップ手順
+1. **migration を順に Supabase SQL editor で適用**: `0118` → `0119` → `0120` → `0121`
+   （Netlify は migration を流さないため手動。各ファイル冒頭コメント参照。未適用でも
+   クライアントは fallback で動作する＝段階適用が安全）。
+2. **シード投入**（任意・動作確認用）: `scripts/seed_admin_console.sql` を SQL editor で実行
+   （ユーザー/投稿 seed が無ければ先に `seed_dummy_v2.sql`）。
+3. **管理者付与**: `select set_admin_role('<user_uuid>', 'admin');`（既存 `is_admin=true` は 0120 で自動移送）。
+4. **起動**: `npm run web`（既存 geek-v4 と同じ）。`/admin` に URL 直打ちで到達（email gate + RLS）。
+
+### 11.4 既知の制約・今後のTODO
+- **AdCard 配線**: `components/feed/AdCard.tsx` は現状 `fetchTargetedAds`(v1)。`fetchTargetedAdsV2`
+  への切替で流入元別配信が実フィードに反映される（v2 は fallback 内蔵で安全）。
+- **流入元取得**: 現状 signup 画面 mount で URL クエリを capture。ルート経由の確実な取得は
+  `app/_layout.tsx` 起動時 capture が将来TODO（§5.5）。
+- **RBAC Phase2**: 個別 RLS / `report_cases` を `is_moderator()` に開放（現状は admin gate）。
+- **PII マスキング**: viewer/moderator 向けの `phone` 等のマスク表示は UI 側で今後適用。
+- **異議申し立て(appeals) / strike(enforcement_actions)**: データモデルは §5.2/§5.3 で設計済、
+  migration 実装は次フェーズ。
