@@ -1252,10 +1252,12 @@ function AnonPostCardInner({
             hitSlop={4}
             disabled={!primaryCommunity}
           >
+            {/* icon_url 優先、なければ emoji。Avatar は emoji を uri より先にチェックするので
+                uri がある場合は emoji を渡さない (二重指定で emoji が優先されるのを防ぐ)。 */}
             <Avatar
               size={40}
               uri={primaryCommunity?.icon_url ?? null}
-              emoji={primaryCommunity?.icon_emoji ?? undefined}
+              emoji={primaryCommunity?.icon_url ? undefined : (primaryCommunity?.icon_emoji ?? undefined)}
             />
           </PressableScale>
         )}

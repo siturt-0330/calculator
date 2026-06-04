@@ -506,9 +506,43 @@ export default function PostDetailScreen() {
                 ))}
               </View>
             )}
+            {/* 投稿者エリア — Reddit スタイル: コミュニティ icon + 名前 (ホームと同じ表示) */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-              <Avatar size={36} anonymous />
-              <Text style={[T.caption, { color: C.text3, flex: 1 }]}>{formatRelative(post.created_at)}</Text>
+              {post.official_author ? (
+                // 公式管理者: shield アイコン
+                <View style={{
+                  width: 36, height: 36, borderRadius: 18,
+                  backgroundColor: C.accentBg, alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Icon.shield size={16} color={C.accent} strokeWidth={2.4} />
+                </View>
+              ) : (
+                // コミュニティアイコン (postCommunities[0] がある場合) / なければ generic
+                <PressableScale
+                  onPress={postCommunities[0] ? () => router.push(`/community/${postCommunities[0]!.community_id}` as never) : undefined}
+                  haptic="tap"
+                  hitSlop={4}
+                  disabled={!postCommunities[0]}
+                >
+                  <Avatar
+                    size={36}
+                    uri={postCommunities[0]?.icon_url ?? null}
+                    emoji={postCommunities[0]?.icon_emoji ?? undefined}
+                  />
+                </PressableScale>
+              )}
+              <View style={{ flex: 1 }}>
+                {post.official_author ? (
+                  <Text style={[T.captionM, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
+                    {post.official_author.name || '公式管理者'}
+                  </Text>
+                ) : postCommunities[0] ? (
+                  <Text style={[T.captionM, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
+                    {postCommunities[0].name}
+                  </Text>
+                ) : null}
+                <Text style={[T.caption, { color: C.text3 }]}>{formatRelative(post.created_at)}</Text>
+              </View>
               <ObsidianSaveButton note={postToObsidianNote(post)} size={18} />
             </View>
             {post.title && (
