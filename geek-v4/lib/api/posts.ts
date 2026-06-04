@@ -721,6 +721,30 @@ export async function fetchCommunityPosts({
 
   // embed 経路で attach 済 → 2nd RTT を skip。
   const decorated = usedFallback ? await attachOfficialAuthor(posts) : posts;
+
+  // コミュニティタブ用: author の nickname + avatar_url を profiles から一括取得して attach。
+  // is_anonymous フラグに関わらず全投稿に付与する (Reddit スタイル表示)。
+  const authorIds = Array.from(
+    new Set(decorated.map((p) => p.author_id).filter((id): id is string => Boolean(id))),
+  );
+  if (authorIds.length > 0) {
+    const { data: profs } = await supabase
+      .from('profiles')
+      .select('id, nickname, avatar_url')
+      .in('id', authorIds);
+    const profMap = new Map(
+      (profs ?? []).map((p) => [p.id, p as { id: string; nickname: string; avatar_url: string | null }]),
+    );
+    return {
+      posts: decorated.map((p) => {
+        const prof = p.author_id ? profMap.get(p.author_id) : undefined;
+        if (!prof) return p;
+        return { ...p, author_nickname: prof.nickname, author_avatar_url: prof.avatar_url };
+      }),
+      nextCursor,
+    };
+  }
+
   return { posts: decorated, nextCursor };
 }
 
