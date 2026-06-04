@@ -22,6 +22,7 @@ import {
   fetchMyCommunities,
   fetchMyCommunityPostsRich,
   subscribeToMyCommunityChanges,
+  fetchCommunity,
   type CommunityMetaLite,
 } from '../../../lib/api/communities';
 import { useAuthStore } from '../../../stores/authStore';
@@ -35,7 +36,7 @@ import { usePolls } from '../../../hooks/usePolls';
 import { useToastStore } from '../../../stores/toastStore';
 import type { Post } from '../../../types/models';
 import type { ReactionAgg } from '../../../lib/api/reactions';
-import type { PostCommunityRef } from '../../../lib/api/posts';
+import { fetchCommunityPosts, type PostCommunityRef } from '../../../lib/api/posts';
 
 // パフォーマンス監査: renderItem で `??[]` を使うと毎回新 array が生成され
 // AnonPostCard memo が壊れる (props 比較で false 判定 → 全カード re-render)。
@@ -211,6 +212,32 @@ export default function CommunityScreen() {
   // 通報シート (運営への通報) — 対象 post id を持つ間だけ開く
   const [reportPostId, setReportPostId] = useState<string | null>(null);
 
+  // ★ Prefetch-on-press: コミュ詳細 (/community/{id}) へ遷移する直前に、詳細画面が
+  //   実際に読む cache key を温める。遷移完了時には ['community', id] が既にキャッシュ済みで、
+  //   詳細の header gate が spinner を出さず即描画される。key/queryFn/staleTime は
+  //   app/(tabs)/community/[id]/index.tsx と完全一致させる (= 遷移先が cache hit になる)。
+  //   prefetchQuery は staleTime 内なら no-op なので連打しても無駄 fetch しない (bbs.tsx と同型)。
+  const prefetchCommunity = useCallback(
+    (communityId: string) => {
+      // header gate (最優先) — [id]/index.tsx の ['community', id] と一致
+      void qc.prefetchQuery({
+        queryKey: ['community', communityId],
+        queryFn: () => fetchCommunity(communityId),
+        staleTime: 2 * 60_000,
+      });
+      // 初期 FeedTab (sort='new', limit:40) — [id]/index.tsx の FeedTab と一致
+      void qc.prefetchQuery({
+        queryKey: ['community', communityId, 'feed', 'new'],
+        queryFn: async () => {
+          const r = await fetchCommunityPosts({ community_id: communityId, sort: 'new', limit: 40 });
+          return r.posts;
+        },
+        staleTime: 20_000,
+      });
+    },
+    [qc],
+  );
+
   // Per-post handler cache (feed.tsx と同じパターン)
   // posts が変わらない限り handler 参照は安定 → AnonPostCard memo が機能する
   const handlersByPostId = useMemo(() => {
@@ -240,6 +267,7 @@ export default function CommunityScreen() {
         onReact: (meme: string) => toggleReact(id, meme),
         onAddTag: (tag: string) => handleAddTag(id, tag),
         onCommunityPress: (communityId: string) => {
+          prefetchCommunity(communityId);
           router.push(`/community/${communityId}` as never);
         },
       };
@@ -249,7 +277,8 @@ export default function CommunityScreen() {
     // 「気になる」トグルの度に全 handler が再生成され AnonPostCard memo が全崩壊するため除外。
     // 最新の liked/concerned/saved 状態は renderItem 側が直接読む。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts, toggleLike, toggleConcern, toggleSave, toggleReact, share, router, handleAddTag]);
+    // prefetchCommunity は useCallback([qc]) で安定なので handler 再生成は誘発しない。
+  }, [posts, toggleLike, toggleConcern, toggleSave, toggleReact, share, router, handleAddTag, prefetchCommunity]);
 
   // ★ FlashList extraData 用の合成 object。useReactionToggle 以外
   //   (useLike / useConcern / useSave / useAddTag) も legacy cache のみ更新する
@@ -316,6 +345,7 @@ export default function CommunityScreen() {
       return (
         <AnonPostCard
           post={p}
+          isOwn={p.is_own}
           liked={!!myLikes[p.id]}
           concerned={!!myConcerns[p.id]}
           saved={!!mySaves[p.id]}
@@ -362,13 +392,14 @@ export default function CommunityScreen() {
       {selectedCommunity && (
         <GoToCommunityChip
           community={selectedCommunity}
+          onPressIn={() => prefetchCommunity(selectedCommunity.id)}
           onPress={() =>
             router.push(`/community/${selectedCommunity.id}` as never)
           }
         />
       )}
     </View>
-  ), [myCommunities, selectedCommunityId, selectedCommunity, loading, router]);
+  ), [myCommunities, selectedCommunityId, selectedCommunity, loading, router, prefetchCommunity]);
 
   // -------------------------------------------------------------------
   // ListEmptyComponent — 状態別 3 パターン
@@ -584,9 +615,10 @@ type GoToCommunityChipProps = {
     icon_url: string | null;
   };
   onPress: () => void;
+  onPressIn?: () => void;
 };
 
-function GoToCommunityChip({ community, onPress }: GoToCommunityChipProps) {
+function GoToCommunityChip({ community, onPress, onPressIn }: GoToCommunityChipProps) {
   const { C } = useTheme();
   // 旧版は紫 gradient + glow shadow の大きな pill だったが、avatar bar の
   // 真下に強い視覚要素を 2 段重ねると "ぼやけ + 喧噪" の原因になっていた。
@@ -598,6 +630,7 @@ function GoToCommunityChip({ community, onPress }: GoToCommunityChipProps) {
     <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['2'], paddingBottom: SP['1'] }}>
       <PressableScale
         onPress={onPress}
+        onPressIn={onPressIn}
         haptic="tap"
         accessibilityLabel={`${community.name} のページに移動`}
         style={{

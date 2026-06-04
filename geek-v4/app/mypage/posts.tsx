@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
+import { withApiTimeout } from '../../lib/withApiTimeout';
 import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
 import { TopBar } from '../../components/nav/TopBar';
@@ -29,14 +30,20 @@ type Item = {
   created_at: string;
 };
 
-async function fetchMyPosts(userId: string): Promise<Item[]> {
-  const { data } = await supabase
-    .from('posts')
-    .select('id, content, tag_names, likes_count, comments_count, is_public, created_at')
-    .eq('author_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(100);
-  return (data ?? []) as Item[];
+async function fetchMyPosts(): Promise<Item[]> {
+  // de-anon Phase2: author_id を client で使わず auth.uid() ベースの RPC (0117_get_my_posts) で
+  // 自分の投稿を取得する。2b で posts.author_id を REVOKE しても壊れない (列フィルタにも SELECT 権が
+  // 要るため .eq('author_id', ...) は permission denied になる)。非公開投稿も自分の分は含まれる。
+  const { data, error } = await withApiTimeout(
+    supabase.rpc('get_my_posts', { p_limit: 100 }),
+    'mypage.get_my_posts',
+    8000,
+  );
+  if (error) {
+    console.warn('[fetchMyPosts] rpc error:', error.message);
+    return [];
+  }
+  return (Array.isArray(data) ? data : []) as Item[];
 }
 
 export default function MyPosts() {
@@ -49,7 +56,7 @@ export default function MyPosts() {
 
   const { data: items = [], isLoading } = useQuery({
     queryKey: ['my-posts', user?.id],
-    queryFn: () => fetchMyPosts(user!.id),
+    queryFn: () => fetchMyPosts(),
     enabled: !!user,
   });
 

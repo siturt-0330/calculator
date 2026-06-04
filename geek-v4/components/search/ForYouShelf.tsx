@@ -36,10 +36,13 @@ const COLUMNS = 2;
 const ROWS = 3;
 const LIMIT = COLUMNS * ROWS;
 // 個人化再ランク用に広めの候補プールを取得（hot 上位の素並びと差別化する余白）
-const POOL = 24;
+const POOL = 12;
 const GAP = SP['2']; // 8px
 
-export function ForYouShelf() {
+export function ForYouShelf({
+  pool: poolProp,
+  loading: loadingProp,
+}: { pool?: Post[]; loading?: boolean } = {}) {
   const C = useColors();
   const router = useRouter();
   const { width: screenWidth } = useWindowDimensions();
@@ -69,7 +72,7 @@ export function ForYouShelf() {
       );
       return r.posts;
     },
-    enabled: !!userId,
+    enabled: !!userId && poolProp === undefined,
     staleTime: 60_000,
     retry: 1,
   });
@@ -95,7 +98,7 @@ export function ForYouShelf() {
   //   diversifyFeed=同 author/同タグ連続の抑制) をそのまま共有して候補プールを再並び替え。
   //   これで「いま盛り上がっている(hot)」の素の並びと別物になる。
   const posts = useMemo<Post[]>(() => {
-    const candidates = pool ?? [];
+    const candidates = poolProp ?? pool ?? [];
     if (candidates.length === 0) return [];
     const profile = computeProfile(events ?? []);
     const userLikedTagsFreq = new Map<string, number>(Object.entries(profile.tagAffinity));
@@ -119,12 +122,12 @@ export function ForYouShelf() {
       }),
     }));
     return diversifyFeed(scored, 2).slice(0, LIMIT);
-  }, [pool, events, myAccountAgeDays]);
+  }, [poolProp, pool, events, myAccountAgeDays]);
 
   // 未ログイン → 描画しない (親はこの section の高さを 0 で扱える)
   if (!userId) return null;
 
-  if (isLoading) {
+  if (poolProp !== undefined ? !!loadingProp : isLoading) {
     // skeleton: 「For You」ヘッダー + grid 6 セル分の placeholder
     return (
       <View style={{ gap: SP['3'] }}>

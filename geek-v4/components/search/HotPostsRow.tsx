@@ -54,10 +54,15 @@ function SectionHeader() {
   );
 }
 
-export function HotPostsRow() {
+export function HotPostsRow({
+  posts: postsProp,
+  loading: loadingProp,
+}: { posts?: Post[]; loading?: boolean } = {}) {
   const C = useColors();
   const router = useRouter();
 
+  // posts prop (DiscoveryView の単一 get_discovery_payload) が来ているときは自前 fetch
+  // しない。standalone 利用時のみ ['hot-posts-row'] を fetch する (fallback)。
   const { data, isLoading } = useQuery({
     queryKey: ['hot-posts-row', LIMIT],
     queryFn: async () => {
@@ -74,15 +79,16 @@ export function HotPostsRow() {
       );
       return r.posts;
     },
-    // staleTime 0 + 検索タブの focus invalidate で、タブを開くたびに新着 hot を反映。
-    // retry:1 + withApiTimeout で「ソケット停止 → 永久スケルトン」を回避。
+    enabled: postsProp === undefined,
     staleTime: 0,
     retry: 1,
   });
 
-  const posts = data ?? [];
+  // payload の hot は共有プール (~18件) なので上位 LIMIT に絞る。
+  const posts = (postsProp ?? data ?? []).slice(0, LIMIT);
+  const loading = postsProp !== undefined ? !!loadingProp : isLoading;
 
-  if (isLoading && posts.length === 0) {
+  if (loading && posts.length === 0) {
     // skeleton: 新レイアウト (画像 banner + 2 本のタイトル行) を薄く再現して
     // ロード中であることを自然に伝える
     return (

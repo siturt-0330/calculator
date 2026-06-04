@@ -821,6 +821,8 @@ type AnonPostCardProps = {
   liked?: boolean;
   concerned?: boolean;
   saved?: boolean;
+  // de-anon Phase2: 「自分の投稿か」を server 供給の boolean で受け取る (author_id 非依存)。
+  isOwn?: boolean;
   reactions?: ReactionAgg[];
   addedTags?: string[];
   poll?: Poll;
@@ -843,6 +845,7 @@ function AnonPostCardInner({
   liked = false,
   concerned = false,
   saved = false,
+  isOwn,
   reactions = [],
   addedTags: _addedTags = [],
   poll,
@@ -881,7 +884,9 @@ function AnonPostCardInner({
   const primaryCommunityId = primaryCommunity?.community_id;
   const isMod = useIsCommunityMod(primaryCommunityId);
   const currentUserId = useAuthStore((s) => s.user?.id);
-  const isOwnPost = !!post.author_id && post.author_id === currentUserId;
+  // de-anon Phase2: server 供給の is_own を優先 (author_id 非依存)。is_own 未配線の経路
+  //   (周辺データ未ロード中など) では従来の author_id 比較に fallback (2b で author_id 除去後は false)。
+  const isOwnPost = isOwn ?? (!!post.author_id && post.author_id === currentUserId);
 
   // ミームリアクション (props 経由で DB から取得済み)
   const [memePickerOpen, setMemePickerOpen] = useState(false);
@@ -1042,8 +1047,8 @@ function AnonPostCardInner({
   // MemeReactionPicker の onPick は JSX で直接インライン化
   // ModActionMenu の target は post 変化時のみ
   const modActionTarget = useMemo(
-    () => ({ kind: 'post' as const, postId: post.id, authorId: post.author_id ?? '' }),
-    [post.id, post.author_id],
+    () => ({ kind: 'post' as const, postId: post.id }),
+    [post.id],
   );
 
   // ============================================================
@@ -1075,6 +1080,7 @@ function AnonPostCardInner({
         reactions: reactionsList,
         added_tags: _addedTags,
         poll: poll ?? null,
+        is_own: isOwnPost,
       };
       const feedPageKey = ['feed-page', currentUserId ?? 'anon', stableKeyFor([post.id])];
       qc.setQueryData<FeedPagePost[]>(feedPageKey, (prev) => prev ?? [feedPageSeed]);
@@ -1094,6 +1100,7 @@ function AnonPostCardInner({
     poll,
     currentUserId,
     onComment,
+    isOwnPost,
   ]);
 
   // ── 動的 style: props/state に依存するもののみ useMemo 化 ──
@@ -1281,11 +1288,12 @@ function AnonPostCardInner({
         <PressableScale onPress={onMore} hitSlop={HIT_SLOP_10} style={STYLES.morePress}>
           <More size={20} color={C.text3} strokeWidth={2.2} />
         </PressableScale>
-        {/* mod 専用 3-dot menu — mod でない / 自分の投稿のときは null render */}
-        {primaryCommunityId && post.author_id && (
+        {/* mod 専用 3-dot menu — mod でない / 自分の投稿のときは null render。
+            ★ author_id 非依存 (匿名マスクで他人の author_id は null になるため、
+              isMod で gate し kick/ban は content ベース RPC へ)。 */}
+        {primaryCommunityId && isMod && (
           <ModActionMenu
             target={modActionTarget}
-            communityId={primaryCommunityId}
             isMod={isMod}
             isOwn={isOwnPost}
             onActionComplete={onModActionComplete}

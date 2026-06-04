@@ -6,7 +6,12 @@ import { useAuthStore } from '../stores/authStore';
 import { useToastStore } from '../stores/toastStore';
 import type { Notification } from '../types/models';
 
-const NOTIF_KEY = ['notifications'];
+// ★ userId スコープ付き通知 key の factory。固定 ['notifications'] だと signOut が
+//   QueryClient を clear せず persist(2h) も残るため、別ユーザーでログインした瞬間
+//   (enabled が true→refetch までの間 / realtime prepend / 楽観 markRead) に前ユーザーの
+//   通知が一瞬混ざりうる。userId を key に含めれば別ユーザーは別 cache entry になり防げる。
+//   useUserChannel.ts / feed.tsx の prefetch とも同形 (['notifications', userId]) に揃える。
+const notifKey = (userId: string | undefined) => ['notifications', userId ?? null] as const;
 
 // ============================================================
 // useNotifications — 通知 cache + 既読 mutation
@@ -27,6 +32,7 @@ const NOTIF_KEY = ['notifications'];
 export function useNotifications() {
   const qc = useQueryClient();
   const userId = useAuthStore((s) => s.user?.id);
+  const NOTIF_KEY = notifKey(userId);
 
   const q = useQuery({
     queryKey: NOTIF_KEY,
@@ -108,8 +114,34 @@ export function useNotifications() {
   };
 }
 
-// 通知バッジだけ欲しい場面 (TabBar 等) で軽量に未読数を取得
+// 通知バッジだけ欲しい場面 (TabBar / LeftSidebar 等) で軽量に未読数を取得。
+// ★ useNotifications() を丸呼びすると notifications 配列全体を購読してしまい、
+//    realtime INSERT/UPDATE や単一既読の楽観 update など「未読数が変わらない」変更でも
+//    購読 component が再 render する。ここでは useQuery の select で最終的な未読「件数」
+//    (number) まで絞り込み、RQ observer の追跡対象を数値にする → 件数が変わったときだけ
+//    再 render する (配列の参照変化には追従しない)。
 export function useUnreadCount(): number {
-  const { unreadCount } = useNotifications();
-  return unreadCount;
+  const userId = useAuthStore((s) => s.user?.id);
+
+  // prefs は低頻度更新。select 内のフィルタに使うため別購読する。
+  const prefsQuery = useQuery({
+    queryKey: ['notification-preferences', userId],
+    queryFn: fetchMyNotificationPreferences,
+    enabled: !!userId,
+    staleTime: 5 * 60_000,
+  });
+  const prefs = prefsQuery.data ?? [];
+
+  const { data: count } = useQuery({
+    queryKey: notifKey(userId),
+    queryFn: fetchNotifications,
+    staleTime: 60_000,
+    enabled: !!userId,
+    // ★ narrow selector: 配列ではなく prefs フィルタ後の未読「件数」を返す。
+    //    出力が number なので RQ は値が変わったときだけ購読側を再 render する。
+    select: (rows: Notification[]) =>
+      rows.filter((n) => shouldShowInApp(n, prefs) && !n.read).length,
+  });
+
+  return count ?? 0;
 }

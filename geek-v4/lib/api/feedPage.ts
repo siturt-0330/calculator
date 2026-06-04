@@ -44,6 +44,9 @@ export type FeedPagePost = Post & {
   reactions: ReactionAgg[];
   added_tags: string[];
   poll: Poll | null;
+  // de-anon Phase2: server が author_id をマスクして返す代わりに「自分の投稿か」を
+  //   boolean で供給する (viewer 相対なので my_like 等と同じ FeedPagePost 側に置く)。
+  is_own: boolean;
 };
 
 // RPC の生 row shape (server 側 json_build_object と一致)
@@ -65,7 +68,7 @@ type RpcPollRow = {
   options: Array<{ id: string; label: string; vote_count: number }>;
   my_vote_option_ids: string[];
 };
-type RpcPostRow = Post & {
+export type RpcPostRow = Post & {
   communities?: RpcCommunityRow[] | null;
   official_author?: { name: string; organization: string } | null;
   my_like?: boolean | null;
@@ -74,6 +77,7 @@ type RpcPostRow = Post & {
   reactions?: RpcReactionRow[] | null;
   added_tags?: string[] | null;
   poll?: RpcPollRow | null;
+  is_own?: boolean | null;
 };
 
 /**
@@ -131,7 +135,7 @@ export async function fetchFeedPage(
     const payload = (data ?? { posts: [] }) as { posts?: RpcPostRow[] };
     const rows = Array.isArray(payload.posts) ? payload.posts : [];
 
-    return rows.map((r) => normalize(r));
+    return rows.map((r) => normalizeFeedPageRow(r));
   } catch (e: unknown) {
     console.warn(
       '[fetchFeedPage] rpc threw:',
@@ -143,8 +147,11 @@ export async function fetchFeedPage(
 
 // ----------------------------------------------------------------
 // RpcPostRow → FeedPagePost (型を確実に揃える)
+// ★ get_home_feed (0114) も get_feed_page と同一 row shape を返すため、
+//   lib/api/homeFeed.ts がこの正規化を再利用して ['feed-page'] cache の
+//   FeedPagePost shape を厳密一致させる (seed しても patcher/realtime と互換)。
 // ----------------------------------------------------------------
-function normalize(r: RpcPostRow): FeedPagePost {
+export function normalizeFeedPageRow(r: RpcPostRow): FeedPagePost {
   const communities: PostCommunityRef[] = Array.isArray(r.communities)
     ? r.communities.map((c) => ({
         community_id: c.community_id,
@@ -217,6 +224,8 @@ function normalize(r: RpcPostRow): FeedPagePost {
     added_tags: _at,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     poll: _pl,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    is_own: _io,
     ...post
   } = r;
 
@@ -230,6 +239,7 @@ function normalize(r: RpcPostRow): FeedPagePost {
     reactions,
     added_tags,
     poll,
+    is_own: !!r.is_own,
   };
   return out;
 }

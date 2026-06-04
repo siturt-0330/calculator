@@ -35,7 +35,12 @@ export type Post = {
   qa_mode?: boolean;
   created_at: string;
   // posts.author_id — RLS で誰でも読める。公式管理者識別のため fetch する。
+  // ★ de-anon Phase2: 2b で anon/authenticated から SELECT(author_id) を REVOKE するため、
+  //   段階的に client から author_id 参照を外していく (移行中は fallback 用に optional 保持)。
   author_id?: string;
+  // de-anon Phase2: server (feed/community RPC) が「閲覧者自身の投稿か」を boolean で供給する
+  //   派生フィールド。author_id 比較を client から無くすための置換 (REVOKE 後は author_id が来ない)。
+  is_own?: boolean;
   // ★ BBS 統合 (migration 0075) — title is not null なら「スレ形式」の post。
   //   通常の写真投稿は title=null。フィード描画では title あれば content の上に大きく表示。
   title?: string | null;

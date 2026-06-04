@@ -34,10 +34,9 @@ import {
   TextInput,
   RefreshControl,
   Keyboard,
-  InteractionManager,
 } from 'react-native';
 import { useSharedValue, withTiming } from 'react-native-reanimated';
-import { useScrollToTop } from '@react-navigation/native';
+import { useScrollToTop, useIsFocused } from '@react-navigation/native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -58,13 +57,10 @@ import { EditorialEmpty } from '../../components/search/EditorialEmpty';
 import { withApiTimeout } from '../../lib/withApiTimeout';
 import {
   searchCommunities,
-  discoverCommunities,
-  fetchRisingCommunities,
-  fetchOfficialCommunities,
   type CommunityHit,
 } from '../../lib/api/communities';
 import { useSearchHistory } from '../../hooks/useSearchHistory';
-import { useMyCommunityIds } from '../../hooks/useMyCommunityIds';
+import { useDiscovery } from '../../hooks/useDiscovery';
 import { useJoinCommunity } from '../../hooks/useJoinCommunity';
 import {
   useSearchV4,
@@ -123,6 +119,15 @@ export default function SearchScreen() {
   const [expandPosts, setExpandPosts] = useState<boolean>(false);
   const [expandCommunities, setExpandCommunities] = useState<boolean>(false);
   const inputRef = useRef<TextInput | null>(null);
+  // onBlur が onPress より先に発火して dropdown が消えるのを防ぐための ref。
+  // blur timer を ref で持つことで onPressIn 時に明示的にキャンセルできる。
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelBlurTimer = useCallback(() => {
+    if (blurTimerRef.current !== null) {
+      clearTimeout(blurTimerRef.current);
+      blurTimerRef.current = null;
+    }
+  }, []);
   // RankingExplainer modal — どの post の説明を開いているか
   const [explainPost, setExplainPost] = useState<{ id: string; query: string } | null>(null);
   // URL ?community=<id> で community scope filter を効かせる
@@ -399,11 +404,7 @@ export default function SearchScreen() {
       } else {
         // Discovery 全 section の query を invalidate
         await Promise.allSettled([
-          qc.invalidateQueries({ queryKey: ['hot-posts-row'] }),
-          qc.invalidateQueries({ queryKey: ['discover-recommended'] }),
-          qc.invalidateQueries({ queryKey: ['discover-rising'] }),
-          qc.invalidateQueries({ queryKey: ['discover-official'] }),
-          qc.invalidateQueries({ queryKey: ['for-you-shelf'] }),
+          qc.invalidateQueries({ queryKey: ['discovery'] }),
           qc.invalidateQueries({ queryKey: ['trendingTopics'] }),
           qc.invalidateQueries({ queryKey: ['trending-tags'] }),
         ]);
@@ -418,13 +419,7 @@ export default function SearchScreen() {
   useFocusEffect(
     useCallback(() => {
       if (showResults) return;
-      void Promise.allSettled([
-        qc.invalidateQueries({ queryKey: ['hot-posts-row'] }),
-        qc.invalidateQueries({ queryKey: ['discover-recommended'] }),
-        qc.invalidateQueries({ queryKey: ['discover-rising'] }),
-        qc.invalidateQueries({ queryKey: ['discover-official'] }),
-        qc.invalidateQueries({ queryKey: ['for-you-shelf-pool'] }),
-      ]);
+      void qc.invalidateQueries({ queryKey: ['discovery'] });
     }, [showResults, qc]),
   );
 
@@ -472,8 +467,13 @@ export default function SearchScreen() {
           onSubmit={() => commit()}
           onFocus={() => setInputFocused(true)}
           onBlur={() => {
-            // onPress(履歴タップ) より onBlur が先に発火して dropdown が消えるのを防ぐ
-            setTimeout(() => setInputFocused(false), 150);
+            // onBlur は onPress より先に発火する。blurTimerRef でタイマーを管理し、
+            // 履歴アイテムの onPressIn でキャンセルできるようにする (タイミング依存なし)。
+            cancelBlurTimer();
+            blurTimerRef.current = setTimeout(() => {
+              blurTimerRef.current = null;
+              setInputFocused(false);
+            }, 150);
           }}
           onClear={clearInput}
           focusProgress={focusProgress}
@@ -511,6 +511,7 @@ export default function SearchScreen() {
                 最近の検索
               </Text>
               <PressableScale
+                onPressIn={cancelBlurTimer}
                 onPress={() => {
                   clearAll();
                 }}
@@ -539,6 +540,7 @@ export default function SearchScreen() {
                   }}
                 >
                   <PressableScale
+                    onPressIn={cancelBlurTimer}
                     onPress={() => commit(h)}
                     haptic="select"
                     accessibilityLabel={`${h} で再検索`}
@@ -558,6 +560,7 @@ export default function SearchScreen() {
                     </Text>
                   </PressableScale>
                   <PressableScale
+                    onPressIn={cancelBlurTimer}
                     onPress={() => removeQuery(h)}
                     haptic="warn"
                     hitSlop={8}
@@ -771,59 +774,24 @@ export default function SearchScreen() {
 // (= 親 ScrollView は左右 padding を持たない)。
 // ============================================================
 function DiscoveryView() {
-  // メンバーシップ判定 (参加済みか) — 3 shelf 共通で使い回す
-  const { idSet: memberIdSet } = useMyCommunityIds();
-  // 参加ボタン / カードタップの共通ハンドラ
-  //   - open      → その場で join_community + 楽観表示 + invalidate
-  //   - request/invite → 詳細画面へ遷移 (申請フローはそこに居る)
-  //   - 二重タップは joiningIds の Set で O(1) ガード
+  // 参加ボタン / カードタップの共通ハンドラ (二重タップは joiningIds Set でガード)
   const { joiningIds, onJoin, onPressCommunity } = useJoinCommunity();
 
-  // ★ 検索タブ即表示: ネットワーク重いセクション (Hot / ForYou / コミュ3種) は
-  //   first paint 後 (タブ遷移が落ち着いてから) に走らせる。検索バーと軽いセクション
-  //   (Trending / ジャンル) は即時描画され、「タブ押下→即表示」になる。重い 5 本の
-  //   query を mount 同時 fan-out させないのが肝。
-  const [deferReady, setDeferReady] = useState(false);
-  useEffect(() => {
-    // first paint 後に重いセクションを解禁する。
-    // ★ ただし Web では InteractionManager.runAfterInteractions が未解放の
-    //   interaction handle (アニメーション等) のせいで発火しないことがあり、その場合
-    //   「おすすめ」等のセクションが永久にスケルトンのまま固まる (= 投稿が表示されない)。
-    //   150ms の setTimeout フォールバックで必ず解禁し、ハングを防ぐ。
-    const handle = InteractionManager.runAfterInteractions(() => setDeferReady(true));
-    const timer = setTimeout(() => setDeferReady(true), 150);
-    return () => {
-      handle.cancel();
-      clearTimeout(timer);
-    };
-  }, []);
+  // ★ 重いセクション (Hot / For-You / コミュ3種) は検索タブが実際に focus された
+  //   ときだけ発火させる。lazyPreloadDistance:2 で起動時に background mount される
+  //   間は撃たない → 起動時のホームフィードとの帯域競合と 150ms 固定待ちを除去。
+  //   useIsFocused は Web でも発火するので「おすすめ永久スケルトン」回帰も起きない。
+  const isFocused = useIsFocused();
 
-  // おすすめ — query 無し discoverCommunities = 人気順 (member_count desc)
-  const recommended = useQuery({
-    queryKey: ['discover-recommended'],
-    queryFn: () => withApiTimeout(discoverCommunities({ limit: 8 }), 'discover.recommended', 8000),
-    enabled: deferReady,
-    staleTime: 60_000,
-    retry: 1,
-  });
-
-  // 急上昇 — last_post_at の新しい順 (最近投稿が活発)
-  const rising = useQuery({
-    queryKey: ['discover-rising'],
-    queryFn: () => withApiTimeout(fetchRisingCommunities(10), 'discover.rising', 8000),
-    enabled: deferReady,
-    staleTime: 60_000,
-    retry: 1,
-  });
-
-  // 公式 — is_official のみ (member_count desc)
-  const official = useQuery({
-    queryKey: ['discover-official'],
-    queryFn: () => withApiTimeout(fetchOfficialCommunities(10), 'discover.official', 8000),
-    enabled: deferReady,
-    staleTime: 60_000,
-    retry: 1,
-  });
+  // ★ Discovery 全セクション (hot 共有プール + コミュ3種 + 参加ID) を 1 RPC
+  //   (get_discovery_payload / migration 0113) で取得。未適用・失敗時は per-shelf へ
+  //   自動 fallback (lib/api/discovery.ts) するので、SQL 未適用でも壊れない。
+  //   これで discovery の 7 往復 → 1 (適用時) / fallback でも hot 共有で 1 本削減。
+  const { data: discovery, isLoading: discoveryLoading } = useDiscovery(isFocused);
+  const memberIdSet = useMemo(
+    () => new Set(discovery.myCommunityIds),
+    [discovery.myCommunityIds],
+  );
 
   return (
     <View style={{ gap: SP['5'] }}>
@@ -832,21 +800,21 @@ function DiscoveryView() {
 
       {/* 2) 今日のホット — 横スクロールカード (動画サムネ対応)。
           first paint 後に mount (内部 query を初回フレームで走らせない)。 */}
-      {deferReady && <HotPostsRow />}
+      {isFocused && <HotPostsRow posts={discovery.hot} loading={discoveryLoading} />}
 
-      {/* 3) あなたへのおすすめ — パーソナライズ (未ログインで non-render)。first paint 後に mount。 */}
-      {deferReady && <ForYouShelf />}
+      {/* 3) あなたへのおすすめ — hot 共有プールを端末ローカルで再ランク */}
+      {isFocused && <ForYouShelf pool={discovery.hot} loading={discoveryLoading} />}
 
       {/* 4) おすすめコミュニティ — 人気順の大カード */}
       <CommunityShelf
         title="おすすめ"
         iconName="sparkles"
-        communities={recommended.data ?? []}
+        communities={discovery.recommended}
         memberIdSet={memberIdSet}
         joiningIds={joiningIds}
         onJoin={onJoin}
         onPressCommunity={onPressCommunity}
-        isLoading={!deferReady || recommended.isLoading}
+        isLoading={!isFocused || (discoveryLoading && discovery.recommended.length === 0)}
         emptyText="まだコミュニティがありません"
       />
 
@@ -854,12 +822,12 @@ function DiscoveryView() {
       <CommunityShelf
         title="急上昇"
         iconName="trendingUp"
-        communities={rising.data ?? []}
+        communities={discovery.rising}
         memberIdSet={memberIdSet}
         joiningIds={joiningIds}
         onJoin={onJoin}
         onPressCommunity={onPressCommunity}
-        isLoading={!deferReady || rising.isLoading}
+        isLoading={!isFocused || (discoveryLoading && discovery.rising.length === 0)}
         emptyText="まだ急上昇コミュニティがありません"
       />
 
@@ -867,12 +835,12 @@ function DiscoveryView() {
       <CommunityShelf
         title="公式"
         iconName="award"
-        communities={official.data ?? []}
+        communities={discovery.official}
         memberIdSet={memberIdSet}
         joiningIds={joiningIds}
         onJoin={onJoin}
         onPressCommunity={onPressCommunity}
-        isLoading={!deferReady || official.isLoading}
+        isLoading={!isFocused || (discoveryLoading && discovery.official.length === 0)}
         emptyText="公式コミュニティはまだありません"
       />
 

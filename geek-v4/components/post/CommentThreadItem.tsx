@@ -491,15 +491,13 @@ export function CommentThreadItem({
               )}
               {/* mod 専用 3-dot menu — parentCommunityId が無い / mod でない / 自分の
                   コメント のときは ModActionMenu 側で null render される */}
-              {parentCommunityId && commentAuthorId && (
+              {parentCommunityId && isMod && (
                 <ModActionMenu
                   target={{
                     kind: 'comment',
                     commentId: comment.id,
-                    authorId: commentAuthorId,
                     postId: comment.post_id,
                   }}
-                  communityId={parentCommunityId}
                   isMod={isMod}
                   isOwn={isOwnComment}
                   onActionComplete={() => {

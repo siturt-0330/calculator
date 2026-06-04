@@ -142,7 +142,7 @@ export default function PostDetailScreen() {
   // するので、useReactionToggle.onMutate の patchFeedPagePost が
   // 詳細画面の cache も自動で更新する (= 楽観 update が UI に即時反映される)。
   const postIdsForFeedPage = useMemo(() => (id ? [id] : []), [id]);
-  const { fullPosts } = useFeedPage(postIdsForFeedPage);
+  const { fullPosts, isLoading: feedPageLoading } = useFeedPage(postIdsForFeedPage);
   const fullPost = id ? fullPosts.get(id) : undefined;
   const reactions = useMemo(() => fullPost?.reactions ?? [], [fullPost]);
   const myMemes = useMemo(
@@ -178,13 +178,25 @@ export default function PostDetailScreen() {
   // 監査指摘: 投稿詳細から community への遷移経路が存在しなかった。
   // 旧版はフィードカード (AnonPostCard) でだけピル表示していたが、直リンク
   // やシェアから来たユーザーが community に戻れない問題があった。
+  // ★ 遅延 fallback (案B): 通常 (feed RPC 有効) は useFeedPage([id]) 由来の
+  //   fullPost.communities を使い、この HTTP は撃たない。RPC が settle しても
+  //   communities を得られなかった時 (kill-switch EXPO_PUBLIC_FEED_PAGE_RPC='0' /
+  //   RPC error / RLS 全 deny で fullPost 自体が undefined) だけ従来経路へ fallback し、
+  //   コミュピル + CommentThreadItem.parentCommunityId の紐付けが消えないようにする。
+  // enabled 条件の肝:
+  //   - feedPageLoading 中は撃たない → RPC とレースしない / 通常経路で無駄 fetch しない
+  //   - fullPost?.communities === undefined は『fullPost 自体が undefined』と同値
+  //     (normalize() が communities を常に配列で返すため)。コミュ無し投稿は [] になり
+  //     === undefined に該当しないので fallback は撃たれない。
   const { data: communitiesByPost = {} } = useQuery({
     queryKey: ['post-communities-of', id],
     queryFn: () => fetchCommunitiesForPosts([id!]),
-    enabled: !!id,
+    enabled: !!id && !feedPageLoading && fullPost?.communities === undefined,
     staleTime: 60_000,
   });
-  const postCommunities = id ? (communitiesByPost[id] ?? []) : [];
+  // RPC 由来を最優先。得られなかった時だけ fallback query の結果を使う。
+  const postCommunities =
+    fullPost?.communities ?? (id ? (communitiesByPost[id] ?? []) : []);
 
   // ============================================================
   // メディア (写真 / 動画) — クリック先の投稿詳細でも表示する

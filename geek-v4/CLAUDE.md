@@ -330,7 +330,8 @@ deploy: `supabase functions deploy <name>`。秘密は `supabase secrets set KEY
 | `EXPO_PUBLIC_POSTHOG_KEY` | 任意 | 空なら analytics 無効 |
 | `EXPO_PUBLIC_POSTHOG_HOST` | 任意 | default `https://app.posthog.com` |
 | `EXPO_PUBLIC_SENTRY_DSN` | 任意 | 空なら Sentry init を早期 return |
-| `EXPO_PUBLIC_FEED_PAGE_RPC` | 任意 | `'0'` でフィード RPC を kill-switch |
+| `EXPO_PUBLIC_FEED_PAGE_RPC` | 任意 | `'0'` でフィード周辺データ RPC (get_feed_page) を kill-switch |
+| `EXPO_PUBLIC_HOME_FEED_RPC` | 任意 | `'1'` で home feed 1ページ目集約 RPC (get_home_feed/0114) を有効化 (★既定 OFF) |
 
 ### 絶対にクライアントに置かない
 
@@ -422,7 +423,7 @@ Native module を触ったら必ず通常 build & submit。
 - `useFeedRealtime(postIds)` — feed 全体の realtime subscription (★ 必ず feed.tsx から起動)
 - `useReactions(postIds)` / `useReactionToggle()` — legacy reactions (RPC fallback)
 - `useLike` / `useConcern` / `useSave` / `useBookmarks` — 各 mutation hook
-- `useBBS()` / `useBBSThread(id)` / `useBBSReplyReactions()`
+- `useBBS()`
 - `useNotifications()` / `useTagRecommendations()` / `useTagSearchV3()` / `useTagFilter()`
 - `useUserStamps()` / `useCommunityStamps()` — テキスト stamp
 - `useAuth()` (= `useAuthStore`) / `useAdmin()` / `useT()`
@@ -469,6 +470,7 @@ Native module を触ったら必ず通常 build & submit。
 - ❌ `key={i}` (FlashList / map の) → 一意な id を key に
 - ❌ `service_role_key` をクライアントへ → Supabase Edge / secrets のみ
 - ❌ EXPO_PUBLIC_FEED_PAGE_RPC など build-time flag を runtime で動的アクセス (`process.env[key]`) → Expo は static 参照しか inline しない
+- ⚠️ 既定 OFF の flag は `=== '1'` で判定する (例 `EXPO_PUBLIC_HOME_FEED_RPC`)。既存の `!== '0'` (既定 ON) パターンをコピペ流用すると意図せず既定 ON になる事故が起きる
 
 ---
 
