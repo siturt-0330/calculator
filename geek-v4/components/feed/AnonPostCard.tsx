@@ -828,6 +828,10 @@ type AnonPostCardProps = {
   poll?: Poll;
   reason?: { text: string; kind: string };
   communities?: PostCommunityRef[];
+  // Reddit スタイル表示の切り替え。
+  //   'home'      (既定): コミュニティ icon + 名前を主役に表示 (ホームフィード・タグページ等)
+  //   'community' : ユーザーの avatar + nickname を主役に表示 (コミュニティ詳細タブ)
+  viewContext?: 'home' | 'community';
   onLike: () => void;
   onConcern: () => void;
   onComment: () => void;
@@ -861,6 +865,7 @@ function AnonPostCardInner({
   onReact,
   onAddTag: _onAddTag,
   onCommunityPress,
+  viewContext = 'home',
 }: AnonPostCardProps) {
   const Heart = Icon.heart;
   const Comment = Icon.comment;
@@ -1221,21 +1226,43 @@ function AnonPostCardInner({
         </View>
       )}
 
-      {/* ヘッダー: アバター / 匿 · 時刻 / ⋯
-          公式コミュ管理者の投稿は de-anonymize して 実名 · 所属 を表示 */}
+      {/* ヘッダー: アバター / メイン表示 / ⋯
+          - 公式管理者: shield + 実名 · 所属 (de-anonymize)
+          - viewContext='community': ユーザー avatar + nickname (Reddit の r/ 内投稿スタイル)
+          - viewContext='home' (既定): コミュニティ icon + 名前 (Reddit の r/ サブレ表示スタイル) */}
       <View style={STYLES.headerRow}>
+        {/* ===== アバター ===== */}
         {post.official_author ? (
-          // 公式管理者: ✓ shield アクセント色のアバター
-          <View
-            style={STYLES.officialAvatar}
-            accessibilityLabel="公式管理者"
-          >
+          // 公式管理者: shield アイコン
+          <View style={STYLES.officialAvatar} accessibilityLabel="公式管理者">
             <Icon.shield size={20} color={C.accent} strokeWidth={2.4} />
           </View>
+        ) : viewContext === 'community' ? (
+          // コミュニティタブ: ユーザーのアバター (avatar_url があれば画像、なければ nickname 頭文字)
+          <Avatar
+            size={40}
+            uri={post.author_avatar_url}
+            name={post.author_nickname ?? undefined}
+          />
         ) : (
-          <Avatar size={40} anonymous />
+          // ホーム/デフォルト: コミュニティアイコン (タップでコミュニティへ遷移)
+          <PressableScale
+            onPressIn={undefined}
+            onPress={onPrimaryCommunityPress}
+            hitSlop={4}
+            disabled={!primaryCommunity}
+          >
+            <Avatar
+              size={40}
+              uri={primaryCommunity?.icon_url ?? null}
+              emoji={primaryCommunity?.icon_emoji ?? undefined}
+            />
+          </PressableScale>
         )}
+
+        {/* ===== メタ (名前 + 時刻) ===== */}
         {post.official_author ? (
+          // 公式管理者
           <View style={STYLES.officialMeta}>
             <View style={STYLES.officialNameRow}>
               <Text style={officialNameStyle} numberOfLines={1}>
@@ -1261,30 +1288,46 @@ function AnonPostCardInner({
               )}
             </View>
           </View>
-        ) : (
-          // anon: 「匿」を 1 行目、relative time + community を 2 行目に分けて typography 階層を作る
+        ) : viewContext === 'community' ? (
+          // コミュニティタブ: ユーザー名 + 時刻
           <View style={STYLES.anonRow}>
             <Text style={anonLabelStyle} numberOfLines={1}>
-              {t('匿')}
+              {post.author_nickname ?? t('メンバー')}
             </Text>
             <View style={STYLES.anonMetaRow}>
               <Text style={STYLES.anonRelative} numberOfLines={1}>
                 {formatRelative(post.created_at)}
               </Text>
-              {primaryCommunity && (
+            </View>
+          </View>
+        ) : (
+          // ホーム/デフォルト: コミュニティ名 (タップ可) + 時刻
+          <View style={STYLES.anonRow}>
+            <PressableScale
+              onPress={onPrimaryCommunityPress}
+              disabled={!primaryCommunity}
+              scaleValue={0.98}
+            >
+              <Text style={anonLabelStyle} numberOfLines={1}>
+                {primaryCommunity?.name ?? t('コミュニティ')}
+              </Text>
+            </PressableScale>
+            <View style={STYLES.anonMetaRow}>
+              <Text style={STYLES.anonRelative} numberOfLines={1}>
+                {formatRelative(post.created_at)}
+              </Text>
+              {communities.length > 1 && (
                 <>
                   <Text style={STYLES.anonMetaDot}>·</Text>
-                  <CommunityInlineIndicator
-                    community={primaryCommunity}
-                    extraCount={communities.length - 1}
-                    onPress={onPrimaryCommunityPress}
-                    STYLES={STYLES}
-                  />
+                  <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
+                    +{communities.length - 1}
+                  </Text>
                 </>
               )}
             </View>
           </View>
         )}
+
         <PressableScale onPress={onMore} hitSlop={HIT_SLOP_10} style={STYLES.morePress}>
           <More size={20} color={C.text3} strokeWidth={2.2} />
         </PressableScale>
@@ -1629,5 +1672,6 @@ export const AnonPostCard = memo(AnonPostCardInner, (prev, next) => {
   if (prev.onReact !== next.onReact) return false;
   if (prev.onAddTag !== next.onAddTag) return false;
   if (prev.onCommunityPress !== next.onCommunityPress) return false;
+  if (prev.viewContext !== next.viewContext) return false;
   return true; // skip re-render
 });

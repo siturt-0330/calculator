@@ -41,6 +41,11 @@ export type Post = {
   // de-anon Phase2: server (feed/community RPC) が「閲覧者自身の投稿か」を boolean で供給する
   //   派生フィールド。author_id 比較を client から無くすための置換 (REVOKE 後は author_id が来ない)。
   is_own?: boolean;
+  // Reddit スタイル author 表示用。
+  //   - home feed: communities prop から community 名/icon を使用するため不要。
+  //   - community tab (viewContext='community'): fetchCommunityPosts が profiles から一括取得して attach。
+  author_nickname?: string;
+  author_avatar_url?: string | null;
   // ★ BBS 統合 (migration 0075) — title is not null なら「スレ形式」の post。
   //   通常の写真投稿は title=null。フィード描画では title あれば content の上に大きく表示。
   title?: string | null;
