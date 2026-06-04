@@ -757,6 +757,30 @@ function ReportsTab() {
 
   return (
     <View>
+      {/* 優先度キュー(report_cases: リアルタイム/severity/担当/解決)への導線。
+          この既存タブは concern 集計ベースの一覧、新画面は通報ケースのワークフロー。 */}
+      <PressableScale
+        onPress={() => router.push('/admin/reports' as never)}
+        haptic="select"
+        style={{
+          marginHorizontal: SP['4'],
+          marginBottom: SP['2'],
+          padding: SP['3'],
+          borderRadius: R.md,
+          backgroundColor: C.accent + '18',
+          borderWidth: 1,
+          borderColor: C.accent + '44',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: SP['2'],
+        }}
+      >
+        <Icon.flag size={16} color={C.accentLight} strokeWidth={2.2} />
+        <Text style={[T.caption, { color: C.accentLight, fontWeight: '700', flex: 1 }]}>
+          優先度キュー（リアルタイム・担当/解決）を開く
+        </Text>
+        <Icon.chevronR size={16} color={C.accentLight} strokeWidth={2.2} />
+      </PressableScale>
       <SearchInput value={search} onChange={setSearch} placeholder="本文で検索…" />
       <View style={{ flexDirection: 'row', gap: 6, paddingHorizontal: SP['4'], paddingBottom: SP['2'] }}>
         <SortChip label="全部"     active={minReports === 1} onPress={() => setMinReports(1)} />
