@@ -96,19 +96,51 @@ export async function fetchAllPosts(opts?: { search?: string; limit?: number }):
   }));
 }
 
+// 引数は (id: string) のまま維持 — useMutation({ mutationFn: suspendUser }) の
+// 直渡し互換のため (第2引数を足すと React Query の MutationFunctionContext と衝突する)。
+// 操作理由は metadata の from→to で監査ログに残す。
 export async function suspendUser(userId: string): Promise<void> {
+  // before→after state を監査ログに残すため、変更前の account_state を先に取得。
+  const { data: before } = await supabase
+    .from('profiles').select('account_state').eq('id', userId).maybeSingle();
+  const fromState = (before as { account_state?: string } | null)?.account_state ?? null;
   const { error } = await supabase.from('profiles').update({ account_state: 'suspended' }).eq('id', userId);
   if (error) throw error;
+  await logModeration({
+    action: 'suspend_user',
+    target_type: 'user',
+    target_id: userId,
+    metadata: { from: fromState, to: 'suspended' },
+  });
 }
 
 export async function unsuspendUser(userId: string): Promise<void> {
+  const { data: before } = await supabase
+    .from('profiles').select('account_state').eq('id', userId).maybeSingle();
+  const fromState = (before as { account_state?: string } | null)?.account_state ?? null;
   const { error } = await supabase.from('profiles').update({ account_state: 'healthy' }).eq('id', userId);
   if (error) throw error;
+  await logModeration({
+    action: 'unsuspend_user',
+    target_type: 'user',
+    target_id: userId,
+    metadata: { from: fromState, to: 'healthy' },
+  });
 }
 
 export async function deletePost(postId: string): Promise<void> {
+  // 削除前に author_id / visibility を取得して監査ログに残す (削除後は引けない)。
+  const { data: before } = await supabase
+    .from('posts').select('author_id, visibility').eq('id', postId).maybeSingle();
+  const meta = before as { author_id?: string; visibility?: string } | null;
   const { error } = await supabase.from('posts').delete().eq('id', postId);
   if (error) throw error;
+  await logModeration({
+    action: 'delete_post',
+    target_type: 'post',
+    target_id: postId,
+    metadata: { author_id: meta?.author_id ?? null, before_visibility: meta?.visibility ?? null },
+  });
 }
 
 // ============================================================
