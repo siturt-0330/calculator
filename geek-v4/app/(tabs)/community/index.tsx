@@ -345,6 +345,7 @@ export default function CommunityScreen() {
       return (
         <AnonPostCard
           post={p}
+          isOwn={p.is_own}
           liked={!!myLikes[p.id]}
           concerned={!!myConcerns[p.id]}
           saved={!!mySaves[p.id]}

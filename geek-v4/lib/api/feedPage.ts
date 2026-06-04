@@ -44,6 +44,9 @@ export type FeedPagePost = Post & {
   reactions: ReactionAgg[];
   added_tags: string[];
   poll: Poll | null;
+  // de-anon Phase2: server が author_id をマスクして返す代わりに「自分の投稿か」を
+  //   boolean で供給する (viewer 相対なので my_like 等と同じ FeedPagePost 側に置く)。
+  is_own: boolean;
 };
 
 // RPC の生 row shape (server 側 json_build_object と一致)
@@ -74,6 +77,7 @@ export type RpcPostRow = Post & {
   reactions?: RpcReactionRow[] | null;
   added_tags?: string[] | null;
   poll?: RpcPollRow | null;
+  is_own?: boolean | null;
 };
 
 /**
@@ -220,6 +224,8 @@ export function normalizeFeedPageRow(r: RpcPostRow): FeedPagePost {
     added_tags: _at,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     poll: _pl,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    is_own: _io,
     ...post
   } = r;
 
@@ -233,6 +239,7 @@ export function normalizeFeedPageRow(r: RpcPostRow): FeedPagePost {
     reactions,
     added_tags,
     poll,
+    is_own: !!r.is_own,
   };
   return out;
 }

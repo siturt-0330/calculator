@@ -657,6 +657,7 @@ export default function FeedScreen() {
         <FeedRowEnter index={index}>
           <AnonPostCard
             post={enrichedPost}
+            isOwn={full?.is_own}
             liked={liked}
             concerned={concerned}
             saved={saved}
