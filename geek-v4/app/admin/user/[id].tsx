@@ -17,6 +17,7 @@ import { TopBar } from '../../../components/nav/TopBar';
 import { BackButton } from '../../../components/nav/BackButton';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { MiniMetric } from '../../../components/admin/MiniMetric';
+import { EnforcementPanel } from '../../../components/admin/EnforcementPanel';
 import { Spinner } from '../../../components/ui/Spinner';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { Avatar } from '../../../components/ui/Avatar';
@@ -227,6 +228,10 @@ export default function AdminUserDetailScreen() {
         >
           <ProfileHero user={data.user} moderation={data.moderationHistory} posts={data.posts} />
           <ActionGrid user={data.user} />
+          {/* 段階的措置(警告→機能制限→一時停止→永久BAN) + strike履歴 (migration 0122) */}
+          <View style={{ paddingHorizontal: SP['4'], paddingBottom: SP['3'] }}>
+            <EnforcementPanel userId={data.user.id} />
+          </View>
           <FilterBar tab={tab} filter={dateFilter} onChangeFilter={setDateFilter} />
           <TabBar
             tab={tab}
