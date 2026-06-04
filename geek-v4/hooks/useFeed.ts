@@ -21,7 +21,7 @@ import { useQuery as useReactQuery } from '@tanstack/react-query';
 import { getEvents, computeProfile, rankFeed, computePostScore, diversifyFeed } from '../lib/personalize';
 import type { FeedEvent, RankableCandidate, RankReason } from '../lib/personalize';
 import { useAuthStore } from '../stores/authStore';
-import { fetchTargetedAds, type Ad } from '../lib/api/ads';
+import { fetchTargetedAdsV2, type Ad } from '../lib/api/ads';
 import { useAdPreferencesStore } from '../stores/adPreferencesStore';
 import { rankByRising } from '../lib/utils/risingScore';
 
@@ -353,7 +353,8 @@ export function useFeed() {
   const blockedTagsKey = blockedTags.join('|');
   const adsQ = useReactQuery<Ad[]>({
     queryKey: ['ads', interestTagsKey, blockedTagsKey],
-    queryFn: () => fetchTargetedAds(interestTags, blockedTags, 3),
+    // v2: 流入元(traffic_source)別 + priority 配信。0119未適用/列無し時は v1 へ内部fallback。
+    queryFn: () => fetchTargetedAdsV2(interestTags, blockedTags, 3),
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,

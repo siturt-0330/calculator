@@ -407,8 +407,8 @@ is_admin() を後方互換で再定義:
 4. **起動**: `npm run web`（既存 geek-v4 と同じ）。`/admin` に URL 直打ちで到達（email gate + RLS）。
 
 ### 11.4 既知の制約・今後のTODO
-- **AdCard 配線**: `components/feed/AdCard.tsx` は現状 `fetchTargetedAds`(v1)。`fetchTargetedAdsV2`
-  への切替で流入元別配信が実フィードに反映される（v2 は fallback 内蔵で安全）。
+- ~~**AdCard 配線**~~: ✅ 完了。`hooks/useFeed.ts` の広告取得を `fetchTargetedAdsV2` に切替済
+  （流入元別配信が実フィードに反映。0119未適用時は v1 へ内部fallback）。
 - **流入元取得**: 現状 signup 画面 mount で URL クエリを capture。ルート経由の確実な取得は
   `app/_layout.tsx` 起動時 capture が将来TODO（§5.5）。
 - **RBAC Phase2**: 個別 RLS / `report_cases` を `is_moderator()` に開放（現状は admin gate）。
