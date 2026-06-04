@@ -940,6 +940,7 @@ const FeedPostRow = memo(function FeedPostRow({
       onMore={onMore}
       onReact={onReact}
       onAddTag={onAddTag}
+      viewContext="community"
     />
   );
 });
