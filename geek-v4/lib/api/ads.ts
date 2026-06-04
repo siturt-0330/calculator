@@ -26,6 +26,10 @@ export type Ad = {
 
 export type AdStatus = 'draft' | 'active' | 'paused' | 'ended';
 
+// 広告ソースの抽象化 (migration 0119)。外部調査(GAM priority体系)に基づく:
+//   sponsorship(直販/保証) > standard相当 > network(外部ネットワーク) > house(自社/フォールバック)
+export type AdSourceType = 'house' | 'network' | 'sponsorship';
+
 export type AdminAd = {
   id: string;
   advertiser_name: string;
@@ -43,6 +47,11 @@ export type AdminAd = {
   created_by: string;
   created_at: string;
   updated_at: string;
+  // 0119 で追加。未適用環境では undefined (optional)。
+  source_type?: AdSourceType;
+  priority?: number;                  // 小さいほど優先 (House=16 が既定/フォールバック)
+  target_traffic_sources?: string[];  // 空=全流入元、非空=一致時のみ配信
+  network_code?: string | null;       // 外部ネットワーク識別 (admob 等)
 };
 
 export type AdEventType = 'impression' | 'click' | 'dismiss';
@@ -72,6 +81,95 @@ export async function fetchTargetedAds(
     return [];
   }
   return ((data ?? []) as Ad[]);
+}
+
+// ----------------------------------------------------------------
+// fetchTargetedAdsV2 — 流入元(traffic_source)別 + priority を考慮した配信 (0119)
+// ----------------------------------------------------------------
+// ads_select_active policy で全 authed user が active 広告を直読できるため、
+// クライアント側でターゲティング/優先度を解決する (RPC 拡張不要)。
+//   - 閲覧者の traffic_source は user_acquisition から引く(本人 select 可)
+//   - ad.target_traffic_sources が空なら全員、非空なら一致時のみ
+//   - priority 昇順(小さいほど優先) → タグ交差スコア降順
+// ★ 0119 未適用(新列が無い)・RLS 等で失敗したら、既存 fetchTargetedAds(タグ RPC)に
+//   自動フォールバックする。
+export async function fetchTargetedAdsV2(
+  interestTags: string[],
+  excludeTags: string[] = [],
+  limit = 3,
+): Promise<Ad[]> {
+  // 1) 閲覧者の流入元
+  let trafficSource: string | null = null;
+  try {
+    const uid = (await supabase.auth.getUser()).data.user?.id;
+    if (uid) {
+      const { data } = await supabase
+        .from('user_acquisition')
+        .select('traffic_source')
+        .eq('user_id', uid)
+        .maybeSingle();
+      trafficSource = (data as { traffic_source?: string | null } | null)?.traffic_source ?? null;
+    }
+  } catch {
+    // 流入元が引けなくても配信は続行 (= 全員向けのみ)
+  }
+
+  // 2) active 広告を直読 (新列込み)。列が無ければ error → fallback。
+  const { data, error } = await supabase
+    .from('ads')
+    .select(
+      'id, advertiser_name, headline, body, image_url, click_url, cta_label, target_tags, exclude_tags, source_type, priority, target_traffic_sources, starts_at, ends_at',
+    )
+    .eq('status', 'active');
+  if (error || !data) {
+    return fetchTargetedAds(interestTags, excludeTags, limit);
+  }
+
+  type Row = {
+    id: string; advertiser_name: string; headline: string; body: string;
+    image_url: string | null; click_url: string; cta_label: string;
+    target_tags: string[] | null; exclude_tags: string[] | null;
+    source_type: string | null; priority: number | null;
+    target_traffic_sources: string[] | null;
+    starts_at: string | null; ends_at: string | null;
+  };
+  const rows = data as Row[];
+  const now = Date.now();
+  const interest = new Set(interestTags);
+  const exclude = new Set(excludeTags);
+
+  const scored = rows
+    .filter((a) => {
+      // 配信期間
+      if (a.starts_at && new Date(a.starts_at).getTime() > now) return false;
+      if (a.ends_at && new Date(a.ends_at).getTime() < now) return false;
+      // 流入元ターゲティング: 空=全員 / 非空=trafficSource 一致時のみ
+      const tts = a.target_traffic_sources ?? [];
+      if (tts.length > 0 && (!trafficSource || !tts.includes(trafficSource))) return false;
+      // 除外: 広告の exclude_tags ∩ 興味、呼び出し側 excludeTags ∩ 広告の target_tags
+      if ((a.exclude_tags ?? []).some((t) => interest.has(t))) return false;
+      if ((a.target_tags ?? []).some((t) => exclude.has(t))) return false;
+      return true;
+    })
+    .map((a) => {
+      const score = (a.target_tags ?? []).reduce((acc, t) => acc + (interest.has(t) ? 1 : 0), 0);
+      return { a, score, priority: a.priority ?? 16 };
+    })
+    // priority 昇順(小=優先) → 同 priority はタグ交差スコア降順
+    .sort((x, y) => x.priority - y.priority || y.score - x.score)
+    .slice(0, Math.max(1, limit));
+
+  return scored.map(({ a, score }) => ({
+    id: a.id,
+    advertiser_name: a.advertiser_name,
+    headline: a.headline,
+    body: a.body,
+    image_url: a.image_url,
+    click_url: a.click_url,
+    cta_label: a.cta_label,
+    target_tags: a.target_tags ?? [],
+    match_score: score,
+  }));
 }
 
 // ----------------------------------------------------------------
@@ -137,6 +235,12 @@ export type CreateAdInput = {
   starts_at: string | null;
   ends_at: string | null;
   daily_budget_yen: number;
+  // 0119 で追加 (optional)。undefined のフィールドは insert に送られないので、
+  // 0119 未適用環境でも UI で設定しなければエラーにならない。
+  source_type?: AdSourceType;
+  priority?: number;
+  target_traffic_sources?: string[];
+  network_code?: string | null;
 };
 
 export async function createAd(input: CreateAdInput): Promise<AdminAd> {
