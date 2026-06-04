@@ -207,17 +207,20 @@ appeals
 
 ### 5.5 流入元（traffic source）
 
+> **実装時の判断変更（§8.11）: profiles 列 → 別テーブル `user_acquisition`。**
+> 既存 `profiles_read` が `using(true)`（全員読取可）で**列単位のプライバシー保護ができない**ため、
+> 流入元は別テーブルに分離し RLS で本人+admin限定にした（migration 0119 で実装済）。
+
 ```
-profiles に列追加（alter add column if not exists）:
-  traffic_source  text  -- 'google_ads' | 'app_store' | 'play_store' | 'organic' | 'referral' | null
-  utm_source      text
-  utm_medium      text
-  utm_campaign    text
-  acquired_at     timestamptz  -- 流入記録時刻
+user_acquisition（本人+admin限定 RLS、改ざん防止のため UPDATE/DELETE policy なし）:
+  user_id        uuid pk → auth.users
+  traffic_source text  -- 'google_ads' | 'app_store' | 'play_store' | 'organic' | 'referral' | 'other'
+  utm_source / utm_medium / utm_campaign  text
+  acquired_at    timestamptz
 ```
 
-- 取得経路: Web は URL クエリ（`?utm_source=...&traffic_source=google_ads`）を サインアップ前に sessionStorage 保存 → `handle_new_user` 後にクライアントが profiles へ bind（または auth metadata 経由）。Native は deep link / Universal Links。
-- **プライバシー**: traffic_source 系は本人 + admin のみ読める RLS（一般公開しない）。
+- 取得経路: Web は URL クエリ（`?utm_source=...&traffic_source=google_ads`）を サインアップ前に sessionStorage 保存 → signup 直後にクライアントが `user_acquisition` へ insert（本人のみ insert 可）。Native は deep link / Universal Links。
+- **プライバシー**: 本人 + admin のみ SELECT（`ua_self_or_admin_select`）。一般公開しない。
 
 ### 5.6 広告ソース抽象化 + 流入元ターゲティング
 
@@ -343,6 +346,9 @@ is_admin() を後方互換で再定義:
 | 8.8 | 広告ソース | **GAM priority ティアを縮小移植 + traffic_source** | ④拡張性（新ソース追加容易）。②PFベストプラクティス。指示書の初期2系統を抽象モデルで表現。 |
 | 8.9 | リアルタイム手段 | **Supabase Realtime（WebSocket）** | ①実用性（既存attachChannel）。指示書のWebSocket/SSE推奨に合致。 |
 | 8.10 | 措置の段階設計 | **strike ladder + 90日失効 + 重大即BANバイパス** | ②YouTube/TikTok型。③安全（重大違反の即時対応）。 |
+| 8.11 | 流入元の保存先 | **profiles 列でなく別テーブル `user_acquisition`** | ③プライバシー最優先: 既存 `profiles_read=using(true)` では列単位保護不可。別テーブルRLSで本人+admin限定。①既存破壊なし（profiles_read 不変）。 |
+| 8.12 | `suspendUser`等の reason引数 | **引数追加せず metadata の from→to で記録** | ①実用性: `useMutation({mutationFn})` 直渡し互換を維持（第2引数は React Query の context と型衝突）。 |
+| 8.13 | RBAC/admin_notifications の分割 | **0118→0119(流入元/広告)→0120(RBAC)→0121(通知) に分割** | ③安全: RBAC は guard_profile_update(0105) との整合精読が必要。通報基盤を先に固め、段階適用。 |
 
 ---
 
