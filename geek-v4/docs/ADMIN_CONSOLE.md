@@ -414,8 +414,9 @@ is_admin() を後方互換で再定義:
 - ~~**異議申し立て(appeals) / strike(enforcement_actions)**~~: ✅ migration `0122` +
   `lib/api/enforcement.ts` で実装済（`apply_enforcement`/`active_strike_count`/`review_appeal`、
   90日失効strike + 重大即BANバイパス + append-only）。措置適用UI(`user/[id].tsx`)は次段階。
-- **RBAC Phase2**: `report_cases`/通報RPC の gate を `is_moderator()` に開放（現状 admin gate）。
-  `get_report_queue` 等の関数再定義が必要なため慎重に別 migration(`0123`)で。
+- ~~**RBAC Phase2**~~: ✅ migration `0123` で `report_cases` RLS + 通報3RPC
+  (`get_report_queue`/`assign_report_case`/`resolve_report_case`) を `is_moderator()` に開放済
+  （body は 0118 と同一、gate のみ変更）。措置/広告/shadowban/RBAC は admin のまま(権限分離)。
 - **PII**: `phone` は `lib/api/admin.ts` で取得しておらず admin 画面には露出していない（調査で確認）。
   一般公開(`profiles_read=using(true)`)の是正は column GRANT 絞り migration が必要だが、
   本人の phone 読取経路への影響調査が前提のため別 PR で慎重に。
