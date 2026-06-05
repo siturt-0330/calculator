@@ -54,6 +54,7 @@ import { EditorialPostCard } from '../../components/search/EditorialPostCard';
 import { EditorialCommunityRow } from '../../components/search/EditorialCommunityRow';
 import { EditorialSkeleton } from '../../components/search/EditorialSkeleton';
 import { EditorialEmpty } from '../../components/search/EditorialEmpty';
+import { SearchFocusOverlay } from '../../components/search/SearchFocusOverlay';
 import { withApiTimeout } from '../../lib/withApiTimeout';
 import {
   searchCommunities,
@@ -115,6 +116,8 @@ export default function SearchScreen() {
   const [rawQuery, setRawQuery] = useState<string>(typeof params.q === 'string' ? params.q : '');
   const [debouncedQuery, setDebouncedQuery] = useState<string>(typeof params.q === 'string' ? params.q : '');
   const [inputFocused, setInputFocused] = useState<boolean>(false);
+  // フォーカス時オーバーレイの開始 Y (= ヘッダ実測高)。onLayout で更新。
+  const [headerH, setHeaderH] = useState<number>(0);
   const [category, setCategory] = useState<ResultCategory>('all');
   const [expandPosts, setExpandPosts] = useState<boolean>(false);
   const [expandCommunities, setExpandCommunities] = useState<boolean>(false);
@@ -136,12 +139,9 @@ export default function SearchScreen() {
     : undefined;
 
   // ============= 履歴 / シグナル =============
-  const {
-    history,
-    pickQuery,
-    removeQuery,
-    clearAll,
-  } = useSearchHistory(10);
+  // 履歴の読み書きは pickQuery (commit 時に積む) のみ親で使う。
+  // 「最近の検索」一覧の表示/削除/全消去は SearchFocusOverlay 側が自前で持つ。
+  const { pickQuery } = useSearchHistory(10);
   const recordSignal = useSearchSignalsStore((s) => s.record);
   const hydrateGraph = useTagGraphStore((s) => s.hydrate);
 
@@ -382,6 +382,9 @@ export default function SearchScreen() {
     if (next !== debouncedQuery) setDebouncedQuery(next);
     pickQuery(next);
     Keyboard.dismiss();
+    // 確定したらフォーカスを解いてオーバーレイを閉じ、結果(本文)を見せる。
+    inputRef.current?.blur();
+    setInputFocused(false);
   }, [rawQuery, debouncedQuery, pickQuery]);
 
   const clearInput = useCallback(() => {
@@ -389,6 +392,31 @@ export default function SearchScreen() {
     setDebouncedQuery('');
     inputRef.current?.focus();
   }, []);
+
+  // ===== フォーカス時オーバーレイ(SearchFocusOverlay)のハンドラ =====
+  // 候補を入力欄へ流し込む (検索はせずフォーカス維持 = さらに絞り込める)。
+  const fillQuery = useCallback((t: string) => {
+    setRawQuery(t);
+    inputRef.current?.focus();
+  }, []);
+  // コミュニティ候補 → 詳細へ。オーバーレイは閉じる。
+  const openCommunityFromOverlay = useCallback(
+    (id: string) => {
+      Keyboard.dismiss();
+      setInputFocused(false);
+      router.push(`/community/${id}` as never);
+    },
+    [router],
+  );
+  // タグ候補 → タグ画面へ。オーバーレイは閉じる。
+  const openTagFromOverlay = useCallback(
+    (name: string) => {
+      Keyboard.dismiss();
+      setInputFocused(false);
+      router.push(`/tag/${encodeURIComponent(name)}` as never);
+    },
+    [router],
+  );
 
   // ============= pull-to-refresh =============
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -435,9 +463,6 @@ export default function SearchScreen() {
     && !isLoading
     && totalCount === 0;
 
-  // ============= history を表示するか? (input focus + empty + 履歴あり) =============
-  const showHistory = inputFocused && rawQuery.length === 0 && history.length > 0;
-
   // ============= EDITORIAL: 派生 UI 値 =============
   // typing = 入力はあるが debounce 未着地 (Inkline の往復ハイライト判定)
   const isTyping = rawQuery.trim().length > 0 && rawQuery.trim() !== debouncedQuery;
@@ -453,11 +478,12 @@ export default function SearchScreen() {
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       {/* ============= sticky ヘッダ (Inkline 検索バー) ============= */}
       <View
+        onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}
         style={{
           paddingTop: insets.top + SP['2'],
           paddingBottom: SP['2'],
           backgroundColor: C.bg,
-          // sticky な見え方 (z-index で history dropdown を被せる)
+          // sticky な見え方 (z-index でフォーカス時オーバーレイを被せる)
           zIndex: 10,
         }}
       >
@@ -465,7 +491,12 @@ export default function SearchScreen() {
           value={rawQuery}
           onChangeText={setRawQuery}
           onSubmit={() => commit()}
-          onFocus={() => setInputFocused(true)}
+          onFocus={() => {
+            // 直前の blur で予約された「閉じる」タイマーを取り消してから開く。
+            // (再フォーカスでオーバーレイが一瞬閉じる/開く ちらつきを防ぐ)
+            cancelBlurTimer();
+            setInputFocused(true);
+          }}
           onBlur={() => {
             // onBlur は onPress より先に発火する。blurTimerRef でタイマーを管理し、
             // 履歴アイテムの onPressIn でキャンセルできるようにする (タイミング依存なし)。
@@ -482,105 +513,11 @@ export default function SearchScreen() {
           inputRef={inputRef}
         />
 
-        {/* ============= 履歴 dropdown (focus + empty) ============= */}
-        {showHistory && (
-          <View
-            style={{
-              marginTop: SP['2'],
-              marginHorizontal: SP['5'],
-              backgroundColor: C.bg2,
-              borderRadius: R.lg,
-              borderWidth: 1,
-              borderColor: C.border,
-              overflow: 'hidden',
-            }}
-          >
-            {/* header — 「最近の検索」 + 「すべて消去」 */}
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                paddingHorizontal: SP['3'],
-                paddingVertical: SP['2'],
-                borderBottomWidth: 1,
-                borderBottomColor: C.divider,
-              }}
-            >
-              <Text style={[T.captionM, { color: C.text3, letterSpacing: 0.5 }]}>
-                最近の検索
-              </Text>
-              <PressableScale
-                onPressIn={cancelBlurTimer}
-                onPress={() => {
-                  clearAll();
-                }}
-                haptic="warn"
-                hitSlop={6}
-                accessibilityLabel="検索履歴をすべて消去"
-                accessibilityRole="button"
-              >
-                <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>
-                  すべて消去
-                </Text>
-              </PressableScale>
-            </View>
-
-            {/* rows */}
-            {history.slice(0, 10).map((h, idx) => {
-              const isLast = idx === Math.min(history.length, 10) - 1;
-              return (
-                <View
-                  key={`hist-${h}`}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    borderBottomWidth: isLast ? 0 : 1,
-                    borderBottomColor: C.divider,
-                  }}
-                >
-                  <PressableScale
-                    onPressIn={cancelBlurTimer}
-                    onPress={() => commit(h)}
-                    haptic="select"
-                    accessibilityLabel={`${h} で再検索`}
-                    accessibilityRole="button"
-                    style={{
-                      flex: 1,
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: SP['2'],
-                      paddingHorizontal: SP['3'],
-                      paddingVertical: SP['3'],
-                    }}
-                  >
-                    <Icon.clock size={16} color={C.text3} strokeWidth={2} />
-                    <Text style={[T.body, { color: C.text, flex: 1 }]} numberOfLines={1}>
-                      {h}
-                    </Text>
-                  </PressableScale>
-                  <PressableScale
-                    onPressIn={cancelBlurTimer}
-                    onPress={() => removeQuery(h)}
-                    haptic="warn"
-                    hitSlop={8}
-                    accessibilityLabel={`${h} を履歴から削除`}
-                    accessibilityRole="button"
-                    style={{
-                      paddingHorizontal: SP['3'],
-                      paddingVertical: SP['3'],
-                    }}
-                  >
-                    <Icon.close size={14} color={C.text3} strokeWidth={2.2} />
-                  </PressableScale>
-                </View>
-              );
-            })}
-          </View>
-        )}
+        {/* フォーカス時の「最近 / 候補」はルート直下の SearchFocusOverlay が担う
+            (旧: ここに履歴 dropdown を inline していた)。 */}
 
         {/* ============= intent 表示 (結果あり時のみ、控えめに) ============= */}
-        {showResults && !showHistory && topIntent && (
+        {showResults && !inputFocused && topIntent && (
           <View
             style={{
               marginTop: SP['2'],
@@ -599,7 +536,7 @@ export default function SearchScreen() {
         )}
 
         {/* ============= community filter chip (URL ?community=<id>) ============= */}
-        {showResults && !showHistory && communityId && (
+        {showResults && !inputFocused && communityId && (
           <View
             style={{
               marginTop: SP['2'],
@@ -625,7 +562,7 @@ export default function SearchScreen() {
         )}
 
         {/* ============= カテゴリ ランニングヘッド (結果あり時のみ) ============= */}
-        {showResults && !showHistory && (
+        {showResults && !inputFocused && (
           <View style={{ marginTop: SP['2'] }}>
             <CategoryRunningHead
               tabs={[
@@ -752,6 +689,22 @@ export default function SearchScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* ============= フォーカス時オーバーレイ (最近 / 候補) =============
+          検索バーをタップした瞬間に本文を覆う。X / Instagram 流の
+          「最近の検索 + 候補 + コミュニティ」。検索タブ本体 UI は不変。 */}
+      {inputFocused && (
+        <SearchFocusOverlay
+          query={rawQuery}
+          topOffset={headerH || insets.top + 72}
+          bottomInset={insets.bottom}
+          onSearchExact={commit}
+          onFillQuery={fillQuery}
+          onOpenCommunity={openCommunityFromOverlay}
+          onOpenTag={openTagFromOverlay}
+          cancelBlurTimer={cancelBlurTimer}
+        />
+      )}
 
       {/* ============= 「なぜこの結果?」 modal =============
           RankingExplainer は別 agent が並列で実装中の C5 component。
