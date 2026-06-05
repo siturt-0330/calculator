@@ -373,8 +373,15 @@ export default function FeedScreen() {
   // ★ リロード/タブ復帰のたびに最新投稿を反映 (ユーザー要望: 投稿push通知ではなく
   //   「リロードするたびに新着が出る」)。focus 時に ['feed'] を invalidate → page1 を
   //   取り直し新着が出る (staleTime:0 と協調)。コミュタブと同じ手法。
+  // ★ 毎フォーカスで invalidate すると For-You が時刻シードのランクで毎回並び替わり、
+  //   タブ往復のたびに(新着が無くても)下の投稿がチラチラ入れ替わる。直近 30s 以内の
+  //   再フォーカスは skip し、明示更新は pull-to-refresh に委ねる。
+  const lastFeedFocusRefreshRef = useRef(0);
   useFocusEffect(
     useCallback(() => {
+      const now = Date.now();
+      if (now - lastFeedFocusRefreshRef.current < 30_000) return;
+      lastFeedFocusRefreshRef.current = now;
       void qc.invalidateQueries({ queryKey: ['feed'] });
     }, [qc]),
   );

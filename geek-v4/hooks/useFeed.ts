@@ -72,7 +72,7 @@ export function useFeed() {
   // ホームフィード — fetchPosts は home=true (デフォルト) で
   // visibility IN ('public', 'community_public') の post だけ返す。
   // private / community_only はサーバー側で弾かれる。
-  const { data, isLoading, isFetching, fetchNextPage, hasNextPage, refetch } = useInfiniteQuery({
+  const { data, isLoading, isFetchingNextPage, fetchNextPage, hasNextPage, refetch } = useInfiniteQuery({
     queryKey: ['feed', sort, scope, likedTags, blockedTags],
     queryFn: async ({ pageParam }) => {
       const cursor = pageParam as string | undefined;
@@ -367,8 +367,11 @@ export function useFeed() {
   const ads: Ad[] = useMemo(() => adsQ.data ?? [], [adsIdHash]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadMore = useCallback(() => {
-    if (hasNextPage && !isFetching) fetchNextPage();
-  }, [hasNextPage, isFetching, fetchNextPage]);
+    // ★ isFetching は page-1 の background refetch(focus/realtime invalidate)でも true に
+    //   なり、その間に末尾に達すると pagination が無視されてスクロールが止まって見える。
+    //   次ページ取得中(isFetchingNextPage)だけを見て二重発火を防ぐ。
+    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const [refreshing, setRefreshing] = useState(false);
   const refresh = useCallback(async () => {

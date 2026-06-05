@@ -194,11 +194,17 @@ export default function CommunityDetailScreen() {
   // 楽観更新で「参加中」表示を先に切り替え、失敗時のみ revert する。
   const onJoinLeave = async () => {
     if (!community || joining) return;
+    const wasMember = community.is_member;
+    const isRequest = community.visibility === 'request';
+    // ★ owner は退会できない(leaveCommunity が拒否)。楽観 leave を出すと member_count が
+    //   一瞬減って戻る「チラつき」+ エラートーストになるので、タップを即無効化して案内のみ。
+    if (wasMember && community.role === 'owner') {
+      show('オーナーはコミュニティから抜けられません', 'warn');
+      return;
+    }
     setJoining(true);
 
     // 楽観更新: header の is_member / member_count を即座に切り替える
-    const wasMember = community.is_member;
-    const isRequest = community.visibility === 'request';
     if (!isRequest) {
       qc.setQueryData(
         ['community', id],

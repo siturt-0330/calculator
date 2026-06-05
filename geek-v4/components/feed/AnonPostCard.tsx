@@ -988,7 +988,10 @@ function AnonPostCardInner({
   const commentsCount = post.comments_count ?? 0;
   const concernCount = post.concern_count ?? 0;
   const hasMedia = mediaUrls.length > 0 || videoUrls.length > 0;
-  const lowTrust = likesCount > 0 && concernCount > likesCount;
+  // ★ 表示と整合させる: ハートは displayLikesCount(fuzz後)を見せているので、
+  //   バナー判定も表示値で行う(real likesCount だと「like16・気になる12」なのに
+  //   "気になるが多い" バナーが出る矛盾になる)。
+  const lowTrust = displayLikesCount > 0 && concernCount > displayLikesCount;
 
   const openSource = useCallback(() => {
     if (!previewUrl) return;

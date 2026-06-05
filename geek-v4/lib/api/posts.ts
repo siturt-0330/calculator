@@ -611,9 +611,11 @@ export async function createPost({
       const rows = uniqueIds.map((community_id) => ({ post_id: postId, community_id }));
       const { error: attachErr } = await supabase.from('post_communities').insert(rows);
       if (attachErr) {
-        // 致命的ではない (post 自体は成功) — ログだけ残してユーザーには知らせる
         console.warn('[createPost] community attach failed:', attachErr.message);
-        throw new Error('コミュニティへの紐付けに失敗しました');
+        // ★ 補償: コミュ紐付け失敗時は作りかけの post を削除して孤児を残さない
+        //   (非会員のディープリンク投稿等で RLS が attach を拒否するケース)。
+        await supabase.from('posts').delete().eq('id', postId);
+        throw new Error('このコミュニティには投稿できませんでした(参加が必要かもしれません)');
       }
     }
   }
@@ -744,21 +746,29 @@ export async function fetchCommunityPosts({
   // embed 経路で attach 済 → 2nd RTT を skip。
   const decorated = usedFallback ? await attachOfficialAuthor(posts) : posts;
 
-  // コミュニティタブ用: author の nickname + avatar_url を profiles から一括取得して attach。
-  // is_anonymous フラグに関わらず全投稿に付与する (Reddit スタイル表示)。
-  const authorIds = Array.from(
-    new Set(decorated.map((p) => p.author_id).filter((id): id is string => Boolean(id))),
+  // コミュニティタブ用: 名前付き投稿(is_anonymous=false。公式/実名)だけ profiles から
+  // nickname + avatar_url を引いて attach する。
+  // ★ 匿名投稿には実名を一切引かない。匿名性は RLS だけに頼らず「実名を要求するクエリ
+  //   自体を作らない」ことで担保する(将来 RLS が緩和されても匿名作者の身元が漏れない)。
+  const namedAuthorIds = Array.from(
+    new Set(
+      decorated
+        .filter((p) => p.is_anonymous === false)
+        .map((p) => p.author_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
   );
-  if (authorIds.length > 0) {
+  if (namedAuthorIds.length > 0) {
     const { data: profs } = await supabase
       .from('profiles')
       .select('id, nickname, avatar_url')
-      .in('id', authorIds);
+      .in('id', namedAuthorIds);
     const profMap = new Map(
       (profs ?? []).map((p) => [p.id, p as { id: string; nickname: string; avatar_url: string | null }]),
     );
     return {
       posts: decorated.map((p) => {
+        if (p.is_anonymous !== false) return p; // 匿名は実名を付与しない
         const prof = p.author_id ? profMap.get(p.author_id) : undefined;
         if (!prof) return p;
         return { ...p, author_nickname: prof.nickname, author_avatar_url: prof.avatar_url };

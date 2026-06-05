@@ -33,8 +33,8 @@ type ChipDef = {
 // 表示順固定: 4 sub tab + admin (mod 限定で末尾)
 const TABS: ChipDef[] = [
   { key: 'home', label: 'ホーム', icon: Icon.home },
-  // Icon.message が registry に無いので Icon.bbs (MessageSquare) を流用
-  { key: 'bbs', label: '掲示板', icon: Icon.bbs },
+  // 掲示板は home フィードに統合済み(/community/[id]/bbs は home への Redirect)。
+  // sub-tab に残すと「タップしても home に戻る」死導線になるため除外。
   { key: 'map', label: 'マップ', icon: Icon.map },
   { key: 'calendar', label: 'カレンダー', icon: Icon.calendar },
   { key: 'admin', label: '管理人', icon: Icon.shield },
