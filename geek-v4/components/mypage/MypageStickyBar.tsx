@@ -4,11 +4,12 @@
 // 設計 (Atelier 改 / navigationSpec + motionSpec(4)):
 //   - カバー誌名がスクロールで消えた後、上端に「誌名を受け渡す」ミニバー。
 //   - 背景:
-//       web   = Animated.View(absoluteFill) + 動的 backdrop-filter
-//               (TopBar.tsx の aWebBackdrop を写経。blur を scrollY で
-//                0→24px に立ち上げ、常時焼付けを避ける。WebkitBackdropFilter
-//                併記 + `as object` 注入。blur 面はこの 1 枚に限定し
-//                Safari の blur ネスト破綻を回避する)
+//       web   = View(absoluteFill) + 静的 backdrop-filter
+//               (blur(24px) を固定で焼付け。blur 半径を毎スクロールフレームで
+//                再計算するのは web/Safari 最重の全面再描画なので避ける。
+//                WebkitBackdropFilter 併記 + `as object` 注入。blur 面はこの
+//                1 枚に限定し Safari の blur ネスト破綻を回避する。バーの
+//                出現は親 aBar の opacity フェードのみで担う)
 //       native= 下地 rgba(20,20,23,0.92) + expo-blur BlurView intensity80。
 //   - バー全体の opacity は scrollY[150,200]→[0,1] でフェードイン出現。
 //   - 中身: 左 Avatar28(accent ring) + ニックネーム(LOGO_FONT13) /

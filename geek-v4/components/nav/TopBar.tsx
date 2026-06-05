@@ -121,26 +121,12 @@ export function TopBar({
     };
   });
 
-  // web 用の動的 backdrop-filter (scroll で blur 強化)
-  const aWebBackdrop = useAnimatedStyle(() => {
-    if (Platform.OS !== 'web') return {};
-    if (!scrollY || reduceMotion) {
-      return {
-        backdropFilter: 'blur(30px) saturate(180%)',
-        WebkitBackdropFilter: 'blur(30px) saturate(180%)',
-      } as object;
-    }
-    const blurPx = interpolate(
-      scrollY.value,
-      [COLLAPSE_START, COLLAPSE_END],
-      [0, 30],
-      'clamp',
-    );
-    return {
-      backdropFilter: `blur(${blurPx}px) saturate(180%)`,
-      WebkitBackdropFilter: `blur(${blurPx}px) saturate(180%)`,
-    } as object;
-  });
+  // ----- web の frosted は背景レイヤに「静的 blur」を直書き(下記 JSX)。-----
+  //   ★ 旧実装は blur 半径を scrollY で 0→30px と毎フレーム動かしていたが、
+  //     backdrop-filter の blur 半径アニメは web/Safari で最も重い再描画
+  //     (背後の生スクロール領域を毎フレーム再 blur)で「かくかく」の主因だった。
+  //     blur は固定にし、バーの出現は同レイヤ aBackdrop の opacity フェードだけで
+  //     担う(opacity は合成のみで安い。blur 面は合成キャッシュ可能な定数になる)。
 
   const blurTint = (
     isDark ? 'systemUltraThinMaterialDark' : 'systemUltraThinMaterialLight'
@@ -168,9 +154,15 @@ export function TopBar({
           pointerEvents="none"
           style={[
             StyleSheet.absoluteFill,
-            { backgroundColor: webBgColor },
+            {
+              backgroundColor: webBgColor,
+              // ★ blur 半径は固定。毎フレーム動かさないことで Safari の全面再描画を断つ。
+              ...({
+                backdropFilter: 'blur(30px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(30px) saturate(180%)',
+              } as object),
+            },
             aBackdrop,
-            aWebBackdrop,
           ]}
         />
       ) : (
