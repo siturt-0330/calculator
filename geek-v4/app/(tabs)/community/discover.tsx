@@ -1,6 +1,4 @@
 import { View, Text, ScrollView, RefreshControl, KeyboardAvoidingView, Platform } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
-import { squareThumbedUrl } from '../../../lib/utils/imageUrl';
 import { useState, useMemo } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,6 +9,7 @@ import { T } from '../../../design/typography';
 import { Input } from '../../../components/ui/Input';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { Skeleton, SkeletonCircle } from '../../../components/ui/Skeleton';
+import { CommunityIcon } from '../../../components/ui/CommunityIcon';
 import { BackButton } from '../../../components/nav/BackButton';
 import { Icon } from '../../../constants/icons';
 import {
@@ -280,34 +279,13 @@ export default function DiscoverCommunitiesScreen() {
                   ]}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <View
-                      style={{
-                        width: 44,
-                        height: 44,
-                        borderRadius: 22,
-                        backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {c.icon_url ? (
-                        // 44px @4x ≒ 176 → 180 で retina 余裕.
-                        // squareThumbedUrl: width=height=180 でサーバ側 center-crop。
-                        // 旧コードは raw icon_url を直接読んで RN Image が
-                        // cover で円に押し込むため、横長写真が極端に拡大されていた。
-                        <ExpoImage
-                          source={{ uri: squareThumbedUrl(c.icon_url, 180) }}
-                          style={{ width: '100%', height: '100%' }}
-                          contentFit="cover"
-                          cachePolicy="memory-disk"
-                          recyclingKey={c.icon_url}
-                          transition={120}
-                        />
-                      ) : (
-                        <Text style={{ fontSize: 22 }}>{c.icon_emoji}</Text>
-                      )}
-                    </View>
+                    <CommunityIcon
+                      iconUrl={c.icon_url}
+                      iconEmoji={c.icon_emoji}
+                      iconColor={c.icon_color}
+                      name={c.name}
+                      size={44}
+                    />
                     <OfficialBadge size="sm" />
                   </View>
                   <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={2}>
@@ -459,32 +437,13 @@ export default function DiscoverCommunitiesScreen() {
                   alignItems: 'center',
                 }}
               >
-                <View
-                  style={{
-                    width: 52,
-                    height: 52,
-                    borderRadius: 26,
-                    backgroundColor: c.icon_url ? C.bg3 : c.icon_color,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    overflow: 'hidden',
-                  }}
-                >
-                  {c.icon_url ? (
-                    // 52px @4x ≒ 208 → 220 で retina 余裕。サーバ側 center-crop で
-                    // 横長集合写真が拡大されて見える問題を回避。
-                    <ExpoImage
-                      source={{ uri: squareThumbedUrl(c.icon_url, 220) }}
-                      style={{ width: '100%', height: '100%' }}
-                      contentFit="cover"
-                      cachePolicy="memory-disk"
-                      recyclingKey={c.icon_url}
-                      transition={120}
-                    />
-                  ) : (
-                    <Text style={{ fontSize: 26 }}>{c.icon_emoji}</Text>
-                  )}
-                </View>
+                <CommunityIcon
+                  iconUrl={c.icon_url}
+                  iconEmoji={c.icon_emoji}
+                  iconColor={c.icon_color}
+                  name={c.name}
+                  size={52}
+                />
                 <View style={{ flex: 1, gap: 2 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>

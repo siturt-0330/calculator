@@ -16,15 +16,13 @@
 
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
 import Animated, { FadeIn, FadeInDown, FadeOut, useReducedMotion } from 'react-native-reanimated';
 
-import { C, SP, R, SIZE } from '../../design/tokens';
+import { C, SP, SIZE } from '../../design/tokens';
 import { T, FONT } from '../../design/typography';
-import { TIMING_NORM } from '../../design/motion';
 import { PressableScale } from '../ui/PressableScale';
+import { CommunityIcon } from '../ui/CommunityIcon';
 import { Icon } from '../../constants/icons';
-import { squareThumbedUrl } from '../../lib/utils/imageUrl';
 import type { Community } from '../../lib/api/communities';
 
 interface SimilarCommunityNoticeProps {
@@ -99,9 +97,6 @@ interface CommunityRowProps {
 }
 
 function CommunityRow({ community, onPress }: CommunityRowProps) {
-  const hasImage = !!community.icon_url;
-  // 32px 円アイコン → 96px(32@3x)正方形サムネ。打鍵ごとの再描画でも cache 再利用
-  const iconThumb = community.icon_url ? squareThumbedUrl(community.icon_url, 96) : null;
   const memberCount = community.member_count ?? 0;
 
   return (
@@ -113,28 +108,13 @@ function CommunityRow({ community, onPress }: CommunityRowProps) {
       style={styles.row}
     >
       {/* 小円アイコン */}
-      <View style={styles.iconWrap}>
-        {hasImage && iconThumb ? (
-          <ExpoImage
-            source={{ uri: iconThumb }}
-            contentFit="cover"
-            transition={TIMING_NORM.duration}
-            cachePolicy="memory-disk"
-            recyclingKey={community.icon_url ?? undefined}
-            style={styles.iconImage}
-            accessible={false}
-          />
-        ) : (
-          <View
-            style={[
-              styles.iconEmoji,
-              { backgroundColor: community.icon_color ?? C.bg3 },
-            ]}
-          >
-            <Text style={styles.iconEmojiText}>{community.icon_emoji ?? '#'}</Text>
-          </View>
-        )}
-      </View>
+      <CommunityIcon
+        iconUrl={community.icon_url}
+        iconEmoji={community.icon_emoji}
+        iconColor={community.icon_color}
+        name={community.name}
+        size={ICON}
+      />
 
       {/* テキスト */}
       <View style={styles.rowText}>
@@ -207,28 +187,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: SP[3],
     paddingVertical: SP[2],
-  },
-  iconWrap: {
-    width: ICON,
-    height: ICON,
-  },
-  iconImage: {
-    width: ICON,
-    height: ICON,
-    borderRadius: R.full,
-    backgroundColor: C.bg3,
-  },
-  iconEmoji: {
-    width: ICON,
-    height: ICON,
-    borderRadius: R.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconEmojiText: {
-    fontSize: 16,
-    lineHeight: 20,
-    textAlign: 'center',
   },
   rowText: {
     flex: 1,

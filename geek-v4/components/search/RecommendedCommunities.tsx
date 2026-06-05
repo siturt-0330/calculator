@@ -13,16 +13,15 @@ import {
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { useColors } from '../../hooks/useColors';
 import { PressableScale } from '../ui/PressableScale';
+import { CommunityIcon } from '../ui/CommunityIcon';
 import { Icon } from '../../constants/icons';
 import { R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { discoverCommunities, type Community } from '../../lib/api/communities';
-import { squareThumbedUrl } from '../../lib/utils/imageUrl';
 
 // iOS-native: 「もっと繋がっているように」 = カード枠を外して
 // 純粋な avatar + label 並びにする (Stories / Friends 行のような密度)
@@ -145,13 +144,6 @@ function CommunityCard({
   onPress: () => void;
 }) {
   const C = useColors();
-  // squareThumbedUrl: width=240&height=240&resize=cover で正方形 center-crop。
-  // width-only だと横長集合写真が円に詰め込まれて拡大されて見える。
-  const thumb = useMemo(
-    () => (community.icon_url ? squareThumbedUrl(community.icon_url, 240) : null),
-    [community.icon_url],
-  );
-  const thumbSource = useMemo(() => (thumb ? { uri: thumb } : null), [thumb]);
 
   return (
     <PressableScale
@@ -172,7 +164,6 @@ function CommunityCard({
             width: AVATAR_SIZE,
             height: AVATAR_SIZE,
             borderRadius: AVATAR_SIZE / 2,
-            backgroundColor: community.icon_url ? C.bg3 : community.icon_color,
             alignItems: 'center',
             justifyContent: 'center',
             overflow: 'hidden',
@@ -183,18 +174,13 @@ function CommunityCard({
           SHADOW.xs,
         ]}
       >
-        {thumbSource ? (
-          <ExpoImage
-            source={thumbSource}
-            style={{ width: '100%', height: '100%' }}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            recyclingKey={community.icon_url ?? community.id}
-            transition={120}
-          />
-        ) : (
-          <Text style={{ fontSize: 26 }}>{community.icon_emoji}</Text>
-        )}
+        <CommunityIcon
+          iconUrl={community.icon_url}
+          iconEmoji={community.icon_emoji}
+          iconColor={community.icon_color}
+          name={community.name}
+          size={AVATAR_SIZE}
+        />
       </View>
 
       {/* name — 11pt (iOS-native の section label と同密度) */}

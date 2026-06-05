@@ -17,7 +17,6 @@ import {
   Pressable,
   ActivityIndicator,
 } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,6 +29,7 @@ import { PressableScale } from '../../../../components/ui/PressableScale';
 import { EmptyState } from '../../../../components/ui/EmptyState';
 import { BackButton } from '../../../../components/nav/BackButton';
 import { Icon } from '../../../../constants/icons';
+import { CommunityIcon } from '../../../../components/ui/CommunityIcon';
 import { AnonPostCard } from '../../../../components/feed/AnonPostCard';
 import { OfficialBadge } from '../../../../components/community/OfficialBadge';
 import { useAuthStore } from '../../../../stores/authStore';
@@ -54,7 +54,6 @@ import { useReactions, useReactionToggle } from '../../../../hooks/useReactions'
 import { useAddedTags, useAddTag } from '../../../../hooks/useAddedTags';
 import { usePolls } from '../../../../hooks/usePolls';
 import { sanitizeUrl } from '../../../../lib/sanitize';
-import { squareThumbedUrl } from '../../../../lib/utils/imageUrl';
 import type { Post } from '../../../../types/models';
 import type { ReactionAgg } from '../../../../lib/api/reactions';
 import type { Poll } from '../../../../lib/api/polls';
@@ -96,34 +95,16 @@ function CommunityAvatar({
   icon_color: string;
   size: number;
 }) {
+  // 画像は contain で「拡大して切れる」を防ぎ、onError で「空白の丸」を防ぐ
+  // (icon_url 失敗時は emoji へ自動 fallback)。CommunityIcon に集約。
   const safeIconUrl = icon_url ? sanitizeUrl(icon_url) : null;
-  // 他のコミュニティアイコンと同じく expo-image + 正方形サムネ(size@3x)に統一
-  const thumb = safeIconUrl ? squareThumbedUrl(safeIconUrl, Math.round(size * 3)) : null;
   return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        backgroundColor: safeIconUrl ? C.bg3 : icon_color,
-        overflow: 'hidden',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      {thumb ? (
-        <ExpoImage
-          source={{ uri: thumb }}
-          style={{ width: '100%', height: '100%' }}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          recyclingKey={safeIconUrl ?? undefined}
-          transition={120}
-        />
-      ) : (
-        <Text style={{ fontSize: size * 0.55 }}>{icon_emoji}</Text>
-      )}
-    </View>
+    <CommunityIcon
+      size={size}
+      iconUrl={safeIconUrl}
+      iconEmoji={icon_emoji}
+      iconColor={icon_color}
+    />
   );
 }
 

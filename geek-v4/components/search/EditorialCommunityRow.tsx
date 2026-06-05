@@ -19,7 +19,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { C, SP } from '../../design/tokens';
 import { T, FONT } from '../../design/typography';
 import { PressableScale } from '../ui/PressableScale';
-import { Avatar } from '../ui/Avatar';
+import { CommunityIcon } from '../ui/CommunityIcon';
 import { HighlightedText } from '../ui/HighlightedText';
 import { Icon } from '../../constants/icons';
 import type { CommunityHit } from '../../lib/api/communities';
@@ -65,12 +65,13 @@ export function EditorialCommunityRow({
           paddingVertical: SP['4'],
         }}
       >
-        {/* 左: アバター (icon_url 優先 / なければ emoji / さらに無ければ頭文字) */}
-        <Avatar
+        {/* 左: アイコン (icon_url 画像優先 / 失敗時 emoji / さらに無ければ頭文字。
+            contain で「拡大して切れる」を防ぎ、onError で「空白の丸」を防ぐ) */}
+        <CommunityIcon
           size={ROW_AVATAR_SIZE}
-          uri={icon_url || undefined}
-          emoji={icon_emoji}
-          color={icon_color}
+          iconUrl={icon_url}
+          iconEmoji={icon_emoji}
+          iconColor={icon_color}
           name={name}
         />
 

@@ -34,7 +34,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useQuery } from '@tanstack/react-query';
 
-import { Avatar } from '../ui/Avatar';
+import { CommunityIcon } from '../ui/CommunityIcon';
 import { PressableScale } from '../ui/PressableScale';
 import { HighlightedText } from '../ui/HighlightedText';
 import { SkeletonRow } from '../ui/SkeletonRow';
@@ -320,13 +320,13 @@ function RecentCommunityChip({
       accessibilityLabel={`${community.name} を開く`}
       style={{ width: 68, alignItems: 'center', gap: 6 }}
     >
-      <Avatar
+      <CommunityIcon
         size={56}
-        uri={community.icon_url ?? undefined}
-        emoji={community.icon_emoji}
-        color={community.icon_color}
+        iconUrl={community.icon_url}
+        iconEmoji={community.icon_emoji}
+        iconColor={community.icon_color}
         name={community.name}
-        ring="accent"
+        ring
       />
       <Text
         numberOfLines={1}
@@ -695,11 +695,11 @@ function CommunityRow({
         paddingVertical: SP['2'],
       }}
     >
-      <Avatar
+      <CommunityIcon
         size={44}
-        uri={community.icon_url ?? undefined}
-        emoji={community.icon_emoji}
-        color={community.icon_color}
+        iconUrl={community.icon_url}
+        iconEmoji={community.icon_emoji}
+        iconColor={community.icon_color}
         name={community.name}
       />
       <View style={{ flex: 1, gap: 1 }}>

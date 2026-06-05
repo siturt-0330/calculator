@@ -3,8 +3,6 @@
 // ============================================================
 import { useMemo } from 'react';
 import { View, Text, ScrollView } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
-import { squareThumbedUrl } from '../../../lib/utils/imageUrl';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -13,6 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { LucideIcon } from 'lucide-react-native';
 import { BackButton } from '../../../components/nav/BackButton';
 import { PressableScale } from '../../../components/ui/PressableScale';
+import { CommunityIcon } from '../../../components/ui/CommunityIcon';
 import { Spinner } from '../../../components/ui/Spinner';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon } from '../../../constants/icons';
@@ -134,33 +133,13 @@ export default function OfficialDashboardScreen() {
         }}
       >
         <BackButton />
-        <View
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: R.md,
-            backgroundColor: safeIcon ? C.bg3 : community.icon_color,
-            alignItems: 'center',
-            justifyContent: 'center',
-            overflow: 'hidden',
-            borderWidth: 1,
-            borderColor: C.border,
-          }}
-        >
-          {safeIcon ? (
-            // 32px @4x = 128 → 140 で retina 余裕。サーバ側 center-crop。
-            <ExpoImage
-              source={{ uri: squareThumbedUrl(safeIcon, 140) }}
-              style={{ width: '100%', height: '100%' }}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              recyclingKey={safeIcon}
-              transition={120}
-            />
-          ) : (
-            <Text style={{ fontSize: 16 }}>{community.icon_emoji}</Text>
-          )}
-        </View>
+        <CommunityIcon
+          iconUrl={safeIcon}
+          iconEmoji={community.icon_emoji}
+          iconColor={community.icon_color}
+          name={community.name}
+          size={32}
+        />
         <Text style={[T.h3, { color: C.text, flex: 1 }]} numberOfLines={1}>{community.name}</Text>
         <View
           style={{

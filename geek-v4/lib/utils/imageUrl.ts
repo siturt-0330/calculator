@@ -35,7 +35,13 @@ const SUPABASE_PUBLIC_RENDER = '/storage/v1/render/image/public/';
 export function thumbedUrl(
   url: string | null | undefined,
   width = 720,
-  opts: { quality?: number; format?: 'webp' | 'avif' | 'origin'; height?: number } = {},
+  opts: {
+    quality?: number;
+    format?: 'webp' | 'avif' | 'origin';
+    height?: number;
+    /** crop=cover (default) / 全体を収める=contain。アイコンは contain で「拡大」を防ぐ。 */
+    resize?: 'cover' | 'contain';
+  } = {},
 ): string {
   if (!url) return '';
   if (!url.includes(SUPABASE_PUBLIC_OBJECT)) return url;
@@ -43,9 +49,10 @@ export function thumbedUrl(
   if (/[?&]width=/.test(rendered)) return rendered;
   const quality = opts.quality ?? 75;
   const format = opts.format ?? 'webp';   // ★ デフォルトを WebP に (JPEG 比 25-30% 軽量)
+  const resize = opts.resize ?? 'cover';
   const sep = rendered.includes('?') ? '&' : '?';
   const heightPart = opts.height ? `&height=${opts.height}` : '';
-  return `${rendered}${sep}width=${width}${heightPart}&quality=${quality}&resize=cover&format=${format}`;
+  return `${rendered}${sep}width=${width}${heightPart}&quality=${quality}&resize=${resize}&format=${format}`;
 }
 
 /**
@@ -61,6 +68,22 @@ export function squareThumbedUrl(
   opts: { quality?: number; format?: 'webp' | 'avif' | 'origin' } = {},
 ): string {
   return thumbedUrl(url, size, { ...opts, height: size });
+}
+
+/**
+ * コミュニティアイコン用の **正方形 contain** サムネ URL。
+ *
+ * squareThumbedUrl (=resize=cover) はロゴを中央 crop して「拡大されて切れる」原因に
+ * なる。アイコンはロゴ全体が見えるべきなので resize=contain にし、円形 ViewBox 側でも
+ * contentFit="contain" で表示する (components/ui/CommunityIcon.tsx)。
+ * 余白にはアイコンの地色 (icon_color) が出るので「収めた」見た目が自然。
+ */
+export function iconThumbedUrl(
+  url: string | null | undefined,
+  size: number,
+  opts: { quality?: number; format?: 'webp' | 'avif' | 'origin' } = {},
+): string {
+  return thumbedUrl(url, size, { ...opts, height: size, resize: 'contain' });
 }
 
 /**

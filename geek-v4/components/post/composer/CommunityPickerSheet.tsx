@@ -15,8 +15,8 @@
 //       * supabase / zustand / navigation は一切持たない
 //   - filtering: 自己完結のため query で *ローカルにも* 名前一致フィルタする
 //     (case-insensitive)。親は query/onQueryChange で文字列を握り続ける。
-//   - アイコン描画は CommunityPill / CommunityBigCard に揃える:
-//       icon_url → ProgressiveImage(round) / 無ければ icon_color 円 + icon_emoji
+//   - アイコン描画は共有 <CommunityIcon> に統一:
+//       icon_url(画像) → emoji → 頭文字 → community アイコン (必ず表示 / contain で非クロップ)
 //   - dark / light どちらでも見えるよう useColors() で配色。白背景は使わない。
 // ============================================================
 
@@ -45,7 +45,7 @@ import { hap } from '../../../design/haptics';
 import { Icon } from '../../../constants/icons';
 import { PressableScale } from '../../ui/PressableScale';
 import { Input } from '../../ui/Input';
-import { ProgressiveImage } from '../../ui/ProgressiveImage';
+import { CommunityIcon } from '../../ui/CommunityIcon';
 import { formatCountJa } from '../../../lib/format/communityMetrics';
 import type { Community } from '../../../lib/api/communities';
 
@@ -292,28 +292,13 @@ function CommunityRow({ community, selected, onPress, C }: CommunityRowProps) {
       }}
     >
       {/* avatar: 画像があれば優先、無ければ icon_color の円 + 絵文字 */}
-      {community.icon_url ? (
-        <ProgressiveImage
-          uri={community.icon_url}
-          width={AVATAR}
-          height={AVATAR}
-          radius={AVATAR / 2}
-          thumbWidth={120}
-        />
-      ) : (
-        <View
-          style={{
-            width: AVATAR,
-            height: AVATAR,
-            borderRadius: AVATAR / 2,
-            backgroundColor: community.icon_color,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Text style={{ fontSize: 18 }}>{community.icon_emoji}</Text>
-        </View>
-      )}
+      <CommunityIcon
+        iconUrl={community.icon_url}
+        iconEmoji={community.icon_emoji}
+        iconColor={community.icon_color}
+        name={community.name}
+        size={AVATAR}
+      />
 
       {/* 中央: 名前 + メトリクス */}
       <View style={{ flex: 1, minWidth: 0 }}>
