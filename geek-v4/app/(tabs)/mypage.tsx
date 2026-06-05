@@ -384,7 +384,15 @@ export default function MypageScreen() {
         data={rows}
         renderItem={renderItem}
         keyExtractor={keyExtractor}
-        estimatedItemSize={180}
+        // ★ 縦長メディア行(画像/動画)の実高は ~350-650px。旧 180 は過小で、
+        //   スクロール中に実測との差でコンテンツが跳ね「かくかく」していた。
+        estimatedItemSize={400}
+        // ★ 行種別ごとに recycle プールを分離。post/comment/saved の縦長行と
+        //   skeleton/lock/empty の小行が混ざると、別種セルへの再利用で全面 relayout
+        //   が走りスクロールがカクつく。kind で分けると同種同士のみ再利用される。
+        getItemType={(item) => item.kind}
+        // ★ 1 ビューポート分先読みして、メディア行の空セル白点滅を抑える(feed と同値)。
+        drawDistance={600}
         // ★ web で FlashList が親の高さを取れず 0 高さに潰れて中身が見えなく
         //   なる(画面が真っ黒)のを防ぐ。初期サイズを明示して必ず描画させる。
         estimatedListSize={{ width: winW, height: winH }}

@@ -160,7 +160,15 @@ export function ProfileMastheadV2(props: ProfileMastheadV2Props) {
       >
         <Animated.View
           style={[
-            { position: 'absolute', left: 0, right: 0, top: 0, height: COVER_H },
+            {
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: 0,
+              height: COVER_H,
+              // ★ web: アニメ層を GPU レイヤへ昇格し、毎フレームの paint/再合成を断つ。
+              ...(Platform.OS === 'web' ? ({ willChange: 'transform, opacity' } as object) : null),
+            },
             coverAnimStyle,
             coverFadeStyle,
           ]}
@@ -218,7 +226,13 @@ export function ProfileMastheadV2(props: ProfileMastheadV2Props) {
         <Animated.View
           pointerEvents="none"
           style={[
-            { position: 'absolute', left: SP['4'], right: SP['4'], bottom: 72 },
+            {
+              position: 'absolute',
+              left: SP['4'],
+              right: SP['4'],
+              bottom: 72,
+              ...(Platform.OS === 'web' ? ({ willChange: 'transform, opacity' } as object) : null),
+            },
             nameLockupStyle,
           ]}
         >
@@ -262,6 +276,9 @@ export function ProfileMastheadV2(props: ProfileMastheadV2Props) {
             marginTop: COVER_H - 55,
             paddingHorizontal: SP['4'],
             alignSelf: 'flex-start',
+            // ★ web: scale する層をレイヤ昇格し、子の glow(box-shadow)の毎フレーム
+            //   再ラスタライズを止める。
+            ...(Platform.OS === 'web' ? ({ willChange: 'transform' } as object) : null),
           },
           avatarStyle,
         ]}
@@ -334,6 +351,7 @@ export function ProfileMastheadV2(props: ProfileMastheadV2Props) {
             position: 'absolute',
             top: topInset + SP['3'],
             right: SP['4'],
+            ...(Platform.OS === 'web' ? ({ willChange: 'opacity' } as object) : null),
           },
           settingsPillStyle,
         ]}
@@ -349,12 +367,11 @@ export function ProfileMastheadV2(props: ProfileMastheadV2Props) {
             borderRadius: R.full,
             alignItems: 'center',
             justifyContent: 'center',
+            // ★ backdrop-filter を撤去。退場 opacity アニメ中の要素に blur が同居すると
+            //   毎フレーム背景 blur を再計算して重い。半透明黒の塗りだけで可読性は十分。
             backgroundColor: 'rgba(0,0,0,0.45)',
             borderWidth: 1,
             borderColor: 'rgba(255,255,255,0.14)',
-            ...(Platform.OS === 'web'
-              ? ({ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' } as object)
-              : null),
           }}
         >
           <Icon.settings size={18} color="#fff" strokeWidth={2.2} />

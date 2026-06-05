@@ -12,7 +12,7 @@
 // ============================================================
 
 import type { ReactNode } from 'react';
-import { View, Text, Pressable } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Heart, MessageCircle, Play } from 'lucide-react-native';
 
@@ -68,6 +68,40 @@ export function MetaNum({ Icon: I, value }: { Icon: typeof Heart; value: number 
   );
 }
 
+// 動画/+N オーバーレイの静的スタイル (毎 render のオブジェクト生成を避け、
+// スクロール中の style 差分=再描画圧を減らす。色は literal でテーマ非依存)。
+const mediaStyles = StyleSheet.create({
+  fillCenter: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playCircle: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  scrim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});
+
 // ------------------------------------------------------------
 // MediaCell — グリッドの 1 マス。画像 or 動画ポスター + (動画は ▶)。
 // ------------------------------------------------------------
@@ -113,48 +147,14 @@ function MediaCell({
         recyclingKey={src}
       />
       {isVideo ? (
-        <View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <View
-            style={{
-              width: 46,
-              height: 46,
-              borderRadius: 23,
-              backgroundColor: 'rgba(0,0,0,0.5)',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderWidth: 1,
-              borderColor: 'rgba(255,255,255,0.25)',
-            }}
-          >
+        <View pointerEvents="none" style={mediaStyles.fillCenter}>
+          <View style={mediaStyles.playCircle}>
             <Play size={22} color="#fff" fill="#fff" strokeWidth={0} />
           </View>
         </View>
       ) : null}
       {extra && extra > 0 ? (
-        <View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
+        <View pointerEvents="none" style={mediaStyles.scrim}>
           <Text style={[T.h3, { color: '#fff', fontWeight: '800' }]}>{`+${extra}`}</Text>
         </View>
       ) : null}
@@ -314,13 +314,13 @@ export function MyEntryRow({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       style={{
-        marginHorizontal: SP['4'],
-        marginTop: SP['3'],
-        padding: SP['4'],
-        backgroundColor: C.bg2,
-        borderRadius: R.lg,
-        borderWidth: 1,
-        borderColor: C.divider,
+        // ★ カード(箱)をやめ、全幅 + 下端 hairline 区切りの X/Twitter 風に。
+        //   投稿ごとの「枠」を無くし、地続きのタイムラインにする。
+        paddingHorizontal: SP['4'],
+        paddingVertical: SP['4'],
+        backgroundColor: C.bg,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: C.divider,
       }}
     >
       {isComment ? (

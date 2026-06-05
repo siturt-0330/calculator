@@ -30,7 +30,6 @@ import { BlurView } from 'expo-blur';
 import Animated, {
   interpolate,
   useAnimatedStyle,
-  useReducedMotion,
   SharedValue,
 } from 'react-native-reanimated';
 import { C, SP, isLightActive } from '../../design/tokens';
@@ -60,8 +59,6 @@ export function MypageStickyBar({
   scrollY,
   onOpenSettings,
 }: Props) {
-  const reduceMotion = useReducedMotion();
-
   // ----- render 時に色を解決 (worklet には渡さない) -----
   const light = isLightActive();
   // 背景: web は半透明 + backdrop-filter、native は不透明寄りの下地。
@@ -77,23 +74,12 @@ export function MypageStickyBar({
     opacity: interpolate(scrollY.value, [150, 200], [0, 1], 'clamp'),
   }));
 
-  // ----- web 動的 backdrop-filter (TopBar.tsx aWebBackdrop 写経) -----
-  // blur を scrollY[150,210]→[0,24]px で立ち上げ saturate(180%)。
-  // reduceMotion / web 以外では transform 由来の連続更新を避け固定値。
-  const aWebBackdrop = useAnimatedStyle(() => {
-    if (Platform.OS !== 'web') return {};
-    if (reduceMotion) {
-      return {
-        backdropFilter: 'blur(24px) saturate(180%)',
-        WebkitBackdropFilter: 'blur(24px) saturate(180%)',
-      } as object;
-    }
-    const blurPx = interpolate(scrollY.value, [150, 210], [0, 24], 'clamp');
-    return {
-      backdropFilter: `blur(${blurPx}px) saturate(180%)`,
-      WebkitBackdropFilter: `blur(${blurPx}px) saturate(180%)`,
-    } as object;
-  });
+  // ----- web の frosted は背景レイヤに「静的 blur」を直書き(下記 JSX)。-----
+  //   ★ 旧実装は blur 半径を scrollY で 0→24px と毎フレーム動かしていたが、
+  //     backdrop-filter の blur 半径アニメは web/Safari で最も重い再描画
+  //     (背後の生スクロール領域を毎フレーム再 blur)で「かくかく」の主因だった。
+  //     blur は固定にし、バーの出現は親 aBar の opacity フェードだけで担う
+  //     (opacity は合成のみで安い。blur 面は合成キャッシュ可能な定数になる)。
 
   // ----- 下端 hairline (遅れてフェードイン) -----
   const aHairline = useAnimatedStyle(() => ({
@@ -118,12 +104,18 @@ export function MypageStickyBar({
     >
       {/* 背景レイヤ: web = backdrop-filter / native = 下地 + BlurView */}
       {Platform.OS === 'web' ? (
-        <Animated.View
+        <View
           pointerEvents="none"
           style={[
             StyleSheet.absoluteFill,
-            { backgroundColor: webBgColor },
-            aWebBackdrop,
+            {
+              backgroundColor: webBgColor,
+              // ★ blur 半径は固定。毎フレーム動かさないことで Safari の全面再描画を断つ。
+              ...({
+                backdropFilter: 'blur(24px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+              } as object),
+            },
           ]}
         />
       ) : (
