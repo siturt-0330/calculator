@@ -51,6 +51,8 @@ export interface MyEntryRowProps {
   onPress: () => void;
   /** 画像タップ(→ 全画面 ImageLightbox)。未指定なら onPress にフォールバック。 */
   onOpenImage?: (url: string) => void;
+  /** 右上「…」メニュー(自分の投稿/コメントの削除など)。未指定なら非表示。 */
+  onMore?: () => void;
   accessibilityLabel?: string;
 }
 
@@ -262,16 +264,21 @@ export function MyEntryRow({
   quoteNode,
   onPress,
   onOpenImage,
+  onMore,
   accessibilityLabel,
 }: MyEntryRowProps) {
   const isComment = variant === 'comment';
   const hasTitle = !isComment && !!title && title.trim().length > 0;
+  const hasMore = !!onMore;
   const body = snippet.trim();
 
   const inner = (
     <>
       {hasTitle ? (
-        <Text style={[T.bodyB, { color: C.text, letterSpacing: -0.2 }]} numberOfLines={2}>
+        <Text
+          style={[T.bodyB, { color: C.text, letterSpacing: -0.2, paddingRight: hasMore ? 28 : 0 }]}
+          numberOfLines={2}
+        >
           {title}
         </Text>
       ) : null}
@@ -279,7 +286,12 @@ export function MyEntryRow({
         <Text
           style={[
             isComment ? T.body : T.body,
-            { color: C.text, marginTop: hasTitle ? 4 : 0 },
+            {
+              color: C.text,
+              marginTop: hasTitle ? 4 : 0,
+              // 本文が最上段(コメント or タイトル無し投稿)のときだけ「…」分の右余白を確保。
+              paddingRight: hasMore && (isComment || !hasTitle) ? 28 : 0,
+            },
           ]}
           numberOfLines={isComment ? 4 : 6}
         >
@@ -307,36 +319,61 @@ export function MyEntryRow({
   );
 
   return (
-    <PressableScale
-      onPress={onPress}
-      haptic="tap"
-      hitSlop={4}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      style={{
-        // ★ カード(箱)をやめ、全幅 + 下端 hairline 区切りの X/Twitter 風に。
-        //   投稿ごとの「枠」を無くし、地続きのタイムラインにする。
-        paddingHorizontal: SP['4'],
-        paddingVertical: SP['4'],
-        backgroundColor: C.bg,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: C.divider,
-      }}
-    >
-      {isComment ? (
-        <View style={{ flexDirection: 'row', gap: SP['3'] }}>
-          {/* accent 引用縦罫 = あなたの声(blockquote) */}
-          <View
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-            style={{ width: 2, alignSelf: 'stretch', borderRadius: 1, backgroundColor: C.accent, opacity: 0.9 }}
-          />
-          <View style={{ flex: 1, minWidth: 0 }}>{inner}</View>
-        </View>
-      ) : (
-        inner
-      )}
-    </PressableScale>
+    <View style={{ position: 'relative' }}>
+      <PressableScale
+        onPress={onPress}
+        haptic="tap"
+        hitSlop={4}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        style={{
+          // ★ カード(箱)をやめ、全幅 + 下端 hairline 区切りの X/Twitter 風に。
+          //   投稿ごとの「枠」を無くし、地続きのタイムラインにする。
+          paddingHorizontal: SP['4'],
+          paddingVertical: SP['4'],
+          backgroundColor: C.bg,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: C.divider,
+        }}
+      >
+        {isComment ? (
+          <View style={{ flexDirection: 'row', gap: SP['3'] }}>
+            {/* accent 引用縦罫 = あなたの声(blockquote) */}
+            <View
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              style={{ width: 2, alignSelf: 'stretch', borderRadius: 1, backgroundColor: C.accent, opacity: 0.9 }}
+            />
+            <View style={{ flex: 1, minWidth: 0 }}>{inner}</View>
+          </View>
+        ) : (
+          inner
+        )}
+      </PressableScale>
+
+      {/* 右上「…」メニュー。カード PressableScale の「兄弟」として上に重ねるので、
+          ここをタップしてもカード本体の onPress(投稿を開く)は発火しない。 */}
+      {onMore ? (
+        <Pressable
+          onPress={onMore}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="その他の操作"
+          style={{
+            position: 'absolute',
+            top: SP['3'],
+            right: SP['3'],
+            width: 28,
+            height: 28,
+            borderRadius: R.full,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Icon.more size={18} color={C.text3} strokeWidth={2} />
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 

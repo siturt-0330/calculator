@@ -18,6 +18,25 @@ import type { Comment } from '../../types/models';
 import { sanitizeContent } from '../sanitize';
 import { checkRate, rateLimitMessage } from '../rateLimit';
 
+// ============================================================
+// deleteComment — 自分のコメントを削除する (author 本人のみ)
+// ------------------------------------------------------------
+// RLS: comments_delete = `auth.uid() = author_id OR <mod>` (0068)。本人は削除可。
+// hard delete。counters (posts.comments_count / profiles.comment_count) は DB
+// トリガで自動減算。`.select('id')` で実削除を確認し RLS 0 行 delete の誤 success を防ぐ。
+// ============================================================
+export async function deleteComment(commentId: string): Promise<void> {
+  const { data, error } = await withApiTimeout(
+    supabase.from('comments').delete().eq('id', commentId).select('id'),
+    'comments.delete',
+    8000,
+  );
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('削除できませんでした (権限が無いか、既に削除済みです)');
+  }
+}
+
 // SELECT カラム — media 有 / 無 の 2 種類。列未適用環境では media 無し版で取る。
 const COMMENT_SELECT_COLS_BASE =
   'id, post_id, author_id, content, avatar_color, created_at, parent_comment_id, reply_to_comment_id';

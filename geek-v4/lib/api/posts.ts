@@ -34,6 +34,28 @@ type PostWithEmbeddedComm = Post & {
     | null;
 };
 
+// ============================================================
+// deleteOwnPost — 自分の投稿を削除する (author 本人のみ)
+// ------------------------------------------------------------
+// RLS: posts_delete = `auth.uid() = author_id` なので本人のみ削除可能。
+// hard delete。子行 (comments/saves/reactions/post_communities) は FK
+// ON DELETE CASCADE、counters (comments_count / profiles.post_count) は DB
+// トリガで自動減算されるため、ここでの手動減算は不要。
+// ★ `.select('id')` で実際に削除された行を確認する。RLS で 0 行 delete は
+//   error にならないため、これが無いと「権限なし」を success と誤報してしまう。
+// ============================================================
+export async function deleteOwnPost(postId: string): Promise<void> {
+  const { data, error } = await withApiTimeout(
+    supabase.from('posts').delete().eq('id', postId).select('id'),
+    'posts.deleteOwn',
+    8000,
+  );
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('削除できませんでした (権限が無いか、既に削除済みです)');
+  }
+}
+
 function attachOfficialAuthorFromEmbed<T extends Post>(
   rawPosts: PostWithEmbeddedComm[],
 ): T[] {

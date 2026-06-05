@@ -21,6 +21,8 @@ import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   View,
   Text,
+  Modal,
+  Pressable,
   useWindowDimensions,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -39,7 +41,8 @@ import Animated, {
 
 import { useAuthStore } from '../../stores/authStore';
 import { supabase } from '../../lib/supabase';
-import { fetchMyComments, type MyCommentRow } from '../../lib/api/comments';
+import { fetchMyComments, type MyCommentRow, deleteComment } from '../../lib/api/comments';
+import { deleteOwnPost } from '../../lib/api/posts';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { formatRelative } from '../../lib/utils/date';
 import { C, R, SP } from '../../design/tokens';
@@ -61,6 +64,9 @@ import {
   type MyMediaItem,
 } from '../../components/mypage/MyEntryRow';
 import { MyEntryRowSkeleton } from '../../components/mypage/MyEntryRowSkeleton';
+import { ActionSheet } from '../../components/ui/ActionSheet';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { useToastStore } from '../../stores/toastStore';
 
 // -----------------------------------------------------------------------------
 // データ型 + 取得(旧 UserPostsList / SavedPostsList の fetch を本画面に集約)
@@ -152,6 +158,9 @@ type Row =
   | { kind: 'comment'; comment: MyCommentRow }
   | { kind: 'saved'; post: SavedPost };
 
+// 「…」削除メニューの対象 (自分の投稿/コメントのみ)。
+type DeleteTarget = { kind: 'post' | 'comment'; id: string };
+
 // 投稿/保存の media 列を MyEntryRow 用の統一 media リストへ(画像→動画の順)。
 function toMedia(
   images: string[] | null,
@@ -195,6 +204,11 @@ export default function MypageScreen() {
   const [tab, setTab] = useState<ProfileTabKey>('posts');
   const [showStickyTabs, setShowStickyTabs] = useState(false);
   const [lightboxUri, setLightboxUri] = useState<string | null>(null);
+  // 自分の投稿/コメントの「…」メニュー & 削除確認の対象。
+  const [menuTarget, setMenuTarget] = useState<DeleteTarget | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<DeleteTarget | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const showToast = useToastStore((s) => s.show);
 
   // ---- スクロール駆動値(全 collapse / parallax / ミニバーの単一ソース)----
   const scrollY = useSharedValue(0);
@@ -312,6 +326,29 @@ export default function MypageScreen() {
   const openPost = useCallback((id: string) => router.push(`/post/${id}` as never), [router]);
   const openImage = useCallback((url: string) => setLightboxUri(thumbedUrl(url, 1280)), []);
 
+  // 「…」→ 削除確認 → 実削除。posts/comments の RLS で本人のみ削除可。
+  //  削除後は該当タブの query を invalidate して一覧から消す(counter は DB トリガで減算)。
+  const handleDelete = useCallback(async () => {
+    const t = confirmTarget;
+    if (!t || deleting) return;
+    setDeleting(true);
+    try {
+      if (t.kind === 'post') {
+        await deleteOwnPost(t.id);
+        await qc.invalidateQueries({ queryKey: ['user-posts', userId] });
+      } else {
+        await deleteComment(t.id);
+        await qc.invalidateQueries({ queryKey: ['user-comments', userId] });
+      }
+      showToast(t.kind === 'comment' ? 'コメントを削除しました' : '投稿を削除しました', 'success');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '削除に失敗しました', 'error');
+    } finally {
+      setDeleting(false);
+      setConfirmTarget(null);
+    }
+  }, [confirmTarget, deleting, qc, userId, showToast]);
+
   // ---- ListHeader(誌面マストヘッド + 実体タブA + ロード中 skeleton)----
   const ListHeader = useMemo(
     () => (
@@ -358,7 +395,12 @@ export default function MypageScreen() {
           return <EmptyForTab tab={item.tab} router={router} />;
         case 'post':
           return (
-            <PostRow post={item.post} onPress={() => openPost(item.post.id)} onOpenImage={openImage} />
+            <PostRow
+              post={item.post}
+              onPress={() => openPost(item.post.id)}
+              onOpenImage={openImage}
+              onMore={() => setMenuTarget({ kind: 'post', id: item.post.id })}
+            />
           );
         case 'comment':
           return (
@@ -366,6 +408,7 @@ export default function MypageScreen() {
               comment={item.comment}
               onPress={() => item.comment.post && openPost(item.comment.post.id)}
               onOpenImage={openImage}
+              onMore={() => setMenuTarget({ kind: 'comment', id: item.comment.id })}
             />
           );
         case 'saved':
@@ -442,6 +485,59 @@ export default function MypageScreen() {
 
       {/* ===== 画像タップ → 全画面ビューア(常時インライン表示 + 拡大は任意) ===== */}
       <ImageLightbox visible={!!lightboxUri} uri={lightboxUri} onClose={() => setLightboxUri(null)} />
+
+      {/* ===== 「…」メニュー(自分の投稿/コメント)— 下端シート ===== */}
+      <Modal
+        transparent
+        visible={!!menuTarget}
+        animationType="fade"
+        onRequestClose={() => setMenuTarget(null)}
+      >
+        <Pressable
+          onPress={() => setMenuTarget(null)}
+          style={{ flex: 1, backgroundColor: C.scrim, justifyContent: 'flex-end' }}
+        >
+          {/* シート本体。onPress を握って背景タップ(閉じる)と分離する。 */}
+          <Pressable
+            onPress={() => {}}
+            style={{
+              backgroundColor: C.bg2,
+              borderTopLeftRadius: R.xl,
+              borderTopRightRadius: R.xl,
+              paddingBottom: insets.bottom + SP['2'],
+              borderTopWidth: 1,
+              borderColor: C.border,
+            }}
+          >
+            <View style={{ alignItems: 'center', paddingTop: SP['3'] }}>
+              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: C.border }} />
+            </View>
+            <ActionSheet
+              actions={[
+                {
+                  label: menuTarget?.kind === 'comment' ? 'コメントを削除' : '投稿を削除',
+                  icon: Icon.trash,
+                  destructive: true,
+                  onPress: () => setConfirmTarget(menuTarget),
+                },
+              ]}
+              onClose={() => setMenuTarget(null)}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ===== 削除の確認 ===== */}
+      <ConfirmDialog
+        visible={!!confirmTarget}
+        destructive
+        title={confirmTarget?.kind === 'comment' ? 'このコメントを削除しますか？' : 'この投稿を削除しますか？'}
+        message="削除すると元に戻せません。"
+        confirmLabel="削除する"
+        cancelLabel="キャンセル"
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmTarget(null)}
+      />
     </View>
   );
 }
@@ -480,10 +576,12 @@ function PostRow({
   post,
   onPress,
   onOpenImage,
+  onMore,
 }: {
   post: UserPost;
   onPress: () => void;
   onOpenImage: (url: string) => void;
+  onMore: () => void;
 }) {
   const title = post.title?.trim() || null;
   const badge = !post.is_public ? (
@@ -512,6 +610,7 @@ function PostRow({
       badgeNode={badge}
       onPress={onPress}
       onOpenImage={onOpenImage}
+      onMore={onMore}
       accessibilityLabel="投稿を開く"
     />
   );
@@ -545,10 +644,12 @@ function CommentRow({
   comment,
   onPress,
   onOpenImage,
+  onMore,
 }: {
   comment: MyCommentRow;
   onPress: () => void;
   onOpenImage: (url: string) => void;
+  onMore: () => void;
 }) {
   const body = comment.content?.trim() || '';
   const post = comment.post;
@@ -581,6 +682,7 @@ function CommentRow({
       quoteNode={quote}
       onPress={post ? onPress : () => {}}
       onOpenImage={onOpenImage}
+      onMore={onMore}
       accessibilityLabel="コメントした投稿を開く"
     />
   );
