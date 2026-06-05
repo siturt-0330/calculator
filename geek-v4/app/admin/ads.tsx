@@ -47,7 +47,7 @@ const STATUS_FILTERS: Array<{ key: AdStatus | 'all'; label: string }> = [
 const STATUS_META: Record<AdStatus, { label: string; fg: string; bg: string; border: string }> = {
   draft:    { label: '下書き', fg: C.text3,        bg: C.bg3,      border: C.border },
   active:   { label: '配信中', fg: C.green,        bg: C.greenBg,  border: C.green + '55' },
-  paused:   { label: '停止中', fg: C.amber,        bg: C.amberBg,  border: C.amber + '55' },
+  paused:   { label: '一時停止', fg: C.amber,        bg: C.amberBg,  border: C.amber + '55' },
   ended:    { label: '終了',   fg: C.text3,        bg: C.bg3,      border: C.border },
 };
 

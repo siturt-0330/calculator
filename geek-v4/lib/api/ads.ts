@@ -11,6 +11,8 @@
 //   - event ログは fire-and-forget — UX を絶対に止めない。
 // ============================================================
 import { supabase } from '../supabase';
+import { withApiTimeout } from '../withApiTimeout';
+import { swallow } from '../swallow';
 
 export type Ad = {
   id: string;
@@ -103,28 +105,23 @@ export async function fetchTargetedAdsV2(
   try {
     const uid = (await supabase.auth.getUser()).data.user?.id;
     if (uid) {
-      const { data } = await supabase
-        .from('user_acquisition')
-        .select('traffic_source')
-        .eq('user_id', uid)
-        .maybeSingle();
+      const { data } = await withApiTimeout(
+        supabase
+          .from('user_acquisition')
+          .select('traffic_source')
+          .eq('user_id', uid)
+          .maybeSingle(),
+        'ads.trafficSource',
+        8000,
+      );
       trafficSource = (data as { traffic_source?: string | null } | null)?.traffic_source ?? null;
     }
-  } catch {
+  } catch (e) {
     // 流入元が引けなくても配信は続行 (= 全員向けのみ)
+    swallow('ads.trafficSource', e);
   }
 
-  // 2) active 広告を直読 (新列込み)。列が無ければ error → fallback。
-  const { data, error } = await supabase
-    .from('ads')
-    .select(
-      'id, advertiser_name, headline, body, image_url, click_url, cta_label, target_tags, exclude_tags, source_type, priority, target_traffic_sources, starts_at, ends_at',
-    )
-    .eq('status', 'active');
-  if (error || !data) {
-    return fetchTargetedAds(interestTags, excludeTags, limit);
-  }
-
+  // 2) active 広告を直読 (新列込み)。列が無い/タイムアウト/RLS 等で失敗したら v1 にフォールバック。
   type Row = {
     id: string; advertiser_name: string; headline: string; body: string;
     image_url: string | null; click_url: string; cta_label: string;
@@ -133,7 +130,27 @@ export async function fetchTargetedAdsV2(
     target_traffic_sources: string[] | null;
     starts_at: string | null; ends_at: string | null;
   };
-  const rows = data as Row[];
+  let rows: Row[];
+  try {
+    const { data, error } = await withApiTimeout(
+      supabase
+        .from('ads')
+        .select(
+          'id, advertiser_name, headline, body, image_url, click_url, cta_label, target_tags, exclude_tags, source_type, priority, target_traffic_sources, starts_at, ends_at',
+        )
+        .eq('status', 'active'),
+      'ads.fetchActiveV2',
+      8000,
+    );
+    if (error || !data) throw error ?? new Error('no ads data');
+    rows = data as Row[];
+  } catch (e) {
+    // priority/流入元ターゲティングが効かない時の切り分け用 (0119 未適用 or 失敗で v1 へ)
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.warn('[ads] fetchTargetedAdsV2 fell back to v1:', e instanceof Error ? e.message : String(e));
+    }
+    return fetchTargetedAds(interestTags, excludeTags, limit);
+  }
   const now = Date.now();
   const interest = new Set(interestTags);
   const exclude = new Set(excludeTags);
@@ -189,8 +206,9 @@ async function logAdEvent(
       feed_position: extra?.feed_position ?? null,
       matched_tags: extra?.matched_tags ?? [],
     });
-  } catch {
+  } catch (e) {
     // 意図的に握りつぶす — 広告のロギング失敗で UX を止めてはいけない
+    swallow('ads.logEvent', e);
   }
 }
 
@@ -217,7 +235,7 @@ export async function logAdDismiss(adId: string): Promise<void> {
 export async function fetchAllAds(status?: AdStatus): Promise<AdminAd[]> {
   let q = supabase.from('ads').select('*').order('created_at', { ascending: false });
   if (status) q = q.eq('status', status);
-  const { data, error } = await q;
+  const { data, error } = await withApiTimeout(q, 'ads.fetchAll', 8000);
   if (error) throw new Error(error.message || '広告の取得に失敗しました');
   return (data ?? []) as AdminAd[];
 }
@@ -246,28 +264,40 @@ export type CreateAdInput = {
 export async function createAd(input: CreateAdInput): Promise<AdminAd> {
   const user = (await supabase.auth.getUser()).data.user;
   if (!user) throw new Error('ログインが必要です');
-  const { data, error } = await supabase
-    .from('ads')
-    .insert({ ...input, created_by: user.id })
-    .select('*')
-    .single();
+  const { data, error } = await withApiTimeout(
+    supabase
+      .from('ads')
+      .insert({ ...input, created_by: user.id })
+      .select('*')
+      .single(),
+    'ads.create',
+    8000,
+  );
   if (error) throw new Error(error.message || '広告の作成に失敗しました');
   return data as AdminAd;
 }
 
 export async function updateAd(id: string, patch: Partial<CreateAdInput>): Promise<AdminAd> {
-  const { data, error } = await supabase
-    .from('ads')
-    .update({ ...patch, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select('*')
-    .single();
+  const { data, error } = await withApiTimeout(
+    supabase
+      .from('ads')
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('*')
+      .single(),
+    'ads.update',
+    8000,
+  );
   if (error) throw new Error(error.message || '広告の更新に失敗しました');
   return data as AdminAd;
 }
 
 export async function deleteAd(id: string): Promise<void> {
-  const { error } = await supabase.from('ads').delete().eq('id', id);
+  const { error } = await withApiTimeout(
+    supabase.from('ads').delete().eq('id', id),
+    'ads.delete',
+    8000,
+  );
   if (error) throw new Error(error.message || '広告の削除に失敗しました');
 }
 
@@ -277,18 +307,26 @@ export async function deleteAd(id: string): Promise<void> {
 export async function fetchAdStats(adId: string, days = 7): Promise<AdStats> {
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
   const [imp, clk] = await Promise.all([
-    supabase
-      .from('ad_events')
-      .select('id', { count: 'exact', head: true })
-      .eq('ad_id', adId)
-      .eq('event_type', 'impression')
-      .gte('created_at', since),
-    supabase
-      .from('ad_events')
-      .select('id', { count: 'exact', head: true })
-      .eq('ad_id', adId)
-      .eq('event_type', 'click')
-      .gte('created_at', since),
+    withApiTimeout(
+      supabase
+        .from('ad_events')
+        .select('id', { count: 'exact', head: true })
+        .eq('ad_id', adId)
+        .eq('event_type', 'impression')
+        .gte('created_at', since),
+      'ads.stats.impression',
+      8000,
+    ),
+    withApiTimeout(
+      supabase
+        .from('ad_events')
+        .select('id', { count: 'exact', head: true })
+        .eq('ad_id', adId)
+        .eq('event_type', 'click')
+        .gte('created_at', since),
+      'ads.stats.click',
+      8000,
+    ),
   ]);
   return {
     impressions: imp.count ?? 0,

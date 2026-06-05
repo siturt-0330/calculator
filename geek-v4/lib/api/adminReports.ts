@@ -13,6 +13,7 @@
 //   なり、assign/resolve は呼べない(UI 側で usedFallback を見て無効化する)。
 // ============================================================
 import { supabase } from '../supabase';
+import { withApiTimeout } from '../withApiTimeout';
 import { fetchReportedPosts, type AdminReportedPost } from './admin';
 
 export type ReportCaseStatus = 'open' | 'triaged' | 'in_review' | 'resolved' | 'rejected';
@@ -67,16 +68,26 @@ export async function fetchReportQueue(opts?: {
   const status = opts?.status ?? 'open';
   const limit = opts?.limit ?? 50;
   try {
-    const { data, error } = await supabase.rpc('get_report_queue', {
-      p_status: status,
-      p_limit: limit,
-    });
+    const { data, error } = await withApiTimeout(
+      supabase.rpc('get_report_queue', {
+        p_status: status,
+        p_limit: limit,
+      }),
+      'adminReports.queue',
+      8000,
+    );
     if (error) {
       if (isRpcMissing(error)) return { cases: await fallbackQueue(limit), usedFallback: true };
       throw error;
     }
-    const cases = Array.isArray(data) ? (data as ReportCase[]) : [];
-    return { cases, usedFallback: false };
+    if (!Array.isArray(data)) {
+      // RPC は在るのに配列以外が返った異常系。空表示で握り潰さず観測可能にする。
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.warn('[adminReports] get_report_queue returned non-array:', typeof data);
+      }
+      return { cases: [], usedFallback: false };
+    }
+    return { cases: data as ReportCase[], usedFallback: false };
   } catch (e) {
     if (isRpcMissing(e)) return { cases: await fallbackQueue(limit), usedFallback: true };
     throw e;
@@ -114,10 +125,14 @@ async function fallbackQueue(limit: number): Promise<ReportCase[]> {
 
 /** 通報ケースに担当をアサイン (省略時は自分)。0118 RPC が前提。 */
 export async function assignReportCase(caseId: string, assignee?: string | null): Promise<void> {
-  const { error } = await supabase.rpc('assign_report_case', {
-    p_case_id: caseId,
-    p_assignee: assignee ?? null,
-  });
+  const { error } = await withApiTimeout(
+    supabase.rpc('assign_report_case', {
+      p_case_id: caseId,
+      p_assignee: assignee ?? null,
+    }),
+    'adminReports.assign',
+    8000,
+  );
   if (error) throw error;
 }
 
@@ -127,10 +142,14 @@ export async function resolveReportCase(
   resolution: ReportResolution,
   reason?: string,
 ): Promise<void> {
-  const { error } = await supabase.rpc('resolve_report_case', {
-    p_case_id: caseId,
-    p_resolution: resolution,
-    p_reason: reason ?? '',
-  });
+  const { error } = await withApiTimeout(
+    supabase.rpc('resolve_report_case', {
+      p_case_id: caseId,
+      p_resolution: resolution,
+      p_reason: reason ?? '',
+    }),
+    'adminReports.resolve',
+    8000,
+  );
   if (error) throw error;
 }

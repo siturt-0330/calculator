@@ -11,6 +11,8 @@
 // try/catch でガードするか、0122 適用後に有効化する想定。
 // ============================================================
 import { supabase } from '../supabase';
+import { withApiTimeout } from '../withApiTimeout';
+import { swallow } from '../swallow';
 
 export type EnforcementLevel = 0 | 1 | 2 | 3;
 
@@ -58,51 +60,73 @@ export async function applyEnforcement(args: {
   caseId?: string | null;
   expiresAt?: string | null;
 }): Promise<string> {
-  const { data, error } = await supabase.rpc('apply_enforcement', {
-    p_user_id: args.userId,
-    p_level: args.level,
-    p_scope: args.scope ?? 'global',
-    p_reason: args.reason ?? '',
-    p_case_id: args.caseId ?? null,
-    p_expires_at: args.expiresAt ?? null,
-  });
+  const { data, error } = await withApiTimeout(
+    supabase.rpc('apply_enforcement', {
+      p_user_id: args.userId,
+      p_level: args.level,
+      p_scope: args.scope ?? 'global',
+      p_reason: args.reason ?? '',
+      p_case_id: args.caseId ?? null,
+      p_expires_at: args.expiresAt ?? null,
+    }),
+    'enforcement.apply',
+    8000,
+  );
   if (error) throw error;
   return data as string;
 }
 
 /** ユーザーの措置履歴 (新しい順)。RLS: admin 全 / 本人は自分のみ。 */
 export async function fetchEnforcementHistory(userId: string): Promise<EnforcementAction[]> {
-  const { data, error } = await supabase
-    .from('enforcement_actions')
-    .select('*')
-    .eq('user_id', userId)
-    .order('issued_at', { ascending: false });
+  const { data, error } = await withApiTimeout(
+    supabase
+      .from('enforcement_actions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('issued_at', { ascending: false }),
+    'enforcement.history',
+    8000,
+  );
   if (error) throw error;
   return (data ?? []) as EnforcementAction[];
 }
 
 /** 失効していない strike(level<=1) 数。失敗時は 0 (措置UIをブロックしない)。 */
 export async function fetchActiveStrikeCount(userId: string): Promise<number> {
-  const { data, error } = await supabase.rpc('active_strike_count', { p_user_id: userId });
-  if (error) return 0;
-  return typeof data === 'number' ? data : 0;
+  try {
+    const { data, error } = await withApiTimeout(
+      supabase.rpc('active_strike_count', { p_user_id: userId }),
+      'enforcement.strikeCount',
+      8000,
+    );
+    if (error) return 0;
+    return typeof data === 'number' ? data : 0;
+  } catch (e) {
+    // 措置 UI をブロックしない — 取得失敗(未適用/タイムアウト)は 0 扱い(breadcrumb は残す)
+    swallow('enforcement.strikeCount', e);
+    return 0;
+  }
 }
 
 /** 異議一覧 (admin)。status で絞り込み。 */
 export async function fetchAppeals(status?: AppealStatus): Promise<Appeal[]> {
   let q = supabase.from('appeals').select('*').order('created_at', { ascending: false });
   if (status) q = q.eq('status', status);
-  const { data, error } = await q;
+  const { data, error } = await withApiTimeout(q, 'enforcement.appeals', 8000);
   if (error) throw error;
   return (data ?? []) as Appeal[];
 }
 
 /** 異議を審査 (admin)。承認/却下を記録し monitor_log に残す(RPC内)。 */
 export async function reviewAppeal(appealId: string, approve: boolean, note?: string): Promise<void> {
-  const { error } = await supabase.rpc('review_appeal', {
-    p_appeal_id: appealId,
-    p_approve: approve,
-    p_note: note ?? '',
-  });
+  const { error } = await withApiTimeout(
+    supabase.rpc('review_appeal', {
+      p_appeal_id: appealId,
+      p_approve: approve,
+      p_note: note ?? '',
+    }),
+    'enforcement.reviewAppeal',
+    8000,
+  );
   if (error) throw error;
 }
