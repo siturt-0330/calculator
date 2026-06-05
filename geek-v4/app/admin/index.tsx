@@ -757,6 +757,30 @@ function ReportsTab() {
 
   return (
     <View>
+      {/* 優先度キュー(report_cases: リアルタイム/severity/担当/解決)への導線。
+          この既存タブは concern 集計ベースの一覧、新画面は通報ケースのワークフロー。 */}
+      <PressableScale
+        onPress={() => router.push('/admin/reports' as never)}
+        haptic="select"
+        style={{
+          marginHorizontal: SP['4'],
+          marginBottom: SP['2'],
+          padding: SP['3'],
+          borderRadius: R.md,
+          backgroundColor: C.accent + '18',
+          borderWidth: 1,
+          borderColor: C.accent + '44',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: SP['2'],
+        }}
+      >
+        <Icon.flag size={16} color={C.accentLight} strokeWidth={2.2} />
+        <Text style={[T.caption, { color: C.accentLight, fontWeight: '700', flex: 1 }]}>
+          優先度キュー（リアルタイム・担当/解決）を開く
+        </Text>
+        <Icon.chevronR size={16} color={C.accentLight} strokeWidth={2.2} />
+      </PressableScale>
       <SearchInput value={search} onChange={setSearch} placeholder="本文で検索…" />
       <View style={{ flexDirection: 'row', gap: 6, paddingHorizontal: SP['4'], paddingBottom: SP['2'] }}>
         <SortChip label="全部"     active={minReports === 1} onPress={() => setMinReports(1)} />
@@ -924,6 +948,7 @@ function UsersTab() {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'recent' | 'concern' | 'trust' | 'problem'>('recent');
+  const [stateFilter, setStateFilter] = useState<string>('all');
   const [pendingSuspend, setPendingSuspend] = useState<AdminUser | null>(null);
   const qc = useQueryClient();
   const show = useToastStore((s) => s.show);
@@ -967,6 +992,12 @@ function UsersTab() {
     return arr;
   }, [isProblemMode, problemQuery.data, usersQuery.data, sortBy]);
 
+  // account_state フィルタ (クライアント側。'all' は全件)
+  const filteredList: AdminUser[] = useMemo(
+    () => (stateFilter === 'all' ? list : list.filter((u) => u.account_state === stateFilter)),
+    [list, stateFilter],
+  );
+
   const isLoading = isProblemMode ? problemQuery.isLoading : usersQuery.isLoading;
   const error = isProblemMode ? problemQuery.error : usersQuery.error;
   const refetch = isProblemMode ? problemQuery.refetch : usersQuery.refetch;
@@ -1000,6 +1031,15 @@ function UsersTab() {
     }
   }, [unsuspend]);
 
+  const STATE_FILTER_OPTIONS: { k: string; l: string }[] = [
+    { k: 'all', l: '全状態' },
+    { k: 'healthy', l: '正常' },
+    { k: 'caution', l: '注意' },
+    { k: 'restricted', l: '制限' },
+    { k: 'warned', l: '警告' },
+    { k: 'suspended', l: '凍結' },
+  ];
+
   return (
     <View>
       <SearchInput value={search} onChange={setSearch} placeholder="ニックネームで検索…" />
@@ -1015,15 +1055,27 @@ function UsersTab() {
         <SortChip label="通報多い順"     active={sortBy === 'concern'} onPress={() => setSortBy('concern')} />
         <SortChip label="問題ユーザー"   active={sortBy === 'problem'} onPress={() => setSortBy('problem')} />
       </ScrollView>
+      {/* account_state フィルタ (調査A補完) */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{
+          flexDirection: 'row', gap: 6, paddingHorizontal: SP['4'], paddingBottom: SP['2'],
+        }}
+      >
+        {STATE_FILTER_OPTIONS.map((s) => (
+          <SortChip key={s.k} label={s.l} active={stateFilter === s.k} onPress={() => setStateFilter(s.k)} />
+        ))}
+      </ScrollView>
       <View style={{ paddingHorizontal: SP['4'], gap: SP['2'] }}>
         {isLoading ? (
           <View style={{ padding: SP['8'], alignItems: 'center' }}><Spinner /></View>
         ) : error ? (
           <ErrorBlock message="ユーザーを取得できませんでした" onRetry={() => void refetch()} />
-        ) : list.length === 0 ? (
-          <EmptyBlock emoji="📭" label="ユーザーがいません" />
+        ) : filteredList.length === 0 ? (
+          <EmptyBlock emoji="📭" label="該当するユーザーがいません" />
         ) : (
-          list.map((u) => (
+          filteredList.map((u) => (
             <UserRow
               key={u.id}
               user={u}

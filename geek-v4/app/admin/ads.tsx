@@ -33,6 +33,7 @@ import {
   type AdminAd,
   type AdStatus,
   type CreateAdInput,
+  type AdSourceType,
 } from '../../lib/api/ads';
 
 const STATUS_FILTERS: Array<{ key: AdStatus | 'all'; label: string }> = [
@@ -46,7 +47,7 @@ const STATUS_FILTERS: Array<{ key: AdStatus | 'all'; label: string }> = [
 const STATUS_META: Record<AdStatus, { label: string; fg: string; bg: string; border: string }> = {
   draft:    { label: '下書き', fg: C.text3,        bg: C.bg3,      border: C.border },
   active:   { label: '配信中', fg: C.green,        bg: C.greenBg,  border: C.green + '55' },
-  paused:   { label: '停止中', fg: C.amber,        bg: C.amberBg,  border: C.amber + '55' },
+  paused:   { label: '一時停止', fg: C.amber,        bg: C.amberBg,  border: C.amber + '55' },
   ended:    { label: '終了',   fg: C.text3,        bg: C.bg3,      border: C.border },
 };
 
@@ -351,10 +352,15 @@ function emptyForm(): FormState {
     starts_at: null,
     ends_at: null,
     daily_budget_yen: 0,
+    source_type: 'house',
+    priority: 16,
+    target_traffic_sources: [],
   };
 }
 
 const STATUS_OPTIONS: AdStatus[] = ['draft', 'active', 'paused', 'ended'];
+const AD_SOURCE_OPTIONS: AdSourceType[] = ['house', 'network', 'sponsorship'];
+const TRAFFIC_SOURCE_OPTIONS = ['google_ads', 'app_store', 'play_store', 'organic', 'referral', 'other'] as const;
 
 function AdFormModal({
   ad,
@@ -386,6 +392,9 @@ function AdFormModal({
         starts_at: ad.starts_at,
         ends_at: ad.ends_at,
         daily_budget_yen: ad.daily_budget_yen,
+        source_type: ad.source_type ?? 'house',
+        priority: ad.priority ?? 16,
+        target_traffic_sources: ad.target_traffic_sources ?? [],
       });
     } else {
       setForm(emptyForm());
@@ -703,6 +712,80 @@ function AdFormModal({
               // memory DoS 対策: 円単位の予算は max 10 桁 (100 億円)
               maxLength={10}
             />
+          </Field>
+
+          {/* source_type (広告ソース抽象化, migration 0119) */}
+          <Field label="広告ソース" hint="house=自社/network=外部ネットワーク/sponsorship=直販">
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              {AD_SOURCE_OPTIONS.map((s) => {
+                const active = (form.source_type ?? 'house') === s;
+                return (
+                  <PressableScale
+                    key={s}
+                    onPress={() => setForm((f) => ({ ...f, source_type: s }))}
+                    haptic="select"
+                    style={{
+                      paddingHorizontal: SP['3'],
+                      paddingVertical: 6,
+                      backgroundColor: active ? C.accentBg : C.bg2,
+                      borderRadius: R.full,
+                      borderWidth: 1,
+                      borderColor: active ? C.accent + '44' : C.border,
+                    }}
+                  >
+                    <Text style={[T.caption, { color: active ? C.accentLight : C.text2, fontWeight: '700' }]}>{s}</Text>
+                  </PressableScale>
+                );
+              })}
+            </View>
+          </Field>
+
+          {/* priority */}
+          <Field label="優先度 (小さいほど優先)" hint="既定16=House。Sponsorship≈4 / Network≈12 (GAM体系)">
+            <TextInput
+              value={String(form.priority ?? 16)}
+              onChangeText={(v) => {
+                const n = parseInt(v.replace(/[^0-9]/g, ''), 10);
+                setForm((f) => ({ ...f, priority: Number.isFinite(n) ? n : 16 }));
+              }}
+              placeholder="16"
+              placeholderTextColor={C.text3}
+              style={inputStyle}
+              keyboardType="number-pad"
+              maxLength={3}
+            />
+          </Field>
+
+          {/* target_traffic_sources (流入元ターゲティング) */}
+          <Field label="流入元ターゲティング (任意)" hint="未選択なら全員に配信。選択すると、その流入元のユーザーにのみ配信">
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              {TRAFFIC_SOURCE_OPTIONS.map((ts) => {
+                const sel = (form.target_traffic_sources ?? []).includes(ts);
+                return (
+                  <PressableScale
+                    key={ts}
+                    onPress={() =>
+                      setForm((f) => {
+                        const cur = f.target_traffic_sources ?? [];
+                        const next = sel ? cur.filter((x) => x !== ts) : [...cur, ts];
+                        return { ...f, target_traffic_sources: next };
+                      })
+                    }
+                    haptic="select"
+                    style={{
+                      paddingHorizontal: SP['3'],
+                      paddingVertical: 6,
+                      backgroundColor: sel ? C.accentBg : C.bg2,
+                      borderRadius: R.full,
+                      borderWidth: 1,
+                      borderColor: sel ? C.accent + '44' : C.border,
+                    }}
+                  >
+                    <Text style={[T.caption, { color: sel ? C.accentLight : C.text2, fontWeight: '700' }]}>{ts}</Text>
+                  </PressableScale>
+                );
+              })}
+            </View>
           </Field>
         </ScrollView>
       </View>

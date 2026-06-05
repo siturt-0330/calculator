@@ -1,5 +1,5 @@
 import { View, Text, KeyboardAvoidingView, Platform, ScrollView, Keyboard, TextInput } from 'react-native';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, SP } from '../../design/tokens';
@@ -13,6 +13,7 @@ import { useToastStore } from '../../stores/toastStore';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 import { Icon } from '../../constants/icons';
 import { validatePassword } from '../../lib/passwordPolicy';
+import { captureAcquisitionFromUrl, recordAcquisition } from '../../lib/api/acquisition';
 
 // 初回ユーザーの障壁を最小化するため、
 //   - ステップ 1: メール + パスワード (必須)
@@ -40,6 +41,12 @@ export default function SignupScreen() {
   const MailIcon = Icon.at;
   const PhoneIcon = Icon.phone;
   const EyeIcon = showPass ? Icon.eyeOff : Icon.eye;
+
+  // Web: ランディング/サインアップ到達時の URL クエリ(?traffic_source/?utm_*)を退避 (mount 1回)。
+  // Native は no-op。実際の記録は signup 成功後の recordAcquisition()。
+  useEffect(() => {
+    captureAcquisitionFromUrl();
+  }, []);
 
   // 厳しめのメール正規表現 — TLD 2 文字以上必須 (a@b.c など 1 char 弾く)
   const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -101,6 +108,9 @@ export default function SignupScreen() {
     }
     if (result.autoLoggedIn) {
       show('アカウントを作成しました！', 'success');
+      // 流入元(traffic_source/utm)を user_acquisition へ記録 — fire-and-forget (体験を止めない)。
+      // autoLoggedIn 時のみ auth.uid() が確定するので、ここで記録する。
+      void recordAcquisition();
       router.replace('/onboarding');
     } else if (result.needsConfirmEmail) {
       show('確認メールを送信しました。リンクをクリックしてからログインしてください。', 'success');
