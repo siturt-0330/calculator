@@ -1,7 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react-native';
 import { View, Text, Platform, Image as RNImage, StyleSheet, Pressable, type TextStyle } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -31,7 +30,7 @@ import { hap } from '../../design/haptics';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { ProgressiveImage } from '../ui/ProgressiveImage';
 import { VideoPlayer } from '../ui/VideoPlayer';
-import { thumbedUrl, squareThumbedUrl } from '../../lib/utils/imageUrl';
+import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { extractFirstUrl } from '../../lib/utils/extractUrl';
 import { DoubleTapHeart } from '../ui/DoubleTapHeart';
 // NOTE: tag chip と「+ タグ追加」 UI は撤去 (周りの人が他人投稿に tag を付与
@@ -45,6 +44,7 @@ import { useFeatureFlag } from '../../hooks/useFeatureFlag';
 import { useIsCommunityMod } from '../../hooks/useIsCommunityMod';
 import type { Poll } from '../../lib/api/polls';
 import { Avatar } from '../ui/Avatar';
+import { CommunityIcon } from '../ui/CommunityIcon';
 import { formatRelative } from '../../lib/utils/date';
 import { sanitizeUrl } from '../../lib/sanitize';
 import { ObsidianSaveButton } from '../ui/ObsidianSaveButton';
@@ -269,19 +269,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
   },
-  // 18px 円 ring (avatar 外枠). chip 内側なので border は外して shape だけ。
-  communityInlineRingBase: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    backgroundColor: C.bg4,
-  },
-  communityInlineImage: { width: '100%', height: '100%' },
-  // icon_url が無い時の emoji fallback (CommunityAvatarBar と同じ思想)
-  communityInlineEmoji: { fontSize: 12, lineHeight: 14 },
   communityInlineName: {
     fontSize: 12,
     lineHeight: 15,
@@ -746,11 +733,10 @@ const ReactionButton = memo(ReactionButtonInner);
 // ============================================================
 // CommunityInlineIndicator — header 内に 1 行で表示する小型 community 表示
 // ------------------------------------------------------------
-// CommunityAvatarBar の 56px avatar を 20px に縮めた版。
-//   - icon_url があれば ExpoImage で表示 (thumbedUrl 80px @4x)
-//   - 無ければ emoji + bg3 背景 (PostCommunityRef は icon_color を持たない
-//     ため backgroundColor は単色 bg3 で代用 — CommunityAvatarBar の color
-//     fallback とは少しだけ違うが、20px 円なので視認影響は最小)
+// 18px の小型アイコン + コミュ名 + (任意で「+N」)。
+//   - アイコンは共有 <CommunityIcon> に集約 (commit f8267aa)。画像優先 +
+//     contentFit="contain" で「必ず表示 / 拡大しない」を保証 (onError で
+//     emoji → 頭文字 → community グリフへ自動 fallback)。
 //   - tap で onPress (親 → router.push('/community/:id'))
 //   - 複数 community のとき末尾に「+N」を出す
 // ============================================================
@@ -767,13 +753,6 @@ function CommunityInlineIndicatorInner({
   onPress,
   STYLES,
 }: CommunityInlineIndicatorProps) {
-  // 80 = 20px @4x retina (CommunityAvatarBar が 56px → 160px と同比率)
-  // squareThumbedUrl で width=height=80 を渡し、サーバ側で正方形に
-  // center-crop された画像を取得する (横長集合写真の「拡大されて見える」防止).
-  // thumb URL は icon_url 変化時のみ再計算
-  const thumb = useMemo(() => (c.icon_url ? squareThumbedUrl(c.icon_url, 80) : null), [c.icon_url]);
-  // ExpoImage 用 source object — icon_url 変化時のみ更新
-  const thumbSource = useMemo(() => (thumb ? { uri: thumb } : null), [thumb]);
   // a11y label は name 変化時のみ
   const a11yLabel = useMemo(() => `コミュニティ ${c.name} を開く`, [c.name]);
   return (
@@ -785,20 +764,9 @@ function CommunityInlineIndicatorInner({
       accessibilityRole="link"
       accessibilityLabel={a11yLabel}
     >
-      <View style={STYLES.communityInlineRingBase}>
-        {thumbSource ? (
-          <ExpoImage
-            source={thumbSource}
-            style={STYLES.communityInlineImage}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            recyclingKey={c.icon_url ?? c.community_id}
-            transition={120}
-          />
-        ) : (
-          <Text style={STYLES.communityInlineEmoji}>{c.icon_emoji || '🌐'}</Text>
-        )}
-      </View>
+      {/* 18px = 旧 communityInlineRingBase の径。画像優先 + contain で
+          「必ず表示 / 拡大しない」を共有 <CommunityIcon> に集約 (commit f8267aa)。 */}
+      <CommunityIcon size={18} iconUrl={c.icon_url} iconEmoji={c.icon_emoji} name={c.name} />
       <Text style={STYLES.communityInlineName} numberOfLines={1}>
         {c.name}
       </Text>
@@ -1252,12 +1220,14 @@ function AnonPostCardInner({
             hitSlop={4}
             disabled={!primaryCommunity}
           >
-            {/* icon_url 優先、なければ emoji。Avatar は emoji を uri より先にチェックするので
-                uri がある場合は emoji を渡さない (二重指定で emoji が優先されるのを防ぐ)。 */}
-            <Avatar
+            {/* コミュニティアイコンは共有 <CommunityIcon> に集約 (commit f8267aa)。
+                画像優先 + contentFit="contain" で「必ず表示 / 拡大しない」。
+                (Avatar は emoji 優先なので uploaded icon_url が emoji に隠れていた) */}
+            <CommunityIcon
               size={40}
-              uri={primaryCommunity?.icon_url ?? null}
-              emoji={primaryCommunity?.icon_url ? undefined : (primaryCommunity?.icon_emoji ?? undefined)}
+              iconUrl={primaryCommunity?.icon_url}
+              iconEmoji={primaryCommunity?.icon_emoji}
+              name={primaryCommunity?.name}
             />
           </PressableScale>
         )}
