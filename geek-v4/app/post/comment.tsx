@@ -34,6 +34,7 @@ import { useToastStore } from '../../stores/toastStore';
 import { useAuthStore } from '../../stores/authStore';
 import { hap } from '../../design/haptics';
 import { createComment } from '../../lib/api/comments';
+import { peekRate, rateLimitMessage } from '../../lib/rateLimit';
 import { validateVideoSource, uploadPostImage, uploadPostVideo } from '../../lib/media';
 import { makeWebPreviewDataUrl } from '../../lib/image';
 import { Icon } from '../../constants/icons';
@@ -178,6 +179,13 @@ export default function CommentComposer() {
       const userId = useAuthStore.getState().user?.id;
       if (!userId) {
         show('ログインし直してください', 'error');
+        return;
+      }
+      // ★ レート制限を upload 前に先読み (createComment の checkRate は increment。peekRate で
+      //   増やさず判定、超過なら upload せず即 return → 孤児メディア防止)。
+      const rl = peekRate('comment');
+      if (!rl.ok) {
+        show(rateLimitMessage('comment', rl.retryAfterMs), 'error');
         return;
       }
       let mediaUrls: string[] = [];

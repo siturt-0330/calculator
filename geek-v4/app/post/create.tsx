@@ -45,6 +45,7 @@ import { checkContent } from '../../lib/ai/checkContent';
 import { validateVideoSource, uploadPostImage, uploadPostVideo } from '../../lib/media';
 import { makeWebPreviewDataUrl } from '../../lib/image';
 import { sanitizeTag } from '../../lib/sanitize';
+import { peekRate, rateLimitMessage } from '../../lib/rateLimit';
 import { Icon } from '../../constants/icons';
 import { SP, R } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -446,6 +447,14 @@ export default function CreatePost() {
       const userId = useAuthStore.getState().user?.id;
       if (!userId) {
         show('ログインし直してください', 'error');
+        return;
+      }
+      // ★ レート制限は upload 前に先読み (createPost の checkRate は increment するので
+      //   ここは peekRate=非increment で判定。超過なら upload せず即 return → 孤児メディア防止)。
+      const rl = peekRate('post');
+      if (!rl.ok) {
+        hap.error();
+        show(rateLimitMessage('post', rl.retryAfterMs), 'error');
         return;
       }
       let uploadedImageUrls: string[] = [];

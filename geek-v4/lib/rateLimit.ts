@@ -72,6 +72,20 @@ export function checkRate(action: keyof typeof limits): RateLimitResult {
   return { ok: true, remaining: cfg.max - cur.count, retryAfterMs: 0 };
 }
 
+// checkRate の「増やさない版」。upload など重い前処理の前に超過を早期に弾くために使う。
+// 実際の increment は本処理側の checkRate が行う(二重カウントで上限が実質半減しないように)。
+export function peekRate(action: keyof typeof limits): RateLimitResult {
+  const cfg = limits[action];
+  if (!cfg) return { ok: true, remaining: Infinity, retryAfterMs: 0 };
+  const now = Date.now();
+  const cur = state.get(action);
+  if (!cur) return { ok: true, remaining: cfg.max, retryAfterMs: 0 };
+  const elapsed = now - cur.windowStart;
+  if (elapsed < 0 || elapsed > cfg.windowMs) return { ok: true, remaining: cfg.max, retryAfterMs: 0 };
+  if (cur.count >= cfg.max) return { ok: false, remaining: 0, retryAfterMs: cfg.windowMs - elapsed };
+  return { ok: true, remaining: cfg.max - cur.count, retryAfterMs: 0 };
+}
+
 export function rateLimitMessage(action: keyof typeof limits, retryAfterMs: number): string {
   const sec = Math.ceil(retryAfterMs / 1000);
   const labels: Record<string, string> = {
