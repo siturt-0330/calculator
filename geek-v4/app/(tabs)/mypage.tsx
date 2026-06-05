@@ -1,47 +1,65 @@
 // =============================================================================
-// app/(tabs)/mypage.tsx — マイページ (カバー + アバター + 3 タブ)
+// app/(tabs)/mypage.tsx — マイページ「Atelier 改」(エディトリアル誌面)
 // -----------------------------------------------------------------------------
-// 構成:
-//   1) ProfileMasthead — カバー画像 (shared 写真があれば自動採用) + 大型アバター
-//      + 名前のみ (bio / 統計chip / フォローボタンは仕様で削除)
-//   2) ProfileTabsBar — 3 タブ (共有 / 投稿 / 保存済み)
-//   3) コンテンツ
-//      - 共有  = AlbumPhoto (visibility='shared') の 3 列写真グリッド
-//      - 投稿  = posts.author_id でフィルタした card リスト
-//      - 保存済み = saves → posts の 2 段 fetch (自分専用)
+// 単一 FlashList(誌面マストヘッド + 3 タブ章インデックスを ListHeaderComponent、
+// 各タブの items を data に流す)で「投稿 / コメント / 保存済み」を組む。
+// スクロールは scrollY:SharedValue 1 本を全層が購読(parallax カバー → 上端
+// ガラスミニバーへ「誌名受け渡し」/ 擬似 sticky タブ複製)。
 //
-// 公開範囲 (本人による切替):
-//   - 共有 / 投稿 は profileVisibilityStore のフラグで「表示 / 非表示」を選べる。
-//     非表示にすると他人視点 (将来) では見えなくなる。本人視点では「非公開中」
-//     表示に切り替わり、内容も伏せて見せる (誤共有チェックしやすい UX)。
-//   - 保存済みは自分専用 (RLS で他人は読めない)。トグル不要。
+// 構成:
+//   ListHeaderComponent = ProfileMastheadV2(scrollY) + ProfileTabsBar(実体A)
+//   data(activeTab で組替):
+//     [ SectionPillar, (saved のみ Lock notice), ...行カード ]
+//     items 0 件なら [ SectionPillar(0), EmptyState ]
+//     ロード中は本文領域に MyEntryRowSkeleton を ListHeader 末尾で重ねる(data 非流入)
+//   絶対配置オーバーレイ = MypageStickyBar + 擬似 sticky タブ複製(B)
+//
+// 公開範囲: 投稿/コメントは他人も見られる(公開された姿) / 保存は自分だけ(RLS + Lock notice)。
 // =============================================================================
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, ScrollView, RefreshControl, Pressable } from 'react-native';
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { View, Text } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useScrollToTop } from '@react-navigation/native';
+import { FlashList } from '@shopify/flash-list';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  useAnimatedScrollHandler,
+  interpolate,
+  Extrapolation,
+  runOnJS,
+} from 'react-native-reanimated';
 
 import { useAuthStore } from '../../stores/authStore';
-import { useProfileVisibilityStore } from '../../stores/profileVisibilityStore';
 import { supabase } from '../../lib/supabase';
-import { fetchMyPhotos } from '../../lib/api/albums';
+import { fetchMyComments, type MyCommentRow } from '../../lib/api/comments';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
-import { MypageSkeleton } from '../../components/ui/Skeleton';
-import { AccountStateCard } from '../../components/mypage/AccountStateCard';
-import { AlbumPhotoGrid } from '../../components/mypage/AlbumPhotoGrid';
-import { EmptyAlbums } from '../../components/mypage/EmptyAlbums';
-import { ProfileMasthead } from '../../components/mypage/ProfileMasthead';
-import { ProfileTabsBar, type ProfileTabKey } from '../../components/mypage/ProfileTabsBar';
-import { TabVisibilityToggle } from '../../components/mypage/TabVisibilityToggle';
-import { UserPostsList } from '../../components/mypage/UserPostsList';
-import { SavedPostsList } from '../../components/mypage/SavedPostsList';
-import { C, SP } from '../../design/tokens';
+import { formatRelative } from '../../lib/utils/date';
+import { C, R, SP } from '../../design/tokens';
+import { T } from '../../design/typography';
 import { TABBAR } from '../../design/tabbar';
-import type { AlbumPhoto } from '../../types/models';
+import { Icon } from '../../constants/icons';
+import { GeekRefreshControl } from '../../components/ui/GeekRefreshControl';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { ProfileMastheadV2, HERO_H } from '../../components/mypage/ProfileMastheadV2';
+import { MypageStickyBar } from '../../components/mypage/MypageStickyBar';
+import { ProfileTabsBar, type ProfileTabKey } from '../../components/mypage/ProfileTabsBar';
+import { SectionPillar } from '../../components/mypage/SectionPillar';
+import {
+  MyEntryRow,
+  MetaNum,
+  MetaHeartIcon,
+  MetaCommentIcon,
+  MyEntryIcons,
+} from '../../components/mypage/MyEntryRow';
+import { MyEntryRowSkeleton } from '../../components/mypage/MyEntryRowSkeleton';
 
+// -----------------------------------------------------------------------------
+// データ型 + 取得(旧 UserPostsList / SavedPostsList の fetch を本画面に集約)
+// -----------------------------------------------------------------------------
 type MypageStats = {
   nickname: string | null;
   avatar_emoji: string | null;
@@ -49,63 +67,181 @@ type MypageStats = {
   cover_url: string | null;
 };
 
+type UserPost = {
+  id: string;
+  content: string;
+  title: string | null;
+  media_urls: string[] | null;
+  likes_count: number;
+  comments_count: number;
+  is_public: boolean;
+  created_at: string;
+};
+
+type SavedPost = {
+  id: string;
+  content: string;
+  title: string | null;
+  media_urls: string[] | null;
+  likes_count: number;
+  comments_count: number;
+  created_at: string;
+};
+
+async function fetchProfileStats(userId: string): Promise<MypageStats | null> {
+  const { data } = await supabase
+    .from('profiles')
+    .select('nickname, avatar_emoji, avatar_url, cover_url')
+    .eq('id', userId)
+    .single();
+  return (data ?? null) as MypageStats | null;
+}
+
+async function fetchPostsByAuthor(authorId: string): Promise<UserPost[]> {
+  // 自分視点 (= 自分の RLS) では is_public=false も見える。カード描画に使う列のみ。
+  const { data } = await supabase
+    .from('posts')
+    .select('id, content, title, media_urls, likes_count, comments_count, is_public, created_at')
+    .eq('author_id', authorId)
+    .order('created_at', { ascending: false })
+    .limit(30);
+  return (data ?? []) as UserPost[];
+}
+
+async function fetchSavedPosts(userId: string): Promise<SavedPost[]> {
+  const { data: saves } = await supabase
+    .from('saves')
+    .select('post_id, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (!saves || saves.length === 0) return [];
+  const postIds = (saves as { post_id: string }[]).map((s) => s.post_id);
+  const { data: posts } = await supabase
+    .from('posts')
+    .select('id, content, title, media_urls, likes_count, comments_count, created_at')
+    .in('id', postIds);
+  // 保存順を維持
+  const map = new Map((posts ?? []).map((p) => [(p as SavedPost).id, p as SavedPost]));
+  return postIds.map((id) => map.get(id)).filter((p): p is SavedPost => !!p);
+}
+
+// -----------------------------------------------------------------------------
+// FlashList の行ユニオン(item.kind で renderItem を分岐)
+// -----------------------------------------------------------------------------
+type Row =
+  | { kind: 'pillar'; label: string; count: number; unit: string }
+  | { kind: 'lock' }
+  | { kind: 'empty'; tab: ProfileTabKey }
+  | { kind: 'post'; post: UserPost; index: number }
+  | { kind: 'comment'; comment: MyCommentRow; index: number }
+  | { kind: 'saved'; post: SavedPost; index: number };
+
+const cover0 = (media: string[] | null): string | null => media?.[0] ?? null;
+
+// =============================================================================
+// MypageScreen
+// =============================================================================
 export default function MypageScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
+  const userId = user?.id;
   const qc = useQueryClient();
-  // マイページタブ再タップで本体 ScrollView を先頭にスクロール。
-  const scrollRef = useRef<ScrollView>(null);
-  useScrollToTop(scrollRef);
 
-  // ---- タブ state ----
-  const [tab, setTab] = useState<ProfileTabKey>('shared');
+  const listRef = useRef<FlashList<Row>>(null);
+  // タブ(底辺バー)再タップで先頭へ。FlashList は scrollToOffset を持つので互換。
+  useScrollToTop(listRef as never);
 
-  // ---- 可視性 store (本人による表示/非表示の切替) ----
-  const showShared = useProfileVisibilityStore((s) => s.showShared);
-  const showPosts = useProfileVisibilityStore((s) => s.showPosts);
-  const setShowShared = useProfileVisibilityStore((s) => s.setShowShared);
-  const setShowPosts = useProfileVisibilityStore((s) => s.setShowPosts);
-  useEffect(() => {
-    useProfileVisibilityStore.getState().hydrate();
-  }, []);
+  const [tab, setTab] = useState<ProfileTabKey>('posts');
+  const [showStickyTabs, setShowStickyTabs] = useState(false);
 
-  // ---- データ ----
-  // stats — bio / 統計は仕様で削除したので、表示に必要な nickname / avatar のみ取得
-  const { data: stats, isLoading: statsLoading } = useQuery<MypageStats | null>({
-    queryKey: ['mypage-stats', user?.id],
-    queryFn: async () => {
-      if (!user) return null;
-      const { data } = await supabase
-        .from('profiles')
-        .select('nickname, avatar_emoji, avatar_url, cover_url')
-        .eq('id', user.id)
-        .single();
-      return data as MypageStats | null;
+  // ---- スクロール駆動値(全 collapse / parallax / ミニバーの単一ソース)----
+  const scrollY = useSharedValue(0);
+  const stickyShown = useSharedValue(false);
+  // 擬似 sticky タブ複製の出現しきい値(ヒーロー実高 − ミニバー高)。
+  const stickyThreshold = HERO_H - (insets.top + 52) - 20;
+  const onScroll = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      'worklet';
+      scrollY.value = e.contentOffset.y;
+      // しきい値を跨いだ瞬間だけ JS state を更新(毎フレーム runOnJS を避ける)。
+      const should = e.contentOffset.y > stickyThreshold;
+      if (should !== stickyShown.value) {
+        stickyShown.value = should;
+        runOnJS(setShowStickyTabs)(should);
+      }
     },
-    enabled: !!user,
-    staleTime: 60_000,
   });
 
-  // 共有写真 (= AlbumPhoto.visibility='shared'). カバー画像にも自動採用する。
-  const { data: sharedPhotos = [], isLoading: sharedLoading } = useQuery<AlbumPhoto[]>({
-    queryKey: ['album-photos', 'shared', user?.id ?? 'anon'],
-    queryFn: () => fetchMyPhotos('shared'),
-    enabled: !!user,
+  // 擬似 sticky タブ複製の opacity(ヒーロー末で 0→1)。
+  const stickyTabStyle = useAnimatedStyle(() => {
+    const start = HERO_H - (insets.top + 52) - 40;
+    const end = HERO_H - (insets.top + 52);
+    return { opacity: interpolate(scrollY.value, [start, end], [0, 1], Extrapolation.CLAMP) };
+  });
+
+  // ---- データ ----
+  const { data: stats } = useQuery({
+    queryKey: ['mypage-stats', userId],
+    queryFn: () => fetchProfileStats(userId!),
+    enabled: !!userId,
+    staleTime: 60_000,
+  });
+  const { data: posts = [], isLoading: postsLoading } = useQuery({
+    queryKey: ['user-posts', userId],
+    queryFn: () => fetchPostsByAuthor(userId!),
+    enabled: !!userId,
+    staleTime: 30_000,
+  });
+  const { data: comments = [], isLoading: commentsLoading } = useQuery({
+    queryKey: ['user-comments', userId],
+    queryFn: () => fetchMyComments(userId!),
+    enabled: !!userId,
+    staleTime: 30_000,
+  });
+  const { data: saved = [], isLoading: savedLoading } = useQuery({
+    queryKey: ['saved-posts', userId],
+    queryFn: () => fetchSavedPosts(userId!),
+    enabled: !!userId,
     staleTime: 30_000,
   });
 
-  // ---- カバー画像: 本人が設定した cover_url を最優先、無ければ最新 shared 写真、
-  //      それも無ければ null (masthead が accent gradient fallback)
-  //      カバーは横幅いっぱい (高さ 220) なので retina 1080px の transformation
-  //      サムネを要求して帯域を削減 (Supabase 以外/変換済み URL はそのまま返る)。
-  const coverUri = useMemo(() => {
-    const raw = stats?.cover_url ?? sharedPhotos[0]?.image_url ?? null;
-    if (!raw) return null;
-    return thumbedUrl(raw, 1080);
-  }, [stats?.cover_url, sharedPhotos]);
+  const nickname = stats?.nickname ?? user?.nickname ?? 'ユーザー';
+  const coverUri = useMemo(
+    () => (stats?.cover_url ? thumbedUrl(stats.cover_url, 1080) : null),
+    [stats?.cover_url],
+  );
 
-  // ---- Pull-to-refresh ----
+  // 現タブのロード中(まだ 1 件も無い)か。本文領域に skeleton を出す条件。
+  const activeLoading =
+    (tab === 'posts' && postsLoading && posts.length === 0) ||
+    (tab === 'comments' && commentsLoading && comments.length === 0) ||
+    (tab === 'saved' && savedLoading && saved.length === 0);
+
+  // ---- data 構築 ----
+  const rows: Row[] = useMemo(() => {
+    if (activeLoading) return []; // skeleton は ListHeader 末尾で重ねる
+    if (tab === 'posts') {
+      const head: Row = { kind: 'pillar', label: '投稿', count: posts.length, unit: '編' };
+      if (posts.length === 0) return [head, { kind: 'empty', tab: 'posts' }];
+      return [head, ...posts.map((post, index): Row => ({ kind: 'post', post, index }))];
+    }
+    if (tab === 'comments') {
+      const head: Row = { kind: 'pillar', label: 'コメント', count: comments.length, unit: '件' };
+      if (comments.length === 0) return [head, { kind: 'empty', tab: 'comments' }];
+      return [head, ...comments.map((comment, index): Row => ({ kind: 'comment', comment, index }))];
+    }
+    const head: Row = { kind: 'pillar', label: '保存済み', count: saved.length, unit: '件' };
+    if (saved.length === 0) return [head, { kind: 'lock' }, { kind: 'empty', tab: 'saved' }];
+    return [
+      head,
+      { kind: 'lock' },
+      ...saved.map((post, index): Row => ({ kind: 'saved', post, index })),
+    ];
+  }, [tab, activeLoading, posts, comments, saved]);
+
+  // ---- pull-to-refresh ----
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(async () => {
     if (refreshing) return;
@@ -113,8 +249,8 @@ export default function MypageScreen() {
     try {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ['mypage-stats'] }),
-        qc.invalidateQueries({ queryKey: ['album-photos'] }),
         qc.invalidateQueries({ queryKey: ['user-posts'] }),
+        qc.invalidateQueries({ queryKey: ['user-comments'] }),
         qc.invalidateQueries({ queryKey: ['saved-posts'] }),
       ]);
     } finally {
@@ -122,104 +258,334 @@ export default function MypageScreen() {
     }
   }, [qc, refreshing]);
 
-  // ---- スケルトン (初回ロードのみ) ----
-  if (statsLoading && !stats) {
-    return (
-      <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
-        <MypageSkeleton />
-      </View>
-    );
-  }
+  // ---- タブ操作: 同じタブ再タップで先頭へ、別タブは切替 ----
+  const onSelectTab = useCallback(
+    (k: ProfileTabKey) => {
+      if (k === tab) {
+        listRef.current?.scrollToOffset({ offset: 0, animated: true });
+      } else {
+        setTab(k);
+      }
+    },
+    [tab],
+  );
 
-  const nickname = stats?.nickname ?? user?.nickname ?? 'ユーザー';
-  const handle = `@${nickname}`;
+  const openSettings = useCallback(() => router.push('/settings' as never), [router]);
+  const editAvatar = useCallback(() => router.push('/settings/profile-edit' as never), [router]);
+  const openPost = useCallback((id: string) => router.push(`/post/${id}` as never), [router]);
 
-  return (
-    <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <ScrollView
-        ref={scrollRef}
-        contentContainerStyle={{
-          paddingBottom: TABBAR.height + insets.bottom + SP['10'],
-        }}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={C.accent}
-            colors={[C.accent]}
-            progressViewOffset={insets.top + 40}
-          />
-        }
-      >
-        {/* ===== カバー + アバター + 名前 (アバター/カバー編集バッジ付き) ===== */}
-        <ProfileMasthead
+  // ---- ListHeader(誌面マストヘッド + 実体タブA + ロード中 skeleton)----
+  const ListHeader = useMemo(
+    () => (
+      <View>
+        <ProfileMastheadV2
           nickname={nickname}
-          handle={handle}
           avatarUrl={stats?.avatar_url}
           avatarEmoji={stats?.avatar_emoji}
           coverUri={coverUri}
           topInset={insets.top}
-          onEditProfilePress={() => router.push('/settings/profile-edit' as never)}
-          onMorePress={() => router.push('/settings' as never)}
-          onAddPress={() => router.push('/post/create' as never)}
-          onSearchPress={() => router.push('/(tabs)/search' as never)}
-          // 本人視点なのでアバター編集導線を渡す (カバー編集は削除)。
-          onEditAvatar={() => router.push('/settings/profile-edit' as never)}
+          scrollY={scrollY}
+          onEditAvatar={editAvatar}
+          onOpenSettings={openSettings}
         />
+        <ProfileTabsBar active={tab} onChange={onSelectTab} />
+        {activeLoading ? (
+          <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['4'], gap: SP['3'] }}>
+            <MyEntryRowSkeleton count={5} />
+          </View>
+        ) : null}
+      </View>
+    ),
+    [
+      nickname,
+      stats?.avatar_url,
+      stats?.avatar_emoji,
+      coverUri,
+      insets.top,
+      scrollY,
+      editAvatar,
+      openSettings,
+      tab,
+      onSelectTab,
+      activeLoading,
+    ],
+  );
 
-        {/* ===== AccountState (制限時のみ表示) ===== */}
-        <View style={{ paddingHorizontal: SP['4'], marginTop: SP['4'] }}>
-          <AccountStateCard />
-        </View>
-
-        {/* ===== 3 タブ切替バー ===== */}
-        <View style={{ marginTop: SP['4'] }}>
-          <ProfileTabsBar active={tab} onChange={setTab} />
-        </View>
-
-        {/* ===== タブごとのコンテンツ ===== */}
-        {/* 公開/非公開トグルは「他人に見せるか」のスイッチ。本人視点では
-            非公開時でも常に中身が見えるよう、中身の描画は分岐しない (UX 改善)。 */}
-        {tab === 'shared' ? (
-          <>
-            <TabVisibilityToggle
-              value={showShared}
-              onChange={setShowShared}
-              tabName="共有"
+  const renderItem = useCallback(
+    ({ item }: { item: Row }) => {
+      switch (item.kind) {
+        case 'pillar':
+          return <SectionPillar label={item.label} count={item.count} unit={item.unit} />;
+        case 'lock':
+          return <LockNotice />;
+        case 'empty':
+          return <EmptyForTab tab={item.tab} router={router} />;
+        case 'post':
+          return <PostRow post={item.post} index={item.index} onPress={() => openPost(item.post.id)} />;
+        case 'comment':
+          return (
+            <CommentRow
+              comment={item.comment}
+              index={item.index}
+              onPress={() => item.comment.post && openPost(item.comment.post.id)}
             />
-            <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['1'] }}>
-              {sharedPhotos.length === 0 && !sharedLoading ? (
-                <EmptyAlbums scope="shared" />
-              ) : (
-                <Pressable accessibilityRole="button">
-                  <AlbumPhotoGrid
-                    photos={sharedPhotos}
-                    isLoading={sharedLoading}
-                    onPhotoPress={(id) => router.push(`/mypage/photo/${id}` as never)}
-                    horizontalPadding={SP['4']}
-                  />
-                </Pressable>
-              )}
-            </View>
-          </>
-        ) : null}
+          );
+        case 'saved':
+          return <SavedRow post={item.post} index={item.index} onPress={() => openPost(item.post.id)} />;
+      }
+    },
+    [router, openPost],
+  );
 
-        {tab === 'posts' ? (
-          <>
-            <TabVisibilityToggle value={showPosts} onChange={setShowPosts} tabName="投稿" />
-            <UserPostsList
-              authorId={user?.id}
-              emptyHint="あなたの投稿はここに表示されます"
-              onCompose={() => router.push('/post/create' as never)}
-            />
-          </>
-        ) : null}
+  return (
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <FlashList
+        ref={listRef}
+        data={rows}
+        renderItem={renderItem}
+        keyExtractor={keyExtractor}
+        estimatedItemSize={96}
+        ListHeaderComponent={ListHeader}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingBottom: TABBAR.height + insets.bottom + SP['10'],
+        }}
+        refreshControl={
+          <GeekRefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            progressViewOffset={insets.top + 40}
+          />
+        }
+      />
 
-        {tab === 'saved' ? (
-          <SavedPostsList onBrowseFeed={() => router.push('/(tabs)/feed' as never)} />
-        ) : null}
-      </ScrollView>
+      {/* ===== 擬似 sticky タブ複製(B)— ヒーロー末で出現。実体A と active を共有 ===== */}
+      <Animated.View
+        pointerEvents={showStickyTabs ? 'auto' : 'none'}
+        style={[
+          {
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: insets.top + 52,
+            backgroundColor: C.bg, // blur ネスト回避(ミニバーが既に blur 面)= solid
+            zIndex: 4,
+          },
+          stickyTabStyle,
+        ]}
+      >
+        <ProfileTabsBar active={tab} onChange={onSelectTab} />
+      </Animated.View>
+
+      {/* ===== 上端ガラスミニバー(誌名受け渡し)— 自己 absolute ===== */}
+      <MypageStickyBar
+        nickname={nickname}
+        avatarUrl={stats?.avatar_url}
+        avatarEmoji={stats?.avatar_emoji}
+        topInset={insets.top}
+        scrollY={scrollY}
+        onOpenSettings={openSettings}
+      />
     </View>
+  );
+}
+
+function keyExtractor(item: Row): string {
+  switch (item.kind) {
+    case 'pillar':
+      return '__pillar';
+    case 'lock':
+      return '__lock';
+    case 'empty':
+      return '__empty';
+    case 'post':
+      return `post:${item.post.id}`;
+    case 'comment':
+      return `comment:${item.comment.id}`;
+    case 'saved':
+      return `saved:${item.post.id}`;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 行ラッパ(MyEntryRow に metaNode/badgeNode/quoteNode を組んで渡す)
+// -----------------------------------------------------------------------------
+function PostMeta({ likes, comments, at }: { likes: number; comments: number; at: string }): ReactNode {
+  return (
+    <>
+      <MetaNum Icon={MetaHeartIcon} value={likes} />
+      <MetaNum Icon={MetaCommentIcon} value={comments} />
+      <Text style={[T.caption, { color: C.text4 }]}>· {formatRelative(at)}</Text>
+    </>
+  );
+}
+
+function PostRow({ post, index, onPress }: { post: UserPost; index: number; onPress: () => void }) {
+  const title = post.title?.trim() || null;
+  const body = post.content?.trim() || '';
+  const snippet = body.length > 0 ? body : title ?? '';
+  const badge = !post.is_public ? (
+    <Text
+      style={[
+        T.caption,
+        {
+          color: C.amber,
+          borderWidth: 1,
+          borderColor: C.amber + '55',
+          borderRadius: 4,
+          paddingHorizontal: 5,
+        },
+      ]}
+    >
+      非公開
+    </Text>
+  ) : undefined;
+  return (
+    <MyEntryRow
+      variant="post"
+      thumbUri={cover0(post.media_urls)}
+      monogramSeed={title ?? body ?? '・'}
+      title={title}
+      snippet={snippet || ' '}
+      metaNode={<PostMeta likes={post.likes_count} comments={post.comments_count} at={post.created_at} />}
+      badgeNode={badge}
+      index={index}
+      onPress={onPress}
+      accessibilityLabel="投稿を開く"
+    />
+  );
+}
+
+function SavedRow({ post, index, onPress }: { post: SavedPost; index: number; onPress: () => void }) {
+  const title = post.title?.trim() || null;
+  const body = post.content?.trim() || '';
+  const snippet = body.length > 0 ? body : title ?? '';
+  return (
+    <MyEntryRow
+      variant="saved"
+      thumbUri={cover0(post.media_urls)}
+      monogramSeed={title ?? body ?? '・'}
+      title={title}
+      snippet={snippet || ' '}
+      metaNode={<PostMeta likes={post.likes_count} comments={post.comments_count} at={post.created_at} />}
+      index={index}
+      onPress={onPress}
+      accessibilityLabel="保存した投稿を開く"
+    />
+  );
+}
+
+function CommentRow({
+  comment,
+  index,
+  onPress,
+}: {
+  comment: MyCommentRow;
+  index: number;
+  onPress: () => void;
+}) {
+  const body = comment.content?.trim() || '';
+  const post = comment.post;
+  const source = post ? post.title?.trim() || post.content?.trim().slice(0, 40) || '投稿' : null;
+  const quote = (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SP['2'],
+        marginTop: SP['2'],
+        paddingTop: SP['2'],
+        borderTopWidth: 1,
+        borderTopColor: C.divider,
+        opacity: post ? 1 : 0.6,
+      }}
+    >
+      <MyEntryIcons.arrowUL size={12} color={C.text3} strokeWidth={2} />
+      <Text style={[T.small, { color: C.text3, flex: 1 }]} numberOfLines={1}>
+        {source ? `${source}への返信` : '削除された投稿'}
+      </Text>
+      {source ? <MyEntryIcons.chevronR size={14} color={C.text4} strokeWidth={2} /> : null}
+    </View>
+  );
+  return (
+    <MyEntryRow
+      variant="comment"
+      thumbUri={null}
+      monogramSeed={body || '・'}
+      snippet={body || ' '}
+      commentMedia={comment.media_urls}
+      quoteNode={quote}
+      index={index}
+      onPress={post ? onPress : () => {}}
+      accessibilityLabel="コメントした投稿を開く"
+    />
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Lock notice(保存タブ専用「自分だけ」宣言)— 安心はグレーで語る(1画面1アクセント)
+// -----------------------------------------------------------------------------
+function LockNotice() {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SP['2'],
+        marginHorizontal: SP['4'],
+        marginTop: SP['3'],
+        paddingHorizontal: SP['3'],
+        paddingVertical: SP['2'],
+        backgroundColor: C.bg2,
+        borderRadius: R.md,
+        borderWidth: 1,
+        borderColor: C.divider,
+      }}
+    >
+      <Icon.lock size={14} color={C.text3} strokeWidth={2.2} />
+      <Text style={[T.caption, { color: C.text3, flex: 1 }]}>保存済みはあなただけが見られます</Text>
+    </View>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// 空状態(「欠落」でなく「これから」)— EmptyState の circle は常に紫(仕様既知)
+// -----------------------------------------------------------------------------
+function EmptyForTab({ tab, router }: { tab: ProfileTabKey; router: ReturnType<typeof useRouter> }) {
+  if (tab === 'posts') {
+    return (
+      <EmptyState
+        emoji="✍️"
+        tone="accent"
+        title="まだ、最初の一編を書いていません"
+        message={'“好き”を、匿名で気軽に。最初の記録がここに綴じられます。'}
+        actionLabel="投稿する"
+        onAction={() => router.push('/post/create' as never)}
+      />
+    );
+  }
+  if (tab === 'comments') {
+    return (
+      <EmptyState
+        emoji="💬"
+        tone="accent"
+        title="まだ声を残していません"
+        message="気になる記事に、あなたの言葉を。残したコメントはここに集まります。"
+        actionLabel="フィードを見る"
+        onAction={() => router.push('/(tabs)/feed' as never)}
+      />
+    );
+  }
+  return (
+    <EmptyState
+      icon={Icon.save}
+      tone="amber"
+      title="切り抜きはまだ空っぽです"
+      message="あとで読み返したい投稿は ブックマーク を。保存はあなただけが見られます。"
+      actionLabel="フィードを見る"
+      onAction={() => router.push('/(tabs)/feed' as never)}
+    />
   );
 }

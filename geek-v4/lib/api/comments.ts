@@ -159,3 +159,164 @@ export async function createComment(
   const { error } = await supabase.from('comments').insert(row);
   if (error) throw error;
 }
+
+// ============================================================
+// fetchMyComments — マイページ「コメント」タブ用: 自分が残したコメント一覧
+// ------------------------------------------------------------
+// 「あなたが他の投稿に残した声」を出典 (post) 付きで時系列降順に取得する。
+// fetchComments と同じ safeRead(withApiTimeout 8s) + 段階 fallback を写経:
+//   tier1 (推奨): comments + media + post embed を 1 RTT で取得
+//   tier2: embed が PGRST200/201 等で壊れた時、post embed を base 列 (media 抜き) に
+//   ★tier3 (FK 非依存の安全網・必須): comments を embed 無しで取得 → 得た post_id を
+//          posts.in('id', ids) で 2 段 fetch し Map で post を復元 (= saved と同型)。
+//          FK 名 comments_post_id_fkey が実在しない / media_urls 列が無い (0104 未適用)
+//          環境でも確実に動き、コメントが silent に全消滅する地雷を回避する。
+//          (実コード上 FK 実在は comments_author_id_fkey のみ確認済 = post embed は未実証)
+// author_visible RLS は自分のコメントには無影響 (必ず読める)。返却は created_at desc。
+// ============================================================
+
+export type MyCommentRow = {
+  id: string;
+  post_id: string;
+  content: string;
+  created_at: string;
+  media_urls: string[] | null;
+  post: {
+    id: string;
+    title: string | null;
+    content: string;
+    media_urls: string[] | null;
+  } | null;
+};
+
+// 自分のコメント取得の上限 (初回ペイロード軽量化。専用一覧があれば別途ページング)
+const FETCH_MY_COMMENTS_LIMIT = 50;
+
+// embed (post:posts!comments_post_id_fkey) を含む tier1/tier2 の生 shape。
+// PostgREST の to-one embed は object だが、FK 不定で配列化することもあるため両対応。
+type RawEmbeddedPost = {
+  id: string;
+  title: string | null;
+  content: string;
+  media_urls?: string[] | null;
+} | null;
+
+type RawMyComment = {
+  id: string;
+  post_id: string;
+  content: string;
+  created_at: string;
+  media_urls?: string[] | null;
+  post?: RawEmbeddedPost | RawEmbeddedPost[];
+};
+
+// embed 結果を MyCommentRow.post (単一 or null) に正規化。
+function normalizePost(p: RawMyComment['post']): MyCommentRow['post'] {
+  const one = Array.isArray(p) ? p[0] : p;
+  if (!one) return null;
+  return {
+    id: one.id,
+    title: one.title ?? null,
+    content: one.content,
+    media_urls: Array.isArray(one.media_urls) ? one.media_urls : null,
+  };
+}
+
+function mapMyComment(c: RawMyComment): MyCommentRow {
+  return {
+    id: c.id,
+    post_id: c.post_id,
+    content: c.content,
+    created_at: c.created_at,
+    media_urls: Array.isArray(c.media_urls) ? c.media_urls : null,
+    post: normalizePost(c.post),
+  };
+}
+
+export async function fetchMyComments(
+  userId: string,
+  opts?: { limit?: number },
+): Promise<MyCommentRow[]> {
+  const limit = opts?.limit ?? FETCH_MY_COMMENTS_LIMIT;
+
+  // tier1: media + post embed を 1 RTT で。
+  const t1 = await safeRead<RawMyComment[]>(
+    supabase
+      .from('comments')
+      .select(
+        'id, post_id, content, created_at, media_urls, post:posts!comments_post_id_fkey(id, title, content, media_urls)',
+      )
+      .eq('author_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(limit),
+    'comments.fetchMine.tier1',
+  );
+  if (!t1.error) return (t1.data ?? []).map(mapMyComment);
+
+  // tier2: embed の media を落として base 列のみ embed (post.media_urls 欠落時の退避)。
+  console.warn('[fetchMyComments] tier1 (embed+media) failed → embed base:', t1.error.message);
+  const t2 = await safeRead<RawMyComment[]>(
+    supabase
+      .from('comments')
+      .select(
+        'id, post_id, content, created_at, media_urls, post:posts!comments_post_id_fkey(id, title, content)',
+      )
+      .eq('author_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(limit),
+    'comments.fetchMine.tier2',
+  );
+  if (!t2.error) return (t2.data ?? []).map(mapMyComment);
+
+  // ★tier3 (FK 非依存の安全網): comments を embed/media 無しで取得 → posts.in で 2 段 fetch。
+  // comment 側 media_urls は取れない環境なので null 埋め。created_at desc は postIds 順で保持。
+  console.warn('[fetchMyComments] tier2 (embed base) failed → 2-step posts.in:', t2.error.message);
+  const t3 = await safeRead<
+    { id: string; post_id: string; content: string; created_at: string }[]
+  >(
+    supabase
+      .from('comments')
+      .select('id, post_id, content, created_at')
+      .eq('author_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(limit),
+    'comments.fetchMine.tier3.comments',
+  );
+  if (t3.error) throw t3.error;
+  const rows = t3.data ?? [];
+  if (rows.length === 0) return [];
+
+  // 出典 post を別 fetch (saves → posts と同型)。重複 post_id は uniq 化して 1 回で引く。
+  const postIds = Array.from(new Set(rows.map((r) => r.post_id)));
+  const tp = await safeRead<
+    { id: string; title: string | null; content: string; media_urls: string[] | null }[]
+  >(
+    supabase.from('posts').select('id, title, content, media_urls').in('id', postIds),
+    'comments.fetchMine.tier3.posts',
+  );
+  // posts 取得が失敗しても自分のコメント本文は誇れる → post=null で返す (silent 消滅は回避)。
+  if (tp.error) {
+    console.warn('[fetchMyComments] tier3 posts.in failed → post=null:', tp.error.message);
+  }
+  const postMap = new Map(
+    (tp.data ?? []).map((p) => [
+      p.id,
+      {
+        id: p.id,
+        title: p.title ?? null,
+        content: p.content,
+        media_urls: Array.isArray(p.media_urls) ? p.media_urls : null,
+      },
+    ]),
+  );
+
+  // comments の created_at desc 順を維持したまま post を Map で復元。
+  return rows.map((c) => ({
+    id: c.id,
+    post_id: c.post_id,
+    content: c.content,
+    created_at: c.created_at,
+    media_urls: null,
+    post: postMap.get(c.post_id) ?? null,
+  }));
+}
