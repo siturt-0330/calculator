@@ -51,13 +51,14 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { ProfileMastheadV2, HERO_H } from '../../components/mypage/ProfileMastheadV2';
 import { MypageStickyBar } from '../../components/mypage/MypageStickyBar';
 import { ProfileTabsBar, type ProfileTabKey } from '../../components/mypage/ProfileTabsBar';
-import { SectionPillar } from '../../components/mypage/SectionPillar';
+import { ImageLightbox } from '../../components/ui/ImageLightbox';
 import {
   MyEntryRow,
   MetaNum,
   MetaHeartIcon,
   MetaCommentIcon,
   MyEntryIcons,
+  type MyMediaItem,
 } from '../../components/mypage/MyEntryRow';
 import { MyEntryRowSkeleton } from '../../components/mypage/MyEntryRowSkeleton';
 
@@ -76,6 +77,9 @@ type UserPost = {
   content: string;
   title: string | null;
   media_urls: string[] | null;
+  media_blurhashes: string[] | null;
+  video_urls: string[] | null;
+  video_posters: string[] | null;
   likes_count: number;
   comments_count: number;
   is_public: boolean;
@@ -87,6 +91,9 @@ type SavedPost = {
   content: string;
   title: string | null;
   media_urls: string[] | null;
+  media_blurhashes: string[] | null;
+  video_urls: string[] | null;
+  video_posters: string[] | null;
   likes_count: number;
   comments_count: number;
   created_at: string;
@@ -105,7 +112,9 @@ async function fetchPostsByAuthor(authorId: string): Promise<UserPost[]> {
   // 自分視点 (= 自分の RLS) では is_public=false も見える。カード描画に使う列のみ。
   const { data } = await supabase
     .from('posts')
-    .select('id, content, title, media_urls, likes_count, comments_count, is_public, created_at')
+    .select(
+      'id, content, title, media_urls, media_blurhashes, video_urls, video_posters, likes_count, comments_count, is_public, created_at',
+    )
     .eq('author_id', authorId)
     .order('created_at', { ascending: false })
     .limit(30);
@@ -123,7 +132,9 @@ async function fetchSavedPosts(userId: string): Promise<SavedPost[]> {
   const postIds = (saves as { post_id: string }[]).map((s) => s.post_id);
   const { data: posts } = await supabase
     .from('posts')
-    .select('id, content, title, media_urls, likes_count, comments_count, created_at')
+    .select(
+      'id, content, title, media_urls, media_blurhashes, video_urls, video_posters, likes_count, comments_count, created_at',
+    )
     .in('id', postIds);
   // 保存順を維持
   const map = new Map((posts ?? []).map((p) => [(p as SavedPost).id, p as SavedPost]));
@@ -134,15 +145,37 @@ async function fetchSavedPosts(userId: string): Promise<SavedPost[]> {
 // FlashList の行ユニオン(item.kind で renderItem を分岐)
 // -----------------------------------------------------------------------------
 type Row =
-  | { kind: 'pillar'; label: string; count: number; unit: string }
   | { kind: 'skeleton' }
   | { kind: 'lock' }
   | { kind: 'empty'; tab: ProfileTabKey }
-  | { kind: 'post'; post: UserPost; index: number }
-  | { kind: 'comment'; comment: MyCommentRow; index: number }
-  | { kind: 'saved'; post: SavedPost; index: number };
+  | { kind: 'post'; post: UserPost }
+  | { kind: 'comment'; comment: MyCommentRow }
+  | { kind: 'saved'; post: SavedPost };
 
-const cover0 = (media: string[] | null): string | null => media?.[0] ?? null;
+// 投稿/保存の media 列を MyEntryRow 用の統一 media リストへ(画像→動画の順)。
+function toMedia(
+  images: string[] | null,
+  blurhashes: string[] | null,
+  videos: string[] | null,
+  posters: string[] | null,
+): MyMediaItem[] {
+  const out: MyMediaItem[] = [];
+  (images ?? []).forEach((url, i) =>
+    out.push({ type: 'image', url, blurhash: blurhashes?.[i] ?? null }),
+  );
+  (videos ?? []).forEach((url, i) =>
+    out.push({ type: 'video', url, poster: posters?.[i] ?? null }),
+  );
+  return out;
+}
+
+// コメントの media_urls は拡張子で画像/動画を判定(動画は poster 無し)。
+const COMMENT_VIDEO_RE = /\.(mp4|mov|webm|m4v)(\?|#|$)/i;
+function commentToMedia(urls: string[] | null): MyMediaItem[] {
+  return (urls ?? []).map((url) =>
+    COMMENT_VIDEO_RE.test(url) ? { type: 'video', url, poster: null } : { type: 'image', url },
+  );
+}
 
 // =============================================================================
 // MypageScreen
@@ -161,6 +194,7 @@ export default function MypageScreen() {
 
   const [tab, setTab] = useState<ProfileTabKey>('posts');
   const [showStickyTabs, setShowStickyTabs] = useState(false);
+  const [lightboxUri, setLightboxUri] = useState<string | null>(null);
 
   // ---- スクロール駆動値(全 collapse / parallax / ミニバーの単一ソース)----
   const scrollY = useSharedValue(0);
@@ -233,22 +267,15 @@ export default function MypageScreen() {
     //   流し rows を絶対に空にしない。
     if (activeLoading) return [{ kind: 'skeleton' }];
     if (tab === 'posts') {
-      const head: Row = { kind: 'pillar', label: '投稿', count: posts.length, unit: '編' };
-      if (posts.length === 0) return [head, { kind: 'empty', tab: 'posts' }];
-      return [head, ...posts.map((post, index): Row => ({ kind: 'post', post, index }))];
+      if (posts.length === 0) return [{ kind: 'empty', tab: 'posts' }];
+      return posts.map((post): Row => ({ kind: 'post', post }));
     }
     if (tab === 'comments') {
-      const head: Row = { kind: 'pillar', label: 'コメント', count: comments.length, unit: '件' };
-      if (comments.length === 0) return [head, { kind: 'empty', tab: 'comments' }];
-      return [head, ...comments.map((comment, index): Row => ({ kind: 'comment', comment, index }))];
+      if (comments.length === 0) return [{ kind: 'empty', tab: 'comments' }];
+      return comments.map((comment): Row => ({ kind: 'comment', comment }));
     }
-    const head: Row = { kind: 'pillar', label: '保存済み', count: saved.length, unit: '件' };
-    if (saved.length === 0) return [head, { kind: 'lock' }, { kind: 'empty', tab: 'saved' }];
-    return [
-      head,
-      { kind: 'lock' },
-      ...saved.map((post, index): Row => ({ kind: 'saved', post, index })),
-    ];
+    if (saved.length === 0) return [{ kind: 'empty', tab: 'saved' }];
+    return [{ kind: 'lock' }, ...saved.map((post): Row => ({ kind: 'saved', post }))];
   }, [tab, activeLoading, posts, comments, saved]);
 
   // ---- pull-to-refresh ----
@@ -283,6 +310,7 @@ export default function MypageScreen() {
   const openSettings = useCallback(() => router.push('/settings' as never), [router]);
   const editAvatar = useCallback(() => router.push('/settings/profile-edit' as never), [router]);
   const openPost = useCallback((id: string) => router.push(`/post/${id}` as never), [router]);
+  const openImage = useCallback((url: string) => setLightboxUri(thumbedUrl(url, 1280)), []);
 
   // ---- ListHeader(誌面マストヘッド + 実体タブA + ロード中 skeleton)----
   const ListHeader = useMemo(
@@ -318,8 +346,6 @@ export default function MypageScreen() {
   const renderItem = useCallback(
     ({ item }: { item: Row }) => {
       switch (item.kind) {
-        case 'pillar':
-          return <SectionPillar label={item.label} count={item.count} unit={item.unit} />;
         case 'skeleton':
           return (
             <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['4'], gap: SP['3'] }}>
@@ -331,20 +357,24 @@ export default function MypageScreen() {
         case 'empty':
           return <EmptyForTab tab={item.tab} router={router} />;
         case 'post':
-          return <PostRow post={item.post} index={item.index} onPress={() => openPost(item.post.id)} />;
+          return (
+            <PostRow post={item.post} onPress={() => openPost(item.post.id)} onOpenImage={openImage} />
+          );
         case 'comment':
           return (
             <CommentRow
               comment={item.comment}
-              index={item.index}
               onPress={() => item.comment.post && openPost(item.comment.post.id)}
+              onOpenImage={openImage}
             />
           );
         case 'saved':
-          return <SavedRow post={item.post} index={item.index} onPress={() => openPost(item.post.id)} />;
+          return (
+            <SavedRow post={item.post} onPress={() => openPost(item.post.id)} onOpenImage={openImage} />
+          );
       }
     },
-    [router, openPost],
+    [router, openPost, openImage],
   );
 
   return (
@@ -354,7 +384,7 @@ export default function MypageScreen() {
         data={rows}
         renderItem={renderItem}
         keyExtractor={keyExtractor}
-        estimatedItemSize={96}
+        estimatedItemSize={180}
         // ★ web で FlashList が親の高さを取れず 0 高さに潰れて中身が見えなく
         //   なる(画面が真っ黒)のを防ぐ。初期サイズを明示して必ず描画させる。
         estimatedListSize={{ width: winW, height: winH }}
@@ -401,14 +431,15 @@ export default function MypageScreen() {
         scrollY={scrollY}
         onOpenSettings={openSettings}
       />
+
+      {/* ===== 画像タップ → 全画面ビューア(常時インライン表示 + 拡大は任意) ===== */}
+      <ImageLightbox visible={!!lightboxUri} uri={lightboxUri} onClose={() => setLightboxUri(null)} />
     </View>
   );
 }
 
 function keyExtractor(item: Row): string {
   switch (item.kind) {
-    case 'pillar':
-      return '__pillar';
     case 'skeleton':
       return '__skeleton';
     case 'lock':
@@ -437,10 +468,16 @@ function PostMeta({ likes, comments, at }: { likes: number; comments: number; at
   );
 }
 
-function PostRow({ post, index, onPress }: { post: UserPost; index: number; onPress: () => void }) {
+function PostRow({
+  post,
+  onPress,
+  onOpenImage,
+}: {
+  post: UserPost;
+  onPress: () => void;
+  onOpenImage: (url: string) => void;
+}) {
   const title = post.title?.trim() || null;
-  const body = post.content?.trim() || '';
-  const snippet = body.length > 0 ? body : title ?? '';
   const badge = !post.is_public ? (
     <Text
       style={[
@@ -460,33 +497,37 @@ function PostRow({ post, index, onPress }: { post: UserPost; index: number; onPr
   return (
     <MyEntryRow
       variant="post"
-      thumbUri={cover0(post.media_urls)}
-      monogramSeed={title ?? body ?? '・'}
       title={title}
-      snippet={snippet || ' '}
+      snippet={post.content?.trim() ?? ''}
+      media={toMedia(post.media_urls, post.media_blurhashes, post.video_urls, post.video_posters)}
       metaNode={<PostMeta likes={post.likes_count} comments={post.comments_count} at={post.created_at} />}
       badgeNode={badge}
-      index={index}
       onPress={onPress}
+      onOpenImage={onOpenImage}
       accessibilityLabel="投稿を開く"
     />
   );
 }
 
-function SavedRow({ post, index, onPress }: { post: SavedPost; index: number; onPress: () => void }) {
+function SavedRow({
+  post,
+  onPress,
+  onOpenImage,
+}: {
+  post: SavedPost;
+  onPress: () => void;
+  onOpenImage: (url: string) => void;
+}) {
   const title = post.title?.trim() || null;
-  const body = post.content?.trim() || '';
-  const snippet = body.length > 0 ? body : title ?? '';
   return (
     <MyEntryRow
       variant="saved"
-      thumbUri={cover0(post.media_urls)}
-      monogramSeed={title ?? body ?? '・'}
       title={title}
-      snippet={snippet || ' '}
+      snippet={post.content?.trim() ?? ''}
+      media={toMedia(post.media_urls, post.media_blurhashes, post.video_urls, post.video_posters)}
       metaNode={<PostMeta likes={post.likes_count} comments={post.comments_count} at={post.created_at} />}
-      index={index}
       onPress={onPress}
+      onOpenImage={onOpenImage}
       accessibilityLabel="保存した投稿を開く"
     />
   );
@@ -494,12 +535,12 @@ function SavedRow({ post, index, onPress }: { post: SavedPost; index: number; on
 
 function CommentRow({
   comment,
-  index,
   onPress,
+  onOpenImage,
 }: {
   comment: MyCommentRow;
-  index: number;
   onPress: () => void;
+  onOpenImage: (url: string) => void;
 }) {
   const body = comment.content?.trim() || '';
   const post = comment.post;
@@ -527,13 +568,11 @@ function CommentRow({
   return (
     <MyEntryRow
       variant="comment"
-      thumbUri={null}
-      monogramSeed={body || '・'}
-      snippet={body || ' '}
-      commentMedia={comment.media_urls}
+      snippet={body}
+      media={commentToMedia(comment.media_urls)}
       quoteNode={quote}
-      index={index}
       onPress={post ? onPress : () => {}}
+      onOpenImage={onOpenImage}
       accessibilityLabel="コメントした投稿を開く"
     />
   );
