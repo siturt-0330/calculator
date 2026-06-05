@@ -43,6 +43,37 @@ const FRAME = {
   overflow: 'hidden' as const,
 };
 
+// ============================================================
+// インライン自動再生の「同時デコード上限」(mobile Safari のデコーダ枯渇対策)
+// ------------------------------------------------------------
+// 画面内の自動再生 <video> が増えても、同時に play() するのは PLAY_CAP 本まで。
+// 超過分は先頭フレーム(=静止画)のまま待機し、スロットが空いたら in-view の
+// ものから再生を再開する。autoplay は無効化しない(常時可視・muted は維持し、
+// 走るハードウェアデコーダの本数だけ間引いて scroll の「かくかく」を防ぐ)。
+// ============================================================
+const PLAY_CAP = 2;
+let playingCount = 0;
+const playWaiters = new Set<() => void>();
+
+function acquirePlaySlot(): boolean {
+  if (playingCount < PLAY_CAP) {
+    playingCount += 1;
+    return true;
+  }
+  return false;
+}
+function releasePlaySlot(): void {
+  if (playingCount > 0) playingCount -= 1;
+  // 空いたスロットを待つ in-view の video 全員に再試行を促す(成功するのは空き分だけ)。
+  playWaiters.forEach((cb) => cb());
+}
+function addPlayWaiter(cb: () => void): () => void {
+  playWaiters.add(cb);
+  return () => {
+    playWaiters.delete(cb);
+  };
+}
+
 export function VideoPlayer({
   uri,
   poster,
@@ -65,6 +96,9 @@ function WebVideo({ uri, poster, style, shouldPlay, autoplay = true, expandable 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const videoRef = useRef<any>(null);
   const mutedRef = useRef(initialMuted);
+  // 同時再生スロットを保持中か / いま画面内で再生したいか(IO 判定の最新値)。
+  const hasSlotRef = useRef(false);
+  const wantPlayRef = useRef(false);
   const [muted, setMuted] = useState(initialMuted);
   const [error, setError] = useState<string | null>(null);
 
@@ -108,30 +142,66 @@ function WebVideo({ uri, poster, style, shouldPlay, autoplay = true, expandable 
     else el.pause?.();
   }, [shouldPlay]);
 
-  // 自前 viewport 検出 — override 未指定 & autoplay 有効時のみ
+  // 自前 viewport 検出 — override 未指定 & autoplay 有効時のみ。
+  // 同時再生は PLAY_CAP 本まで。上限時は先頭フレームのまま待機し、他が画面外へ
+  // 出てスロットが空いたら(releasePlaySlot のブロードキャストで)再生を取り戻す。
   useEffect(() => {
     if (shouldPlay !== undefined || !autoplay) return;
     const el = videoRef.current;
     if (!el || typeof IntersectionObserver === 'undefined') return;
+
+    const tryPlay = () => {
+      el.muted = mutedRef.current;
+      // 音あり autoplay が弾かれたら muted で再試行
+      el.play?.().catch(() => {
+        applyMuted(true);
+        el.play?.().catch(() => {});
+      });
+    };
+    // スロットが空いたとき呼ばれる: まだ画面内 & 未取得なら取得して再生。
+    const retry = () => {
+      if (hasSlotRef.current || !wantPlayRef.current) return;
+      if (acquirePlaySlot()) {
+        hasSlotRef.current = true;
+        tryPlay();
+      }
+    };
+    const removeWaiter = addPlayWaiter(retry);
+
     const io = new IntersectionObserver(
       (entries) => {
         const e = entries[0];
         if (!e) return;
         if (e.isIntersecting && e.intersectionRatio >= 0.6) {
-          // 現在の mute 設定で再生 → 音あり autoplay が弾かれたら muted で再試行
-          el.muted = mutedRef.current;
-          el.play?.().catch(() => {
-            applyMuted(true);
-            el.play?.().catch(() => {});
-          });
+          wantPlayRef.current = true;
+          if (hasSlotRef.current) {
+            tryPlay();
+          } else if (acquirePlaySlot()) {
+            hasSlotRef.current = true;
+            tryPlay();
+          }
+          // それ以外(上限到達)は retry が空きを待つ
         } else {
+          wantPlayRef.current = false;
           el.pause?.();
+          if (hasSlotRef.current) {
+            hasSlotRef.current = false;
+            releasePlaySlot();
+          }
         }
       },
       { threshold: [0, 0.6, 1] },
     );
     io.observe(el);
-    return () => io.disconnect();
+    return () => {
+      io.disconnect();
+      removeWaiter();
+      wantPlayRef.current = false;
+      if (hasSlotRef.current) {
+        hasSlotRef.current = false;
+        releasePlaySlot();
+      }
+    };
   }, [autoplay, shouldPlay, uri, applyMuted]);
 
   return (
@@ -157,7 +227,16 @@ function WebVideo({ uri, poster, style, shouldPlay, autoplay = true, expandable 
             backgroundColor: '#000',
             cursor: 'pointer',
           },
-          onError: () => setError('動画を読み込めませんでした'),
+          onError: () => {
+            // ★ エラー時はグローバル再生スロットを解放する。壊れた動画がスロットを
+            //   握り続けると、アプリ全体の自動再生が枯渇しうる。
+            wantPlayRef.current = false;
+            if (hasSlotRef.current) {
+              hasSlotRef.current = false;
+              releasePlaySlot();
+            }
+            setError('動画を読み込めませんでした');
+          },
         });
       })()}
       {!error && <MuteBadge muted={muted} onPress={() => applyMuted(!muted)} />}

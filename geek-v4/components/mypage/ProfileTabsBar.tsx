@@ -1,8 +1,11 @@
 // =============================================================================
-// ProfileTabsBar — 3 タブ (共有 / 投稿 / 保存済み) の切替バー
+// ProfileTabsBar — 3 タブ (投稿 / コメント / 保存済み) の章インデックス切替バー
 // -----------------------------------------------------------------------------
-// Reddit 風の下線が滑るアニメ。タブ高さ 46、underline 3px の accent。
+// Reddit 風の下線が滑るアニメ。タブ高さ 48、underline 3px の accent。
 // 親が active key と onChange を渡す制御コンポーネント。
+// Atelier改: 'shared'(共有アルバム) を撤去し 'comments'(残したコメント) を新設。
+// 件数はここでは出さない(誌面の SectionPillar 側で見せる)= タブ⇔柱の役割分担。
+// 親 mypage が active state を単一管理し、実体バーと擬似sticky 複製バーの2インスタンスで共有する。
 // =============================================================================
 
 import { useEffect, useState } from 'react';
@@ -20,11 +23,11 @@ import { C } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { SPRING_TIGHT, TIMING_FAST } from '../../design/motion';
 
-export type ProfileTabKey = 'shared' | 'posts' | 'saved';
+export type ProfileTabKey = 'posts' | 'comments' | 'saved';
 
 const TABS: { key: ProfileTabKey; label: string }[] = [
-  { key: 'shared', label: '共有' },
   { key: 'posts', label: '投稿' },
+  { key: 'comments', label: 'コメント' },
   { key: 'saved', label: '保存済み' },
 ];
 

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
@@ -79,6 +79,38 @@ function EmojiInner({ size, emoji, color }: { size: number; emoji: string; color
   );
 }
 
+// uri 画像 — onError で fallback に落とす (404 / 期限切れ URL での「空白の丸」防止)。
+function AvatarImage({
+  uri,
+  size,
+  fallback,
+}: {
+  uri: string;
+  size: number;
+  fallback: React.ReactNode;
+}) {
+  const [errored, setErrored] = useState(false);
+  // uri が変わったら error 状態をリセット (リスト再利用対策)。
+  useEffect(() => {
+    setErrored(false);
+  }, [uri]);
+  if (errored) return <>{fallback}</>;
+  // Supabase Storage URL は size に応じたサムネ URL に変換 (帯域 + decode コスト削減)。
+  // 外部 URL や既にサムネ化済みなら thumbedUrl は no-op。
+  const resolvedUri = thumbedUrl(uri, avatarThumbWidth(size));
+  return (
+    <Image
+      source={{ uri: resolvedUri }}
+      style={{ width: size, height: size, borderRadius: R.full, backgroundColor: C.bg3 }}
+      contentFit="cover"
+      cachePolicy="memory-disk"
+      recyclingKey={resolvedUri}
+      transition={120}
+      onError={() => setErrored(true)}
+    />
+  );
+}
+
 export function Avatar({
   size = 36,
   uri,
@@ -111,6 +143,23 @@ export function Avatar({
   // ring がある時は inner avatar を RING_WIDTH 分縮める (見た目サイズは size を維持)
   const innerSize = hasRing ? size - RING_WIDTH * 2 : size;
 
+  // 画像 fallback / 画像なし時に共通で使う「頭文字の丸」。
+  const initial = name?.charAt(0).toUpperCase() ?? '?';
+  const initialInner = (
+    <View
+      style={{
+        width: innerSize,
+        height: innerSize,
+        borderRadius: R.full,
+        backgroundColor: color ?? C.accent,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text style={[T.bodyB, { color: '#fff', fontSize: innerSize * 0.4 }]}>{initial}</Text>
+    </View>
+  );
+
   let inner: React.ReactNode;
   if (anonymous) {
     inner = (
@@ -132,44 +181,11 @@ export function Avatar({
   } else if (emoji) {
     inner = <EmojiInner size={innerSize} emoji={emoji} color={color} />;
   } else if (uri) {
-    // Supabase Storage URL は size に応じたサムネ URL に変換 — 32px アバターに
-    // 1600px の元画像を投げないようにする (帯域 + decode コスト削減)。
-    // 外部 URL や既にサムネ化済みなら thumbedUrl は no-op。
-    const resolvedUri = thumbedUrl(uri, avatarThumbWidth(innerSize));
-    inner = (
-      <Image
-        source={{ uri: resolvedUri }}
-        style={{
-          width: innerSize,
-          height: innerSize,
-          borderRadius: R.full,
-          backgroundColor: C.bg3,
-        }}
-        contentFit="cover"
-        cachePolicy="memory-disk"
-        // List 内で同じセルが別 user のアバターに再利用されるとき、
-        // recyclingKey が変われば expo-image が確実に新しい画像を出す。
-        recyclingKey={resolvedUri}
-        // フェードを短めに (リスト再利用時の二重フェード防止)
-        transition={120}
-      />
-    );
+    // 画像は AvatarImage 経由。onError で initialInner に落ちるので、404 / 期限切れ
+    // URL でも「空白の丸」にならず必ず頭文字が出る。
+    inner = <AvatarImage uri={uri} size={innerSize} fallback={initialInner} />;
   } else {
-    const initial = name?.charAt(0).toUpperCase() ?? '?';
-    inner = (
-      <View
-        style={{
-          width: innerSize,
-          height: innerSize,
-          borderRadius: R.full,
-          backgroundColor: color ?? C.accent,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Text style={[T.bodyB, { color: '#fff', fontSize: innerSize * 0.4 }]}>{initial}</Text>
-      </View>
-    );
+    inner = initialInner;
   }
 
   // ring を当てる場合は LinearGradient の円で inner を包む。

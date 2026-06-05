@@ -5,8 +5,6 @@
 // /official/[communityId] のダッシュボードに遷移する。
 // ============================================================
 import { View, Text, ScrollView } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
-import { squareThumbedUrl } from '../../lib/utils/imageUrl';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -14,6 +12,7 @@ import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BackButton } from '../../components/nav/BackButton';
 import { PressableScale } from '../../components/ui/PressableScale';
+import { CommunityIcon } from '../../components/ui/CommunityIcon';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Icon } from '../../constants/icons';
 import { C, R, SP, SHADOW } from '../../design/tokens';
@@ -156,34 +155,13 @@ function CommunityCard({ community, onPress }: { community: Community; onPress: 
         pointerEvents="none"
       />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['3'] }}>
-        <View
-          style={{
-            width: 56,
-            height: 56,
-            borderRadius: R.lg,
-            backgroundColor: safeIconUrl ? C.bg3 : community.icon_color,
-            alignItems: 'center',
-            justifyContent: 'center',
-            overflow: 'hidden',
-            borderWidth: 1,
-            borderColor: C.border,
-          }}
-        >
-          {safeIconUrl ? (
-            // 56px @4x = 224 → 240 で retina 余裕。サーバ側 center-crop で
-            // 横長集合写真でも正方形に切り出される。
-            <ExpoImage
-              source={{ uri: squareThumbedUrl(safeIconUrl, 240) }}
-              style={{ width: '100%', height: '100%' }}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              recyclingKey={safeIconUrl}
-              transition={120}
-            />
-          ) : (
-            <Text style={{ fontSize: 32 }}>{community.icon_emoji}</Text>
-          )}
-        </View>
+        <CommunityIcon
+          iconUrl={safeIconUrl}
+          iconEmoji={community.icon_emoji}
+          iconColor={community.icon_color}
+          name={community.name}
+          size={56}
+        />
         <View style={{ flex: 1, gap: 4 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Text style={[T.h3, { color: C.text, flexShrink: 1 }]} numberOfLines={1}>

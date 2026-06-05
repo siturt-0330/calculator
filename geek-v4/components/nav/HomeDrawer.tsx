@@ -59,6 +59,7 @@ import {
   type LucideIcon,
 } from 'lucide-react-native';
 import { Avatar } from '../ui/Avatar';
+import { CommunityIcon } from '../ui/CommunityIcon';
 import { PressableScale } from '../ui/PressableScale';
 import { useAuthStore } from '../../stores/authStore';
 import { useMyFriends } from '../../hooks/useFriends';
@@ -679,11 +680,11 @@ function CommunityRow({
         gap: SP['3'],
       }}
     >
-      <Avatar
+      <CommunityIcon
         size={36}
-        uri={community.icon_url ?? undefined}
-        emoji={community.icon_emoji}
-        color={community.icon_color}
+        iconUrl={community.icon_url}
+        iconEmoji={community.icon_emoji}
+        iconColor={community.icon_color}
         name={community.name}
       />
       <View style={{ flex: 1 }}>

@@ -9,14 +9,13 @@
 // ============================================================
 import React from 'react';
 import { View, Text } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
 import { useColors } from '../../hooks/useColors';
 import { SP, R, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { hap } from '../../design/haptics';
 import { Icon } from '../../constants/icons';
 import { PressableScale } from '../ui/PressableScale';
-import { squareThumbedUrl } from '../../lib/utils/imageUrl';
+import { CommunityIcon } from '../ui/CommunityIcon';
 import { formatCountJa } from '../../lib/format/communityMetrics';
 import { type Community } from '../../lib/api/communities';
 
@@ -93,30 +92,13 @@ export function CommunityBigCard(props: CommunityBigCardProps) {
         {/* Top row: アイコン + 右カラム */}
         <View style={{ flexDirection: 'row', gap: SP['3'], alignItems: 'center' }}>
           {/* 56x56 円アイコン */}
-          <View style={{ width: 56, height: 56, borderRadius: 28, overflow: 'hidden' }}>
-            {community.icon_url ? (
-              <ExpoImage
-                source={{ uri: squareThumbedUrl(community.icon_url, 240) }}
-                style={{ width: '100%', height: '100%' }}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-                recyclingKey={community.icon_url ?? community.id}
-                transition={120}
-              />
-            ) : (
-              <View
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  backgroundColor: community.icon_color,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Text style={{ fontSize: 26 }}>{community.icon_emoji}</Text>
-              </View>
-            )}
-          </View>
+          <CommunityIcon
+            iconUrl={community.icon_url}
+            iconEmoji={community.icon_emoji}
+            iconColor={community.icon_color}
+            name={community.name}
+            size={56}
+          />
 
           {/* 右カラム: 名称 + メトリクス */}
           <View style={{ flex: 1, minWidth: 0 }}>

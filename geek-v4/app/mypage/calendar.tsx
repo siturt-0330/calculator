@@ -8,8 +8,6 @@
 // ============================================================
 
 import { View, Text, ScrollView, Modal } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
-import { squareThumbedUrl } from '../../lib/utils/imageUrl';
 import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,6 +16,7 @@ import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { BackButton } from '../../components/nav/BackButton';
 import { PressableScale } from '../../components/ui/PressableScale';
+import { CommunityIcon } from '../../components/ui/CommunityIcon';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Spinner } from '../../components/ui/Spinner';
 import { Icon } from '../../constants/icons';
@@ -218,31 +217,13 @@ export default function MyCalendarScreen() {
                         opacity: isVisible ? 1 : 0.5,
                       }}
                     >
-                      <View
-                        style={{
-                          width: 36,
-                          height: 36,
-                          borderRadius: 18,
-                          backgroundColor: safeIconUrl ? C.bg3 : c.icon_color,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        {safeIconUrl ? (
-                          // 36px @4x = 144 → 160 で retina 余裕。サーバ側 center-crop。
-                          <ExpoImage
-                            source={{ uri: squareThumbedUrl(safeIconUrl, 160) }}
-                            style={{ width: '100%', height: '100%' }}
-                            contentFit="cover"
-                            cachePolicy="memory-disk"
-                            recyclingKey={safeIconUrl}
-                            transition={120}
-                          />
-                        ) : (
-                          <Text style={{ fontSize: 20 }}>{c.icon_emoji}</Text>
-                        )}
-                      </View>
+                      <CommunityIcon
+                        iconUrl={safeIconUrl}
+                        iconEmoji={c.icon_emoji}
+                        iconColor={c.icon_color}
+                        name={c.name}
+                        size={36}
+                      />
                       <Text style={[T.bodyB, { color: C.text, flex: 1 }]} numberOfLines={1}>
                         {c.name}
                       </Text>
@@ -348,31 +329,13 @@ function MyCalendarEventRow({
       {/* 本体 */}
       <View style={{ flex: 1, gap: 4 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <View
-            style={{
-              width: 18,
-              height: 18,
-              borderRadius: 9,
-              backgroundColor: safeIconUrl ? C.bg3 : event.community.icon_color,
-              alignItems: 'center',
-              justifyContent: 'center',
-              overflow: 'hidden',
-            }}
-          >
-            {safeIconUrl ? (
-              // 18px @4x = 72 → 80 で retina 余裕。サーバ側 center-crop。
-              <ExpoImage
-                source={{ uri: squareThumbedUrl(safeIconUrl, 80) }}
-                style={{ width: '100%', height: '100%' }}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-                recyclingKey={safeIconUrl}
-                transition={120}
-              />
-            ) : (
-              <Text style={{ fontSize: 10 }}>{event.community.icon_emoji}</Text>
-            )}
-          </View>
+          <CommunityIcon
+            iconUrl={safeIconUrl}
+            iconEmoji={event.community.icon_emoji}
+            iconColor={event.community.icon_color}
+            name={event.community.name}
+            size={18}
+          />
           <Text style={[T.caption, { color: C.text3, flex: 1 }]} numberOfLines={1}>
             {event.community.name}
           </Text>

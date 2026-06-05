@@ -12,13 +12,13 @@
 //   - supabase / zustand / fetch は一切持たない
 // ============================================================
 
-import { Text, View } from 'react-native';
+import { Text } from 'react-native';
 import { useColors } from '../../../hooks/useColors';
 import { SP, R } from '../../../design/tokens';
 import { T } from '../../../design/typography';
 import { Icon } from '../../../constants/icons';
 import { PressableScale } from '../../ui/PressableScale';
-import { ProgressiveImage } from '../../ui/ProgressiveImage';
+import { CommunityIcon } from '../../ui/CommunityIcon';
 import type { Community } from '../../../lib/api/communities';
 
 export interface CommunityPillProps {
@@ -64,27 +64,13 @@ export function CommunityPill({
       {community ? (
         <>
           {/* アイコン: 画像があれば優先、無ければ icon_color の円 + 絵文字 */}
-          {community.icon_url ? (
-            <ProgressiveImage
-              uri={community.icon_url}
-              width={AVATAR}
-              height={AVATAR}
-              radius={AVATAR / 2}
-            />
-          ) : (
-            <View
-              style={{
-                width: AVATAR,
-                height: AVATAR,
-                borderRadius: AVATAR / 2,
-                backgroundColor: community.icon_color,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Text style={{ fontSize: 13 }}>{community.icon_emoji}</Text>
-            </View>
-          )}
+          <CommunityIcon
+            iconUrl={community.icon_url}
+            iconEmoji={community.icon_emoji}
+            iconColor={community.icon_color}
+            name={community.name}
+            size={AVATAR}
+          />
 
           <Text numberOfLines={1} style={[T.smallB, { color: C.text, flexShrink: 1 }]}>
             {community.name}

@@ -16,7 +16,6 @@
 //
 // ============================================================
 import { View, Text, ScrollView } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { R, SP } from '../../design/tokens';
 import { useTheme } from '../../hooks/useColors';
@@ -24,7 +23,7 @@ import { T } from '../../design/typography';
 import { Icon } from '../../constants/icons';
 import { PressableScale } from '../ui/PressableScale';
 import { OfficialBadge } from './OfficialBadge';
-import { squareThumbedUrl } from '../../lib/utils/imageUrl';
+import { CommunityIcon } from '../ui/CommunityIcon';
 
 // ------------------------------------------------------------
 // 受け取れる community 形状 — CommunityMetaLite と Community の
@@ -258,26 +257,16 @@ function AvatarItem({
                 color={isSelected ? C.accent : C.text2}
                 strokeWidth={2.2}
               />
-            ) : iconUrl ? (
-              <ExpoImage
-                // 52px 内枠 @3x ≒ 156 → 160 で retina 余裕。
-                // squareThumbedUrl: width=160&height=160&resize=cover で
-                // **サーバ側で正方形に center-crop** された画像を取得する。
-                // 旧 thumbedUrl(_, 160) は width だけ指定 → 横長集合写真は
-                // 縦が短いまま降ってきて、expo-image が contentFit="cover"
-                // で大幅拡大して円に詰め込む = 「顔が押し込まれて拡大」状態に。
-                source={{ uri: squareThumbedUrl(iconUrl, 160) }}
-                style={{ width: '100%', height: '100%' }}
-                contentFit="cover"
-                // 監査 (2026-05): memory-disk 未指定だと横スクロールで戻った際に
-                // 再 download が走り、ネット slot を食い潰す。memory-disk + recyclingKey
-                // で 2 回目以降は instant.
-                cachePolicy="memory-disk"
-                recyclingKey={iconUrl}
-                transition={120}
-              />
             ) : (
-              <Text style={{ fontSize: 26 }}>{iconEmoji ?? '🌐'}</Text>
+              // ★ CommunityIcon に集約: contain で「拡大して切れる」を防ぎ、
+              //   onError で「空白の丸」を防ぐ (icon_url 失敗時は emoji へ fallback)。
+              <CommunityIcon
+                size={INNER_SIZE}
+                iconUrl={iconUrl}
+                iconEmoji={iconEmoji}
+                iconColor={iconColor}
+                name={label}
+              />
             )}
           </View>
         </View>
