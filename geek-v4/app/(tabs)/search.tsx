@@ -45,7 +45,7 @@ import { Icon } from '../../constants/icons';
 import { C, R, SP } from '../../design/tokens';
 import { TABBAR } from '../../design/tabbar';
 import { T } from '../../design/typography';
-import { fetchPostById } from '../../lib/api/posts';
+import { fetchPostsByIds } from '../../lib/api/posts';
 // EDITORIAL「特集」検索 UI コンポーネント群
 import { InklineSearchBar } from '../../components/search/InklineSearchBar';
 import { EditorialMasthead } from '../../components/search/EditorialMasthead';
@@ -207,12 +207,11 @@ export default function SearchScreen() {
     queryKey: ['searchV4-posts', postIds.join('|')],
     queryFn: async () => {
       if (postIds.length === 0) return [];
-      // 投稿ごとに 1 RTT を許容 — useSearchV4 の上位 N (= 30) に絞っているので
-      // 並列で問題ないが、Promise.allSettled で 1 件失敗が全体を壊さないようにする
-      const settled = await Promise.allSettled(postIds.map((id) => fetchPostById(id)));
-      return settled
-        .map((r) => (r.status === 'fulfilled' ? r.value : null))
-        .filter((p): p is Post => p !== null);
+      // ★ 1 RTT でまとめて hydrate(旧: 1 件ずつ最大 30 RTT のウォーターフォール)。
+      //   取得は順不同なので searchV4 のランキング順に並べ直す。
+      const fetched = await fetchPostsByIds(postIds);
+      const map = new Map(fetched.map((p) => [p.id, p]));
+      return postIds.map((id) => map.get(id)).filter((p): p is Post => !!p);
     },
     enabled: postIds.length > 0,
     staleTime: 60_000,
@@ -393,6 +392,17 @@ export default function SearchScreen() {
     inputRef.current?.focus();
   }, []);
 
+  // フォーカス時オーバーレイを明示的に閉じる「キャンセル」。web は入力外タップで
+  // blur しづらく、空クエリだと commit でも閉じられないため必須(空クエリ詰まり対策)。
+  const cancelSearch = useCallback(() => {
+    cancelBlurTimer();
+    setRawQuery('');
+    setDebouncedQuery('');
+    Keyboard.dismiss();
+    inputRef.current?.blur();
+    setInputFocused(false);
+  }, [cancelBlurTimer]);
+
   // ===== フォーカス時オーバーレイ(SearchFocusOverlay)のハンドラ =====
   // 候補を入力欄へ流し込む (検索はせずフォーカス維持 = さらに絞り込める)。
   const fillQuery = useCallback((t: string) => {
@@ -487,31 +497,48 @@ export default function SearchScreen() {
           zIndex: 10,
         }}
       >
-        <InklineSearchBar
-          value={rawQuery}
-          onChangeText={setRawQuery}
-          onSubmit={() => commit()}
-          onFocus={() => {
-            // 直前の blur で予約された「閉じる」タイマーを取り消してから開く。
-            // (再フォーカスでオーバーレイが一瞬閉じる/開く ちらつきを防ぐ)
-            cancelBlurTimer();
-            setInputFocused(true);
-          }}
-          onBlur={() => {
-            // onBlur は onPress より先に発火する。blurTimerRef でタイマーを管理し、
-            // 履歴アイテムの onPressIn でキャンセルできるようにする (タイミング依存なし)。
-            cancelBlurTimer();
-            blurTimerRef.current = setTimeout(() => {
-              blurTimerRef.current = null;
-              setInputFocused(false);
-            }, 150);
-          }}
-          onClear={clearInput}
-          focusProgress={focusProgress}
-          resultCount={resultCount}
-          isTyping={isTyping}
-          inputRef={inputRef}
-        />
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ flex: 1 }}>
+            <InklineSearchBar
+              value={rawQuery}
+              onChangeText={setRawQuery}
+              onSubmit={() => commit()}
+              onFocus={() => {
+                // 直前の blur で予約された「閉じる」タイマーを取り消してから開く。
+                cancelBlurTimer();
+                setInputFocused(true);
+              }}
+              onBlur={() => {
+                // onBlur は onPress より先に発火する。blurTimerRef でタイマー管理し、
+                // 行の onPressIn でキャンセルできるようにする (タイミング依存なし)。
+                cancelBlurTimer();
+                blurTimerRef.current = setTimeout(() => {
+                  blurTimerRef.current = null;
+                  setInputFocused(false);
+                }, 150);
+              }}
+              onClear={clearInput}
+              focusProgress={focusProgress}
+              resultCount={resultCount}
+              isTyping={isTyping}
+              inputRef={inputRef}
+            />
+          </View>
+          {/* iOS 流「キャンセル」— フォーカス時のみ。web で入力外タップでも確実に閉じられる。 */}
+          {inputFocused ? (
+            <PressableScale
+              onPressIn={cancelBlurTimer}
+              onPress={cancelSearch}
+              haptic="tap"
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="検索をキャンセル"
+              style={{ paddingLeft: SP['2'], paddingRight: SP['4'], paddingBottom: SP['4'] }}
+            >
+              <Text style={[T.body, { color: C.accentLight, fontWeight: '700' }]}>キャンセル</Text>
+            </PressableScale>
+          ) : null}
+        </View>
 
         {/* フォーカス時の「最近 / 候補」はルート直下の SearchFocusOverlay が担う
             (旧: ここに履歴 dropdown を inline していた)。 */}

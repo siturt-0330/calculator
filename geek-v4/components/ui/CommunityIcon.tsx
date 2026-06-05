@@ -22,6 +22,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { C, R, GRAD } from '../../design/tokens';
 import { Icon } from '../../constants/icons';
 import { iconThumbedUrl } from '../../lib/utils/imageUrl';
+import { sanitizeUrl } from '../../lib/sanitize';
 
 const RING_WIDTH = 2;
 
@@ -52,9 +53,11 @@ export function CommunityIcon({
   }, [iconUrl]);
 
   const inner = ring ? size - RING_WIDTH * 2 : size;
-  const showImage = !!iconUrl && !errored;
+  // icon_url は信頼できない入力。sanitizeUrl で javascript: 等を弾いてから使う。
+  const safeUrl = iconUrl ? sanitizeUrl(iconUrl) : '';
+  const showImage = !!safeUrl && !errored;
   // retina 2x。contain なので crop されず、ロゴ全体が収まる。
-  const resolved = showImage ? iconThumbedUrl(iconUrl, Math.round(inner * 2)) : '';
+  const resolved = showImage ? iconThumbedUrl(safeUrl, Math.round(inner * 2)) : '';
 
   const circle = (
     <View

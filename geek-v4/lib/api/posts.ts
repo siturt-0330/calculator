@@ -815,6 +815,36 @@ export async function fetchPostById(id: string): Promise<Post | null> {
   return decorated ?? null;
 }
 
+// 複数 post id をまとめて 1 RTT で取得 (検索結果の hydrate 用)。順不同で返るので
+// 呼び出し側でランキング順に並べ直す。embed 失敗時は legacy SELECT に fallback。
+// (旧: 検索が 1 件ずつ最大 30 RTT のウォーターフォールだったのを 1 RTT に畳む)
+export async function fetchPostsByIds(ids: string[]): Promise<Post[]> {
+  const valid = ids.filter((id) => id && UUID_RE.test(id));
+  if (valid.length === 0) return [];
+  const { data, error } = await withApiTimeout(
+    supabase.from('posts').select(POSTS_SELECT_COLS_WITH_COMM).in('id', valid),
+    'posts.fetchPostsByIds',
+    8000,
+  );
+  if (error && isEmbedFailure(error)) {
+    const fb = await withApiTimeout(
+      supabase.from('posts').select(POSTS_SELECT_COLS).in('id', valid),
+      'posts.fetchPostsByIds.fallback',
+      8000,
+    );
+    if (fb.error) {
+      console.warn('[fetchPostsByIds] error:', fb.error.message);
+      return [];
+    }
+    return attachOfficialAuthor((fb.data ?? []) as Post[]);
+  }
+  if (error) {
+    console.warn('[fetchPostsByIds] error:', error.message);
+    return [];
+  }
+  return attachOfficialAuthorFromEmbed<Post>((data ?? []) as PostWithEmbeddedComm[]);
+}
+
 // ============================================================
 // 公式コミュ管理者投稿の de-anonymize
 // ------------------------------------------------------------
@@ -880,6 +910,8 @@ export type PostCommunityRef = {
   community_id: string;
   name: string;
   icon_emoji: string;
+  // fetchCommunitiesForPosts は供給する。feed RPC 等の他ソースは未供給(任意)。
+  icon_color?: string;
   icon_url: string | null;
   is_official?: boolean;
 };
@@ -893,7 +925,7 @@ export async function fetchCommunitiesForPosts(
   const { data, error } = await withApiTimeout(
     supabase
       .from('post_communities')
-      .select('post_id, community:communities(id, name, icon_emoji, icon_url, is_official)')
+      .select('post_id, community:communities(id, name, icon_emoji, icon_color, icon_url, is_official)')
       .in('post_id', postIds),
     'posts.fetchCommunitiesForPosts',
     8000,
@@ -905,7 +937,7 @@ export async function fetchCommunitiesForPosts(
   // Supabase の typed return は join 関係を array で返す形 (FK の方向に依らず) なので
   // 単一でも複数でも安全に扱えるよう unknown 経由で narrow。
   // community が null (RLS で読めない / 削除済み) の行は無視。
-  type CommunityCol = { id: string; name: string; icon_emoji: string; icon_url: string | null; is_official?: boolean };
+  type CommunityCol = { id: string; name: string; icon_emoji: string; icon_color: string; icon_url: string | null; is_official?: boolean };
   type Row = {
     post_id: string;
     community: CommunityCol | CommunityCol[] | null;
@@ -921,6 +953,7 @@ export async function fetchCommunitiesForPosts(
       community_id: community.id,
       name: community.name,
       icon_emoji: community.icon_emoji,
+      icon_color: community.icon_color,
       icon_url: community.icon_url,
       is_official: community.is_official ?? false,
     });

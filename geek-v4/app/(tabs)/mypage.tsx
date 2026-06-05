@@ -43,6 +43,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { supabase } from '../../lib/supabase';
 import { fetchMyComments, type MyCommentRow, deleteComment } from '../../lib/api/comments';
 import { deleteOwnPost, fetchCommunitiesForPosts, type PostCommunityRef } from '../../lib/api/posts';
+import { withApiTimeout } from '../../lib/withApiTimeout';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { formatRelative } from '../../lib/utils/date';
 import { C, R, SP } from '../../design/tokens';
@@ -107,42 +108,62 @@ type SavedPost = {
 };
 
 async function fetchProfileStats(userId: string): Promise<MypageStats | null> {
-  const { data } = await supabase
-    .from('profiles')
-    .select('nickname, avatar_emoji, avatar_url, cover_url')
-    .eq('id', userId)
-    .single();
+  const { data, error } = await withApiTimeout(
+    supabase
+      .from('profiles')
+      .select('nickname, avatar_emoji, avatar_url, cover_url')
+      .eq('id', userId)
+      .single(),
+    'mypage.stats',
+    8000,
+  );
+  if (error) throw error;
   return (data ?? null) as MypageStats | null;
 }
 
 async function fetchPostsByAuthor(authorId: string): Promise<UserPost[]> {
   // 自分視点 (= 自分の RLS) では is_public=false も見える。カード描画に使う列のみ。
-  const { data } = await supabase
-    .from('posts')
-    .select(
-      'id, content, title, media_urls, media_blurhashes, video_urls, video_posters, likes_count, comments_count, is_public, created_at',
-    )
-    .eq('author_id', authorId)
-    .order('created_at', { ascending: false })
-    .limit(30);
+  const { data, error } = await withApiTimeout(
+    supabase
+      .from('posts')
+      .select(
+        'id, content, title, media_urls, media_blurhashes, video_urls, video_posters, likes_count, comments_count, is_public, created_at',
+      )
+      .eq('author_id', authorId)
+      .order('created_at', { ascending: false })
+      .limit(30),
+    'mypage.posts',
+    8000,
+  );
+  if (error) throw error;
   return (data ?? []) as UserPost[];
 }
 
 async function fetchSavedPosts(userId: string): Promise<SavedPost[]> {
-  const { data: saves } = await supabase
-    .from('saves')
-    .select('post_id, created_at')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(100);
+  const { data: saves, error: savesError } = await withApiTimeout(
+    supabase
+      .from('saves')
+      .select('post_id, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(100),
+    'mypage.saves',
+    8000,
+  );
+  if (savesError) throw savesError;
   if (!saves || saves.length === 0) return [];
   const postIds = (saves as { post_id: string }[]).map((s) => s.post_id);
-  const { data: posts } = await supabase
-    .from('posts')
-    .select(
-      'id, content, title, media_urls, media_blurhashes, video_urls, video_posters, likes_count, comments_count, created_at',
-    )
-    .in('id', postIds);
+  const { data: posts, error: postsError } = await withApiTimeout(
+    supabase
+      .from('posts')
+      .select(
+        'id, content, title, media_urls, media_blurhashes, video_urls, video_posters, likes_count, comments_count, created_at',
+      )
+      .in('id', postIds),
+    'mypage.savedPosts',
+    8000,
+  );
+  if (postsError) throw postsError;
   // 保存順を維持
   const map = new Map((posts ?? []).map((p) => [(p as SavedPost).id, p as SavedPost]));
   return postIds.map((id) => map.get(id)).filter((p): p is SavedPost => !!p);
@@ -160,7 +181,8 @@ type Row =
   | { kind: 'saved'; post: SavedPost };
 
 // 「…」削除メニューの対象 (自分の投稿/コメントのみ)。
-type DeleteTarget = { kind: 'post' | 'comment'; id: string };
+// comment は postId(所属投稿)も持ち、削除後に投稿詳細のコメント一覧も無効化する。
+type DeleteTarget = { kind: 'post' | 'comment'; id: string; postId?: string };
 
 // 投稿/保存の media 列を MyEntryRow 用の統一 media リストへ(画像→動画の順)。
 function toMedia(
@@ -208,7 +230,8 @@ export default function MypageScreen() {
   // 自分の投稿/コメントの「…」メニュー & 削除確認の対象。
   const [menuTarget, setMenuTarget] = useState<DeleteTarget | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<DeleteTarget | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  // ★ 連打レース対策: state は非同期更新で二重実行を許すので ref で確実にロックする。
+  const deletingRef = useRef(false);
   const showToast = useToastStore((s) => s.show);
 
   // ---- スクロール駆動値(全 collapse / parallax / ミニバーの単一ソース)----
@@ -346,24 +369,38 @@ export default function MypageScreen() {
   //  削除後は該当タブの query を invalidate して一覧から消す(counter は DB トリガで減算)。
   const handleDelete = useCallback(async () => {
     const t = confirmTarget;
-    if (!t || deleting) return;
-    setDeleting(true);
+    if (!t || deletingRef.current) return;
+    deletingRef.current = true;
     try {
       if (t.kind === 'post') {
         await deleteOwnPost(t.id);
-        await qc.invalidateQueries({ queryKey: ['user-posts', userId] });
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: ['user-posts', userId] }),
+          // 同じ投稿は保存タブ/投稿詳細キャッシュにも居るので一緒に無効化。
+          qc.invalidateQueries({ queryKey: ['saved-posts', userId] }),
+          qc.invalidateQueries({ queryKey: ['post', t.id] }),
+        ]);
       } else {
         await deleteComment(t.id);
-        await qc.invalidateQueries({ queryKey: ['user-comments', userId] });
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: ['user-comments', userId] }),
+          // 開いている投稿詳細のコメント一覧/件数も更新する。
+          ...(t.postId
+            ? [
+                qc.invalidateQueries({ queryKey: ['post-comments', t.postId] }),
+                qc.invalidateQueries({ queryKey: ['post', t.postId] }),
+              ]
+            : []),
+        ]);
       }
       showToast(t.kind === 'comment' ? 'コメントを削除しました' : '投稿を削除しました', 'success');
     } catch (e) {
       showToast(e instanceof Error ? e.message : '削除に失敗しました', 'error');
     } finally {
-      setDeleting(false);
+      deletingRef.current = false;
       setConfirmTarget(null);
     }
-  }, [confirmTarget, deleting, qc, userId, showToast]);
+  }, [confirmTarget, qc, userId, showToast]);
 
   // ---- ListHeader(誌面マストヘッド + 実体タブA + ロード中 skeleton)----
   const ListHeader = useMemo(
@@ -426,7 +463,7 @@ export default function MypageScreen() {
               comment={item.comment}
               onPress={() => item.comment.post && openPost(item.comment.post.id)}
               onOpenImage={openImage}
-              onMore={() => setMenuTarget({ kind: 'comment', id: item.comment.id })}
+              onMore={() => setMenuTarget({ kind: 'comment', id: item.comment.id, postId: item.comment.post_id })}
             />
           );
         case 'saved':
@@ -628,6 +665,7 @@ function CommunityChip({ community, onPress }: { community: PostCommunityRef; on
         size={18}
         iconUrl={community.icon_url}
         iconEmoji={community.icon_emoji}
+        iconColor={community.icon_color}
         name={community.name}
       />
       <Text style={[T.caption, { color: C.text2, fontWeight: '700', flexShrink: 1 }]} numberOfLines={1}>

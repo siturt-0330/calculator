@@ -227,7 +227,16 @@ function WebVideo({ uri, poster, style, shouldPlay, autoplay = true, expandable 
             backgroundColor: '#000',
             cursor: 'pointer',
           },
-          onError: () => setError('動画を読み込めませんでした'),
+          onError: () => {
+            // ★ エラー時はグローバル再生スロットを解放する。壊れた動画がスロットを
+            //   握り続けると、アプリ全体の自動再生が枯渇しうる。
+            wantPlayRef.current = false;
+            if (hasSlotRef.current) {
+              hasSlotRef.current = false;
+              releasePlaySlot();
+            }
+            setError('動画を読み込めませんでした');
+          },
         });
       })()}
       {!error && <MuteBadge muted={muted} onPress={() => applyMuted(!muted)} />}
