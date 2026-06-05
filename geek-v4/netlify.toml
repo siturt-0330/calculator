@@ -38,6 +38,12 @@
   EXPO_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_qUe9WLya6BdSnBWjHQGMWw_hgp7FP67"
   EXPO_PUBLIC_VAPID_PUBLIC_KEY  = "BI5KOhcP8w0KPoaRf0DBskimUBLdJoQwBkOiDEV3_Szlh-VvdOGLLWgyTR2VQBedF5LpzunyaYakHdrmwftN4n8"
   EXPO_PUBLIC_POSTHOG_HOST      = "https://app.posthog.com"
+  # ★ home feed 1ページ目を 1 RTT に集約する get_home_feed(0114) RPC を有効化。
+  #   ⚠️ 前提: migration 0114_get_home_feed.sql を Supabase に適用済みであること。
+  #   未適用だと client は get_home_feed(PGRST202) → fetchPosts へ fallback するため
+  #   壊れはしないが「失敗RTT + fallback」で一時的に遅くなる。必ず 0114 適用後にデプロイする。
+  #   既定 OFF (=== '1' のときだけ ON)。
+  EXPO_PUBLIC_HOME_FEED_RPC     = "1"
 
 # ============================================================
 # SPA fallback: Expo Router の client-side routing に全 path を渡す
