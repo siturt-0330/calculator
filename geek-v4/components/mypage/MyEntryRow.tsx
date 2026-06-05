@@ -47,6 +47,8 @@ export interface MyEntryRowProps {
   badgeNode?: ReactNode;
   /** comment の出典行(どの投稿への返信か)。variant='comment' でのみ描画。 */
   quoteNode?: ReactNode;
+  /** 投稿の所属コミュニティ chip(post/saved の先頭に「どこに投稿したか」を表示)。 */
+  communityNode?: ReactNode;
   /** カードタップ(→ 投稿詳細)。 */
   onPress: () => void;
   /** 画像タップ(→ 全画面 ImageLightbox)。未指定なら onPress にフォールバック。 */
@@ -262,6 +264,7 @@ export function MyEntryRow({
   metaNode,
   badgeNode,
   quoteNode,
+  communityNode,
   onPress,
   onOpenImage,
   onMore,
@@ -274,6 +277,8 @@ export function MyEntryRow({
 
   const inner = (
     <>
+      {/* 所属コミュニティ chip(post/saved の先頭) — 「どこに投稿したか」 */}
+      {!isComment && communityNode ? communityNode : null}
       {hasTitle ? (
         <Text
           style={[T.bodyB, { color: C.text, letterSpacing: -0.2, paddingRight: hasMore ? 28 : 0 }]}

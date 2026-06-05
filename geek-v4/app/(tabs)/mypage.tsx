@@ -42,7 +42,7 @@ import Animated, {
 import { useAuthStore } from '../../stores/authStore';
 import { supabase } from '../../lib/supabase';
 import { fetchMyComments, type MyCommentRow, deleteComment } from '../../lib/api/comments';
-import { deleteOwnPost } from '../../lib/api/posts';
+import { deleteOwnPost, fetchCommunitiesForPosts, type PostCommunityRef } from '../../lib/api/posts';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { formatRelative } from '../../lib/utils/date';
 import { C, R, SP } from '../../design/tokens';
@@ -67,6 +67,7 @@ import { MyEntryRowSkeleton } from '../../components/mypage/MyEntryRowSkeleton';
 import { ActionSheet } from '../../components/ui/ActionSheet';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useToastStore } from '../../stores/toastStore';
+import { CommunityIcon } from '../../components/ui/CommunityIcon';
 
 // -----------------------------------------------------------------------------
 // データ型 + 取得(旧 UserPostsList / SavedPostsList の fetch を本画面に集約)
@@ -262,6 +263,20 @@ export default function MypageScreen() {
     staleTime: 30_000,
   });
 
+  // 投稿/保存が「どのコミュニティに投稿されているか」。posts+saved の id を 1 query で集約。
+  const communityPostIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const p of posts) ids.add(p.id);
+    for (const p of saved) ids.add(p.id);
+    return Array.from(ids);
+  }, [posts, saved]);
+  const { data: postCommunities = {} } = useQuery({
+    queryKey: ['mypage-post-communities', communityPostIds.join('|')],
+    queryFn: () => fetchCommunitiesForPosts(communityPostIds),
+    enabled: communityPostIds.length > 0,
+    staleTime: 60_000,
+  });
+
   const nickname = stats?.nickname ?? user?.nickname ?? 'ユーザー';
   const coverUri = useMemo(
     () => (stats?.cover_url ? thumbedUrl(stats.cover_url, 1080) : null),
@@ -324,6 +339,7 @@ export default function MypageScreen() {
   const openSettings = useCallback(() => router.push('/settings' as never), [router]);
   const editAvatar = useCallback(() => router.push('/settings/profile-edit' as never), [router]);
   const openPost = useCallback((id: string) => router.push(`/post/${id}` as never), [router]);
+  const openCommunity = useCallback((id: string) => router.push(`/community/${id}` as never), [router]);
   const openImage = useCallback((url: string) => setLightboxUri(thumbedUrl(url, 1280)), []);
 
   // 「…」→ 削除確認 → 実削除。posts/comments の RLS で本人のみ削除可。
@@ -397,8 +413,10 @@ export default function MypageScreen() {
           return (
             <PostRow
               post={item.post}
+              community={postCommunities[item.post.id]?.[0] ?? null}
               onPress={() => openPost(item.post.id)}
               onOpenImage={openImage}
+              onOpenCommunity={openCommunity}
               onMore={() => setMenuTarget({ kind: 'post', id: item.post.id })}
             />
           );
@@ -413,11 +431,17 @@ export default function MypageScreen() {
           );
         case 'saved':
           return (
-            <SavedRow post={item.post} onPress={() => openPost(item.post.id)} onOpenImage={openImage} />
+            <SavedRow
+              post={item.post}
+              community={postCommunities[item.post.id]?.[0] ?? null}
+              onPress={() => openPost(item.post.id)}
+              onOpenImage={openImage}
+              onOpenCommunity={openCommunity}
+            />
           );
       }
     },
-    [router, openPost, openImage],
+    [router, openPost, openImage, openCommunity, postCommunities],
   );
 
   return (
@@ -572,15 +596,60 @@ function PostMeta({ likes, comments, at }: { likes: number; comments: number; at
   );
 }
 
+// 投稿が「どのコミュニティに投稿されているか」を示す小型 chip(アイコン + 名前)。
+// カード本体タップ(投稿を開く)と衝突しないよう stopPropagation で握る。
+function CommunityChip({ community, onPress }: { community: PostCommunityRef; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={(e) => {
+        e.stopPropagation();
+        onPress();
+      }}
+      hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={`コミュニティ ${community.name} を開く`}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        alignSelf: 'flex-start',
+        maxWidth: '80%',
+        marginBottom: SP['2'],
+        paddingVertical: 3,
+        paddingLeft: 3,
+        paddingRight: 9,
+        backgroundColor: C.bg2,
+        borderRadius: R.full,
+        borderWidth: 1,
+        borderColor: C.border,
+      }}
+    >
+      <CommunityIcon
+        size={18}
+        iconUrl={community.icon_url}
+        iconEmoji={community.icon_emoji}
+        name={community.name}
+      />
+      <Text style={[T.caption, { color: C.text2, fontWeight: '700', flexShrink: 1 }]} numberOfLines={1}>
+        {community.name}
+      </Text>
+    </Pressable>
+  );
+}
+
 function PostRow({
   post,
+  community,
   onPress,
   onOpenImage,
+  onOpenCommunity,
   onMore,
 }: {
   post: UserPost;
+  community: PostCommunityRef | null;
   onPress: () => void;
   onOpenImage: (url: string) => void;
+  onOpenCommunity: (id: string) => void;
   onMore: () => void;
 }) {
   const title = post.title?.trim() || null;
@@ -608,6 +677,11 @@ function PostRow({
       media={toMedia(post.media_urls, post.media_blurhashes, post.video_urls, post.video_posters)}
       metaNode={<PostMeta likes={post.likes_count} comments={post.comments_count} at={post.created_at} />}
       badgeNode={badge}
+      communityNode={
+        community ? (
+          <CommunityChip community={community} onPress={() => onOpenCommunity(community.community_id)} />
+        ) : undefined
+      }
       onPress={onPress}
       onOpenImage={onOpenImage}
       onMore={onMore}
@@ -618,12 +692,16 @@ function PostRow({
 
 function SavedRow({
   post,
+  community,
   onPress,
   onOpenImage,
+  onOpenCommunity,
 }: {
   post: SavedPost;
+  community: PostCommunityRef | null;
   onPress: () => void;
   onOpenImage: (url: string) => void;
+  onOpenCommunity: (id: string) => void;
 }) {
   const title = post.title?.trim() || null;
   return (
@@ -633,6 +711,11 @@ function SavedRow({
       snippet={post.content?.trim() ?? ''}
       media={toMedia(post.media_urls, post.media_blurhashes, post.video_urls, post.video_posters)}
       metaNode={<PostMeta likes={post.likes_count} comments={post.comments_count} at={post.created_at} />}
+      communityNode={
+        community ? (
+          <CommunityChip community={community} onPress={() => onOpenCommunity(community.community_id)} />
+        ) : undefined
+      }
       onPress={onPress}
       onOpenImage={onOpenImage}
       accessibilityLabel="保存した投稿を開く"
