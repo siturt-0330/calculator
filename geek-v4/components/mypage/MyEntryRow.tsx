@@ -23,7 +23,7 @@
 // ============================================================
 
 import type { ReactNode } from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, Platform } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -211,13 +211,17 @@ export function MyEntryRow({
   const isComment = variant === 'comment';
   const hasTitle = !isComment && !!title && title.trim().length > 0;
 
-  // 入場アニメ: reduceMotion 時は entering 無効 (opacity のみ=transform 殺し)。
-  const entering = reduceMotion
-    ? undefined
-    : FadeInDown.duration(280)
-        .springify()
-        .damping(18)
-        .delay(Math.min(index, STAGGER_MAX_INDEX) * STAGGER_STEP_MS);
+  // 入場アニメ: reduceMotion 時は無効。
+  // ★ Web では FlashList のリサイクルで FadeInDown が再発火し、カードが一瞬
+  //   opacity 0 になって「消える/チラつく」(初回も不可視に見える)。react-native-web
+  //   の layout animation は不安定なので web では entering を無効化し即時表示にする。
+  const entering =
+    reduceMotion || Platform.OS === 'web'
+      ? undefined
+      : FadeInDown.duration(280)
+          .springify()
+          .damping(18)
+          .delay(Math.min(index, STAGGER_MAX_INDEX) * STAGGER_STEP_MS);
 
   return (
     <Animated.View entering={entering}>

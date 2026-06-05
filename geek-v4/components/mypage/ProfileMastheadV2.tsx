@@ -212,11 +212,13 @@ export function ProfileMastheadV2(props: ProfileMastheadV2Props) {
           pointerEvents="none"
         />
 
-        {/* L3 誌名ロックアップ(カバー下端 左寄せ) */}
+        {/* L3 誌名ロックアップ(カバー左下寄り)。
+            ★ アバターが -55 で半被せするため、誌名は bottom:72 に持ち上げて
+              アバターの上に逃がす(誌名がアバターに隠れて読めない不具合の解消)。 */}
         <Animated.View
           pointerEvents="none"
           style={[
-            { position: 'absolute', left: SP['4'], bottom: SP['4'] },
+            { position: 'absolute', left: SP['4'], right: SP['4'], bottom: 72 },
             nameLockupStyle,
           ]}
         >

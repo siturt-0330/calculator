@@ -18,7 +18,13 @@
 // =============================================================================
 
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
-import { View, Text } from 'react-native';
+import {
+  View,
+  Text,
+  useWindowDimensions,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -27,10 +33,8 @@ import { FlashList } from '@shopify/flash-list';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
-  useAnimatedScrollHandler,
   interpolate,
   Extrapolation,
-  runOnJS,
 } from 'react-native-reanimated';
 
 import { useAuthStore } from '../../stores/authStore';
@@ -131,6 +135,7 @@ async function fetchSavedPosts(userId: string): Promise<SavedPost[]> {
 // -----------------------------------------------------------------------------
 type Row =
   | { kind: 'pillar'; label: string; count: number; unit: string }
+  | { kind: 'skeleton' }
   | { kind: 'lock' }
   | { kind: 'empty'; tab: ProfileTabKey }
   | { kind: 'post'; post: UserPost; index: number }
@@ -144,6 +149,7 @@ const cover0 = (media: string[] | null): string | null => media?.[0] ?? null;
 // =============================================================================
 export default function MypageScreen() {
   const insets = useSafeAreaInsets();
+  const { width: winW, height: winH } = useWindowDimensions();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const userId = user?.id;
@@ -158,21 +164,22 @@ export default function MypageScreen() {
 
   // ---- スクロール駆動値(全 collapse / parallax / ミニバーの単一ソース)----
   const scrollY = useSharedValue(0);
-  const stickyShown = useSharedValue(false);
   // 擬似 sticky タブ複製の出現しきい値(ヒーロー実高 − ミニバー高)。
   const stickyThreshold = HERO_H - (insets.top + 52) - 20;
-  const onScroll = useAnimatedScrollHandler({
-    onScroll: (e) => {
-      'worklet';
-      scrollY.value = e.contentOffset.y;
-      // しきい値を跨いだ瞬間だけ JS state を更新(毎フレーム runOnJS を避ける)。
-      const should = e.contentOffset.y > stickyThreshold;
-      if (should !== stickyShown.value) {
-        stickyShown.value = should;
-        runOnJS(setShowStickyTabs)(should);
-      }
+  // ★ Web 対応: useAnimatedScrollHandler を plain FlashList の onScroll に渡すと
+  //   react-native-web の ScrollView が `_b.call is not a function` で落ちる
+  //   (reanimated の worklet ハンドラは Animated コンポーネント専用)。通常の JS
+  //   onScroll で shared value を更新する(web は元々 JS スレッド、native も 16ms
+  //   throttle で十分滑らか。masthead/ミニバー側の useAnimatedStyle が scrollY を購読)。
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const y = e.nativeEvent.contentOffset.y;
+      scrollY.value = y;
+      const should = y > stickyThreshold;
+      setShowStickyTabs((prev) => (prev !== should ? should : prev));
     },
-  });
+    [scrollY, stickyThreshold],
+  );
 
   // 擬似 sticky タブ複製の opacity(ヒーロー末で 0→1)。
   const stickyTabStyle = useAnimatedStyle(() => {
@@ -221,7 +228,10 @@ export default function MypageScreen() {
 
   // ---- data 構築 ----
   const rows: Row[] = useMemo(() => {
-    if (activeLoading) return []; // skeleton は ListHeader 末尾で重ねる
+    // ★ 重要(web): FlashList は data が空だと ListHeaderComponent(マストヘッド)ごと
+    //   描画しない(ローディング中に画面が真っ黒になる)。skeleton を data 行として
+    //   流し rows を絶対に空にしない。
+    if (activeLoading) return [{ kind: 'skeleton' }];
     if (tab === 'posts') {
       const head: Row = { kind: 'pillar', label: '投稿', count: posts.length, unit: '編' };
       if (posts.length === 0) return [head, { kind: 'empty', tab: 'posts' }];
@@ -289,11 +299,6 @@ export default function MypageScreen() {
           onOpenSettings={openSettings}
         />
         <ProfileTabsBar active={tab} onChange={onSelectTab} />
-        {activeLoading ? (
-          <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['4'], gap: SP['3'] }}>
-            <MyEntryRowSkeleton count={5} />
-          </View>
-        ) : null}
       </View>
     ),
     [
@@ -307,7 +312,6 @@ export default function MypageScreen() {
       openSettings,
       tab,
       onSelectTab,
-      activeLoading,
     ],
   );
 
@@ -316,6 +320,12 @@ export default function MypageScreen() {
       switch (item.kind) {
         case 'pillar':
           return <SectionPillar label={item.label} count={item.count} unit={item.unit} />;
+        case 'skeleton':
+          return (
+            <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['4'], gap: SP['3'] }}>
+              <MyEntryRowSkeleton count={5} />
+            </View>
+          );
         case 'lock':
           return <LockNotice />;
         case 'empty':
@@ -345,6 +355,9 @@ export default function MypageScreen() {
         renderItem={renderItem}
         keyExtractor={keyExtractor}
         estimatedItemSize={96}
+        // ★ web で FlashList が親の高さを取れず 0 高さに潰れて中身が見えなく
+        //   なる(画面が真っ黒)のを防ぐ。初期サイズを明示して必ず描画させる。
+        estimatedListSize={{ width: winW, height: winH }}
         ListHeaderComponent={ListHeader}
         onScroll={onScroll}
         scrollEventThrottle={16}
@@ -396,6 +409,8 @@ function keyExtractor(item: Row): string {
   switch (item.kind) {
     case 'pillar':
       return '__pillar';
+    case 'skeleton':
+      return '__skeleton';
     case 'lock':
       return '__lock';
     case 'empty':
