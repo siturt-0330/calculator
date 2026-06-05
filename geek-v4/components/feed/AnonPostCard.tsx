@@ -186,21 +186,6 @@ const PARTICLE_DOT_STYLE = {
 // no-unused-styles が全キーを未使用と誤報する。実際にはすべて JSX 内で使用済み。
 /* eslint-disable react-native/no-unused-styles */
 const makeStyles = (C: ColorPalette) => StyleSheet.create({
-  // 低信頼バナー — iOS-native: 角 12px に揃え、border を控えめに
-  lowTrustBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SP['2'],
-    paddingHorizontal: SP['3'],
-    paddingVertical: 10,
-    backgroundColor: C.amberBg,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: C.amber + '44',
-    marginBottom: SP['2'],
-  },
-  lowTrustText: { color: C.amber, flex: 1 },
-
   // ヘッダー — Apple News / Threads 寄りに密度を上げ、 avatar/name 距離を 10px に詰める
   headerRow: {
     flexDirection: 'row',
@@ -824,7 +809,6 @@ function AnonPostCardInner({
   reason: _reason,
   communities = [],
   onLike,
-  onConcern,
   onComment,
   onSave,
   onShare,
@@ -840,7 +824,6 @@ function AnonPostCardInner({
   const Save = Icon.save;
   const Share = Icon.share;
   const More = Icon.more;
-  const Warn = Icon.warn;
   const t = useT();
   const qc = useQueryClient();
   // ★ テーマ購読 — light/dark で全 style が再評価される。
@@ -986,12 +969,7 @@ function AnonPostCardInner({
   // 実 ranking / score / lowTrust 計算は real value (likesCount) のまま使う。
   const displayLikesCount = getDisplayLikes(post.id, likesCount);
   const commentsCount = post.comments_count ?? 0;
-  const concernCount = post.concern_count ?? 0;
   const hasMedia = mediaUrls.length > 0 || videoUrls.length > 0;
-  // ★ 表示と整合させる: ハートは displayLikesCount(fuzz後)を見せているので、
-  //   バナー判定も表示値で行う(real likesCount だと「like16・気になる12」なのに
-  //   "気になるが多い" バナーが出る矛盾になる)。
-  const lowTrust = displayLikesCount > 0 && concernCount > displayLikesCount;
 
   const openSource = useCallback(() => {
     if (!previewUrl) return;
@@ -1140,12 +1118,6 @@ function AnonPostCardInner({
     [liked, C.pink, C.text2],
   );
 
-  // Concern ラベル/カウント色
-  const concernCountTextStyle = useMemo(
-    () => ({ color: concerned ? C.amber : C.text3 }),
-    [concerned, C.amber, C.text3],
-  );
-
   // Reaction カウント色 — 自分のリアクション有無で変わる
   const hasMyReaction = myReactionsForPost.length > 0;
   const reactionCountTextStyle = useMemo(
@@ -1167,10 +1139,6 @@ function AnonPostCardInner({
     () => [T.smallM, STYLES.anonLabel],
     [STYLES.anonLabel],
   );
-  const lowTrustTextStyle = useMemo(
-    () => [T.caption, STYLES.lowTrustText],
-    [STYLES.lowTrustText],
-  );
   const cwLabelStyle = useMemo(() => [T.smallM, STYLES.cwLabel], [STYLES.cwLabel]);
   const cwWarningStyle = useMemo(
     () => [T.caption, STYLES.cwWarning],
@@ -1187,16 +1155,6 @@ function AnonPostCardInner({
   // floating-card grid on tall screens.
   return (
     <Animated.View style={containerStyleCombined}>
-      {/* 低信頼バナー */}
-      {lowTrust && (
-        <View style={STYLES.lowTrustBanner}>
-          <Warn size={14} color={C.amber} strokeWidth={2.2} />
-          <Text style={lowTrustTextStyle}>
-            この投稿に「気になる」が多く付いています ({concernCount})
-          </Text>
-        </View>
-      )}
-
       {/* ヘッダー: アバター / メイン表示 / ⋯
           - 公式管理者: shield + 実名 · 所属 (de-anonymize)
           - viewContext='community': ユーザー avatar + nickname (Reddit の r/ 内投稿スタイル)
@@ -1490,7 +1448,7 @@ function AnonPostCardInner({
 
       {/* アクション行 — icon を 20px に統一. hitSlop:10 で 44pt 以上の tap target を確保
           (icon 自体は 20 だが押下範囲を上下左右 +10 で誤タップ防止)。
-          gap は SP['5'] で各アクションを規則的に配置 — 「♥ 15 / 💬 9 / ⚠ / 🪶 15」 が
+          gap は SP['5'] で各アクションを規則的に配置 — 「♥ 15 / 💬 9 / 🪶 15」 が
           視覚的にリズミカルに並ぶ。 */}
       <View style={STYLES.actionsRow}>
         <ReactionButton
@@ -1515,17 +1473,6 @@ function AnonPostCardInner({
             <Text style={[T.smallM, STYLES.commentCount]}>{commentsCount}</Text>
           )}
         </PressableScale>
-        <ReactionButton
-          IconCmp={Warn}
-          active={concerned}
-          count={concernCount}
-          onPress={onConcern}
-          inactiveColor={C.text3}
-          activeColor={C.amber}
-          activeFill={C.amber + '44'}
-          accessibilityLabel={concerned ? '気になる済み' : '気になる'}
-          countTextStyle={{ ...T.smallM, ...concernCountTextStyle }}
-        />
         <PressableScale
           onPress={() => setMemePickerOpen(true)}
           haptic="tap"
