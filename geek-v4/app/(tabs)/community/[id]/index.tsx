@@ -21,7 +21,7 @@ import {
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { C, R, SP } from '../../../../design/tokens';
 import { T } from '../../../../design/typography';
 import Animated, { useSharedValue, FadeInDown } from 'react-native-reanimated';
@@ -336,8 +336,7 @@ export default function CommunityDetailScreen() {
             掲示板 / マップ / カレンダー / 管理 は URL 直打ち or AdminBanner CTA から
             引き続きアクセス可能 (route は残存)。
             ============================================================ */}
-        <FeedTab
-          communityId={id}
+        <CommunityIdentityBlock
           description={safeDesc}
           memberCount={community.member_count}
           postCount={community.post_count}
@@ -345,6 +344,7 @@ export default function CommunityDetailScreen() {
           officialAdminName={community.official_admin_display_name ?? null}
           officialOrganization={community.official_organization ?? null}
         />
+        <FeedTab communityId={id} />
       </Animated.ScrollView>
 
       {/* コラプシング・ヘッダー(ScrollView の外=固定。content は paddingTop 168 で下に逃がす)。
@@ -358,7 +358,7 @@ export default function CommunityDetailScreen() {
         iconEmoji={community.icon_emoji}
         iconColor={community.icon_color}
         isOfficial={!!community.is_official}
-        coverUrl={(community as { cover_url?: string | null }).cover_url ?? null}
+        coverUrl={null}
         visibility={community.visibility}
         isMember={community.is_member}
         isRequestVisibility={community.visibility === 'request'}
@@ -444,8 +444,15 @@ function AdminBanner({
 // ============================================================
 // Tab: みんなの投稿集 (community posts feed)
 // ============================================================
-type FeedTabProps = {
-  communityId: string;
+// ============================================================
+// CommunityIdentityBlock — 公式管理者名 / 説明(折りたたみ) / メンバー証跡
+// ------------------------------------------------------------
+// 重量級の FeedTab(投稿リスト)から切り離した memo 子。descExpanded を内部 state に
+// 持つことで、参加/退会(member_count 変化)・説明の続きを読む・ソート切替で投稿カード
+// (最大40枚)を再レンダさせない(監査 H1 回帰の修正)。画面はこのブロックを FeedTab の
+// 兄弟として描く。
+// ============================================================
+type CommunityIdentityBlockProps = {
   description: string;
   memberCount: number;
   postCount: number;
@@ -453,19 +460,96 @@ type FeedTabProps = {
   officialAdminName: string | null;
   officialOrganization: string | null;
 };
-const FeedTab = memo(function FeedTab({
-  communityId,
+const CommunityIdentityBlock = memo(function CommunityIdentityBlock({
   description,
   memberCount,
   postCount,
   isOfficial,
   officialAdminName,
   officialOrganization,
-}: FeedTabProps) {
+}: CommunityIdentityBlockProps) {
   const C = useColors();
   const reduce = useReducedMotion();
-  const [sort, setSort] = useState<FeedSort>('new');
   const [descExpanded, setDescExpanded] = useState(false);
+  const hasAdmin = isOfficial && !!officialAdminName;
+  // 日本語は全角20字/行前後。2行 clamp と整合させ、短文の「黙って切れる」を防ぐ閾値。
+  const descTruncatable = description.length > 40;
+  const dotCount = Math.min(3, memberCount);
+  return (
+    <Animated.View
+      entering={reduce ? undefined : FadeInDown.duration(220)}
+      style={{
+        paddingHorizontal: SP['5'],
+        paddingTop: SP['5'],
+        paddingBottom: SP['5'],
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: C.divider,
+      }}
+    >
+      {hasAdmin ? (
+        <Text style={[T.small, { color: C.text2 }]}>
+          管理者: {officialAdminName}
+          {officialOrganization ? ` · ${officialOrganization}` : ''}
+        </Text>
+      ) : null}
+      {description.length > 0 ? (
+        <Pressable
+          onPress={() => descTruncatable && setDescExpanded((v) => !v)}
+          hitSlop={6}
+          style={{ marginTop: hasAdmin ? SP['2'] : 0 }}
+        >
+          <Text style={[T.body, { color: C.text2 }]} numberOfLines={descExpanded ? undefined : 2}>
+            {description}
+          </Text>
+          {descTruncatable ? (
+            <Text style={[T.smallM, { color: C.text3, marginTop: SP['1'] }]}>
+              {descExpanded ? '閉じる' : '続きを読む'}
+            </Text>
+          ) : null}
+        </Pressable>
+      ) : null}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          marginTop: description.length > 0 || hasAdmin ? SP['4'] : 0,
+        }}
+      >
+        {memberCount >= 1 ? (
+          <View style={{ flexDirection: 'row' }}>
+            {[C.bg3, C.bg4, C.bg5].slice(0, dotCount).map((col, i) => (
+              <View
+                key={col}
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: R.full,
+                  backgroundColor: col,
+                  borderWidth: 2,
+                  borderColor: C.bg,
+                  marginLeft: i === 0 ? 0 : -7,
+                }}
+              />
+            ))}
+          </View>
+        ) : null}
+        <Text style={{ marginLeft: memberCount >= 1 ? SP['2'] : 0 }}>
+          <Text style={[T.smallB, { color: C.text2 }]}>{memberCount.toLocaleString('ja-JP')}</Text>
+          <Text style={[T.small, { color: C.text3 }]}>
+            {` 人 · ${postCount.toLocaleString('ja-JP')} 投稿`}
+          </Text>
+        </Text>
+      </View>
+    </Animated.View>
+  );
+});
+
+type FeedTabProps = {
+  communityId: string;
+};
+const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
+  const C = useColors();
+  const [sort, setSort] = useState<FeedSort>('new');
   const onSortChange = useCallback((s: FeedSort) => setSort(s), []);
   const router = useRouter();
   const showToast = useToastStore((s) => s.show);
@@ -481,6 +565,8 @@ const FeedTab = memo(function FeedTab({
     },
     enabled: communityId.length > 0,
     staleTime: 20_000,
+    // ソート切替で全面スピナーにせず前回結果を保持(深スクロール時のちらつき回避)。
+    placeholderData: keepPreviousData,
   });
 
   useEffect(() => {
@@ -529,73 +615,6 @@ const FeedTab = memo(function FeedTab({
 
   return (
     <View>
-      {/* 識別ブロック(ヘッダーから移譲: 公式管理者名 / 説明(折りたたみ) / メンバー証跡) */}
-      <Animated.View
-        entering={reduce ? undefined : FadeInDown.duration(220)}
-        style={{
-          paddingHorizontal: SP['5'],
-          paddingTop: SP['5'],
-          paddingBottom: SP['5'],
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: C.divider,
-        }}
-      >
-        {isOfficial && officialAdminName ? (
-          <Text style={[T.small, { color: C.text2 }]}>
-            管理者: {officialAdminName}
-            {officialOrganization ? ` · ${officialOrganization}` : ''}
-          </Text>
-        ) : null}
-        {description.length > 0 ? (
-          <Pressable
-            onPress={() => description.length > 80 && setDescExpanded((v) => !v)}
-            hitSlop={6}
-            style={{ marginTop: isOfficial && officialAdminName ? SP['2'] : 0 }}
-          >
-            <Text style={[T.body, { color: C.text2 }]} numberOfLines={descExpanded ? undefined : 2}>
-              {description}
-            </Text>
-            {description.length > 80 ? (
-              <Text style={[T.smallM, { color: C.text3, marginTop: SP['1'] }]}>
-                {descExpanded ? '閉じる' : '続きを読む'}
-              </Text>
-            ) : null}
-          </Pressable>
-        ) : null}
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            marginTop: description.length > 0 || (isOfficial && officialAdminName) ? SP['4'] : 0,
-          }}
-        >
-          {memberCount >= 1 ? (
-            <View style={{ flexDirection: 'row' }}>
-              {[C.bg3, C.bg4, C.bg5].map((col, i) => (
-                <View
-                  key={col}
-                  style={{
-                    width: 18,
-                    height: 18,
-                    borderRadius: R.full,
-                    backgroundColor: col,
-                    borderWidth: 2,
-                    borderColor: C.bg,
-                    marginLeft: i === 0 ? 0 : -7,
-                  }}
-                />
-              ))}
-            </View>
-          ) : null}
-          <Text style={{ marginLeft: memberCount >= 1 ? SP['2'] : 0 }}>
-            <Text style={[T.smallB, { color: C.text2 }]}>{memberCount.toLocaleString('ja-JP')}</Text>
-            <Text style={[T.small, { color: C.text3 }]}>
-              {` 人 · ${postCount.toLocaleString('ja-JP')} 投稿`}
-            </Text>
-          </Text>
-        </View>
-      </Animated.View>
-
       {/* ソート(滑るアンダーライン) */}
       <CommunitySortTabs value={sort} onChange={onSortChange} />
 

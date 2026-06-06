@@ -409,21 +409,32 @@ export default function RootLayout() {
   //   フィードの取得を「フィード画面 mount まで」待たず、auth 確定直後に裏で開始する。
   //   フィード画面 (useFeed) は同一 key (feedQueryKey) を使うので、mount 時には取得済/
   //   取得中 → React Query が dedupe して投稿カードが即表示される (spinner を挟まない)。
-  //   tagFilter は MMKV 同期 hydrate 済、feedStore は既定 for-you/open。getState() で画面が
-  //   実際に使う key に一致させる (不一致でも無害=画面側が通常取得するだけ)。community prewarm
-  //   と違い遅延させない (landing なので最優先で投げる)。失敗は内部で握り潰される。
+  //   ★ feedStore は AsyncStorage 由来で「非同期」hydrate。未 hydrate のまま getState() すると
+  //     既定 for-you/open を読み、sort をカスタムした復帰ユーザーで feed.tsx の key と不一致
+  //     → prefetch が消費されず無駄 (無駄 RPC も発生)。hydrate を await してから実 key で投げる。
+  //     tagFilter は同期 hydrate 済なので getState() でそのまま正しい。community prewarm と違い
+  //     遅延させない (landing なので最優先)。失敗は内部で握り潰される。
   useEffect(() => {
     if (!authHydrated || !user?.id) return;
     const uid = user.id;
-    const { sort, scope } = useFeedStore.getState();
-    const { likedTags, blockedTags } = useTagFilterStore.getState();
-    void qc.prefetchInfiniteQuery({
-      queryKey: feedQueryKey(sort, scope, likedTags, blockedTags),
-      queryFn: () => fetchFeedFirstPage({ sort, scope, likedTags, blockedTags, userId: uid, qc }),
-      initialPageParam: undefined,
-      // pages 未指定 = 1ページ目だけ prefetch (getNextPageParam 不要)。
-      staleTime: 0,
-    });
+    let cancelled = false;
+    void useFeedStore
+      .getState()
+      .hydrate()
+      .then(() => {
+        if (cancelled) return;
+        const { sort, scope } = useFeedStore.getState();
+        const { likedTags, blockedTags } = useTagFilterStore.getState();
+        void qc.prefetchInfiniteQuery({
+          queryKey: feedQueryKey(sort, scope, likedTags, blockedTags),
+          queryFn: () => fetchFeedFirstPage({ sort, scope, likedTags, blockedTags, userId: uid, qc }),
+          initialPageParam: undefined,
+          staleTime: 0,
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [authHydrated, user?.id]);
 
   // ★ コミュニティタブ pre-warm:

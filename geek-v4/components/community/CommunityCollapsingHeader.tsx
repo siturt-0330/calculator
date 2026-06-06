@@ -153,7 +153,7 @@ export function CommunityCollapsingHeader(props: CommunityCollapsingHeaderProps)
       >
         {NATIVE ? (
           <>
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(20,20,23,0.92)' }]} />
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: isDark ? 'rgba(20,20,23,0.92)' : 'rgba(250,250,252,0.92)' }]} />
             <BlurView
               intensity={80}
               tint={isDark ? 'systemUltraThinMaterialDark' : 'systemUltraThinMaterialLight'}
@@ -233,7 +233,7 @@ export function CommunityCollapsingHeader(props: CommunityCollapsingHeaderProps)
         <CommunityIcon size={56} iconUrl={iconUrl} iconEmoji={iconEmoji} iconColor={iconColor} name={name} />
         <View style={{ flex: 1, gap: 2, minWidth: 0 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <Text numberOfLines={1} style={[T.h2, { color: C.text }]}>{name}</Text>
+            <Text numberOfLines={1} style={[T.h2, { color: C.text, flexShrink: 1 }]}>{name}</Text>
             {isOfficial && <OfficialBadge size="sm" />}
           </View>
           {handle ? (
