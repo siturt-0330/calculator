@@ -32,7 +32,7 @@ import { Lock, Camera, Image as ImageIcon } from 'lucide-react-native';
 import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
 import { supabase } from '../../lib/supabase';
-import { prepareImageUpload } from '../../lib/image';
+import { prepareImageUpload, makeWebPreviewDataUrl } from '../../lib/image';
 import { openCropper } from '../../lib/imageCropper';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { HeroAvatar } from '../../components/mypage/HeroAvatar';
@@ -160,7 +160,14 @@ export default function ProfileEditScreen() {
     const asset = r.assets[0];
     setUploadingCover(true);
     try {
-      const prepared = await prepareImageUpload(asset.uri, {
+      // ★ iPhone Safari fix: web で picker の生 blob: URI を直接 prepareImageUpload に
+      //   渡すと、Safari が blob URL を勝手に revoke して "Load failed" / 空 Blob となり
+      //   カバーのアップロードが無音失敗する (= 「選んでも反映されない」)。avatar は
+      //   openCropper 経由で data: URL 化されるため起きていなかった。cover も先に canvas で
+      //   data:URL 化し、prepareImageUpload の data: shortpath (revoke の影響を受けない) に乗せる。
+      const coverSrc =
+        Platform.OS === 'web' ? await makeWebPreviewDataUrl(asset.uri, 1600, 0.85) : asset.uri;
+      const prepared = await prepareImageUpload(coverSrc, {
         maxSizeBytes: 5 * 1024 * 1024,
         maxWidth: 1600,
         maxHeight: 900,
