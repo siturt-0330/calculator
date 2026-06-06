@@ -1,6 +1,7 @@
 import { View, Text, Platform } from 'react-native';
 import { safeOpenUrl } from '../../lib/openUrl';
 import { sanitizeUrl } from '../../lib/sanitize';
+import { ENV } from '../../lib/env';
 import { useQuery } from '@tanstack/react-query';
 import { fetchAndCachePreview } from '../../lib/api/linkPreview';
 import { PressableScale } from '../ui/PressableScale';
@@ -17,6 +18,17 @@ function shortHost(url: string): string {
   }
 }
 
+// 自 Supabase ドメイン (og-fetch が og-image 署名 URL でプロキシして返す画像) か。
+// プライバシー方針: 閲覧者の端末から外部画像ホストへ直接アクセスさせない。
+// 万一外部ホストの生 URL が来た場合は画像を出さず IP/UA 漏洩を防ぐ。
+function isSelfHostedImage(url: string): boolean {
+  try {
+    return new URL(url).host === new URL(ENV.SUPABASE_URL).host;
+  } catch {
+    return false;
+  }
+}
+
 export function LinkPreviewCard({ url }: { url: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ['link-preview', url],
@@ -25,10 +37,13 @@ export function LinkPreviewCard({ url }: { url: string }) {
     staleTime: 60 * 60 * 1000,  // 1h
   });
 
-  // OG 画像 URL は http/https + SSRF/private-network ガードを通す (data:/javascript:/
-  // 内部ネットワークを排除)。検証 NG の画像は表示しない。
-  // 注: 外部ホストへの閲覧者 IP 露出の完全遮断には画像プロキシ(サーバ側)が必要 [TODO]。
-  const safeImageUrl = data?.image_url ? sanitizeUrl(data.image_url) : null;
+  // OG 画像 URL の二重ガード:
+  //   1. sanitizeUrl: http/https のみ + SSRF/private-network/userinfo 排除 (data:/javascript: を弾く)
+  //   2. isSelfHostedImage: og-image プロキシ (自 Supabase ドメイン) 以外は表示しない
+  //      → 閲覧者 IP が外部画像ホストへ漏れる経路を遮断。外部 raw URL のときは画像を捨て、
+  //        タイトル/出典バーのみ表示 (deep-research 結論「壊れたカードを出さず非表示」)。
+  const sanitizedImage = data?.image_url ? sanitizeUrl(data.image_url) : null;
+  const safeImageUrl = sanitizedImage && isSelfHostedImage(sanitizedImage) ? sanitizedImage : null;
 
   const open = () => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {

@@ -28,13 +28,19 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { buildCorsHeaders, jsonResponse } from '../_shared/cors.ts';
+import { assertHostResolvesToPublic, signImageUrl, validateUrl } from '../_shared/ssrf.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+// og-image プロキシ署名用 secret (og-image 側=検証 と同一)。未設定なら画像は
+// proxy せず null (fail-secure: raw 画像 URL を閲覧者に晒さない)。
+//   有効化: supabase secrets set OG_IMAGE_PROXY_SECRET=<32+byte hex>
+const OG_IMAGE_PROXY_SECRET = Deno.env.get('OG_IMAGE_PROXY_SECRET') ?? '';
 
 // fetch の上限値
 const FETCH_TIMEOUT_MS = 6000;
 const MAX_BODY_BYTES = 512 * 1024; // 512KB
+const MAX_REDIRECTS = 4; // リダイレクト追従の上限 (og-image と同値)
 const USER_AGENT = 'GeekBot/1.0 (+link-preview)';
 
 // DB の CHECK 制約に合わせた truncate 上限 (migration 0036)
@@ -67,84 +73,19 @@ function nullPreview(url: string): PreviewResult {
 }
 
 // ------------------------------------------------------------
-// SSRF ガード — private / loopback / link-local を全て拒否する。
+// SSRF ガード — 判定ロジックは _shared/ssrf.ts に集約 (og-image と共有)。
 // ------------------------------------------------------------
 // 攻撃者が og-fetch に内部 URL を渡すと、Edge ランタイムの権限で
 // メタデータエンドポイント (169.254.169.254) や内部サービスへ到達できる。
-// よって「外部の公開ホスト」以外は fetch する前に弾く (fail-secure)。
-
-// IPv4 ドット 10 進が private/loopback/link-local 範囲か判定
-function isBlockedIpv4(host: string): boolean {
-  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!m) return false;
-  const octets = [m[1], m[2], m[3], m[4]].map((o) => Number(o));
-  // 各オクテットが 0-255 に収まらなければ不正な IP literal として拒否
-  if (octets.some((o) => Number.isNaN(o) || o < 0 || o > 255)) return true;
-  const [a, b] = octets as [number, number, number, number];
-  if (a === 0) return true; // 0.0.0.0/8 (0.0.0.0 含む)
-  if (a === 127) return true; // 127.0.0.0/8 loopback
-  if (a === 10) return true; // 10.0.0.0/8 private
-  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12 private
-  if (a === 192 && b === 168) return true; // 192.168.0.0/16 private
-  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local
-  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 CGNAT (念のため)
-  return false;
-}
-
-// IPv6 リテラル (角括弧除去済) が loopback / private / link-local か判定
-function isBlockedIpv6(rawHost: string): boolean {
-  // URL.hostname は IPv6 を角括弧付きで返すので外す。zone id (%eth0) も除去。
-  let h = rawHost.trim().toLowerCase();
-  if (h.startsWith('[') && h.endsWith(']')) h = h.slice(1, -1);
-  const zone = h.indexOf('%');
-  if (zone !== -1) h = h.slice(0, zone);
-  if (!h.includes(':')) return false; // IPv6 ではない
-
-  if (h === '::1' || h === '::') return true; // loopback / unspecified
-  // IPv4-mapped (::ffff:127.0.0.1 等) は埋め込み v4 を再判定
-  const mapped = h.match(/:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-  if (mapped && mapped[1] && isBlockedIpv4(mapped[1])) return true;
-
-  // 先頭ハイバイトで範囲判定
-  const firstGroup = h.split(':').find((g) => g.length > 0) ?? '';
-  if (firstGroup) {
-    const val = parseInt(firstGroup, 16);
-    if (!Number.isNaN(val)) {
-      const high = val >> 8; // 上位 8bit
-      if ((high & 0xfe) === 0xfc) return true; // fc00::/7 unique-local
-      if (high === 0xfe && (val & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
-    }
-  }
-  return false;
-}
-
-// hostname が拒否対象か (localhost / *.local / bare IP リテラル)
-function isBlockedHostname(hostname: string): boolean {
-  const host = hostname.trim().toLowerCase();
-  if (!host) return true;
-  if (host === 'localhost') return true;
-  if (host.endsWith('.localhost')) return true;
-  if (host === 'local' || host.endsWith('.local')) return true; // mDNS / *.local
-  if (isBlockedIpv4(host)) return true;
-  if (isBlockedIpv6(host)) return true;
-  return false;
-}
-
-// URL 全体を検証。OK なら正規化済 URL 文字列、NG なら null。
-function validateUrl(raw: string): string | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    return null; // パース不能
-  }
-  // http(s) 以外 (file:, ftp:, gopher:, data: 等) は全て拒否
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-  // URL 内 credential (user:pass@host) を拒否
-  if (parsed.username || parsed.password) return null;
-  if (isBlockedHostname(parsed.hostname)) return null;
-  return parsed.toString();
-}
+// よって「外部の公開ホスト」以外は fetch する前に弾く (fail-secure)。多層で防ぐ:
+//   1. validateUrl: http(s) / credential / private / loopback / link-local /
+//      CGNAT / multicast / IPv6(-mapped) を静的に一括判定。
+//   2. assertHostResolvesToPublic: 対象ホストを DNS 解決し、解決後 IP も分類
+//      (名前→内部 IP / DNS rebinding の入口を塞ぐ)。
+//   3. redirect:'manual' + 各 hop で 1.2. を再適用 (リダイレクト経由の bypass 防止)。
+// ※ 旧 isBlockedIpv4/isBlockedIpv6/isBlockedHostname/validateUrl のローカル定義は
+//   _shared/ssrf.ts に移管・統合済 (shared 版は multicast/CGNAT/IPv4-mapped-hex を
+//   追加でブロックする strict superset。正規 URL への挙動は不変)。
 
 // ------------------------------------------------------------
 // HTML エンティティのデコード (名前付き + 数値参照)
@@ -265,23 +206,83 @@ async function readCappedBody(res: Response): Promise<string> {
 }
 
 // ------------------------------------------------------------
-// ページを取得して OG メタを抽出
+// SSRF を通った URL を redirect:'manual' で fetch。
+// 3xx は Location を各 hop 再検証 (validateUrl + DNS 解決分類) してから
+// MAX_REDIRECTS まで追従する。これで「正常 URL → 302 で内部 IP」という
+// リダイレクト経由の SSRF bypass を塞ぐ (og-image と同型)。
+// 戻り値: { res(body 未読), finalUrl } / 拒否・上限・Location 欠落で null。
 // ------------------------------------------------------------
-async function fetchPreview(safeUrl: string): Promise<PreviewResult> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(safeUrl, {
+async function fetchFollowingRedirects(
+  startUrl: string,
+  signal: AbortSignal,
+): Promise<{ res: Response; finalUrl: string } | null> {
+  let currentUrl = startUrl;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const res = await fetch(currentUrl, {
       method: 'GET',
-      redirect: 'follow', // リダイレクト上限は fetch default に委ねる
-      signal: controller.signal,
+      redirect: 'manual', // 各 hop を自前で再検証する (自動追従させない)
+      signal,
       headers: {
         'User-Agent': USER_AGENT,
         Accept: 'text/html,application/xhtml+xml',
       },
     });
 
-    if (!res.ok) return nullPreview(safeUrl);
+    const status = res.status;
+    // 3xx + Location → リダイレクト。各 hop で再 SSRF 検証してから追従。
+    if (status >= 300 && status < 400) {
+      const location = res.headers.get('location');
+      try {
+        await res.body?.cancel(); // body は捨てる
+      } catch {
+        // 無視
+      }
+      if (!location || hop === MAX_REDIRECTS) return null; // 上限到達 or Location 欠落
+      let nextUrl: string;
+      try {
+        nextUrl = new URL(location, currentUrl).toString(); // 相対 Location を絶対化
+      } catch {
+        return null;
+      }
+      const safeNext = validateUrl(nextUrl); // http/https + private 等を再拒否
+      if (!safeNext) return null;
+      // DNS rebinding 対策: 解決後 IP が内部なら拒否 (null=解決不能は許容=fail-open)
+      const dnsOk = await assertHostResolvesToPublic(new URL(safeNext).hostname);
+      if (dnsOk === false) return null;
+      currentUrl = safeNext;
+      continue;
+    }
+
+    // 非 3xx はここで確定 (最終 URL も相対 image 解決用に返す)
+    return { res, finalUrl: res.url || currentUrl };
+  }
+  return null;
+}
+
+// ------------------------------------------------------------
+// ページを取得して OG メタを抽出
+// ------------------------------------------------------------
+async function fetchPreview(safeUrl: string): Promise<PreviewResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    // DNS rebinding 対策 (初回ホスト): 静的 validateUrl は通っていても
+    // 名前が内部 IP に解決されるなら fetch しない。null=解決不能は fail-open
+    // (可用性優先。静的検証は既に通過済み)。
+    const dnsOk = await assertHostResolvesToPublic(new URL(safeUrl).hostname);
+    if (dnsOk === false) return nullPreview(safeUrl);
+
+    const fetched = await fetchFollowingRedirects(safeUrl, controller.signal);
+    if (!fetched || !fetched.res.ok) {
+      // 3xx 上限/拒否、または非 2xx 最終応答は本文を読まず破棄して fail-secure
+      try {
+        await fetched?.res.body?.cancel();
+      } catch {
+        // 無視
+      }
+      return nullPreview(safeUrl);
+    }
+    const res = fetched.res;
 
     const contentType = res.headers.get('content-type') ?? '';
     if (!contentType.toLowerCase().includes('text/html')) {
@@ -295,7 +296,7 @@ async function fetchPreview(safeUrl: string): Promise<PreviewResult> {
     }
 
     // リダイレクト後の最終 URL (相対 image 解決の base に使う)
-    const finalUrl = res.url || safeUrl;
+    const finalUrl = fetched.finalUrl || safeUrl;
     const html = await readCappedBody(res);
 
     const title =
@@ -311,7 +312,10 @@ async function fetchPreview(safeUrl: string): Promise<PreviewResult> {
     const rawImage =
       extractMetaContent(html, ['og:image', 'og:image:url', 'og:image:secure_url']) ??
       extractMetaContent(html, ['twitter:image', 'twitter:image:src']);
-    const image = resolveImageUrl(rawImage, finalUrl);
+    const absImage = resolveImageUrl(rawImage, finalUrl);
+    // ★ og:image を og-image プロキシの署名つき URL に変換する (閲覧者IP漏れ防止)。
+    //   secret 未設定 / SSRF NG / 長すぎ は null = 画像なし (raw URL は閲覧者に晒さない)。
+    const image = await signImageUrl(absImage, OG_IMAGE_PROXY_SECRET, SUPABASE_URL);
 
     const siteName =
       extractMetaContent(html, ['og:site_name']) ?? extractMetaContent(html, ['application-name']);
@@ -320,7 +324,7 @@ async function fetchPreview(safeUrl: string): Promise<PreviewResult> {
       url: safeUrl,
       title: truncate(title, MAX_TITLE),
       description: truncate(description, MAX_DESCRIPTION),
-      image_url: truncate(image, MAX_IMAGE_URL),
+      image_url: image, // og-image 署名 proxy URL (≤2048) or null。署名を切らないため truncate しない。
       site_name: truncate(siteName, MAX_SITE_NAME),
       fetched_at: new Date().toISOString(),
     };
