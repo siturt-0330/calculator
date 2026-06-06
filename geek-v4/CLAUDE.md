@@ -358,6 +358,7 @@ deploy: `supabase functions deploy <name>`。秘密は `supabase secrets set KEY
 | `EXPO_PUBLIC_SENTRY_DSN` | 任意 | 空なら Sentry init を早期 return |
 | `EXPO_PUBLIC_FEED_PAGE_RPC` | 任意 | `'0'` でフィード周辺データ RPC (get_feed_page) を kill-switch |
 | `EXPO_PUBLIC_HOME_FEED_RPC` | 任意 | `'1'` で home feed 1ページ目集約 RPC (get_home_feed/0114) を有効化 (★既定 OFF) |
+| `EXPO_PUBLIC_COLDSTART_INTEREST_FEED` | 任意 | `'1'` で興味タグ選択済み新規ユーザーを初回フィードだけ興味スコープ(closed)に着地 (one-shot/migration不要、★既定 OFF) |
 
 ### 絶対にクライアントに置かない
 
