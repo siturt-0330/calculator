@@ -80,6 +80,7 @@ export function useLike() {
     prevLikes: Array<[readonly unknown[], Record<string, boolean> | undefined]>;
     prevFeed: Array<[readonly unknown[], unknown]>;
     prevFeedPage: Array<[readonly unknown[], FeedPagePost[] | undefined]>;
+    prevCommunity: Array<[readonly unknown[], unknown]>;
   };
 
   const mutation = useMutation<void, Error, Vars, Ctx>({
@@ -90,6 +91,7 @@ export function useLike() {
         qc.cancelQueries({ queryKey: ['my-likes'] }).catch(() => {}),
         qc.cancelQueries({ queryKey: ['feed'] }).catch(() => {}),
         qc.cancelQueries({ queryKey: ['feed-page'] }).catch(() => {}),
+        qc.cancelQueries({ queryKey: ['community'] }).catch(() => {}),
       ]);
 
       // snapshot は patch 前 (= mutation 適用前の真の値) で取る
@@ -98,6 +100,7 @@ export function useLike() {
       });
       const prevFeed = qc.getQueriesData({ queryKey: ['feed'] });
       const prevFeedPage = snapshotFeedPage(qc);
+      const prevCommunity = qc.getQueriesData({ queryKey: ['community'] });
 
       // 1) legacy my-likes cache — exact-key 書き戻し (partial-match 廃止)
       const likesEntries = qc.getQueriesData<Record<string, boolean> | undefined>({
@@ -130,21 +133,40 @@ export function useLike() {
         qc.setQueryData(exactKey, next);
       }
 
+      // 2.5) コミュニティ詳細 feed cache (['community', id, 'feed', sort] → Post[]) — likes_count を ±1。
+      //   コミュ feed は useFeedPage を使わず post.likes_count を直接表示するため、ここを更新しないと
+      //   「コミュニティでいいねしても数が増えない」bug になる。配列の cache だけを対象にする
+      //   (['community', id] = metadata オブジェクトは Array でないのでスキップされる)。
+      const communityEntries = qc.getQueriesData<unknown>({ queryKey: ['community'] });
+      for (const [exactKey, data] of communityEntries) {
+        if (!Array.isArray(data)) continue;
+        let touched = false;
+        const next = (data as Array<{ id: string; likes_count: number }>).map((p) => {
+          if (p && p.id === postId) {
+            touched = true;
+            return { ...p, likes_count: Math.max(0, (p.likes_count ?? 0) + (wasLiked ? -1 : 1)) };
+          }
+          return p;
+        });
+        if (touched) qc.setQueryData(exactKey, next);
+      }
+
       // 3) ★ RPC cache (feed-page) — my_like + likes_count を更新
-      //    feed.tsx は full.my_like / post.likes_count を参照するので、ここを更新しないと UI 反映 0。
+      //    feed.tsx は full.my_like / full.likes_count を参照するので、ここを更新しないと UI 反映 0。
       patchFeedPagePost(qc, postId, (p) => ({
         ...p,
         my_like: !wasLiked,
         likes_count: Math.max(0, (p.likes_count ?? 0) + (wasLiked ? -1 : 1)),
       }));
 
-      return { prevLikes, prevFeed, prevFeedPage };
+      return { prevLikes, prevFeed, prevFeedPage, prevCommunity };
     },
     onError: (_e, _v, ctx) => {
       if (!ctx) return;
       for (const [k, d] of ctx.prevLikes) qc.setQueryData(k, d);
       for (const [k, d] of ctx.prevFeed) qc.setQueryData(k, d);
       revertFeedPageSnapshot(qc, ctx.prevFeedPage);
+      for (const [k, d] of ctx.prevCommunity) qc.setQueryData(k, d);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['my-likes'] });

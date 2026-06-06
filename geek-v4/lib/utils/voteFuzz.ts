@@ -93,3 +93,35 @@ export function getDisplayLikes(postId: string, realLikes: number): number {
   // post_id 不一致やバグで負になっても 0 にクランプ
   return display < 0 ? 0 : display;
 }
+
+/**
+ * 閲覧者の self-like を fuzz から切り離した表示用 likes 数。
+ *
+ * 【背景 = "いいね押しても数が反映されない" バグ】
+ *   getDisplayLikes は real_likes 全体に fuzz をかける。閲覧者自身が like /
+ *   unlike すると real_likes が ±1 するが、その値が fuzz の tier 境界
+ *   (2↔3 / 10↔11) を跨ぐと fuzz の大きさ自体が変わり、表示が ±1 にならない。
+ *   例: real 10 (fuzz ±1 帯) → 11 (fuzz ±5 帯) で、表示が 11 → 11 のまま動かず、
+ *   ハートは点くのに数字が増えない → 「反映されない」と感じる。
+ *
+ * 【対策】
+ *   fuzz は「自分を除いた票数 (others)」に対して計算する。others は閲覧者が
+ *   toggle しても不変 (real_likes と self が同時に ±1 するため相殺) なので fuzz が
+ *   安定する。そこへ自分の like を素の +1 として上乗せすることで、自分の操作は
+ *   必ず ±1 で表示に反映される。他人票に対する観測耐性 (spammer 対策) は維持。
+ *
+ * @param postId 投稿 ID (fuzz の seed)
+ * @param realLikes DB の likes_count (自分の like を含む)
+ * @param viewerLiked 閲覧者がこの投稿を like 済みか
+ * @returns 表示用 likes 数 (常に >= 0)
+ */
+export function getDisplayLikesForViewer(
+  postId: string,
+  realLikes: number,
+  viewerLiked: boolean,
+): number {
+  const r = Math.max(0, Math.floor(realLikes || 0));
+  const mine = viewerLiked ? 1 : 0;
+  const others = Math.max(0, r - mine);
+  return getDisplayLikes(postId, others) + mine;
+}

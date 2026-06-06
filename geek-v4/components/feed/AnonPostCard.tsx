@@ -55,7 +55,7 @@ import { stableKeyFor } from '../../lib/utils/queryKey';
 import { OfficialBadge } from '../community/OfficialBadge';
 import { ModActionMenu } from '../community/ModActionMenu';
 import { MediaWithCWGuard } from '../post/MediaWithCWGuard';
-import { getDisplayLikes } from '../../lib/utils/voteFuzz';
+import { getDisplayLikesForViewer } from '../../lib/utils/voteFuzz';
 import { ImageLightbox } from '../ui/ImageLightbox';
 
 // 画像アスペクト比のモジュールレベルキャッシュ。
@@ -967,7 +967,10 @@ function AnonPostCardInner({
   const likesCount = post.likes_count ?? 0;
   // 表示用 likes 数 — Vote Fuzzing (#3) で post_id seed の決定的 noise を加える。
   // 実 ranking / score / lowTrust 計算は real value (likesCount) のまま使う。
-  const displayLikesCount = getDisplayLikes(post.id, likesCount);
+  // ★ 自分の like 由来の ±1 は fuzz に飲み込ませず必ず反映させる (getDisplayLikesForViewer)。
+  //   fuzz を「自分を除いた票数」に対して計算 → tier 境界 (10↔11 等) でも自分の操作が
+  //   表示上で確実に ±1 になる。「いいね押しても数字が変わらない」UX バグの根本修正。
+  const displayLikesCount = getDisplayLikesForViewer(post.id, likesCount, liked);
   const commentsCount = post.comments_count ?? 0;
   const hasMedia = mediaUrls.length > 0 || videoUrls.length > 0;
 

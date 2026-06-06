@@ -9,7 +9,12 @@
 // ============================================================
 
 import { describe, it, expect } from '@jest/globals';
-import { fnv1a32, getVoteFuzz, getDisplayLikes } from './voteFuzz';
+import {
+  fnv1a32,
+  getVoteFuzz,
+  getDisplayLikes,
+  getDisplayLikesForViewer,
+} from './voteFuzz';
 
 describe('voteFuzz', () => {
   describe('determinism', () => {
@@ -87,6 +92,60 @@ describe('voteFuzz', () => {
         if (getVoteFuzz(`post-mid-${i}`, 5) !== 0) nonZero++;
       }
       expect(nonZero).toBeGreaterThan(0);
+    });
+  });
+
+  describe('getDisplayLikesForViewer — self-like は必ず ±1 反映', () => {
+    // 「いいね押しても数字が変わらない」バグの回帰防止。
+    // 自分が like すると server count は +1 する (othersN → othersN+1, liked=true)。
+    // 表示はその前後で必ず +1 になること (fuzz tier 境界を跨いでも) を保証する。
+    it('toggling self-like changes display by exactly +1 across all tiers', () => {
+      // others 票数 = N。tier 境界 (2↔3, 10↔11) を含めて網羅。
+      const otherCounts = [0, 1, 2, 3, 4, 9, 10, 11, 12, 50, 100, 999];
+      for (let i = 0; i < 300; i++) {
+        const id = `viewer-${i}`;
+        for (const others of otherCounts) {
+          const notLiked = getDisplayLikesForViewer(id, others, false);
+          // like すると real_likes は others+1、liked=true
+          const liked = getDisplayLikesForViewer(id, others + 1, true);
+          expect(liked - notLiked).toBe(1);
+        }
+      }
+    });
+
+    it('reproduces the original boundary bug class (10→11) and fixes it', () => {
+      // getDisplayLikes 単体だと 10↔11 で表示が ±1 にならない id が必ず存在する
+      // (raw>5 の id: real10→fuzz+1=11, real11→fuzz=full)。
+      // getDisplayLikesForViewer はその id でも必ず +1 にする。
+      let boundaryBugExisted = false;
+      for (let i = 0; i < 300; i++) {
+        const id = `boundary-${i}`;
+        // 旧挙動: real 10 (liked前) vs real 11 (liked後) を素の getDisplayLikes で
+        if (getDisplayLikes(id, 11) - getDisplayLikes(id, 10) !== 1) {
+          boundaryBugExisted = true;
+        }
+        // 新挙動: viewer 版は必ず +1
+        expect(
+          getDisplayLikesForViewer(id, 11, true) - getDisplayLikesForViewer(id, 10, false),
+        ).toBe(1);
+      }
+      // テスト前提の健全性: 旧挙動には実際に境界バグが存在したこと
+      expect(boundaryBugExisted).toBe(true);
+    });
+
+    it('is deterministic and never negative', () => {
+      expect(getDisplayLikesForViewer('p', 50, true)).toBe(
+        getDisplayLikesForViewer('p', 50, true),
+      );
+      for (let i = 0; i < 200; i++) {
+        expect(getDisplayLikesForViewer(`neg-${i}`, 0, false)).toBeGreaterThanOrEqual(0);
+        expect(getDisplayLikesForViewer(`neg-${i}`, 0, true)).toBeGreaterThanOrEqual(0);
+      }
+    });
+
+    it('handles NaN / negative realLikes safely', () => {
+      expect(getDisplayLikesForViewer('p', Number.NaN, false)).toBe(0);
+      expect(getDisplayLikesForViewer('p', -10, true)).toBe(1); // others=0 → fuzz0 → +mine
     });
   });
 
