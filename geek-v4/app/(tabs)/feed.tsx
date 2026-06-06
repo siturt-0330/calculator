@@ -656,10 +656,18 @@ export default function FeedScreen() {
         full?.communities ?? communitiesByPost[post.id] ?? EMPTY_COMMUNITIES;
       // RPC 由来の official_author を post 本体に merge して AnonPostCard に渡す
       // (旧 useFeed パスでは fetchPosts → attachOfficialAuthor が既にやっている)
-      const enrichedPost =
-        full && full.official_author
-          ? { ...post, official_author: full.official_author }
-          : post;
+      // ★ liked と同じく likes_count / comments_count も RPC cache (full) を優先する。
+      //   base post は rank pipeline の memo が id ベースで再計算されず likes_count 変化に
+      //   追従しない(= いいねしても数字が増えない bug)。full は useFeedPage の cache から
+      //   毎 render 再生成され optimistic patch (patchFeedPagePost) で即時更新されるので新鮮。
+      const enrichedPost = full
+        ? {
+            ...post,
+            likes_count: full.likes_count ?? post.likes_count,
+            comments_count: full.comments_count ?? post.comments_count,
+            ...(full.official_author ? { official_author: full.official_author } : {}),
+          }
+        : post;
       return (
         <FeedRowEnter index={index}>
           <AnonPostCard
