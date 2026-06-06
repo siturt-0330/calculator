@@ -64,7 +64,9 @@ const CFG = {
   SWEEP_RATIO: 0.38, // splash ::after width:38% と同一
   BAR_GAP: 24, // splash margin-top:24px と同一
   // タイミング
-  FADE_IN: 280,
+  // ★ web は FADE_IN=0: 起動スプラッシュ(同一画)と即差し替えることで、splash の fade-out と
+  //   イントロの fade-in が重なる瞬間の「二重像 / 一瞬の点滅」を防ぐ (handoff を継ぎ目なく)。
+  FADE_IN: Platform.OS === 'web' ? 0 : 280,
   HOLD: 1320,
   FADE_OUT: 320,
   PULSE_MS: 1600, // splash gk-pulse 1.6s
@@ -171,6 +173,9 @@ export function IntroAnimation({ onComplete }: { onComplete: () => void }) {
       pointerEvents="box-only"
       onStartShouldSetResponder={() => true}
       onResponderRelease={handleSkip}
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel="Geek"
       style={[
         StyleSheet.absoluteFill,
         {
@@ -182,11 +187,16 @@ export function IntroAnimation({ onComplete }: { onComplete: () => void }) {
         containerStyle,
       ]}
     >
-      <Animated.Text style={[wordmarkStyle(), wordStyle]} allowFontScaling={false}>
+      <Animated.Text
+        style={[wordmarkStyle(), wordStyle]}
+        allowFontScaling={false}
+        importantForAccessibility="no-hide-descendants"
+      >
         Geek
       </Animated.Text>
 
       <View
+        importantForAccessibility="no-hide-descendants"
         style={{
           marginTop: CFG.BAR_GAP,
           width: CFG.BAR_W,

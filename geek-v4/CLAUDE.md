@@ -30,6 +30,31 @@
 - ただし **コード本体 (識別子 / 関数名 / 型名)** は英語。
 - console.log / Sentry breadcrumb メッセージは英語 prefix (`[realtime] ...`) + 日本語説明 OK。
 
+### 🔒 Geek イントロ / 起動スプラッシュは【確定版・変更禁止】(2026-06-06 確定)
+
+「Geek」起動演出 = **(A) 起動スプラッシュ**(`scripts/web-postbuild.mjs` が `dist/index.html` に注入する素 HTML/CSS の `#geek-splash`、JS 到着前から表示)+ **(B) イントロ**(`components/ui/IntroAnimation.tsx`、アプリ mount 後に表示)。この 2 つは **「同じ寸法・同じ演出」で完全一致** させてある(スプラッシュ→イントロ→本体が seam なく繋がるため)。**ユーザが「これで固定」と確定した最終版。デザイン・寸法・タイミングを勝手に変えない。**
+
+確定値(A と B で必ず一致させる):
+- 背景 `#0a0a0a` / ワードマーク文字「Geek」
+- グラデ `linear-gradient(120deg, #7C6AF7 0%, #B98CFF 48%, #E891C7 100%)`(single source = `design/typography.ts` の `GEEK_GRADIENT_CSS`)
+- font: Apple system stack(`LOGO_FONT`)/ **weight 800**(★ `LOGO_FONT_WEIGHT`=700 ではない)/ size **46px** / line-height **1.0(=46)** / letter-spacing **-1px**
+- 進捗バー: 外枠 幅 **132** 高 **3** `radius:99` 背景 `rgba(255,255,255,.08)` / 内側 幅 **38%(≈50px)** グラデ `#7C6AF7→#E891C7` / word の下 `margin-top:24`
+- 明滅 pulse: opacity 1→0.5 / **1600ms** / ease-in-out。バー sweep: translateX `-130%→360%` / **1150ms** / `cubic-bezier(.4,0,.2,1)` / 左→右ループ
+- 全体: fade-in(web は 0 / native 280ms)→ HOLD 1320ms → fade-out 320ms ≈ 体感 ~1.9s / 画面タップで skip
+
+reduce-motion(必須挙動):
+- fade(in/out/skip)は **必ず `ReduceMotion.Never`** で動かす(system RM 下で duration が 0 に潰れ「1 フレーム点滅して消える」事故を防ぐ)。
+- pulse/sweep は **停止**し、バーは見える位置で静止(splash の `translateX(85%)` 相当 = `RM_SWEEP≈0.44`)。
+- HOLD は **`setTimeout`**(`withDelay` は system RM 下で 0 に潰れるため使わない)。
+
+実装の前提(壊すと seam / 事故):
+- web のグラデ文字は CSS `background-clip:text`(react-native-web 0.19.13 で DOM へ通ることをソース確認済。`color:transparent` + `backgroundImage` + `backgroundClip` + `WebkitBackgroundClip` + `WebkitTextFillColor` の 5 プロパティはセットで必須)。native はワードマークのみ単色 `#B98CFF` フォールバック(バーは native もグラデ)。native グラデ文字は実機検証が要るため follow-up。
+- `web-postbuild.mjs` に **Service Worker を足さない**(古い shell 残存事故。[[project_geek_v4_web_freshness]])。`#geek-splash` 除去(MutationObserver + 12s safety)・idempotent marker(`geek-splash-style`)を壊さない。
+- `IntroAnimation` の `onComplete` / `markIntroShown`(no-op stub・export 維持)/ skip / safety timer の契約は `app/_layout.tsx` 互換。二重発火させない(`completedRef`)。
+- 回帰防止テスト **`tests/unit/introSplashLock.test.ts`** が A↔B の固定値一致を assert する。寸法/色/タイミングを変えたら落ちる。**意図的に変える時は (A) splash と (B) intro を必ずペアで直し、このテストの期待値も同値に更新**してから preview で seam が出ないことを確認する。
+
+🚫 「改善」名目で単独変更しない。フル仕様は `components/ui/IntroAnimation.tsx` 冒頭コメント + `design/typography.ts` のコメントが正。
+
 ---
 
 ## 1. プロジェクト一言まとめ
