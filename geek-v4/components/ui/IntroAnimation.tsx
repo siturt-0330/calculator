@@ -28,7 +28,7 @@ import Animated, {
 //     画面サイズ依存にすると splash(46px)→intro が拡大して seam が見えるため固定にする。
 //
 //   - 背景 #0a0a0a / 中央「Geek」(web:グラデ, native:単色) + 細い進捗バー (左→右スライド) + 明滅
-//   - 短く上品 (~1.9s)、タップでスキップ。
+//   - 上品 (~2.6s)。★バーが左→右を必ず完走 (2 周) してから退場、タップでスキップ。
 //   - reduce motion 時: pulse/sweep を止め、フェードのみ (ReduceMotion.Never で
 //     「1フレームだけ点滅して消える」事故を防ぎ、静止した短いイントロを必ず見せる)。
 //   - onComplete / markIntroShown / skip / safety の契約は不変 (_layout.tsx 互換)。
@@ -67,10 +67,14 @@ const CFG = {
   // ★ web は FADE_IN=0: 起動スプラッシュ(同一画)と即差し替えることで、splash の fade-out と
   //   イントロの fade-in が重なる瞬間の「二重像 / 一瞬の点滅」を防ぐ (handoff を継ぎ目なく)。
   FADE_IN: Platform.OS === 'web' ? 0 : 280,
-  HOLD: 1320,
   FADE_OUT: 320,
   PULSE_MS: 1600, // splash gk-pulse 1.6s
   SWEEP_MS: 1150, // splash gk-slide 1.15s
+  // ★ バー(左→右スイープ)を必ず「完走」させてから退場する。退場(fade 開始)は
+  //   SWEEPS_BEFORE_EXIT × SWEEP_MS にアンカー — sweep は mount(t=0) から走るので、
+  //   バーが必ず右端へ到達した瞬間に一致 (途中でブツ切りにならない = 短すぎ違和感の解消)。
+  //   2 周で体感 ~2.6s (= 2×1150 + 320)。最低 1 (= 必ず 1 周は左→右を見せ切る)。
+  SWEEPS_BEFORE_EXIT: 2,
 };
 
 const INNER_W = Math.round(CFG.BAR_W * CFG.SWEEP_RATIO); // ≈ 50
@@ -136,8 +140,11 @@ export function IntroAnimation({ onComplete }: { onComplete: () => void }) {
       );
     }
 
-    // 3) HOLD は setTimeout で (reanimated の withDelay は system RM 下で delay=0 に
-    //    潰れて即完了→1フレーム点滅になるため使わない)。fade-out は Never で必ず動かす。
+    // 3) 退場は「バーが左→右を完走した瞬間」に合わせる。setTimeout を使う理由は
+    //    reanimated の withDelay が system RM 下で delay=0 に潰れ即完了→1フレーム点滅に
+    //    なるため。sweep は t=0 から走るので holdUntilExit = N×SWEEP_MS でバー右端到達と一致。
+    //    fade-out は Never で必ず動かす。
+    const holdUntilExit = CFG.SWEEPS_BEFORE_EXIT * CFG.SWEEP_MS;
     const exitTimer = setTimeout(() => {
       containerOp.value = withTiming(
         0,
@@ -146,10 +153,10 @@ export function IntroAnimation({ onComplete }: { onComplete: () => void }) {
           if (finished) runOnJS(fireComplete)();
         },
       );
-    }, CFG.FADE_IN + CFG.HOLD);
+    }, holdUntilExit);
 
     // Safety: 何があっても必ず完了
-    const safety = setTimeout(fireComplete, CFG.FADE_IN + CFG.HOLD + CFG.FADE_OUT + 1200);
+    const safety = setTimeout(fireComplete, holdUntilExit + CFG.FADE_OUT + 1200);
 
     return () => {
       clearTimeout(exitTimer);

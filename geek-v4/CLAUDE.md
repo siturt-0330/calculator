@@ -40,7 +40,8 @@
 - font: Apple system stack(`LOGO_FONT`)/ **weight 800**(★ `LOGO_FONT_WEIGHT`=700 ではない)/ size **46px** / line-height **1.0(=46)** / letter-spacing **-1px**
 - 進捗バー: 外枠 幅 **132** 高 **3** `radius:99` 背景 `rgba(255,255,255,.08)` / 内側 幅 **38%(≈50px)** グラデ `#7C6AF7→#E891C7` / word の下 `margin-top:24`
 - 明滅 pulse: opacity 1→0.5 / **1600ms** / ease-in-out。バー sweep: translateX `-130%→360%` / **1150ms** / `cubic-bezier(.4,0,.2,1)` / 左→右ループ
-- 全体: fade-in(web は 0 / native 280ms)→ HOLD 1320ms → fade-out 320ms ≈ 体感 ~1.9s / 画面タップで skip
+- 全体: fade-in(web は 0 / native 280ms)→ バー sweep を必ず **2 周完走**(`SWEEPS_BEFORE_EXIT`=2 × `SWEEP_MS` 1150 = **2300ms 表示**、退場は sweep にアンカーしバー右端到達と同時)→ fade-out 320ms ≈ 体感 **~2.6s** / 画面タップで skip
+  - ★「**Geek の下のバーが左→右を完走するまで必ず表示**」をコードで保証(退場 = `SWEEPS_BEFORE_EXIT × SWEEP_MS`。`FADE_IN+HOLD` のような sweep 非依存値に戻すと途中でブツ切り=短すぎ違和感が再発)。短すぎ修正 2026-06-06。
 
 reduce-motion(必須挙動):
 - fade(in/out/skip)は **必ず `ReduceMotion.Never`** で動かす(system RM 下で duration が 0 に潰れ「1 フレーム点滅して消える」事故を防ぐ)。
