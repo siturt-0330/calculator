@@ -15,7 +15,7 @@
     "test": "jest --passWithNoTests",
     "test:e2e": "maestro test tests/e2e",
     "supabase:gen": "supabase gen types typescript --project-id $SUPABASE_PROJECT_ID > types/supabase.ts",
-    "build:web": "expo export --platform web --output-dir dist",
+    "build:web": "expo export --platform web --output-dir dist && node scripts/web-postbuild.mjs",
     "build:ios": "eas build --platform ios --profile production",
     "build:android": "eas build --platform android --profile production",
     "update": "eas update --branch production --message"

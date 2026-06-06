@@ -32,9 +32,13 @@ import type { PostCommunityRef } from './posts';
 // ★ '1' のとき「だけ」有効 (既定 OFF)。'' / undefined / '0' / 'true' は全て OFF に倒れる。
 export const HOME_FEED_RPC_ENABLED = process.env.EXPO_PUBLIC_HOME_FEED_RPC === '1';
 
-// fetchPosts(for-you) の effectiveLimit = ceil(20 * 1.5) = 30 に一致させる
-// (client の rankFeed 再ランクの母集合サイズを現行と揃え、並びを変えない)。
-export const HOME_FEED_FIRST_PAGE_LIMIT = 30;
+// cold start 初速優先: 初回ページを 12 件に絞る (旧 30)。get_home_feed の応答 JSON は
+// 周辺データ + (現状のシードでは base64 画像) を含み、30 件で ~3.8MB と重く、モバイル
+// 初回表示の主ボトルネックだった。12 件で初回 payload を ~⅓ に圧縮する。2 ページ目以降は
+// 従来の fetchPosts (cursor) が担うので総取得量は変わらない。
+// ※ トレードオフ: client rankFeed の「1ページ目 再ランク母集合」が 30→12 に縮むため、
+//   初回の for-you 並びは僅かに変わる (スクロールで後続が追従)。
+export const HOME_FEED_FIRST_PAGE_LIMIT = 12;
 
 const HOME_FEED_RPC_TIMEOUT_MS = 8000;
 
