@@ -262,19 +262,6 @@ export function CommunityCollapsingHeader(props: CommunityCollapsingHeaderProps)
           onPress={onJoinLeave}
         />
       </Animated.View>
-
-      {/* 拡張ヘッダー本体下端 hairline */}
-      <View
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          top: topInset + HEADER_EXPANDED - StyleSheet.hairlineWidth,
-          left: 0,
-          right: 0,
-          height: StyleSheet.hairlineWidth,
-          backgroundColor: C.border,
-        }}
-      />
     </View>
   );
 }
