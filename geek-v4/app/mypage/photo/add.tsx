@@ -15,8 +15,9 @@
 // - cancel → router.back()
 //
 // 画像 upload は必ず prepareImageUpload 経由 (CLAUDE.md § 5.9 / spec § 4)。
-// useUploadPhoto の mutationFn 内で prepareImageUpload を call しているので、
-// 画面側は asset.uri を直接渡す。
+// useUploadPhoto の mutationFn 内で prepareImageUpload を call している。
+// native は asset.uri を直接渡すが、web は iPhone Safari の blob: URL revoke 対策で
+// ピック時に makeWebPreviewDataUrl で data: URL 化してから渡す (下記 launchPicker 参照)。
 // ============================================================
 
 import { useState } from 'react';
@@ -45,6 +46,7 @@ import { Avatar } from '../../../components/ui/Avatar';
 import { useMyAlbums, useUploadPhoto } from '../../../hooks/useAlbums';
 import { useMyFriends } from '../../../hooks/useFriends';
 import { useToastStore } from '../../../stores/toastStore';
+import { makeWebPreviewDataUrl } from '../../../lib/image';
 import { Icon } from '../../../constants/icons';
 import { C, R, SP, SHADOW } from '../../../design/tokens';
 import { T } from '../../../design/typography';
@@ -110,7 +112,23 @@ export default function AddPhotoScreen() {
         // キャンセルは画面に留まる (旧仕様は router.back() だったが、再選択チャンスを与える)。
         return;
       }
-      setPickedUri(r.assets[0].uri);
+      const asset = r.assets[0];
+      // ★ iPhone Safari fix (プロフィールのカバー画像と同根の不具合):
+      //   web で picker の生 blob: URI をそのまま upload に渡すと、iPhone Safari が
+      //   blob URL を勝手に revoke して prepareImageUpload の web fetch が空 Blob /
+      //   "Load failed" になり、写真が無音で上がらない (= 「選んでも反映されない」)。
+      //   ピック時に 1600px JPEG (data URL — uploadAlbumPhoto の prepareImageUpload
+      //   maxWidth/maxHeight=1600 と一致) 化して data: 短絡パス (revoke 耐性) に乗せる。
+      //   失敗時は生 URI にフォールバックして退行なし。native は従来どおり asset.uri。
+      let uploadUri = asset.uri;
+      if (Platform.OS === 'web') {
+        try {
+          uploadUri = await makeWebPreviewDataUrl(asset.uri, 1600, 0.85);
+        } catch (e) {
+          console.warn('[mypage/photo/add] web image pre-process failed, fallback to raw uri:', e);
+        }
+      }
+      setPickedUri(uploadUri);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '画像の取得に失敗しました';
       show(msg, 'error');
