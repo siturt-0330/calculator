@@ -21,6 +21,39 @@ export const LOGO_FONT = Platform.select({
 
 export const LOGO_FONT_WEIGHT = '700' as const;
 
+// ============================================================
+// Geek ブランドのグラデ塗り (起動スプラッシュ / イントロ / ログイン 共通の単一ソース)
+// ============================================================
+// 「Geek」ワードマークを起動スプラッシュと同一のグラデ (紫→ラベンダー→ピンク) で塗る。
+// size / weight / letterSpacing は呼び出し側で指定し、この helper は「塗り」だけを返す。
+//   - web: CSS background-clip:text (react-native-web 0.19.13 が全 prop を DOM へ通すことを
+//     ソース追跡で確認済 — color:transparent でも不可視にならない)
+//   - native: RN Text はグラデ文字を持てないので単色フォールバック (#B98CFF)
+// ★ stop は scripts/web-postbuild.mjs の起動スプラッシュ .gk-word と一致させること。
+export const GEEK_GRADIENT_CSS =
+  'linear-gradient(120deg, #7C6AF7 0%, #B98CFF 48%, #E891C7 100%)';
+
+type WebTextExtras = {
+  backgroundImage?: string;
+  backgroundClip?: string;
+  WebkitBackgroundClip?: string;
+  WebkitTextFillColor?: string;
+};
+export type GradientTextStyle = TextStyle & WebTextExtras;
+
+export function geekGradientFill(): GradientTextStyle {
+  if (Platform.OS === 'web') {
+    return {
+      color: 'transparent',
+      backgroundImage: GEEK_GRADIENT_CSS,
+      backgroundClip: 'text',
+      WebkitBackgroundClip: 'text',
+      WebkitTextFillColor: 'transparent',
+    };
+  }
+  return { color: '#B98CFF' };
+}
+
 // パフォーマンス: font weight を削減 — Syne 600 / NotoSansJP 500 / Inter 500
 // を排除し、代わりに近い weight (700 / 700 / 600) を使い回す。
 // display2 は display (700Bold) に集約。ui は uiBold (600SemiBold) に集約。

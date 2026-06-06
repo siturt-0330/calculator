@@ -1,101 +1,99 @@
 import { useEffect, useRef } from 'react';
-import { StyleSheet, Dimensions, Platform, View, type TextStyle } from 'react-native';
-import { LOGO_FONT, LOGO_FONT_WEIGHT } from '../../design/typography';
+import { StyleSheet, Platform, View, type TextStyle } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { LOGO_FONT } from '../../design/typography';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
-  withDelay,
+  withRepeat,
+  interpolate,
+  Extrapolation,
+  cancelAnimation,
   runOnJS,
   Easing,
-  type SharedValue,
+  ReduceMotion,
+  useReducedMotion,
 } from 'react-native-reanimated';
 
-// Web 専用 CSS プロパティを TextStyle に重ねるための拡張型
-// (React Native の StyleProp 型は WebkitFontSmoothing 等を知らないので
-//  any キャストの代わりにこのローカル型で正確に表現する)
+// ============================================================
+// Geek イントロ — 起動スプラッシュ (web の instant splash) と「完全一致」
+// ============================================================
+// 設計意図 (継ぎ目のない起動体験):
+//   web では HTML の起動スプラッシュ (scripts/web-postbuild.mjs が注入する
+//   「Geek グラデ ワードマーク + 進捗バー」) が JS 到着前から出ている。
+//   アプリ mount 後に出るこのイントロを **同じ寸法・同じ演出** にすることで、
+//   スプラッシュ → イントロ → 本体 が一切ジャンプせず繋がる。
+//   ★ そのため寸法は splash と同じ固定値 (46px / バー132px / gap24px / line-height1.0)。
+//     画面サイズ依存にすると splash(46px)→intro が拡大して seam が見えるため固定にする。
+//
+//   - 背景 #0a0a0a / 中央「Geek」(web:グラデ, native:単色) + 細い進捗バー (左→右スライド) + 明滅
+//   - 上品 (~2.6s)。★バーが左→右を必ず完走 (2 周) してから退場、タップでスキップ。
+//   - reduce motion 時: pulse/sweep を止め、フェードのみ (ReduceMotion.Never で
+//     「1フレームだけ点滅して消える」事故を防ぎ、静止した短いイントロを必ず見せる)。
+//   - onComplete / markIntroShown / skip / safety の契約は不変 (_layout.tsx 互換)。
+//
+// グラデ文字:
+//   - web: CSS background-clip:text。react-native-web 0.19.13 が全 prop を DOM へ通すことを
+//     ソース追跡で確認済 (color:transparent でも不可視にならない)。splash と同一 CSS。
+//   - native: RN Text はグラデ文字を持てないので単色 (#B98CFF) フォールバック。
+//     (native のグラデ文字は react-native-svg での follow-up。進捗バーは linear-gradient で native もグラデ)
+// ============================================================
+
+// web 専用 CSS プロパティを TextStyle に重ねるためのローカル拡張型
 type WebTextExtras = {
-  textShadow?: string;
+  backgroundImage?: string;
+  backgroundClip?: string;
+  WebkitBackgroundClip?: string;
+  WebkitTextFillColor?: string;
   WebkitFontSmoothing?: string;
   MozOsxFontSmoothing?: string;
   textRendering?: string;
 };
 type ExtendedTextStyle = TextStyle & WebTextExtras;
 
-// ============================================================
-// Geek イントロ
-//   1. G が画面中央でフェードイン
-//   2. G が左へスライドしながら e, e, k が右側に順に出現
-//   3. "Geek" 完成 → 短いホールド
-//   4. 大胆な突き抜けズーム (画面を貫通する勢い)
-//   5. フェードアウト
-// 紫グローは控えめ (黒背景を主役に)
-// ============================================================
-
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
-const SHORTER = Math.min(SCREEN_W, SCREEN_H);
-
+// ★ すべて起動スプラッシュ (scripts/web-postbuild.mjs の #geek-splash) と同一の固定値
 const CFG = {
-  // 文字
-  FONT_SIZE:       Math.round(Math.min(SHORTER * 0.26, 150)),
-  LETTER_SPACING:  -1.5,  // Apple SF Pro Display 風の negative tracking
-  BG_COLOR:        '#000000',
-  LOGO_COLOR:      '#FFFFFF',
-  GLOW_COLOR:      '#7C6AF7',
-
-  // タイミング (ms) — 旧 ~5.5s → 新 ~3.0s
-  // ユーザーの体感応答を最優先するため、迫力は保ちつつ全体を短縮
-  G_REVEAL:        320,    // G が中央でフェードイン
-  G_CENTER_HOLD:   180,    // G を中央でホールド
-  SHIFT_DURATION:  500,    // G が左へ移動する尺
-  LETTER_STAGGER:  100,    // e→e→k の登場間隔
-  LETTER_REVEAL:   240,    // 1文字のフェードイン
-  POST_FORM_HOLD:  120,    // 完成後ホールド (グロー一瞬)
-  GLOW_FLASH:      160,    // グロー (短く控えめ)
-  ZOOM_START_DELAY: 80,
-  ZOOM_DURATION:   1500,   // ズームイン尺 — 旧 900 → 1500ms。文字拡大をゆっくり見せる
-  ZOOM_MAX:        25,     // 突き抜ける勢いの拡大率
-  FADE_OUT:        320,    // ズームが長くなった分 fade も少し長く
+  BG_COLOR: '#0a0a0a',
+  FONT_SIZE: 46, // splash .gk-word と同一
+  LINE_HEIGHT: 46, // line-height:1.0 (splash と同一)
+  LETTER_SPACING: -1, // splash と同一
+  NATIVE_LOGO_COLOR: '#B98CFF',
+  BAR_W: 132, // splash .gk-bar と同一
+  BAR_H: 3,
+  SWEEP_RATIO: 0.38, // splash ::after width:38% と同一
+  BAR_GAP: 24, // splash margin-top:24px と同一
+  // タイミング
+  // ★ web は FADE_IN=0: 起動スプラッシュ(同一画)と即差し替えることで、splash の fade-out と
+  //   イントロの fade-in が重なる瞬間の「二重像 / 一瞬の点滅」を防ぐ (handoff を継ぎ目なく)。
+  FADE_IN: Platform.OS === 'web' ? 0 : 280,
+  FADE_OUT: 320,
+  PULSE_MS: 1600, // splash gk-pulse 1.6s
+  SWEEP_MS: 1150, // splash gk-slide 1.15s
+  // ★ バー(左→右スイープ)を必ず「完走」させてから退場する。退場(fade 開始)は
+  //   SWEEPS_BEFORE_EXIT × SWEEP_MS にアンカー — sweep は mount(t=0) から走るので、
+  //   バーが必ず右端へ到達した瞬間に一致 (途中でブツ切りにならない = 短すぎ違和感の解消)。
+  //   2 周で体感 ~2.6s (= 2×1150 + 320)。最低 1 (= 必ず 1 周は左→右を見せ切る)。
+  SWEEPS_BEFORE_EXIT: 2,
 };
 
-const LETTERS = ['G', 'e', 'e', 'k'] as const;
+const INNER_W = Math.round(CFG.BAR_W * CFG.SWEEP_RATIO); // ≈ 50
+// splash の translateX(-130% → 360%)(内側バー幅基準)を px に換算
+const SWEEP_FROM = -INNER_W * 1.3;
+const SWEEP_TO = INNER_W * 3.6;
+// reduce motion 時のバー静止位置 (splash の translateX(85%) 相当)
+const RM_SWEEP = (0.85 + 1.3) / (3.6 + 1.3); // ≈ 0.44
 
-// "Geek" の幅推定 (Apple SF Pro Display / Inter Bold) — humanist sans
-// は Orbitron より narrow / proportional。実測値で G:0.66 / e:0.50 / k:0.52
-const W_RATIO: Record<string, number> = { G: 0.66, e: 0.50, k: 0.52 };
-
-// G を中央に置く時の word-row の translateX
-// = (e + e + k の合計幅) / 2
-const G_CENTER_SHIFT_RATIO =
-  (W_RATIO.e! + W_RATIO.e! + W_RATIO.k!) / 2;
+const GRADIENT_CSS = 'linear-gradient(120deg, #7C6AF7 0%, #B98CFF 48%, #E891C7 100%)';
+const BAR_GRADIENT = ['#7C6AF7', '#E891C7'] as const;
 
 export function IntroAnimation({ onComplete }: { onComplete: () => void }) {
-  // 各文字の opacity
-  const op0 = useSharedValue(0);    // G
-  const op1 = useSharedValue(0);    // e
-  const op2 = useSharedValue(0);    // e
-  const op3 = useSharedValue(0);    // k
-  const opacities = [op0, op1, op2, op3];
+  const reduceMotion = useReducedMotion();
 
-  // G の上から降りる初期オフセット
-  const tyG = useSharedValue(28);
-  // e/e/k は右から少しスライドして登場
-  const tx1 = useSharedValue(40);
-  const tx2 = useSharedValue(40);
-  const tx3 = useSharedValue(40);
-  const xOffsets = [tx1, tx2, tx3];
+  const containerOp = useSharedValue(0);
+  const pulse = useSharedValue(1);
+  const sweep = useSharedValue(0);
 
-  // word-row の translateX (G 中央 → 全部中央)
-  const wordShift = useSharedValue(CFG.FONT_SIZE * G_CENTER_SHIFT_RATIO);
-
-  // グロー (短く控えめにフラッシュ)
-  const glow = useSharedValue(0);
-  // 全体のスケール (ズーム用)
-  const zoom = useSharedValue(1);
-  // コンテナ不透明度 (フェードアウト用)
-  const containerOp = useSharedValue(1);
-
-  // 完了済みフラグ (タップでスキップ後の二重発火防止)
   const completedRef = useRef(false);
   const fireComplete = () => {
     if (completedRef.current) return;
@@ -103,102 +101,88 @@ export function IntroAnimation({ onComplete }: { onComplete: () => void }) {
     onComplete();
   };
 
-  // タップでスキップ: 急いでフェードアウトして onComplete
   const handleSkip = () => {
     if (completedRef.current) return;
-    containerOp.value = withTiming(0, { duration: 180, easing: Easing.in(Easing.quad) }, () => {
-      runOnJS(fireComplete)();
-    });
+    // skip の fade も RM 下で必ず動くように Never。
+    containerOp.value = withTiming(
+      0,
+      { duration: 180, easing: Easing.in(Easing.quad), reduceMotion: ReduceMotion.Never },
+      (finished) => {
+        if (finished) runOnJS(fireComplete)();
+      },
+    );
   };
 
   useEffect(() => {
     const EASE_OUT = Easing.bezier(0.16, 1, 0.3, 1);
-    const EASE_SHIFT = Easing.bezier(0.22, 1, 0.36, 1);
 
-    // 1) G を中央でフェードイン
-    op0.value = withTiming(1, { duration: CFG.G_REVEAL, easing: EASE_OUT });
-    tyG.value = withTiming(0, { duration: CFG.G_REVEAL, easing: EASE_OUT });
+    // 1) フェードイン (RM でも必ず動かす = 1フレーム点滅防止)
+    containerOp.value = withTiming(1, {
+      duration: CFG.FADE_IN,
+      easing: EASE_OUT,
+      reduceMotion: ReduceMotion.Never,
+    });
 
-    // 2) G を中央でホールド → 左へスライド開始 (eek 登場と同時)
-    const shiftStart = CFG.G_REVEAL + CFG.G_CENTER_HOLD;
-    wordShift.value = withDelay(
-      shiftStart,
-      withTiming(0, { duration: CFG.SHIFT_DURATION, easing: EASE_SHIFT }),
-    );
-
-    // 3) e, e, k が右から順に登場
-    for (let i = 0; i < 3; i++) {
-      const v = opacities[i + 1]!;
-      const tx = xOffsets[i]!;
-      const delay = shiftStart + i * CFG.LETTER_STAGGER + 60;
-      v.value = withDelay(
-        delay,
-        withTiming(1, { duration: CFG.LETTER_REVEAL, easing: EASE_OUT }),
+    // 2) ループ演出。RM 時は止めて splash の静止状態に合わせる。
+    if (reduceMotion) {
+      pulse.value = 1;
+      sweep.value = RM_SWEEP; // バーを見える位置で静止 (splash と同じ振る舞い)
+    } else {
+      pulse.value = withRepeat(
+        withTiming(0.5, { duration: CFG.PULSE_MS, easing: Easing.inOut(Easing.ease) }),
+        -1,
+        true,
       );
-      tx.value = withDelay(
-        delay,
-        withTiming(0, { duration: CFG.LETTER_REVEAL, easing: EASE_OUT }),
+      sweep.value = withRepeat(
+        withTiming(1, { duration: CFG.SWEEP_MS, easing: Easing.bezier(0.4, 0, 0.2, 1) }),
+        -1,
+        false,
       );
     }
 
-    // 4) 全部出揃った瞬間にグローを一瞬だけフラッシュ (控えめ)
-    const formCompleteAt =
-      shiftStart + 2 * CFG.LETTER_STAGGER + 60 + CFG.LETTER_REVEAL;
-    glow.value = withDelay(
-      formCompleteAt - 40,
-      withTiming(1, { duration: CFG.GLOW_FLASH, easing: Easing.out(Easing.cubic) }, () => {
-        // すぐ消える
-        glow.value = withTiming(0, { duration: 480, easing: Easing.in(Easing.quad) });
-      }),
-    );
+    // 3) 退場は「バーが左→右を完走した瞬間」に合わせる。setTimeout を使う理由は
+    //    reanimated の withDelay が system RM 下で delay=0 に潰れ即完了→1フレーム点滅に
+    //    なるため。sweep は t=0 から走るので holdUntilExit = N×SWEEP_MS でバー右端到達と一致。
+    //    fade-out は Never で必ず動かす。
+    const holdUntilExit = CFG.SWEEPS_BEFORE_EXIT * CFG.SWEEP_MS;
+    const exitTimer = setTimeout(() => {
+      containerOp.value = withTiming(
+        0,
+        { duration: CFG.FADE_OUT, easing: Easing.in(Easing.quad), reduceMotion: ReduceMotion.Never },
+        (finished) => {
+          if (finished) runOnJS(fireComplete)();
+        },
+      );
+    }, holdUntilExit);
 
-    // 5) ズーム開始 (突き抜ける勢い)
-    const zoomStart = formCompleteAt + CFG.POST_FORM_HOLD;
-    zoom.value = withDelay(
-      zoomStart,
-      withTiming(CFG.ZOOM_MAX, {
-        duration: CFG.ZOOM_DURATION,
-        // 後半で爆発的に加速 (Netflix 風)
-        easing: Easing.bezier(0.32, 0, 0.68, 0.06),
-      }),
-    );
+    // Safety: 何があっても必ず完了
+    const safety = setTimeout(fireComplete, holdUntilExit + CFG.FADE_OUT + 1200);
 
-    // 6) フェードアウトはズーム終盤と重ねる
-    const fadeStart = zoomStart + CFG.ZOOM_DURATION - 240;
-    containerOp.value = withDelay(
-      fadeStart,
-      withTiming(0, { duration: CFG.FADE_OUT, easing: Easing.in(Easing.quad) }, () => {
-        runOnJS(fireComplete)();
-      }),
-    );
-
-    // Safety
-    const total = fadeStart + CFG.FADE_OUT + 1500;
-    const safety = setTimeout(fireComplete, total);
-    return () => clearTimeout(safety);
+    return () => {
+      clearTimeout(exitTimer);
+      clearTimeout(safety);
+      cancelAnimation(pulse);
+      cancelAnimation(sweep);
+      cancelAnimation(containerOp);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [reduceMotion]);
 
-  const containerStyle = useAnimatedStyle(() => ({
-    opacity: containerOp.value,
-  }));
-
-  const zoomStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: zoom.value }],
-  }));
-
-  const rowStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: wordShift.value }],
-  }));
-
-  const baseLogo = baseLogoStyle();
+  const containerStyle = useAnimatedStyle(() => ({ opacity: containerOp.value }));
+  const wordStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+  const sweepStyle = useAnimatedStyle(() => {
+    const tx = interpolate(sweep.value, [0, 1], [SWEEP_FROM, SWEEP_TO], Extrapolation.CLAMP);
+    return { transform: [{ translateX: tx }] };
+  });
 
   return (
     <Animated.View
-      // タップでスキップできるよう pointerEvents は box-only (子要素のヒットは無視)
       pointerEvents="box-only"
       onStartShouldSetResponder={() => true}
       onResponderRelease={handleSkip}
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel="Geek"
       style={[
         StyleSheet.absoluteFill,
         {
@@ -206,120 +190,65 @@ export function IntroAnimation({ onComplete }: { onComplete: () => void }) {
           alignItems: 'center',
           justifyContent: 'center',
           zIndex: 9999,
-          overflow: 'hidden',
         },
         containerStyle,
       ]}
     >
-      <Animated.View style={zoomStyle}>
-        <Animated.View style={[rowStyle, { flexDirection: 'row', alignItems: 'baseline' }]}>
-          {/* G */}
-          <Letter
-            ch={LETTERS[0]}
-            opacity={op0}
-            translateY={tyG}
-            translateX={null}
-            glow={glow}
-            baseStyle={baseLogo}
+      <Animated.Text
+        style={[wordmarkStyle(), wordStyle]}
+        allowFontScaling={false}
+        importantForAccessibility="no-hide-descendants"
+      >
+        Geek
+      </Animated.Text>
+
+      <View
+        importantForAccessibility="no-hide-descendants"
+        style={{
+          marginTop: CFG.BAR_GAP,
+          width: CFG.BAR_W,
+          height: CFG.BAR_H,
+          borderRadius: 99,
+          backgroundColor: 'rgba(255,255,255,0.08)',
+          overflow: 'hidden',
+        }}
+      >
+        <Animated.View style={[{ width: INNER_W, height: CFG.BAR_H }, sweepStyle]}>
+          <LinearGradient
+            colors={BAR_GRADIENT}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={{ flex: 1, borderRadius: 99 }}
           />
-          {/* eek */}
-          {[1, 2, 3].map((i) => (
-            <Letter
-              key={i}
-              ch={LETTERS[i]!}
-              opacity={opacities[i]!}
-              translateY={null}
-              translateX={xOffsets[i - 1]!}
-              glow={glow}
-              baseStyle={baseLogo}
-            />
-          ))}
         </Animated.View>
-      </Animated.View>
+      </View>
     </Animated.View>
   );
 }
 
-function Letter({
-  ch,
-  opacity,
-  translateY,
-  translateX,
-  glow,
-  baseStyle,
-}: {
-  ch: string;
-  opacity: SharedValue<number>;
-  translateY: SharedValue<number> | null;
-  translateX: SharedValue<number> | null;
-  glow: SharedValue<number>;
-  baseStyle: ExtendedTextStyle;
-}) {
-  // 文字本体
-  const charStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-    transform: [
-      { translateX: translateX ? translateX.value : 0 },
-      { translateY: translateY ? translateY.value : 0 },
-    ],
-  }));
-
-  // グロー (控えめ・ピーク 0.55、すぐ消える)
-  const glowStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value * glow.value * 0.55,
-  }));
-
-  return (
-    <View style={{ position: 'relative' }}>
-      {/* 控えめなグロー層 */}
-      <Animated.Text
-        style={[
-          baseStyle,
-          {
-            position: 'absolute',
-            color: CFG.LOGO_COLOR,
-            textShadowColor: CFG.GLOW_COLOR,
-            textShadowRadius: 22,
-            textShadowOffset: { width: 0, height: 0 },
-            ...(Platform.OS === 'web'
-              ? ({
-                  textShadow: '0 0 14px #7C6AF7, 0 0 28px #7C6AF7',
-                } satisfies WebTextExtras)
-              : {}),
-          },
-          glowStyle,
-        ]}
-      >
-        {ch}
-      </Animated.Text>
-      {/* 文字本体 */}
-      <Animated.Text style={[baseStyle, { color: CFG.LOGO_COLOR }, charStyle]}>
-        {ch}
-      </Animated.Text>
-    </View>
-  );
-}
-
-function baseLogoStyle(): ExtendedTextStyle {
-  // Apple SF Pro Display 風: iOS=System / Web=-apple-system stack / Android=Inter
-  // design/typography.ts の LOGO_FONT に集約 (LOGO_FONT_WEIGHT='700')
+function wordmarkStyle(): ExtendedTextStyle {
   const base: ExtendedTextStyle = {
     fontFamily: LOGO_FONT,
     fontSize: CFG.FONT_SIZE,
-    fontWeight: LOGO_FONT_WEIGHT,
+    fontWeight: '800', // splash と同一
     letterSpacing: CFG.LETTER_SPACING,
-    color: CFG.LOGO_COLOR,
+    lineHeight: CFG.LINE_HEIGHT,
     includeFontPadding: false,
   };
   if (Platform.OS === 'web') {
     return {
       ...base,
+      color: 'transparent',
+      backgroundImage: GRADIENT_CSS,
+      backgroundClip: 'text',
+      WebkitBackgroundClip: 'text',
+      WebkitTextFillColor: 'transparent',
       WebkitFontSmoothing: 'antialiased',
       MozOsxFontSmoothing: 'grayscale',
       textRendering: 'optimizeLegibility',
     };
   }
-  return base;
+  return { ...base, color: CFG.NATIVE_LOGO_COLOR };
 }
 
 // 旧 API 互換 (no-op)

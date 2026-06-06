@@ -286,6 +286,19 @@ export default function RootLayout() {
     };
   }, [playIntro]);
 
+  // ★ HIGH バグ修正: 初回イントロ (Slot A: !introDone && !introReplaying) の再生中に
+  //   replay (設定→イントロ再生 / web 'I' キー) が起動すると introReplaying=true で Slot A が
+  //   onComplete 前に unmount され、seen フラグが立たず「初回が二重再生 + リロードで再再生」になる。
+  //   replay 開始時に初回がまだ未完了なら、ここで初回完了の副作用 (seen 永続化 + introDone) を
+  //   確定させて Slot A を「完了扱い」で畳む。onComplete は IntroAnimation 内 completedRef で
+  //   一回性が保たれるため、後から元の onComplete が走っても二重発火しない (全て idempotent)。
+  useEffect(() => {
+    if (introReplaying && !introDone) {
+      markIntroSeenForSession();
+      setIntroDone(true);
+    }
+  }, [introReplaying, introDone]);
+
   const hydrateLang = useLanguageStore((s) => s.hydrate);
   const lang = useLanguageStore((s) => s.lang);
   const hydrateTagFilter = useTagFilterStore((s) => s.hydrate);
