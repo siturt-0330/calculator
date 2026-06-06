@@ -106,6 +106,8 @@ import { useAuthStore } from '../stores/authStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useLanguageStore } from '../stores/languageStore';
 import { useTagFilterStore } from '../stores/tagFilterStore';
+import { useFeedStore } from '../stores/feedStore';
+import { feedQueryKey, fetchFeedFirstPage } from '../lib/feed/feedQuery';
 import { useAdPreferencesStore } from '../stores/adPreferencesStore';
 import { ToastHost } from '../components/ui/ToastHost';
 import { VideoLightbox } from '../components/ui/VideoLightbox';
@@ -402,6 +404,38 @@ export default function RootLayout() {
       meta.setAttribute('content', C.bg);
     } catch { /* ignore */ }
   }, [C.bg, resolvedTheme]);
+
+  // ★ ホームフィード起動時 prefetch (landing 初速の最大改善):
+  //   フィードの取得を「フィード画面 mount まで」待たず、auth 確定直後に裏で開始する。
+  //   フィード画面 (useFeed) は同一 key (feedQueryKey) を使うので、mount 時には取得済/
+  //   取得中 → React Query が dedupe して投稿カードが即表示される (spinner を挟まない)。
+  //   ★ feedStore は AsyncStorage 由来で「非同期」hydrate。未 hydrate のまま getState() すると
+  //     既定 for-you/open を読み、sort をカスタムした復帰ユーザーで feed.tsx の key と不一致
+  //     → prefetch が消費されず無駄 (無駄 RPC も発生)。hydrate を await してから実 key で投げる。
+  //     tagFilter は同期 hydrate 済なので getState() でそのまま正しい。community prewarm と違い
+  //     遅延させない (landing なので最優先)。失敗は内部で握り潰される。
+  useEffect(() => {
+    if (!authHydrated || !user?.id) return;
+    const uid = user.id;
+    let cancelled = false;
+    void useFeedStore
+      .getState()
+      .hydrate()
+      .then(() => {
+        if (cancelled) return;
+        const { sort, scope } = useFeedStore.getState();
+        const { likedTags, blockedTags } = useTagFilterStore.getState();
+        void qc.prefetchInfiniteQuery({
+          queryKey: feedQueryKey(sort, scope, likedTags, blockedTags),
+          queryFn: () => fetchFeedFirstPage({ sort, scope, likedTags, blockedTags, userId: uid, qc }),
+          initialPageParam: undefined,
+          staleTime: 0,
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authHydrated, user?.id]);
 
   // ★ コミュニティタブ pre-warm:
   //   ログイン済 & auth hydrate 完了で「コミュニティタブを開いたときに 1-2 秒

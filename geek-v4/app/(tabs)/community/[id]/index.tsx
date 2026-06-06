@@ -12,26 +12,29 @@
 import {
   View,
   Text,
-  ScrollView,
+  StyleSheet,
   RefreshControl,
   Pressable,
-  ActivityIndicator,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { C, R, SP } from '../../../../design/tokens';
 import { T } from '../../../../design/typography';
+import Animated, { useSharedValue, FadeInDown } from 'react-native-reanimated';
+import { useColors } from '../../../../hooks/useColors';
+import { useReducedMotion } from '../../../../hooks/useReducedMotion';
+import { CommunityCollapsingHeader, HEADER_EXPANDED } from '../../../../components/community/CommunityCollapsingHeader';
+import { CommunitySortTabs, type FeedSort } from '../../../../components/community/CommunitySortTabs';
 import { Spinner } from '../../../../components/ui/Spinner';
 import { TABBAR } from '../../../../design/tabbar';
 import { PressableScale } from '../../../../components/ui/PressableScale';
-import { EmptyState } from '../../../../components/ui/EmptyState';
 import { BackButton } from '../../../../components/nav/BackButton';
 import { Icon } from '../../../../constants/icons';
-import { CommunityIcon } from '../../../../components/ui/CommunityIcon';
 import { AnonPostCard } from '../../../../components/feed/AnonPostCard';
-import { OfficialBadge } from '../../../../components/community/OfficialBadge';
 import { useAuthStore } from '../../../../stores/authStore';
 import { useRecentCommunitiesStore } from '../../../../stores/recentCommunitiesStore';
 import { useDelayedLoading } from '../../../../hooks/useDelayedLoading';
@@ -53,7 +56,6 @@ import { useShare } from '../../../../hooks/useShare';
 import { useReactions, useReactionToggle } from '../../../../hooks/useReactions';
 import { useAddedTags, useAddTag } from '../../../../hooks/useAddedTags';
 import { usePolls } from '../../../../hooks/usePolls';
-import { sanitizeUrl } from '../../../../lib/sanitize';
 import type { Post } from '../../../../types/models';
 import type { ReactionAgg } from '../../../../lib/api/reactions';
 import type { Poll } from '../../../../lib/api/polls';
@@ -64,7 +66,6 @@ import type { Poll } from '../../../../lib/api/polls';
 // タブ構成は lib/community/tabSets.ts に集約 (genre 別 + 公式コミュ別の決定論)。
 // 本ファイルは活動状態 (activeTab / visitedTabs) と panel 表示制御だけを担う。
 type TabKey = CommunityTabKey;
-type FeedSort = 'new' | 'top' | 'old';
 
 
 // ============================================================
@@ -82,30 +83,6 @@ function deriveHandle(community: CommunityWithMembership): string | null {
   if (stripped.length === 0) return null;
   const slug = stripped.slice(0, 6);
   return `${slug}-${community.id.slice(0, 4)}`;
-}
-
-function CommunityAvatar({
-  icon_url,
-  icon_emoji,
-  icon_color,
-  size,
-}: {
-  icon_url: string | null;
-  icon_emoji: string;
-  icon_color: string;
-  size: number;
-}) {
-  // 画像は contain で「拡大して切れる」を防ぎ、onError で「空白の丸」を防ぐ
-  // (icon_url 失敗時は emoji へ自動 fallback)。CommunityIcon に集約。
-  const safeIconUrl = icon_url ? sanitizeUrl(icon_url) : null;
-  return (
-    <CommunityIcon
-      size={size}
-      iconUrl={safeIconUrl}
-      iconEmoji={icon_emoji}
-      iconColor={icon_color}
-    />
-  );
 }
 
 // ============================================================
@@ -143,9 +120,16 @@ export default function CommunityDetailScreen() {
 
   // NOTE: feedSort lives inside FeedTab so changing the sort does not
   // re-render sibling tabs.
-  const [descExpanded, setDescExpanded] = useState(false);
   const [joining, setJoining] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // コラプシング・ヘッダー駆動用のスクロール位置(1本だけ持ち header に渡す)。
+  const scrollY = useSharedValue(0);
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      scrollY.value = e.nativeEvent.contentOffset.y;
+    },
+    [scrollY],
+  );
 
   // -----------------------------------------------------------
   // Community core fetch (header)
@@ -320,161 +304,12 @@ export default function CommunityDetailScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: TABBAR.height + insets.bottom + SP['10'] }}
+      <Animated.ScrollView
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        contentContainerStyle={{ paddingTop: insets.top + HEADER_EXPANDED, paddingBottom: TABBAR.height + insets.bottom + SP['10'] }}
         refreshControl={<RefreshControl tintColor={C.text2} refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* Top nav bar */}
-        <View
-          style={{
-            paddingTop: insets.top + SP['2'],
-            paddingHorizontal: SP['4'],
-            paddingBottom: SP['2'],
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: SP['2'],
-          }}
-        >
-          <BackButton />
-          <View style={{ flex: 1 }} />
-          {community.visibility === 'request' && (
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 4,
-                paddingHorizontal: SP['2'],
-                paddingVertical: 2,
-                backgroundColor: C.amberBg,
-                borderRadius: R.full,
-              }}
-            >
-              <Icon.lock size={12} color={C.amber} strokeWidth={2.4} />
-              <Text style={[T.caption, { color: C.amber, fontWeight: '600' }]}>許可制</Text>
-            </View>
-          )}
-          {community.visibility === 'invite' && (
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 4,
-                paddingHorizontal: SP['2'],
-                paddingVertical: 2,
-                backgroundColor: C.redBg,
-                borderRadius: R.full,
-              }}
-            >
-              <Icon.shield size={12} color={C.red} strokeWidth={2.4} />
-              <Text style={[T.caption, { color: C.red, fontWeight: '600' }]}>招待制</Text>
-            </View>
-          )}
-        </View>
-
-        {/* ============================================================
-            Reddit 風 hero header — 横並びレイアウト
-            avatar (small, left) → name + stats (middle) → join CTA (right)
-            その下に説明文 + tags + ジャンル chip を compact に出す。
-            旧版の中央集権 (avatar 大 + 中央寄せ name + 中央 stats) は廃止。
-            ============================================================ */}
-        <View
-          style={{
-            backgroundColor: C.bg2,
-            paddingHorizontal: SP['4'],
-            paddingTop: SP['3'],
-            paddingBottom: SP['3'],
-            gap: SP['3'],
-          }}
-        >
-          {/* Row: avatar | name+stats | join button */}
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: SP['3'],
-            }}
-          >
-            <CommunityAvatar
-              icon_url={community.icon_url}
-              icon_emoji={community.icon_emoji}
-              icon_color={community.icon_color}
-              size={56}
-            />
-            <View style={{ flex: 1, gap: 2 }}>
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <Text
-                  style={[T.h3, { color: C.text, fontWeight: '700' }]}
-                  numberOfLines={1}
-                >
-                  {community.name}
-                </Text>
-                {community.is_official && <OfficialBadge size="sm" />}
-              </View>
-              <Text
-                style={[T.caption, { color: C.text3 }]}
-                numberOfLines={1}
-              >
-                {handle ? `@${handle} · ` : ''}
-                {community.member_count.toLocaleString('ja-JP')} メンバー · {community.post_count.toLocaleString('ja-JP')} 投稿
-              </Text>
-            </View>
-            <CompactSubscribeButton
-              isMember={community.is_member}
-              isRequestVisibility={community.visibility === 'request'}
-              hasPendingRequest={community.has_pending_request ?? false}
-              loading={joining}
-              onPress={onJoinLeave}
-            />
-          </View>
-
-          {/* 公式コミュの管理者名 (旧版から保留) */}
-          {community.is_official && community.official_admin_display_name && (
-            <Text style={[T.small, { color: C.text2 }]}>
-              管理者: {community.official_admin_display_name}
-              {community.official_organization ? ` · ${community.official_organization}` : ''}
-            </Text>
-          )}
-
-          {/* Description — 3 行 clamp, タップで展開 */}
-          {safeDesc.length > 0 && (
-            <Pressable
-              onPress={() => safeDesc.length > 80 && setDescExpanded((v) => !v)}
-              style={{ alignSelf: 'stretch' }}
-              hitSlop={6}
-            >
-              <Text
-                style={[T.body, { color: C.text2 }]}
-                numberOfLines={descExpanded ? undefined : 3}
-              >
-                {safeDesc}
-              </Text>
-              {safeDesc.length > 80 && (
-                <Text
-                  style={{
-                    color: C.accent,
-                    fontSize: 12,
-                    fontWeight: '700',
-                    marginTop: 4,
-                  }}
-                >
-                  {descExpanded ? '閉じる' : '表示を増やす ↓'}
-                </Text>
-              )}
-            </Pressable>
-          )}
-
-          {/* Hashtag chip (community.tags) は 2026-05 撤去 — hero を「名前 + 説明文 + 参加 CTA」だけに
-              絞り視覚 noise を減らす。DB の community.tags は検索インデックス用に残置。
-              ジャンル chip は F6 で既に撤去済。 */}
-        </View>
-
         {/* ============================================================
             Admin Banner (mod 限定) — header 直下に strip で出す。
             「あなたはこのコミュニティの管理人です」+ 管理 / 編集 CTA。
@@ -501,113 +336,37 @@ export default function CommunityDetailScreen() {
             掲示板 / マップ / カレンダー / 管理 は URL 直打ち or AdminBanner CTA から
             引き続きアクセス可能 (route は残存)。
             ============================================================ */}
+        <CommunityIdentityBlock
+          description={safeDesc}
+          memberCount={community.member_count}
+          postCount={community.post_count}
+          isOfficial={!!community.is_official}
+          officialAdminName={community.official_admin_display_name ?? null}
+          officialOrganization={community.official_organization ?? null}
+        />
         <FeedTab communityId={id} />
-      </ScrollView>
+      </Animated.ScrollView>
 
-      {/* 投稿作成 FAB は TabBar 側 (components/nav/TabBar.tsx) に一本化済み。
-          TabBar の「+」は usePathname で現在のルートが /community/<id> なら
-          自動で ?community_id=<id> を付けて遷移するため、ここでは独自 FAB を
-          描画しない (2 つの紫「+」が重なる重複を解消)。 */}
-
+      {/* コラプシング・ヘッダー(ScrollView の外=固定。content は paddingTop 168 で下に逃がす)。
+          投稿作成 FAB は TabBar 側に一本化済みのため独自 FAB は描画しない。 */}
+      <CommunityCollapsingHeader
+        scrollY={scrollY}
+        topInset={insets.top}
+        name={community.name}
+        handle={handle}
+        iconUrl={community.icon_url}
+        iconEmoji={community.icon_emoji}
+        iconColor={community.icon_color}
+        isOfficial={!!community.is_official}
+        coverUrl={null}
+        visibility={community.visibility}
+        isMember={community.is_member}
+        isRequestVisibility={community.visibility === 'request'}
+        hasPendingRequest={community.has_pending_request ?? false}
+        joining={joining}
+        onJoinLeave={onJoinLeave}
+      />
     </View>
-  );
-}
-
-// ============================================================
-// CompactSubscribeButton — Reddit 風 hero の右上に置く小さい参加ボタン
-// ------------------------------------------------------------
-// 旧版 SubscribeButton はフル幅 (alignSelf:'stretch') で hero 全幅を占めていた。
-// 横並びレイアウトに合わせて auto-width / 高さ控えめ / icon なしの compact 版。
-// 参加中なら「参加中 ▾」 (chevronDown 付き — 通知設定等の dropdown ヒント)、
-// 未参加なら「参加」 (request visibility なら「申請」)。
-// ============================================================
-function CompactSubscribeButton({
-  isMember,
-  isRequestVisibility,
-  hasPendingRequest,
-  loading,
-  onPress,
-}: {
-  isMember: boolean;
-  isRequestVisibility: boolean;
-  hasPendingRequest: boolean;
-  loading: boolean;
-  onPress: () => void;
-}) {
-  // 申請中 (request 制で pending) — 承認待ちを明示し、二重申請を防ぐため非活性。
-  if (!isMember && hasPendingRequest) {
-    return (
-      <View
-        accessibilityLabel="参加申請中 — 承認待ちです"
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 4,
-          backgroundColor: C.accentBg,
-          borderRadius: R.full,
-          borderWidth: 1,
-          borderColor: C.accent,
-          paddingHorizontal: SP['3'],
-          paddingVertical: 6,
-        }}
-      >
-        <Text style={[T.smallM, { color: C.accent, fontWeight: '700' }]}>申請中</Text>
-      </View>
-    );
-  }
-  if (isMember) {
-    return (
-      <PressableScale
-        onPress={onPress}
-        haptic="tap"
-        disabled={loading}
-        accessibilityLabel="参加中 — タップで脱退 / 通知設定"
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 4,
-          backgroundColor: 'transparent',
-          borderRadius: R.full,
-          borderWidth: 1.5,
-          borderColor: C.border2,
-          paddingHorizontal: SP['3'],
-          paddingVertical: 6,
-          opacity: loading ? 0.6 : 1,
-        }}
-      >
-        {loading ? (
-          <ActivityIndicator size="small" color={C.text2} />
-        ) : (
-          <>
-            <Text style={[T.smallM, { color: C.text2, fontWeight: '700' }]}>参加中</Text>
-            <Icon.chevronD size={12} color={C.text3} strokeWidth={2.4} />
-          </>
-        )}
-      </PressableScale>
-    );
-  }
-  return (
-    <PressableScale
-      onPress={onPress}
-      haptic="confirm"
-      disabled={loading}
-      accessibilityLabel={isRequestVisibility ? '参加申請を送る' : 'コミュニティに参加する'}
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        backgroundColor: C.accent,
-        borderRadius: R.full,
-        paddingHorizontal: SP['4'],
-        paddingVertical: 6,
-        opacity: loading ? 0.7 : 1,
-      }}
-    >
-      {loading && <ActivityIndicator size="small" color="#fff" />}
-      <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>
-        {loading ? '…' : isRequestVisibility ? '申請' : '参加'}
-      </Text>
-    </PressableScale>
   );
 }
 
@@ -685,10 +444,111 @@ function AdminBanner({
 // ============================================================
 // Tab: みんなの投稿集 (community posts feed)
 // ============================================================
+// ============================================================
+// CommunityIdentityBlock — 公式管理者名 / 説明(折りたたみ) / メンバー証跡
+// ------------------------------------------------------------
+// 重量級の FeedTab(投稿リスト)から切り離した memo 子。descExpanded を内部 state に
+// 持つことで、参加/退会(member_count 変化)・説明の続きを読む・ソート切替で投稿カード
+// (最大40枚)を再レンダさせない(監査 H1 回帰の修正)。画面はこのブロックを FeedTab の
+// 兄弟として描く。
+// ============================================================
+type CommunityIdentityBlockProps = {
+  description: string;
+  memberCount: number;
+  postCount: number;
+  isOfficial: boolean;
+  officialAdminName: string | null;
+  officialOrganization: string | null;
+};
+const CommunityIdentityBlock = memo(function CommunityIdentityBlock({
+  description,
+  memberCount,
+  postCount,
+  isOfficial,
+  officialAdminName,
+  officialOrganization,
+}: CommunityIdentityBlockProps) {
+  const C = useColors();
+  const reduce = useReducedMotion();
+  const [descExpanded, setDescExpanded] = useState(false);
+  const hasAdmin = isOfficial && !!officialAdminName;
+  // 日本語は全角20字/行前後。2行 clamp と整合させ、短文の「黙って切れる」を防ぐ閾値。
+  const descTruncatable = description.length > 40;
+  const dotCount = Math.min(3, memberCount);
+  return (
+    <Animated.View
+      entering={reduce ? undefined : FadeInDown.duration(220)}
+      style={{
+        paddingHorizontal: SP['5'],
+        paddingTop: SP['5'],
+        paddingBottom: SP['5'],
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: C.divider,
+      }}
+    >
+      {hasAdmin ? (
+        <Text style={[T.small, { color: C.text2 }]}>
+          管理者: {officialAdminName}
+          {officialOrganization ? ` · ${officialOrganization}` : ''}
+        </Text>
+      ) : null}
+      {description.length > 0 ? (
+        <Pressable
+          onPress={() => descTruncatable && setDescExpanded((v) => !v)}
+          hitSlop={6}
+          style={{ marginTop: hasAdmin ? SP['2'] : 0 }}
+        >
+          <Text style={[T.body, { color: C.text2 }]} numberOfLines={descExpanded ? undefined : 2}>
+            {description}
+          </Text>
+          {descTruncatable ? (
+            <Text style={[T.smallM, { color: C.text3, marginTop: SP['1'] }]}>
+              {descExpanded ? '閉じる' : '続きを読む'}
+            </Text>
+          ) : null}
+        </Pressable>
+      ) : null}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          marginTop: description.length > 0 || hasAdmin ? SP['4'] : 0,
+        }}
+      >
+        {memberCount >= 1 ? (
+          <View style={{ flexDirection: 'row' }}>
+            {[C.bg3, C.bg4, C.bg5].slice(0, dotCount).map((col, i) => (
+              <View
+                key={col}
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: R.full,
+                  backgroundColor: col,
+                  borderWidth: 2,
+                  borderColor: C.bg,
+                  marginLeft: i === 0 ? 0 : -7,
+                }}
+              />
+            ))}
+          </View>
+        ) : null}
+        <Text style={{ marginLeft: memberCount >= 1 ? SP['2'] : 0 }}>
+          <Text style={[T.smallB, { color: C.text2 }]}>{memberCount.toLocaleString('ja-JP')}</Text>
+          <Text style={[T.small, { color: C.text3 }]}>
+            {` 人 · ${postCount.toLocaleString('ja-JP')} 投稿`}
+          </Text>
+        </Text>
+      </View>
+    </Animated.View>
+  );
+});
+
 type FeedTabProps = {
   communityId: string;
 };
 const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
+  const C = useColors();
   const [sort, setSort] = useState<FeedSort>('new');
   const onSortChange = useCallback((s: FeedSort) => setSort(s), []);
   const router = useRouter();
@@ -705,6 +565,8 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
     },
     enabled: communityId.length > 0,
     staleTime: 20_000,
+    // ソート切替で全面スピナーにせず前回結果を保持(深スクロール時のちらつき回避)。
+    placeholderData: keepPreviousData,
   });
 
   useEffect(() => {
@@ -752,67 +614,37 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
   );
 
   return (
-    <View style={{ paddingVertical: SP['3'] }}>
-      {/* Filter chips — paddingTop for breathing room from tab bar */}
-      <View
-        style={{
-          flexDirection: 'row',
-          gap: SP['2'],
-          paddingHorizontal: SP['4'],
-          paddingTop: SP['3'],
-          paddingBottom: SP['3'],
-        }}
-      >
-        {(
-          [
-            { v: 'new', label: '新しい順' },
-            { v: 'top', label: '人気順' },
-            { v: 'old', label: '古い順' },
-          ] as const
-        ).map((opt) => {
-          const active = sort === opt.v;
-          return (
-            <PressableScale
-              key={opt.v}
-              onPress={() => onSortChange(opt.v)}
-              haptic="tap"
-              style={{
-                paddingHorizontal: SP['3'],
-                paddingVertical: 6,
-                backgroundColor: active ? C.text : C.bg2,
-                borderRadius: R.full,
-                borderWidth: 1,
-                borderColor: active ? C.text : C.border,
-              }}
-            >
-              <Text
-                style={[
-                  T.caption,
-                  { color: active ? C.bg : C.text2, fontWeight: '700' },
-                ]}
-              >
-                {opt.label}
-              </Text>
-            </PressableScale>
-          );
-        })}
-      </View>
+    <View>
+      {/* ソート(滑るアンダーライン) */}
+      <CommunitySortTabs value={sort} onChange={onSortChange} />
 
       {isLoading ? (
         <View style={{ paddingVertical: SP['10'], alignItems: 'center' }}>
           <Spinner size="large" />
         </View>
       ) : posts.length === 0 ? (
-        <EmptyState
-          icon={Icon.community}
-          title="まだ投稿がありません"
-          message="最初の一投を投稿して、このコミュニティを盛り上げよう"
-          actionLabel="投稿する"
-          onAction={() =>
-            router.push(`/post/create?community_id=${encodeURIComponent(communityId)}` as never)
-          }
-          tone="accent"
-        />
+        <View style={{ paddingTop: SP['10'], paddingBottom: SP['10'], paddingHorizontal: SP['5'], alignItems: 'center' }}>
+          <Text style={[T.h2, { color: C.text, textAlign: 'center' }]}>まだ、静かだ。</Text>
+          <Text style={[T.body, { color: C.text3, textAlign: 'center', marginTop: SP['2'] }]}>
+            最初の一投が、この場所の温度になる。
+          </Text>
+          <PressableScale
+            onPress={() =>
+              router.push(`/post/create?community_id=${encodeURIComponent(communityId)}` as never)
+            }
+            haptic="confirm"
+            style={{
+              marginTop: SP['5'],
+              borderWidth: 1,
+              borderColor: C.border,
+              borderRadius: R.full,
+              paddingHorizontal: SP['5'],
+              paddingVertical: 10,
+            }}
+          >
+            <Text style={[T.smallM, { color: C.text2, fontWeight: '700' }]}>投稿する</Text>
+          </PressableScale>
+        </View>
       ) : (
         <View>
           {posts.map((p) => (

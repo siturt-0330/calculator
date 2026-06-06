@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { fetchPosts, fetchCommunitiesForPosts } from '../lib/api/posts';
-import {
-  fetchHomeFeedFirstPage,
-  seedHomeFeedSurroundingCaches,
-  HOME_FEED_RPC_ENABLED,
-} from '../lib/api/homeFeed';
+import { feedQueryKey, fetchFeedFirstPage } from '../lib/feed/feedQuery';
 import { supabase } from '../lib/supabase';
 import { attachChannel } from '../lib/realtime';
 import { useTagFilterStore } from '../stores/tagFilterStore';
@@ -73,21 +69,15 @@ export function useFeed() {
   // visibility IN ('public', 'community_public') の post だけ返す。
   // private / community_only はサーバー側で弾かれる。
   const { data, isLoading, isFetchingNextPage, fetchNextPage, hasNextPage, refetch } = useInfiniteQuery({
-    queryKey: ['feed', sort, scope, likedTags, blockedTags],
+    queryKey: feedQueryKey(sort, scope, likedTags, blockedTags),
     queryFn: async ({ pageParam }) => {
       const cursor = pageParam as string | undefined;
-      // ★ get_home_feed (0114): 既定 (for-you + open) の1ページ目だけ、ベース posts +
-      //   周辺データ + nextCursor を 1 RTT で取得し、周辺 cache を seed して get_feed_page /
-      //   fetchCommunitiesForPosts の二重 fetch を抑止する (cache 戦略 B)。flag OFF / RPC 失敗 /
-      //   0件 / 非該当 (2ページ目以降・別 sort・closed scope) は現行 fetchPosts へ完全 fallback。
-      if (cursor === undefined && sort === 'for-you' && scope === 'open' && HOME_FEED_RPC_ENABLED) {
-        const home = await fetchHomeFeedFirstPage(userId);
-        if (home) {
-          seedHomeFeedSurroundingCaches(qc, userId, home.posts);
-          // FeedPagePost は Post の superset なので ['feed'] page1 にそのまま入れて良い
-          // (余分フィールドは下流で無視。base 表示は ['feed'] post / 周辺は ['feed-page'] から読む)。
-          return { posts: home.posts as Post[], nextCursor: home.nextCursor };
-        }
+      // ★ 1ページ目は共有 helper (lib/feed/feedQuery.ts) で取得。app/_layout.tsx の
+      //   起動時 prefetch と同一 key + 同一ロジックなので、prefetch 済なら React Query が
+      //   in-flight/結果を dedupe して投稿カードが即表示される。get_home_feed(0114) の
+      //   1RTT 集約 or 現行 fetchPosts への fallback は helper 側に集約。
+      if (cursor === undefined) {
+        return fetchFeedFirstPage({ sort, scope, likedTags, blockedTags, userId, qc });
       }
       return fetchPosts({ sort, likedTags, blockedTags, filterTags, cursor, home: true });
     },
