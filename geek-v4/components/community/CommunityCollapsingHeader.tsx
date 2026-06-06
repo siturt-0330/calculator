@@ -37,7 +37,7 @@ import { T } from '../../design/typography';
 import { SP, R } from '../../design/tokens';
 import type { ColorPalette } from '../../lib/theme/palettes';
 
-const HEADER_EXPANDED = 168;
+export const HEADER_EXPANDED = 132;
 const HEADER_PINNED = 48;
 const RAIL_H = 44;
 const NATIVE = Platform.OS !== 'web';
@@ -53,8 +53,6 @@ export type CommunityCollapsingHeaderProps = {
   iconEmoji?: string | null;
   iconColor?: string | null;
   isOfficial: boolean;
-  memberCount: number;
-  postCount: number;
   coverUrl?: string | null;
   visibility: CommunityVisibility;
   isMember: boolean;
@@ -62,16 +60,15 @@ export type CommunityCollapsingHeaderProps = {
   hasPendingRequest: boolean;
   joining: boolean;
   onJoinLeave: () => void;
-  onMore: () => void;
   scrollY: SharedValue<number>;
   topInset: number;
 };
 
 export function CommunityCollapsingHeader(props: CommunityCollapsingHeaderProps) {
   const {
-    name, handle, iconUrl, iconEmoji, iconColor, isOfficial, memberCount, postCount,
+    name, handle, iconUrl, iconEmoji, iconColor, isOfficial,
     coverUrl, visibility, isMember, isRequestVisibility, hasPendingRequest, joining,
-    onJoinLeave, onMore, scrollY, topInset,
+    onJoinLeave, scrollY, topInset,
   } = props;
   const { C, isDark } = useTheme();
   const reduce = useReducedMotion();
@@ -211,15 +208,6 @@ export function CommunityCollapsingHeader(props: CommunityCollapsingHeaderProps)
         <View style={{ flex: 1 }} />
         {visibility === 'request' && <VisibilityBadge C={C} kind="request" />}
         {visibility === 'invite' && <VisibilityBadge C={C} kind="invite" />}
-        <PressableScale
-          onPress={onMore}
-          haptic="tap"
-          hitSlop={8}
-          accessibilityLabel="メニュー"
-          style={{ marginLeft: SP['2'], width: RAIL_H, height: RAIL_H, alignItems: 'flex-end', justifyContent: 'center' }}
-        >
-          <Icon.more size={24} color={C.text} strokeWidth={2} />
-        </PressableScale>
       </View>
 
       {/* Lockup (z10) — 大きな識別。崩壊で消える。pointerEvents は静的 prop でトグル。 */}
@@ -248,10 +236,9 @@ export function CommunityCollapsingHeader(props: CommunityCollapsingHeaderProps)
             <Text numberOfLines={1} style={[T.h2, { color: C.text }]}>{name}</Text>
             {isOfficial && <OfficialBadge size="sm" />}
           </View>
-          <Text numberOfLines={1} style={[T.caption, { color: C.text3 }]}>
-            {handle ? `@${handle} · ` : ''}
-            {memberCount.toLocaleString('ja-JP')} メンバー · {postCount.toLocaleString('ja-JP')} 投稿
-          </Text>
+          {handle ? (
+            <Text numberOfLines={1} style={[T.caption, { color: C.text3 }]}>@{handle}</Text>
+          ) : null}
         </View>
         <CompactSubscribeButton
           C={C}

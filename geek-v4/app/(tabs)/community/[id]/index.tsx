@@ -27,7 +27,7 @@ import { T } from '../../../../design/typography';
 import Animated, { useSharedValue, FadeInDown } from 'react-native-reanimated';
 import { useColors } from '../../../../hooks/useColors';
 import { useReducedMotion } from '../../../../hooks/useReducedMotion';
-import { CommunityCollapsingHeader } from '../../../../components/community/CommunityCollapsingHeader';
+import { CommunityCollapsingHeader, HEADER_EXPANDED } from '../../../../components/community/CommunityCollapsingHeader';
 import { CommunitySortTabs, type FeedSort } from '../../../../components/community/CommunitySortTabs';
 import { Spinner } from '../../../../components/ui/Spinner';
 import { TABBAR } from '../../../../design/tabbar';
@@ -307,7 +307,7 @@ export default function CommunityDetailScreen() {
       <Animated.ScrollView
         onScroll={onScroll}
         scrollEventThrottle={16}
-        contentContainerStyle={{ paddingTop: insets.top + 168, paddingBottom: TABBAR.height + insets.bottom + SP['10'] }}
+        contentContainerStyle={{ paddingTop: insets.top + HEADER_EXPANDED, paddingBottom: TABBAR.height + insets.bottom + SP['10'] }}
         refreshControl={<RefreshControl tintColor={C.text2} refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {/* ============================================================
@@ -358,8 +358,6 @@ export default function CommunityDetailScreen() {
         iconEmoji={community.icon_emoji}
         iconColor={community.icon_color}
         isOfficial={!!community.is_official}
-        memberCount={community.member_count}
-        postCount={community.post_count}
         coverUrl={(community as { cover_url?: string | null }).cover_url ?? null}
         visibility={community.visibility}
         isMember={community.is_member}
@@ -367,9 +365,6 @@ export default function CommunityDetailScreen() {
         hasPendingRequest={community.has_pending_request ?? false}
         joining={joining}
         onJoinLeave={onJoinLeave}
-        onMore={() => {
-          /* no-op — 将来の管理シート */
-        }}
       />
     </View>
   );

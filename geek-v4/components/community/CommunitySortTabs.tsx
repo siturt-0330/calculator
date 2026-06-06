@@ -68,6 +68,7 @@ export function CommunitySortTabs({
             onPress={() => onChange(t.v)}
             haptic="tap"
             accessibilityRole="tab"
+            accessibilityLabel={t.label}
             accessibilityState={{ selected: t.v === value }}
             style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
           >
@@ -129,7 +130,7 @@ function SortLabel({
     opacity: interpolate(xP.value, [index - 1, index, index + 1], [1, 0, 1], Extrapolation.CLAMP),
   }));
   return (
-    <View style={{ position: 'relative' }}>
+    <View style={{ position: 'relative' }} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
       <Animated.Text style={[T.smallM, { color: inactive, letterSpacing: -0.08 }, inactiveStyle]}>
         {label}
       </Animated.Text>
