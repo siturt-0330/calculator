@@ -12,6 +12,7 @@ const STATIC_ALLOWED_ORIGINS: ReadonlySet<string> = new Set([
   'https://www.geek.app',
   'https://admin.geek.app',
   'https://preview.geek.app',
+  'https://geekboard.netlify.app', // ★ 本番 Web (Netlify)
   // 開発用
   'http://localhost:8081',   // Expo Web dev (default)
   'http://localhost:19006',  // Expo Web (legacy default)
@@ -23,11 +24,16 @@ const STATIC_ALLOWED_ORIGINS: ReadonlySet<string> = new Set([
 
 // *.geek.app は許可 (preview deploy 等)
 const ALLOWED_HOST_SUFFIX = /^https:\/\/[a-z0-9-]+\.geek\.app$/i;
+// geekboard.netlify.app の deploy-preview / branch ドメイン (例
+// deploy-preview-159--geekboard.netlify.app)。このサイト限定で許可する。
+// ★ `*.netlify.app` 全体は他人のサイトも含むので絶対に許可しない (--geekboard 固定)。
+const ALLOWED_NETLIFY_PREVIEW = /^https:\/\/[a-z0-9-]+--geekboard\.netlify\.app$/i;
 
 function isOriginAllowed(origin: string): boolean {
   if (!origin) return false;
   if (STATIC_ALLOWED_ORIGINS.has(origin)) return true;
   if (ALLOWED_HOST_SUFFIX.test(origin)) return true;
+  if (ALLOWED_NETLIFY_PREVIEW.test(origin)) return true;
   return false;
 }
 
