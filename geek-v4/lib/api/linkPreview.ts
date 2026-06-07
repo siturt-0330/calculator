@@ -20,10 +20,6 @@ export async function fetchCachedPreview(url: string): Promise<LinkPreview | nul
   return data as LinkPreview | null;
 }
 
-// Public な無料 OG プロキシ経由でメタを取得 (Edge Function 未 deploy 時の fallback)
-// (Supabase Edge Function 'og-fetch' が deploy されればそちらが優先)
-const META_PROXY = 'https://api.microlink.io';
-
 // ------------------------------------------------------------
 // edge function 'og-fetch' のレスポンス型 (server 側で truncate / cache 済)
 // ------------------------------------------------------------
@@ -73,45 +69,15 @@ export async function fetchAndCachePreview(url: string): Promise<LinkPreview | n
     if (ageDays < 7) return cached;
   }
 
-  // PRIMARY: GEEK サーバー (Edge Function) がページを fetch して OG メタを返す。
-  // edge function 側で post_link_previews に upsert 済みなので、ここでは upsert しない。
+  // 唯一の取得経路: GEEK サーバー (Edge Function 'og-fetch') がページを fetch して
+  // OG メタを返す。og-fetch が service_role で post_link_previews に upsert 済みなので
+  // client からの upsert はしない (0036 の rate-limit trigger に当たる & 冗長)。
+  // ★ 第三者プロキシ (microlink 等) は使わない — ページ URL を外部に渡さず、
+  //   生 image URL も受け取らない (= 閲覧者IP漏れ経路を作らない / deep-research 結論)。
   const fromEdge = await fetchViaEdge(url);
   if (fromEdge) return fromEdge;
 
-  // FALLBACK: edge function が未 deploy / エラー / 空のとき。
-  // microlink.io で取得 (匿名で月50req/secのフリー枠) + client から upsert。
-  try {
-    const r = await fetch(`${META_PROXY}/?url=${encodeURIComponent(url)}`);
-    if (!r.ok) return cached;
-    const j = await r.json() as {
-      status?: string;
-      data?: {
-        title?: string;
-        description?: string;
-        image?: { url?: string };
-        publisher?: string;
-      };
-    };
-    if (j.status !== 'success' || !j.data) return cached;
-    const preview: LinkPreview = {
-      url,
-      title: j.data.title ?? null,
-      description: j.data.description ?? null,
-      image_url: j.data.image?.url ?? null,
-      site_name: j.data.publisher ?? null,
-      fetched_at: new Date().toISOString(),
-    };
-    // DB upsert (失敗しても無視)
-    await supabase.from('post_link_previews').upsert({
-      url,
-      title: preview.title,
-      description: preview.description,
-      image_url: preview.image_url,
-      site_name: preview.site_name,
-      fetched_at: preview.fetched_at,
-    }).select();
-    return preview;
-  } catch {
-    return cached;
-  }
+  // og-fetch が未 deploy / エラー / メタ空 のとき: 期限切れでも cache があれば返す
+  // (壊れたカードよりマシ)。cache も無ければ null → LinkPreviewCard は出典バーのみ表示。
+  return cached;
 }
