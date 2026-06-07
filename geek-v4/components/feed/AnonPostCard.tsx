@@ -381,8 +381,14 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 //   - base 側 (StyleSheet ID) は安定なので reconciliation コストは差分分のみ
 // ────────────────────────────────────────────────────────────────────
 
+// 投稿画像の表示アスペクト比の下限 (= 許容する最も縦長の比)。aspectRatio = width/height
+// なので、値が小さいほど縦長。極端に縦長の写真はフィードを画面いっぱいに占有して
+// しまうため、4:5 (0.8) でクランプし、それより縦長は ProgressiveImage の
+// contentFit='cover' でクロップ表示する。画像全体はタップ→ライトボックス
+// (contentFit='contain') で確認できる。横長 (>1) はそのまま全体表示。
+const MEDIA_MIN_ASPECT = 0.8; // 4:5
 function mediaItemAspect(aspect: number): { aspectRatio: number } {
-  return { aspectRatio: aspect };
+  return { aspectRatio: Math.max(MEDIA_MIN_ASPECT, aspect) };
 }
 
 function reactionPillColors(C: ColorPalette, mine: boolean): { backgroundColor: string; borderColor: string } {
@@ -1385,7 +1391,8 @@ function AnonPostCardInner({
 
       {/* メディア — 文章の下に表示 (文章 → 写真/動画 の順)。
           自然なアスペクト比で表示 (square crop しない)
-          tall portrait (5:6 等) や wide landscape も切れず全体が見える
+          縦長は 4:5 (MEDIA_MIN_ASPECT) を上限にクロップ表示しフィードを占有させない
+          (画像全体はタップ→ライトボックスで確認可)。横長はそのまま全体表示
           複数枚は縦に積む (各画像が自身のアスペクト比を保持)
           外側カードの paddingHorizontal に揃え、premium feel の rounded corners
 
