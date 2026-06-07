@@ -397,7 +397,7 @@ export default function FeedScreen() {
   // 旧 6 hook (useLikes/useConcerns/useSaves/useReactions/useAddedTags/usePolls)
   // を 1 RPC に統合。失敗 / ENV flag 無効時は legacy hook 群へフォールバック。
   // rpcLoading / rpcEmpty は使わない (旧 fallback ロジック用) — 上記コメント参照。
-  const { fullPosts, isDisabled: rpcDisabled } = useFeedPage(postIds);
+  const { fullPosts, isDisabled: rpcDisabled, isEmpty: rpcEmpty } = useFeedPage(postIds);
 
   // ★ Realtime 反映 — RPC 経路でも post_reactions / likes / concerns / saves の
   //   変更を購読する。useReactions(legacyIds) の中の subscription は legacyIds=[]
@@ -417,7 +417,10 @@ export default function FeedScreen() {
   //   レイテンシ短縮 + Supabase row 引きの圧縮 (4-6x の query 数削減) を狙う。
   //   renderItem 側で full?.X ?? legacy[id] ?? EMPTY の順 — RPC 経路なら legacy は
   //   常に空 map になるが、依然として fallback 経路で安全。
-  const useLegacy = rpcDisabled;
+  // ★ 安全網 (2026-06): RPC が無効 (ENV flag) または「成功したのに 0 件 (= pseudonym_id 列欠落等で
+  //   degrade して空配列が返る)」のとき、legacy hook 群へフォールバックして反応(スタンプ)/いいね等が
+  //   消えないようにする。正常時 (RPC が周辺データを返す) は rpcEmpty=false なので従来どおり legacy は走らない。
+  const useLegacy = rpcDisabled || rpcEmpty;
   const legacyIds = useLegacy ? postIds : EMPTY_LEGACY_IDS;
 
   const { data: legacyMyLikes = EMPTY_BOOL_MAP } = useLikes(legacyIds);

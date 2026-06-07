@@ -848,12 +848,15 @@ export type PostCommunityRef = {
 export async function fetchCommunitiesForPosts(
   postIds: string[],
 ): Promise<Record<string, PostCommunityRef[]>> {
-  if (postIds.length === 0) return {};
+  // ★ UUID ガード: 非UUID (壊れた deep-link id / 文字列 "undefined" 等) が混じると PostgREST が
+  //   22P02 で 400 を返し配列全体が落ちる。他の fetch 関数 (fetchPostById/ByIds) と同様に弾く。
+  const validIds = postIds.filter((id) => id && UUID_RE.test(id));
+  if (validIds.length === 0) return {};
   const { data, error } = await withApiTimeout(
     supabase
       .from('post_communities')
       .select('post_id, community:communities(id, name, icon_emoji, icon_color, icon_url, is_official)')
-      .in('post_id', postIds),
+      .in('post_id', validIds),
     'posts.fetchCommunitiesForPosts',
     8000,
   );
