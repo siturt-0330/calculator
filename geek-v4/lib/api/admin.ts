@@ -5,7 +5,23 @@ import { supabase } from '../supabase';
 // is_admin=true な profile に対し profiles / posts / bbs_threads /
 // communities への全権アクセスを許可する形で導入済み。
 // client は自身の JWT を使うので service_role キーは露出しない。
+//
+// ★ 匿名性ハードニング (security/deanon-phase2):
+//   将来 posts.author_id の列 SELECT を authenticated から REVOKE する。
+//   admin も 'authenticated' なので直読は壊れる。そこで author_id を見る読み /
+//   削除は 0128 の SECURITY DEFINER RPC (admin_reported_posts / admin_user_posts /
+//   admin_post_detail / admin_delete_post, 全て is_admin() gate) 経由に切り替える。
+//   0128 未適用の本番/CI では isRpcMissing で従来の直読経路に fallback する。
 // ============================================================
+
+// RPC がスキーマに無い (= 0128 未適用) ことを判定する (adminReports.ts と同形)。
+function isRpcMissing(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null;
+  if (!e) return false;
+  if (e.code === 'PGRST202') return true; // function not found in schema cache
+  const msg = e.message ?? '';
+  return /function .*does not exist|could not find the function/i.test(msg);
+}
 
 export type AdminUser = {
   id: string;
@@ -46,15 +62,34 @@ export async function fetchAllUsers(opts?: { search?: string; limit?: number }):
 }
 
 export async function fetchAllPosts(opts?: { search?: string; limit?: number }): Promise<AdminPost[]> {
+  // 0128 admin_all_posts RPC を第一経路にする (author_id + nickname を definer 内で
+  // join 済で返すため、posts.author_id 直読 + nickname N+1 が不要)。
+  // 未適用時のみ従来の 2 段階フェッチに fallback する。
+  const limit = opts?.limit ?? 100;
+  const search = opts?.search && opts.search.trim().length > 0 ? opts.search.trim() : null;
+
+  const { data, error } = await supabase.rpc('admin_all_posts', {
+    p_limit: limit,
+    p_search: search,
+  });
+  if (error) {
+    if (isRpcMissing(error)) return fetchAllPostsFallback({ limit, search });
+    throw error;
+  }
+  return (Array.isArray(data) ? data : []) as AdminPost[];
+}
+
+// 0128 未適用環境向け: 旧 posts 直読 + profiles から nickname を N+1 join。
+async function fetchAllPostsFallback(args: { limit: number; search: string | null }): Promise<AdminPost[]> {
   // posts.author_id の FK は auth.users(id) で profiles ではない為、
   // PostgREST の embed では取れない。 2 段階フェッチで nickname を join する。
   let q = supabase
     .from('posts')
     .select('id, author_id, content, visibility, likes_count, concern_count, created_at')
     .order('created_at', { ascending: false })
-    .limit(opts?.limit ?? 100);
-  if (opts?.search && opts.search.trim().length > 0) {
-    q = q.ilike('content', `%${opts.search.trim()}%`);
+    .limit(args.limit);
+  if (args.search) {
+    q = q.ilike('content', `%${args.search}%`);
   }
   const { data, error } = await q;
   if (error) throw error;
@@ -129,6 +164,18 @@ export async function unsuspendUser(userId: string): Promise<void> {
 }
 
 export async function deletePost(postId: string): Promise<void> {
+  // 0128 admin_delete_post RPC は author_id 読み・moderation_log 記録・削除を
+  // definer 内で完結させるため、client は author_id を pre-read 不要。
+  // 未適用時のみ従来の「pre-read author_id → delete → logModeration」に fallback する。
+  const { error } = await supabase.rpc('admin_delete_post', { p_post_id: postId });
+  if (error) {
+    if (isRpcMissing(error)) return deletePostFallback(postId);
+    throw error;
+  }
+}
+
+// 0128 未適用環境向け: 旧 pre-read author_id → delete → logModeration。
+async function deletePostFallback(postId: string): Promise<void> {
   // 削除前に author_id / visibility を取得して監査ログに残す (削除後は引けない)。
   const { data: before } = await supabase
     .from('posts').select('author_id, visibility').eq('id', postId).maybeSingle();
@@ -218,6 +265,9 @@ async function fetchNicknameMap(authorIds: string[]): Promise<Map<string, string
 // ============================================================
 // fetchReportedPosts — 報告数が閾値以上の投稿を取得
 // ============================================================
+// 0128 の admin_reported_posts RPC を第一経路にする (author_id + nickname を
+// definer 内で join 済で返すため fetchNicknameMap の別ラウンドトリップが不要)。
+// RPC 未適用 (PGRST202) のときだけ従来の admin_reported_posts_v 直読に fallback する。
 export async function fetchReportedPosts(opts?: {
   minReports?: number;
   limit?: number;
@@ -225,15 +275,35 @@ export async function fetchReportedPosts(opts?: {
 }): Promise<AdminReportedPost[]> {
   const minReports = opts?.minReports ?? 1;
   const limit = opts?.limit ?? 100;
+  const search = opts?.search && opts.search.trim().length > 0 ? opts.search.trim() : null;
+
+  const { data, error } = await supabase.rpc('admin_reported_posts', {
+    p_min_reports: minReports,
+    p_limit: limit,
+    p_search: search,
+  });
+  if (error) {
+    if (isRpcMissing(error)) return fetchReportedPostsFallback({ minReports, limit, search });
+    throw error;
+  }
+  return (Array.isArray(data) ? data : []) as AdminReportedPost[];
+}
+
+// 0128 未適用環境向け: 旧 admin_reported_posts_v 直読 + nickname N+1 join。
+async function fetchReportedPostsFallback(args: {
+  minReports: number;
+  limit: number;
+  search: string | null;
+}): Promise<AdminReportedPost[]> {
   let q = supabase
     .from('admin_reported_posts_v')
     .select('post_id, author_id, content, visibility, post_created_at, likes_count, concern_count, reports_count, last_reported_at')
-    .gte('reports_count', minReports)
+    .gte('reports_count', args.minReports)
     .order('reports_count', { ascending: false })
     .order('last_reported_at', { ascending: false })
-    .limit(limit);
-  if (opts?.search && opts.search.trim().length > 0) {
-    q = q.ilike('content', `%${opts.search.trim()}%`);
+    .limit(args.limit);
+  if (args.search) {
+    q = q.ilike('content', `%${args.search}%`);
   }
   const { data, error } = await q;
   if (error) throw error;
@@ -297,24 +367,15 @@ export async function fetchUserDetail(userId: string): Promise<{
   moderationHistory: ModerationLog[];
   messages: AdminMessage[];
 }> {
-  const [userRes, postsRes, concernsRes, modRes, msgRes] = await Promise.all([
+  // 投稿は 0128 admin_user_posts RPC で取得 (author_id 列 SELECT に依存しない)。
+  // 未適用時のみ posts 直読に fallback する。
+  const [userRes, postRows, modRes, msgRes] = await Promise.all([
     supabase
       .from('profiles')
       .select('id, nickname, account_state, trust_score, post_count, concern_received_count, is_admin, shadowbanned, created_at')
       .eq('id', userId)
       .single(),
-    supabase
-      .from('posts')
-      .select('id, author_id, content, visibility, likes_count, concern_count, created_at')
-      .eq('author_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(50),
-    supabase
-      .from('concerns')
-      .select('user_id, post_id, reason, created_at, posts!inner(author_id)')
-      .eq('posts.author_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(50),
+    fetchUserPostRows(userId),
     supabase
       .from('moderation_log')
       .select('id, admin_id, action, target_type, target_id, reason, metadata, created_at')
@@ -332,15 +393,6 @@ export async function fetchUserDetail(userId: string): Promise<{
   if (userRes.error) throw userRes.error;
   const user = userRes.data as AdminUser;
 
-  const postRows = (postsRes.data ?? []) as Array<{
-    id: string;
-    author_id: string;
-    content: string;
-    visibility: string;
-    likes_count: number;
-    concern_count: number;
-    created_at: string;
-  }>;
   const posts: AdminPost[] = postRows.map((p) => ({
     id: p.id,
     author_id: p.author_id,
@@ -352,23 +404,85 @@ export async function fetchUserDetail(userId: string): Promise<{
     created_at: p.created_at,
   }));
 
-  const concernRows = (concernsRes.data ?? []) as Array<{
-    user_id: string;
-    post_id: string;
-    reason: string;
-    created_at: string;
-  }>;
-  const recentReports: ConcernSummary[] = concernRows.map((c) => ({
-    user_id: c.user_id,
-    post_id: c.post_id,
-    reason: c.reason,
-    created_at: c.created_at,
-  }));
+  // 受報告 (concern) はこのユーザーの投稿に付いたものを集める。旧実装は
+  // concerns.posts!inner(author_id) で embed-filter していたが、それは
+  // posts.author_id 列 SELECT に依存する。上で得た post_id 集合で filter し直す
+  // ことで author_id 列に触れずに同じ結果を得る。
+  const postIds = postRows.map((p) => p.id);
+  let recentReports: ConcernSummary[] = [];
+  if (postIds.length > 0) {
+    const { data: concernData, error: concernErr } = await supabase
+      .from('concerns')
+      .select('user_id, post_id, reason, created_at')
+      .in('post_id', postIds)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (concernErr) throw concernErr;
+    const concernRows = (concernData ?? []) as Array<{
+      user_id: string;
+      post_id: string;
+      reason: string;
+      created_at: string;
+    }>;
+    recentReports = concernRows.map((c) => ({
+      user_id: c.user_id,
+      post_id: c.post_id,
+      reason: c.reason,
+      created_at: c.created_at,
+    }));
+  }
 
   const moderationHistory = ((modRes.data ?? []) as ModerationLog[]);
   const messages = ((msgRes.data ?? []) as AdminMessage[]);
 
   return { user, posts, recentReports, moderationHistory, messages };
+}
+
+// 指定ユーザーの投稿行を取得。0128 admin_user_posts RPC を第一経路にし、
+// 未適用時のみ posts 直読 (.eq('author_id')) に fallback する。
+async function fetchUserPostRows(userId: string): Promise<Array<{
+  id: string;
+  author_id: string;
+  content: string;
+  visibility: string;
+  likes_count: number;
+  concern_count: number;
+  created_at: string;
+}>> {
+  const { data, error } = await supabase.rpc('admin_user_posts', {
+    p_user_id: userId,
+    p_limit: 50,
+  });
+  if (error) {
+    if (isRpcMissing(error)) {
+      const { data: fb, error: fbErr } = await supabase
+        .from('posts')
+        .select('id, author_id, content, visibility, likes_count, concern_count, created_at')
+        .eq('author_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (fbErr) throw fbErr;
+      return (fb ?? []) as Array<{
+        id: string;
+        author_id: string;
+        content: string;
+        visibility: string;
+        likes_count: number;
+        concern_count: number;
+        created_at: string;
+      }>;
+    }
+    throw error;
+  }
+  return (Array.isArray(data) ? data : []) as Array<{
+    id: string;
+    author_id: string;
+    content: string;
+    visibility: string;
+    likes_count: number;
+    concern_count: number;
+    created_at: string;
+  }>;
 }
 
 // ============================================================
@@ -379,7 +493,67 @@ export async function fetchPostDetail(postId: string): Promise<{
   reporters: Array<{ user_id: string; nickname: string | null; created_at: string }>;
   moderationHistory: ModerationLog[];
 }> {
-  const [postRes, concernsRes, modRes] = await Promise.all([
+  // post + reporters は 0128 admin_post_detail RPC で取得 (author_id 列 SELECT に
+  // 依存しない)。moderation_log は author_id と無関係なので従来どおり直読する。
+  const [detail, modRes] = await Promise.all([
+    fetchPostDetailCore(postId),
+    supabase
+      .from('moderation_log')
+      .select('id, admin_id, action, target_type, target_id, reason, metadata, created_at')
+      .eq('target_id', postId)
+      .order('created_at', { ascending: false })
+      .limit(50),
+  ]);
+
+  const moderationHistory = ((modRes.data ?? []) as ModerationLog[]);
+  return { post: detail.post, reporters: detail.reporters, moderationHistory };
+}
+
+// post 本体 + reporters を取得。0128 admin_post_detail RPC を第一経路にし、
+// 未適用時のみ posts/concerns 直読 + nickname N+1 join に fallback する。
+async function fetchPostDetailCore(postId: string): Promise<{
+  post: AdminPost;
+  reporters: Array<{ user_id: string; nickname: string | null; created_at: string }>;
+}> {
+  const { data, error } = await supabase.rpc('admin_post_detail', { p_post_id: postId });
+  if (error) {
+    if (isRpcMissing(error)) return fetchPostDetailFallback(postId);
+    throw error;
+  }
+  const payload = (data ?? null) as {
+    post: {
+      id: string;
+      author_id: string;
+      author_nickname: string | null;
+      content: string;
+      visibility: string;
+      likes_count: number;
+      concern_count: number;
+      created_at: string;
+    } | null;
+    reporters: Array<{ user_id: string; nickname: string | null; created_at: string }> | null;
+  } | null;
+  if (!payload || !payload.post) throw new Error('post not found');
+  const p = payload.post;
+  const post: AdminPost = {
+    id: p.id,
+    author_id: p.author_id,
+    author_nickname: p.author_nickname ?? null,
+    content: p.content,
+    visibility: p.visibility,
+    likes_count: p.likes_count,
+    concern_count: p.concern_count,
+    created_at: p.created_at,
+  };
+  return { post, reporters: payload.reporters ?? [] };
+}
+
+// 0128 未適用環境向け: 旧 posts/concerns 直読 + nickname N+1 join。
+async function fetchPostDetailFallback(postId: string): Promise<{
+  post: AdminPost;
+  reporters: Array<{ user_id: string; nickname: string | null; created_at: string }>;
+}> {
+  const [postRes, concernsRes] = await Promise.all([
     supabase
       .from('posts')
       .select('id, author_id, content, visibility, likes_count, concern_count, created_at')
@@ -390,12 +564,6 @@ export async function fetchPostDetail(postId: string): Promise<{
       .select('user_id, created_at')
       .eq('post_id', postId)
       .order('created_at', { ascending: false }),
-    supabase
-      .from('moderation_log')
-      .select('id, admin_id, action, target_type, target_id, reason, metadata, created_at')
-      .eq('target_id', postId)
-      .order('created_at', { ascending: false })
-      .limit(50),
   ]);
 
   if (postRes.error) throw postRes.error;
@@ -430,9 +598,7 @@ export async function fetchPostDetail(postId: string): Promise<{
     created_at: c.created_at,
   }));
 
-  const moderationHistory = ((modRes.data ?? []) as ModerationLog[]);
-
-  return { post, reporters, moderationHistory };
+  return { post, reporters };
 }
 
 // ============================================================
@@ -587,7 +753,7 @@ export async function fetchAdminDashboardStats(): Promise<{
       supabase.from('posts').select('id', { count: 'exact', head: true }),
       supabase
         .from('posts')
-        .select('author_id', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .gte('created_at', since24h),
       supabase
         .from('posts')

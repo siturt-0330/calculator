@@ -144,6 +144,12 @@ export default function PostDetailScreen() {
   const postIdsForFeedPage = useMemo(() => (id ? [id] : []), [id]);
   const { fullPosts, isLoading: feedPageLoading } = useFeedPage(postIdsForFeedPage);
   const fullPost = id ? fullPosts.get(id) : undefined;
+  // ★ de-anon Phase2: 投稿者の擬似アイデンティティ (handle / 色 / 頭文字) を
+  //   server 供給の pseudonym_id から導出 (author_id 非依存・AnonPostCard と同方針)。
+  const pseudo = useMemo(() => pseudonymFor(fullPost?.pseudonym_id), [fullPost?.pseudonym_id]);
+  // 公式管理者の実名 + 所属。RPC (useFeedPage) 供給を優先 — REST (fetchPostById) は
+  //   2b で author_id を外したため official_author を算出しなくなった。
+  const officialAuthor = fullPost?.official_author ?? post?.official_author ?? null;
   const reactions = useMemo(() => fullPost?.reactions ?? [], [fullPost]);
   const myMemes = useMemo(
     () => reactions.filter((r) => r.mine).map((r) => r.meme),
@@ -367,7 +373,8 @@ export default function PostDetailScreen() {
   // 返信ボタン押下: 全画面コメント作成画面へ遷移。
   // parent / 返信先 comment id と、表示用の擬似名・本文プレビューを params で渡す。
   const handleReply = (c: Comment) => {
-    const ps = pseudonymFor(c.author_id);
+    // ★ de-anon Phase2: 返信先の擬似名は author_id ではなく pseudonym_id から導出。
+    const ps = pseudonymFor(c.pseudonym_id);
     router.push({
       pathname: '/post/comment',
       params: {
@@ -506,9 +513,18 @@ export default function PostDetailScreen() {
                 ))}
               </View>
             )}
-            {/* 投稿者エリア — Reddit スタイル: コミュニティ icon + 名前 (ホームと同じ表示) */}
+            {/* ============================================================
+                投稿者エリア (★ de-anon Phase2)
+                ------------------------------------------------------------
+                - 公式管理者投稿: shield + 実名 (official_author)。official_author は
+                  REST (fetchPostById) ではなく RPC (useFeedPage) 供給を優先する
+                  (2b で REST から author_id を外したため REST 経路では算出されない)。
+                - それ以外: 投稿者の擬似アイデンティティ (avatar + handle) を主役にする
+                  (AnonPostCard と同方針 / author_id 非依存)。avatar は画像優先 →
+                  emoji → 色+頭文字 fallback。投稿先コミュニティは上部ピルで導線確保済。
+                ============================================================ */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-              {post.official_author ? (
+              {officialAuthor ? (
                 // 公式管理者: shield アイコン
                 <View style={{
                   width: 36, height: 36, borderRadius: 18,
@@ -517,30 +533,25 @@ export default function PostDetailScreen() {
                   <Icon.shield size={16} color={C.accent} strokeWidth={2.4} />
                 </View>
               ) : (
-                // コミュニティアイコン (postCommunities[0] がある場合) / なければ generic
-                <PressableScale
-                  onPress={postCommunities[0] ? () => router.push(`/community/${postCommunities[0]!.community_id}` as never) : undefined}
-                  haptic="tap"
-                  hitSlop={4}
-                  disabled={!postCommunities[0]}
-                >
-                  <Avatar
-                    size={36}
-                    uri={postCommunities[0]?.icon_url ?? null}
-                    emoji={postCommunities[0]?.icon_emoji ?? undefined}
-                  />
-                </PressableScale>
+                // 投稿者アバター (擬似人格) — 本人アイコン優先 → emoji → 色+頭文字
+                <Avatar
+                  size={36}
+                  uri={fullPost?.avatar_url}
+                  emoji={fullPost?.avatar_url ? undefined : fullPost?.avatar_emoji}
+                  color={pseudo.color}
+                  name={pseudo.initial}
+                />
               )}
               <View style={{ flex: 1 }}>
-                {post.official_author ? (
+                {officialAuthor ? (
                   <Text style={[T.captionM, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
-                    {post.official_author.name || '公式管理者'}
+                    {officialAuthor.name || '公式管理者'}
                   </Text>
-                ) : postCommunities[0] ? (
-                  <Text style={[T.captionM, { color: C.text, fontWeight: '700' }]} numberOfLines={1}>
-                    {postCommunities[0].name}
+                ) : (
+                  <Text style={[T.captionM, { color: pseudo.color, fontWeight: '700' }]} numberOfLines={1}>
+                    {pseudo.handle}
                   </Text>
-                ) : null}
+                )}
                 <Text style={[T.caption, { color: C.text3 }]}>{formatRelative(post.created_at)}</Text>
               </View>
               <ObsidianSaveButton note={postToObsidianNote(post)} size={18} />

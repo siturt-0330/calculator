@@ -41,6 +41,13 @@ export type Post = {
   // de-anon Phase2: server (feed/community RPC) が「閲覧者自身の投稿か」を boolean で供給する
   //   派生フィールド。author_id 比較を client から無くすための置換 (REVOKE 後は author_id が来ない)。
   is_own?: boolean;
+  // de-anon Phase2: 投稿者アイデンティティの表示用フィールド (author_id 非依存)。
+  //   - avatar_url / avatar_emoji: 投稿者アバター (画像優先 → emoji → 色+頭文字 fallback)。
+  //   - pseudonym_id: 安定した擬似ハンドルを導出するためのトークン (lib/utils/pseudonym.ts)。
+  //     ★ author_id ではなくサーバが供給するこのトークンを使う (実名特定を防ぐ)。
+  avatar_url?: string | null;
+  avatar_emoji?: string | null;
+  pseudonym_id?: string | null;
   // Reddit スタイル author 表示用。
   //   - home feed: communities prop から community 名/icon を使用するため不要。
   //   - community tab (viewContext='community'): fetchCommunityPosts が profiles から一括取得して attach。
@@ -65,8 +72,20 @@ export type Comment = {
   content: string;
   avatar_color: string;
   created_at: string;
-  author_id?: string | null;  // コメント主の user id — モデレーション操作・own判定用 (fetchComments が SELECT)
+  author_id?: string | null;  // コメント主の user id — 旧 own/mod 判定の name残り。de-anon Phase2 で SELECT しない (write 経路と RLS のみ)
   trust_score?: number | null;  // 著者の現在の信頼スコア
+  // ============================================================
+  // de-anon Phase2 — コメント主アイデンティティ (author_id 非依存)。
+  //   get_post_comments RPC が server 側でマスクして供給する:
+  //   - avatar_url / avatar_emoji: 本人アバター (画像優先 → emoji → 色+頭文字 fallback)
+  //   - pseudonym_id: 安定した擬似ハンドル導出用トークン (lib/utils/pseudonym.ts)。
+  //     ★ author_id ではなくこのトークンを使う (実名特定を防ぐ)。
+  //   - is_own: 閲覧者自身のコメントか (author_id 比較を client から無くす置換)。
+  // ============================================================
+  avatar_url?: string | null;
+  avatar_emoji?: string | null;
+  pseudonym_id?: string | null;
+  is_own?: boolean;
   // ============================================================
   // コメントツリー (migration 0059)
   // ------------------------------------------------------------

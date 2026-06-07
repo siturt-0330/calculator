@@ -660,12 +660,17 @@ export default function FeedScreen() {
       //   base post は rank pipeline の memo が id ベースで再計算されず likes_count 変化に
       //   追従しない(= いいねしても数字が増えない bug)。full は useFeedPage の cache から
       //   毎 render 再生成され optimistic patch (patchFeedPagePost) で即時更新されるので新鮮。
+      // de-anon Phase2: 投稿者アイデンティティ (avatar / pseudonym) も RPC cache (full)
+      //   から merge して AnonPostCard に渡す (author_id 非依存で投稿者を主役表示するため)。
       const enrichedPost = full
         ? {
             ...post,
             likes_count: full.likes_count ?? post.likes_count,
             comments_count: full.comments_count ?? post.comments_count,
             ...(full.official_author ? { official_author: full.official_author } : {}),
+            avatar_url: full.avatar_url ?? post.avatar_url ?? null,
+            avatar_emoji: full.avatar_emoji ?? post.avatar_emoji ?? null,
+            pseudonym_id: full.pseudonym_id ?? post.pseudonym_id ?? null,
           }
         : post;
       return (

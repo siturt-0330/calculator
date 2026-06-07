@@ -38,14 +38,16 @@ export async function deleteComment(commentId: string): Promise<void> {
 }
 
 // SELECT カラム — media 有 / 無 の 2 種類。列未適用環境では media 無し版で取る。
+// ★ de-anon Phase2: REST fallback tier も author_id を SELECT しない (REVOKE 後も安全)。
+//   own/mod 判定は RPC tier の is_own / server RLS に一本化したため、この tier では
+//   author_id は不要 (mapRow も載せない)。
 const COMMENT_SELECT_COLS_BASE =
-  'id, post_id, author_id, content, avatar_color, created_at, parent_comment_id, reply_to_comment_id';
+  'id, post_id, content, avatar_color, created_at, parent_comment_id, reply_to_comment_id';
 const COMMENT_SELECT_COLS_MEDIA = `${COMMENT_SELECT_COLS_BASE}, media_urls`;
 
 type RawComment = {
   id: string;
   post_id: string;
-  author_id: string;
   content: string;
   avatar_color: string;
   created_at: string;
@@ -55,12 +57,15 @@ type RawComment = {
   author?: { trust_score?: number } | { trust_score?: number }[] | null;
 };
 
+// ★ de-anon Phase2: legacy REST tier (1-3) は author_id を SELECT し得るが、
+//   client の Comment には author_id を載せない (own/mod 判定は is_own / RLS へ)。
+//   この tier では de-anon フィールド (avatar_url / avatar_emoji / pseudonym_id /
+//   is_own) は供給されないため undefined のまま (RPC tier 0 でのみ揃う)。
 function mapRow(c: RawComment): Comment {
   const a = Array.isArray(c.author) ? c.author[0] : c.author;
   return {
     id: c.id,
     post_id: c.post_id,
-    author_id: c.author_id,
     content: c.content,
     avatar_color: c.avatar_color,
     created_at: c.created_at,
@@ -68,6 +73,45 @@ function mapRow(c: RawComment): Comment {
     reply_to_comment_id: c.reply_to_comment_id,
     media_urls: Array.isArray(c.media_urls) ? c.media_urls : null,
     trust_score: a?.trust_score ?? null,
+  } as Comment;
+}
+
+// ============================================================
+// de-anon Phase2 — get_post_comments RPC (0125) の生 row。
+//   server 側で author_id をマスクし、擬似アイデンティティ表示に必要な
+//   avatar_url / avatar_emoji / pseudonym_id と、own 判定用 is_own を供給する。
+// ============================================================
+type RpcCommentRow = {
+  id: string;
+  post_id: string;
+  content: string;
+  avatar_color: string;
+  created_at: string;
+  parent_comment_id: string | null;
+  reply_to_comment_id: string | null;
+  media_urls?: string[] | null;
+  trust_score?: number | null;
+  avatar_url?: string | null;
+  avatar_emoji?: string | null;
+  pseudonym_id?: string | null;
+  is_own?: boolean | null;
+};
+
+function mapRpcRow(c: RpcCommentRow): Comment {
+  return {
+    id: c.id,
+    post_id: c.post_id,
+    content: c.content,
+    avatar_color: c.avatar_color,
+    created_at: c.created_at,
+    parent_comment_id: c.parent_comment_id ?? null,
+    reply_to_comment_id: c.reply_to_comment_id ?? null,
+    media_urls: Array.isArray(c.media_urls) ? c.media_urls : null,
+    trust_score: c.trust_score ?? null,
+    avatar_url: c.avatar_url ?? null,
+    avatar_emoji: c.avatar_emoji ?? null,
+    pseudonym_id: c.pseudonym_id ?? null,
+    is_own: !!c.is_own,
   } as Comment;
 }
 
@@ -88,12 +132,37 @@ async function safeRead<T>(
   }
 }
 
-// 投稿へのコメント取得 — 3 段 fallback:
-//   1) media + author(trust_score) join
+// RPC がスキーマに無い (= migration 未適用) ことを判定する (adminReports.ts と同型)。
+// 未適用環境では旧 REST クエリ tier に fall-through させ、適用前でも動かす。
+function isRpcMissing(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null;
+  if (!e) return false;
+  if (e.code === 'PGRST202') return true; // function not found in schema cache
+  const msg = e.message ?? '';
+  return /function .*does not exist|could not find the function/i.test(msg);
+}
+
+// 投稿へのコメント取得 — 4 段 fallback:
+//   0) ★ de-anon Phase2: get_post_comments RPC (0125)。author_id をマスクしつつ
+//      avatar_url / avatar_emoji / pseudonym_id / is_own を供給する (擬似アイデンティティ
+//      表示 + own 判定が author_id 非依存になる正経路)。RPC 未適用なら次 tier へ。
+//   1) media + author(trust_score) join (REST fallback — de-anon フィールドは付かない)
 //   2) media のみ (author join が PGRST201 で壊れた時も media は保つ)
 //   3) base のみ (media_urls 列が無い = migration 0104 未適用 の環境)
 // 各 tier を withApiTimeout(8s) で bound し、timeout も「その tier 失敗」として次へ流す。
 export async function fetchComments(postId: string): Promise<Comment[]> {
+  // tier0: de-anon RPC。{ comments: RpcCommentRow[] } を返す。
+  const t0 = await safeRead<{ comments?: RpcCommentRow[] } | null>(
+    supabase.rpc('get_post_comments', { p_post_id: postId }),
+    'comments.fetch.tier0.rpc',
+  );
+  if (!t0.error) {
+    const payload = t0.data ?? { comments: [] };
+    const rows = Array.isArray(payload?.comments) ? payload.comments : [];
+    return rows.map((c) => mapRpcRow(c));
+  }
+  console.warn('[fetchComments] tier0 (get_post_comments rpc) failed → REST tiers:', t0.error.message);
+
   const t1 = await safeRead<RawComment[]>(
     supabase
       .from('comments')
@@ -183,14 +252,23 @@ export async function createComment(
 // fetchMyComments — マイページ「コメント」タブ用: 自分が残したコメント一覧
 // ------------------------------------------------------------
 // 「あなたが他の投稿に残した声」を出典 (post) 付きで時系列降順に取得する。
-// fetchComments と同じ safeRead(withApiTimeout 8s) + 段階 fallback を写経:
-//   tier1 (推奨): comments + media + post embed を 1 RTT で取得
+//   ★ de-anon Phase2: 自分のコメントも author_id を client で使わず auth.uid() ベースの
+//     RPC (0130_get_my_comments) で取得する。0129 で comments.author_id を REVOKE しても
+//     壊れない (列フィルタにも SELECT 権が要るため .eq('author_id', ...) は permission denied)。
+//
+//   tier0 (推奨・正経路): get_my_comments RPC。出典 post も server 側 join で同梱 (1 RTT)。
+//     RPC 未適用 (PGRST202) のときだけ、下の旧 REST tier に fall-through する (適用前でも動く)。
+//
+// 以下は RPC 未適用環境専用の fallback (fetchComments と同じ safeRead + 段階 fallback を写経):
+//   tier1: comments + media + post embed を 1 RTT で取得
 //   tier2: embed が PGRST200/201 等で壊れた時、post embed を base 列 (media 抜き) に
 //   ★tier3 (FK 非依存の安全網・必須): comments を embed 無しで取得 → 得た post_id を
 //          posts.in('id', ids) で 2 段 fetch し Map で post を復元 (= saved と同型)。
 //          FK 名 comments_post_id_fkey が実在しない / media_urls 列が無い (0104 未適用)
 //          環境でも確実に動き、コメントが silent に全消滅する地雷を回避する。
 //          (実コード上 FK 実在は comments_author_id_fkey のみ確認済 = post embed は未実証)
+// ★ REVOKE (0129) 後は tier1-3 (= .eq('author_id')) は permission denied になるが、その時は
+//   既に RPC が適用済 (tier0 成功) のはず。fallback は「RPC 未適用 (=author_id まだ読める)」専用。
 // author_visible RLS は自分のコメントには無影響 (必ず読める)。返却は created_at desc。
 // ============================================================
 
@@ -257,6 +335,22 @@ export async function fetchMyComments(
   opts?: { limit?: number },
 ): Promise<MyCommentRow[]> {
   const limit = opts?.limit ?? FETCH_MY_COMMENTS_LIMIT;
+
+  // tier0 (正経路): get_my_comments RPC (0130)。auth.uid() ベースで author_id 非依存。
+  //   返却は MyCommentRow と同形 (post を server 側 join で同梱)。json 配列なので mapMyComment で
+  //   正規化 (post が単一 object でも配列でも吸収)。RPC 未適用 (PGRST202) のときだけ下の旧 tier へ。
+  const t0 = await safeRead<RawMyComment[]>(
+    supabase.rpc('get_my_comments', { p_limit: limit }),
+    'comments.fetchMine.tier0.rpc',
+  );
+  if (!t0.error) return (Array.isArray(t0.data) ? t0.data : []).map(mapMyComment);
+  if (!isRpcMissing(t0.error)) {
+    // RPC は在るが失敗 (timeout / 一時障害)。REVOKE 後は REST fallback も使えないので、ここで諦める。
+    console.warn('[fetchMyComments] tier0 (get_my_comments rpc) failed:', t0.error.message);
+    throw t0.error;
+  }
+  // RPC 未適用 → 旧 REST tier (author_id ベース) に fall-through (適用前環境専用)。
+  console.warn('[fetchMyComments] get_my_comments rpc missing → legacy REST tiers');
 
   // tier1: media + post embed を 1 RTT で。
   const t1 = await safeRead<RawMyComment[]>(

@@ -57,6 +57,7 @@ import { ModActionMenu } from '../community/ModActionMenu';
 import { MediaWithCWGuard } from '../post/MediaWithCWGuard';
 import { getDisplayLikesForViewer } from '../../lib/utils/voteFuzz';
 import { ImageLightbox } from '../ui/ImageLightbox';
+import { pseudonymFor } from '../../lib/utils/pseudonym';
 
 // 画像アスペクト比のモジュールレベルキャッシュ。
 // パフォーマンス監査: 旧版は無制限キャッシュで長時間スクロール後にメモリ蓄積。
@@ -817,7 +818,10 @@ function AnonPostCardInner({
   onReact,
   onAddTag: _onAddTag,
   onCommunityPress,
-  viewContext = 'home',
+  // de-anon Phase2: 非公式投稿は home / community とも「投稿者 (avatar + handle)」を主役に
+  //   統一したため、本体では viewContext を分岐に使わなくなった (prop 自体は後方互換 +
+  //   memo 比較のため型に残す)。
+  viewContext: _viewContext = 'home',
 }: AnonPostCardProps) {
   const Heart = Icon.heart;
   const Comment = Icon.comment;
@@ -843,6 +847,10 @@ function AnonPostCardInner({
   // de-anon Phase2: server 供給の is_own を優先 (author_id 非依存)。is_own 未配線の経路
   //   (周辺データ未ロード中など) では従来の author_id 比較に fallback (2b で author_id 除去後は false)。
   const isOwnPost = isOwn ?? (!!post.author_id && post.author_id === currentUserId);
+  // de-anon Phase2: 投稿者の擬似アイデンティティ (handle / 色 / 頭文字) を pseudonym_id から導出。
+  //   ★ author_id ではなく server 供給の pseudonym_id を使う (実名特定ホールを塞ぐ)。
+  //   pseudonym_id 変化時のみ再計算 (perf — 大量カード mount でも cheap)。
+  const pseudo = useMemo(() => pseudonymFor(post.pseudonym_id), [post.pseudonym_id]);
 
   // ミームリアクション (props 経由で DB から取得済み)
   const [memePickerOpen, setMemePickerOpen] = useState(false);
@@ -1038,6 +1046,10 @@ function AnonPostCardInner({
         added_tags: _addedTags,
         poll: poll ?? null,
         is_own: isOwnPost,
+        // de-anon Phase2: 表示用フィールドを詳細画面 cache にも seed (FeedPagePost は非 optional)。
+        avatar_url: post.avatar_url ?? null,
+        avatar_emoji: post.avatar_emoji ?? null,
+        pseudonym_id: post.pseudonym_id ?? null,
       };
       const feedPageKey = ['feed-page', currentUserId ?? 'anon', stableKeyFor([post.id])];
       qc.setQueryData<FeedPagePost[]>(feedPageKey, (prev) => prev ?? [feedPageSeed]);
@@ -1160,8 +1172,9 @@ function AnonPostCardInner({
     <Animated.View style={containerStyleCombined}>
       {/* ヘッダー: アバター / メイン表示 / ⋯
           - 公式管理者: shield + 実名 · 所属 (de-anonymize)
-          - viewContext='community': ユーザー avatar + nickname (Reddit の r/ 内投稿スタイル)
-          - viewContext='home' (既定): コミュニティ icon + 名前 (Reddit の r/ サブレ表示スタイル) */}
+          - de-anon Phase2 (非公式 / home + community 共通): 投稿者を主役に表示
+              = 投稿者アバター (avatar_url → avatar_emoji → 色+頭文字) + 擬似ハンドル (pseudonym_id 由来)。
+                コミュニティは時刻行の secondary inline indicator として表示。 */}
       <View style={STYLES.headerRow}>
         {/* ===== アバター ===== */}
         {post.official_author ? (
@@ -1169,31 +1182,19 @@ function AnonPostCardInner({
           <View style={STYLES.officialAvatar} accessibilityLabel="公式管理者">
             <Icon.shield size={20} color={C.accent} strokeWidth={2.4} />
           </View>
-        ) : viewContext === 'community' ? (
-          // コミュニティタブ: ユーザーのアバター (avatar_url があれば画像、なければ nickname 頭文字)
+        ) : (
+          // de-anon Phase2: 非公式投稿は「投稿者」を主役に表示 (home / community 共通)。
+          //   実アバター優先 → avatar_emoji → 色+頭文字 fallback。コミュニティは
+          //   下のメタ行に secondary inline indicator として表示する。
+          //   ★ Avatar は emoji が uri より優先なので、avatar_url がある時は emoji を渡さない
+          //     (= 「実アバター優先」を担保する)。
           <Avatar
             size={40}
-            uri={post.author_avatar_url}
-            name={post.author_nickname ?? undefined}
+            uri={post.avatar_url ?? null}
+            emoji={post.avatar_url ? undefined : (post.avatar_emoji ?? undefined)}
+            color={pseudo.color}
+            name={pseudo.initial}
           />
-        ) : (
-          // ホーム/デフォルト: コミュニティアイコン (タップでコミュニティへ遷移)
-          <PressableScale
-            onPressIn={undefined}
-            onPress={onPrimaryCommunityPress}
-            hitSlop={4}
-            disabled={!primaryCommunity}
-          >
-            {/* コミュニティアイコンは共有 <CommunityIcon> に集約 (commit f8267aa)。
-                画像優先 + contentFit="contain" で「必ず表示 / 拡大しない」。
-                (Avatar は emoji 優先なので uploaded icon_url が emoji に隠れていた) */}
-            <CommunityIcon
-              size={40}
-              iconUrl={primaryCommunity?.icon_url}
-              iconEmoji={primaryCommunity?.icon_emoji}
-              name={primaryCommunity?.name}
-            />
-          </PressableScale>
         )}
 
         {/* ===== メタ (名前 + 時刻) ===== */}
@@ -1224,40 +1225,28 @@ function AnonPostCardInner({
               )}
             </View>
           </View>
-        ) : viewContext === 'community' ? (
-          // コミュニティタブ: ユーザー名 + 時刻
+        ) : (
+          // de-anon Phase2: 非公式投稿は「投稿者」が主役 (home / community 共通)。
+          //   - 名前行 = pseudonym_id 由来の擬似ハンドル (英数字。実名/コミュ名ではない)。
+          //   - メタ行 = 時刻 + community を secondary inline indicator として表示
+          //     (コミュ文脈は残しつつ、主役は投稿者 avatar+handle)。
           <View style={STYLES.anonRow}>
             <Text style={anonLabelStyle} numberOfLines={1}>
-              {post.author_nickname ?? t('メンバー')}
+              {pseudo.handle}
             </Text>
             <View style={STYLES.anonMetaRow}>
               <Text style={STYLES.anonRelative} numberOfLines={1}>
                 {formatRelative(post.created_at)}
               </Text>
-            </View>
-          </View>
-        ) : (
-          // ホーム/デフォルト: コミュニティ名 (タップ可) + 時刻
-          <View style={STYLES.anonRow}>
-            <PressableScale
-              onPress={onPrimaryCommunityPress}
-              disabled={!primaryCommunity}
-              scaleValue={0.98}
-            >
-              <Text style={anonLabelStyle} numberOfLines={1}>
-                {primaryCommunity?.name ?? t('コミュニティ')}
-              </Text>
-            </PressableScale>
-            <View style={STYLES.anonMetaRow}>
-              <Text style={STYLES.anonRelative} numberOfLines={1}>
-                {formatRelative(post.created_at)}
-              </Text>
-              {communities.length > 1 && (
+              {primaryCommunity && (
                 <>
                   <Text style={STYLES.anonMetaDot}>·</Text>
-                  <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
-                    +{communities.length - 1}
-                  </Text>
+                  <CommunityInlineIndicator
+                    community={primaryCommunity}
+                    extraCount={communities.length - 1}
+                    onPress={onPrimaryCommunityPress}
+                    STYLES={STYLES}
+                  />
                 </>
               )}
             </View>
@@ -1578,6 +1567,11 @@ function AnonPostCardInner({
 export const AnonPostCard = memo(AnonPostCardInner, (prev, next) => {
   // Re-render only when something this card actually cares about changed.
   if (prev.post !== next.post) return false;
+  // de-anon Phase2: 投稿者アイデンティティ (avatar / pseudonym) が後から merge されて
+  //   差し替わったとき、post ref が同一でも再描画する (avatar+handle を確実に更新)。
+  if (prev.post.avatar_url !== next.post.avatar_url) return false;
+  if (prev.post.avatar_emoji !== next.post.avatar_emoji) return false;
+  if (prev.post.pseudonym_id !== next.post.pseudonym_id) return false;
   if (prev.liked !== next.liked) return false;
   if (prev.concerned !== next.concerned) return false;
   if (prev.saved !== next.saved) return false;
