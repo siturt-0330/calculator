@@ -1,8 +1,11 @@
 // =============================================================================
 // UserPostsList — 「投稿」タブ: 特定ユーザーの投稿リスト (自分視点 / 他人視点共通)
 // -----------------------------------------------------------------------------
-// posts.author_id でフィルタした card リスト。自分視点では非公開も含めて表示し、
-// 他人視点では RLS で is_public=true / community_public のみが返る。
+// ★ de-anon Phase2: posts.author_id を client で一切扱わない。取得は subject で分岐する RPC:
+//   - 自分視点 (subject.kind='self')      → get_my_posts (0117, auth.uid() ベース)
+//   - 他人視点 (subject.kind='pseudonym') → get_pseudo_profile_posts (0125, pseudonym_id トークン)
+//   いずれも author_id を返さず、可視性は server (RLS / can_view_post / author_visible) が保証する。
+//   自分視点は非公開も含み、他人視点は公開 (is_public / community_public) のみが返る。
 //
 // presentational + 軽い fetch (useQuery)。
 // =============================================================================
@@ -33,35 +36,65 @@ type UserPost = {
   created_at: string;
 };
 
-async function fetchPostsByAuthor(authorId: string): Promise<UserPost[]> {
-  // 自分視点 (= 自分の RLS) では is_public=false も見える。他人視点では RLS が
-  // 自動で is_public=true / community_public のみに絞る (DB ポリシー側で保護)。
-  // カード描画に使う列のみ select (tag_names はカードで未使用なので除外)。
-  // 埋め込みタブは最初の画面で 30 件もあれば十分なので limit を 30 に抑えて初回
-  // ペイロード/描画を軽くする (専用 /mypage/posts はより多く取得する想定)。
-  const { data } = await supabase
-    .from('posts')
-    .select('id, content, title, media_urls, likes_count, comments_count, is_public, created_at')
-    .eq('author_id', authorId)
-    .order('created_at', { ascending: false })
-    .limit(30);
-  return (data ?? []) as UserPost[];
+// 取得対象の指定。own/other を型で明示し、author_id を client で持たない。
+//   - { kind: 'self' }                 → 自分の投稿 (get_my_posts, auth.uid())
+//   - { kind: 'pseudonym'; token }     → 擬似プロフィールの公開投稿 (get_pseudo_profile_posts)
+export type UserPostsSubject =
+  | { kind: 'self' }
+  | { kind: 'pseudonym'; token: string };
+
+// get_pseudo_profile_posts (0125) の返り値。posts[] は is_own を含む (本リストでは未使用)。
+type PseudoProfileResult = {
+  avatar_url: string | null;
+  avatar_emoji: string | null;
+  posts: UserPost[] | null;
+};
+
+async function fetchUserPosts(subject: UserPostsSubject): Promise<UserPost[]> {
+  // 自分視点 (= server の auth.uid()) では is_public=false も含む。他人視点は server が
+  // 公開 (is_public / community_public) のみに絞る。author_id は client に渡らない。
+  // 埋め込みタブは最初の画面で 30 件もあれば十分なので limit を 30 に抑える。
+  if (subject.kind === 'self') {
+    const { data, error } = await supabase.rpc('get_my_posts', { p_limit: 30 });
+    if (error) {
+      console.warn('[UserPostsList] get_my_posts rpc error:', error.message);
+      return [];
+    }
+    return (Array.isArray(data) ? data : []) as UserPost[];
+  }
+  // pseudonym: token (pseudonym_id) で他人の公開投稿を取得。返りは { avatar_*, posts }。
+  const { data, error } = await supabase.rpc('get_pseudo_profile_posts', {
+    p_pseudonym_id: subject.token,
+    p_limit: 30,
+  });
+  if (error) {
+    console.warn('[UserPostsList] get_pseudo_profile_posts rpc error:', error.message);
+    return [];
+  }
+  const result = (data ?? null) as PseudoProfileResult | null;
+  return Array.isArray(result?.posts) ? result.posts : [];
+}
+
+// query key は subject を安定 string 化 (self / pseudonym:token)。
+function subjectKey(subject: UserPostsSubject | undefined): string {
+  if (!subject) return 'none';
+  return subject.kind === 'self' ? 'self' : `pseudonym:${subject.token}`;
 }
 
 export function UserPostsList({
-  authorId,
+  subject,
   emptyHint,
   onCompose,
 }: {
-  authorId: string | undefined;
+  subject: UserPostsSubject | undefined;
   emptyHint: string;
   onCompose?: () => void;
 }) {
   const router = useRouter();
-  const enabled = !!authorId;
+  const enabled = !!subject;
   const { data: items = [], isLoading } = useQuery({
-    queryKey: ['user-posts', authorId],
-    queryFn: () => fetchPostsByAuthor(authorId!),
+    queryKey: ['user-posts', subjectKey(subject)],
+    queryFn: () => fetchUserPosts(subject!),
     enabled,
     staleTime: 30_000,
   });

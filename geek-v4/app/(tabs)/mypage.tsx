@@ -121,22 +121,19 @@ async function fetchProfileStats(userId: string): Promise<MypageStats | null> {
   return (data ?? null) as MypageStats | null;
 }
 
-async function fetchPostsByAuthor(authorId: string): Promise<UserPost[]> {
-  // 自分視点 (= 自分の RLS) では is_public=false も見える。カード描画に使う列のみ。
+async function fetchMyPosts(): Promise<UserPost[]> {
+  // ★ de-anon Phase2: author_id を client で使わず auth.uid() ベースの RPC (get_my_posts) で
+  //   自分の投稿を取得する。0129 で posts.author_id を REVOKE しても壊れない (列フィルタにも
+  //   SELECT 権が要るため .eq('author_id', ...) は permission denied)。非公開も自分の分は含む。
+  //   カード描画用の title/media/video 列は 0131 で RPC に追加済 (未適用環境では undefined になり、
+  //   PostRow 側の guard で画像/タイトル無しとして安全に描画される)。
   const { data, error } = await withApiTimeout(
-    supabase
-      .from('posts')
-      .select(
-        'id, content, title, media_urls, media_blurhashes, video_urls, video_posters, likes_count, comments_count, is_public, created_at',
-      )
-      .eq('author_id', authorId)
-      .order('created_at', { ascending: false })
-      .limit(30),
-    'mypage.posts',
+    supabase.rpc('get_my_posts', { p_limit: 30 }),
+    'mypage.get_my_posts',
     8000,
   );
   if (error) throw error;
-  return (data ?? []) as UserPost[];
+  return (Array.isArray(data) ? data : []) as UserPost[];
 }
 
 async function fetchSavedPosts(userId: string): Promise<SavedPost[]> {
@@ -269,7 +266,7 @@ export default function MypageScreen() {
   });
   const { data: posts = [], isLoading: postsLoading } = useQuery({
     queryKey: ['user-posts', userId],
-    queryFn: () => fetchPostsByAuthor(userId!),
+    queryFn: () => fetchMyPosts(),
     enabled: !!userId,
     staleTime: 30_000,
   });
