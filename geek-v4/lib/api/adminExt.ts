@@ -6,7 +6,21 @@ import { supabase } from '../supabase';
 // 導入された view / RPC / table 群を扱う。 RLS は base table 側 +
 // is_admin() ヘルパで担保されるので client 側で service_role は
 // 一切使わない。
+//
+// ★ 匿名性ハードニング (security/deanon-phase2):
+//   posts.author_id を見る読みは 0128 の SECURITY DEFINER RPC
+//   (admin_reported_posts, is_admin() gate) 経由に切り替える。0128 未適用の
+//   本番/CI では isRpcMissing で従来の admin_reported_posts_v 直読に fallback する。
 // ============================================================
+
+// RPC がスキーマに無い (= 0128 未適用) ことを判定する (adminReports.ts と同形)。
+function isRpcMissing(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null;
+  if (!e) return false;
+  if (e.code === 'PGRST202') return true; // function not found in schema cache
+  const msg = e.message ?? '';
+  return /function .*does not exist|could not find the function/i.test(msg);
+}
 
 export type AdminReportedPost = {
   post_id: string;
@@ -55,6 +69,9 @@ export type AdminModerationLogEntry = {
 // ============================================================
 // 通報投稿
 // ============================================================
+// 0128 admin_reported_posts RPC を第一経路にする (author_id + nickname を definer
+// 内で join 済で返すため、別途 profiles から nickname を引く round-trip が不要)。
+// RPC 未適用 (PGRST202) のときだけ従来の admin_reported_posts_v 直読に fallback する。
 export async function fetchReportedPosts(opts?: {
   minReports?: number;
   limit?: number;
@@ -62,19 +79,38 @@ export async function fetchReportedPosts(opts?: {
 }): Promise<AdminReportedPost[]> {
   const min = opts?.minReports ?? 1;
   const limit = opts?.limit ?? 100;
+  const search = opts?.search && opts.search.trim().length > 0 ? opts.search.trim() : null;
 
+  const { data, error } = await supabase.rpc('admin_reported_posts', {
+    p_min_reports: min,
+    p_limit: limit,
+    p_search: search,
+  });
+  if (error) {
+    if (isRpcMissing(error)) return fetchReportedPostsFallback({ min, limit, search });
+    throw error;
+  }
+  return (Array.isArray(data) ? data : []) as AdminReportedPost[];
+}
+
+// 0128 未適用環境向け: 旧 admin_reported_posts_v 直読 + nickname N+1 join。
+async function fetchReportedPostsFallback(args: {
+  min: number;
+  limit: number;
+  search: string | null;
+}): Promise<AdminReportedPost[]> {
   let q = supabase
     .from('admin_reported_posts_v')
     .select(
       'post_id, author_id, content, visibility, post_created_at, likes_count, concern_count, reports_count, last_reported_at',
     )
-    .gte('reports_count', min)
+    .gte('reports_count', args.min)
     .order('reports_count', { ascending: false })
     .order('last_reported_at', { ascending: false })
-    .limit(limit);
+    .limit(args.limit);
 
-  if (opts?.search && opts.search.trim().length > 0) {
-    q = q.ilike('content', `%${opts.search.trim()}%`);
+  if (args.search) {
+    q = q.ilike('content', `%${args.search}%`);
   }
 
   const { data, error } = await q;
@@ -174,7 +210,7 @@ export async function fetchAdminDashboardStats(): Promise<AdminDashboardStats> {
     supabase.from('posts').select('id', { head: true, count: 'exact' }),
     supabase
       .from('posts')
-      .select('author_id', { head: true, count: 'exact' })
+      .select('id', { head: true, count: 'exact' })
       .gte('created_at', since24h),
     supabase
       .from('posts')
