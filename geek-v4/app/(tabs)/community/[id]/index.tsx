@@ -56,6 +56,7 @@ import { useShare } from '../../../../hooks/useShare';
 import { useReactions, useReactionToggle } from '../../../../hooks/useReactions';
 import { useAddedTags, useAddTag } from '../../../../hooks/useAddedTags';
 import { usePolls } from '../../../../hooks/usePolls';
+import { useFeedPage } from '../../../../hooks/useFeedPage';
 import type { Post } from '../../../../types/models';
 import type { ReactionAgg } from '../../../../lib/api/reactions';
 import type { Poll } from '../../../../lib/api/polls';
@@ -590,6 +591,28 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
   const { data: addedTagsByPost = {} } = useAddedTags(postIds);
   const { polls } = usePolls(postIds);
 
+  // ★ de-anon Phase2: コミュニティ詳細では投稿者本人のアバター + 擬似ハンドル(id)を表示する。
+  //   その identity (avatar_url / avatar_emoji / pseudonym_id / official_author / is_own) は
+  //   author_id 非依存で get_feed_page RPC (useFeedPage) が server 側マスクして供給する。
+  //   REST (fetchCommunityPosts) は本文 / counter のみで identity を持たないため、ここで merge。
+  //   posts / fullPosts が安定参照のときは同一 object を返すので FeedPostRow の memo は保たれる。
+  const { fullPosts } = useFeedPage(postIds);
+  const enrichedPosts = useMemo<Post[]>(
+    () =>
+      posts.map((p) => {
+        const full = fullPosts.get(p.id);
+        if (!full) return p;
+        return {
+          ...p,
+          avatar_url: full.avatar_url ?? null,
+          avatar_emoji: full.avatar_emoji ?? null,
+          pseudonym_id: full.pseudonym_id ?? null,
+          ...(full.official_author ? { official_author: full.official_author } : {}),
+        };
+      }),
+    [posts, fullPosts],
+  );
+
   // コミュニティスタンプ機能 (community stamp reactions) は UI から撤去 (2026-05)。
   // DB 側の table / RPC は残置 — rollback の容易性のため。
 
@@ -647,10 +670,11 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
         </View>
       ) : (
         <View>
-          {posts.map((p) => (
+          {enrichedPosts.map((p) => (
             <FeedPostRow
               key={p.id}
               post={p}
+              isOwn={fullPosts.get(p.id)?.is_own}
               liked={!!myLikes[p.id]}
               concerned={!!myConcerns[p.id]}
               saved={!!mySaves[p.id]}
@@ -680,6 +704,7 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
 // ------------------------------------------------------------
 type FeedPostRowProps = {
   post: Post;
+  isOwn?: boolean;
   liked: boolean;
   concerned: boolean;
   saved: boolean;
@@ -696,6 +721,7 @@ type FeedPostRowProps = {
 };
 const FeedPostRow = memo(function FeedPostRow({
   post,
+  isOwn,
   liked,
   concerned,
   saved,
@@ -744,6 +770,7 @@ const FeedPostRow = memo(function FeedPostRow({
   return (
     <AnonPostCard
       post={post}
+      isOwn={isOwn}
       liked={liked}
       concerned={concerned}
       saved={saved}

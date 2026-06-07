@@ -11,6 +11,7 @@ import Animated, {
   interpolateColor,
 } from 'react-native-reanimated';
 import { useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
 import { safeOpenUrl } from '../../lib/openUrl';
 import { Icon } from '../../constants/icons';
 import type { Post } from '../../types/models';
@@ -46,6 +47,7 @@ import type { Poll } from '../../lib/api/polls';
 import { Avatar } from '../ui/Avatar';
 import { CommunityIcon } from '../ui/CommunityIcon';
 import { formatRelative } from '../../lib/utils/date';
+import { pseudonymFor } from '../../lib/utils/pseudonym';
 import { sanitizeUrl } from '../../lib/sanitize';
 import { ObsidianSaveButton } from '../ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
@@ -782,8 +784,8 @@ type AnonPostCardProps = {
   reason?: { text: string; kind: string };
   communities?: PostCommunityRef[];
   // Reddit スタイル表示の切り替え。
-  //   'home'      (既定): コミュニティ icon + 名前を主役に表示 (ホームフィード・タグページ等)
-  //   'community' : ユーザーの avatar + nickname を主役に表示 (コミュニティ詳細タブ)
+  //   'home'      (既定): コミュニティ icon + 名前を主役に表示 (ホーム / コミュニティタブ / 検索 / タグページ等)
+  //   'community' : 投稿者本人のアバター + 擬似ハンドル(id)を主役に表示 (コミュニティ詳細ページのみ・de-anon Phase2)
   viewContext?: 'home' | 'community';
   onLike: () => void;
   onConcern: () => void;
@@ -831,6 +833,16 @@ function AnonPostCardInner({
   //   同一参照を返すので、Card 再 render は色変化のときだけ。
   const C = useColors();
   const STYLES = useMemo(() => makeStyles(C), [C]);
+  const router = useRouter();
+
+  // ★ de-anon Phase2: コミュニティ詳細 (viewContext='community') では投稿者本人の
+  //   アバター + 擬似ハンドルを表示する。identity は server 供給の pseudonym_id から
+  //   決定的に導出 (author_id 非依存・comment / 投稿詳細と同方針)。tap で擬似プロフィールへ。
+  const pseudonymId = post.pseudonym_id ?? null;
+  const pseudo = useMemo(() => pseudonymFor(pseudonymId), [pseudonymId]);
+  const goToPseudoProfile = useCallback(() => {
+    if (pseudonymId) router.push(`/user/${pseudonymId}` as never);
+  }, [router, pseudonymId]);
 
   // ★ ModActionMenu 配線 (mod だけに見える 3-dot)
   // post.community_id は型に無いが post_communities junction で 1 件以上紐付く。
@@ -1165,7 +1177,7 @@ function AnonPostCardInner({
     <Animated.View style={containerStyleCombined}>
       {/* ヘッダー: アバター / メイン表示 / ⋯
           - 公式管理者: shield + 実名 · 所属 (de-anonymize)
-          - viewContext='community': ユーザー avatar + nickname (Reddit の r/ 内投稿スタイル)
+          - viewContext='community': 投稿者本人の avatar + 擬似ハンドル(id) (コミュニティ詳細ページ・de-anon Phase2)
           - viewContext='home' (既定): コミュニティ icon + 名前 (Reddit の r/ サブレ表示スタイル) */}
       <View style={STYLES.headerRow}>
         {/* ===== アバター ===== */}
@@ -1175,12 +1187,17 @@ function AnonPostCardInner({
             <Icon.shield size={20} color={C.accent} strokeWidth={2.4} />
           </View>
         ) : viewContext === 'community' ? (
-          // コミュニティタブ: ユーザーのアバター (avatar_url があれば画像、なければ nickname 頭文字)
-          <Avatar
-            size={40}
-            uri={post.author_avatar_url}
-            name={post.author_nickname ?? undefined}
-          />
+          // コミュニティ詳細: 投稿者本人のアバター + 擬似ハンドル (de-anon Phase2)。
+          //   画像優先 → emoji → 擬似色+頭文字 fallback。tap で擬似プロフィールへ。
+          <PressableScale onPress={goToPseudoProfile} hitSlop={4} disabled={!pseudonymId}>
+            <Avatar
+              size={40}
+              uri={post.avatar_url}
+              emoji={post.avatar_url ? undefined : post.avatar_emoji}
+              color={pseudo.color}
+              name={pseudo.initial}
+            />
+          </PressableScale>
         ) : (
           // ホーム/デフォルト: コミュニティアイコン (タップでコミュニティへ遷移)
           <PressableScale
@@ -1230,11 +1247,17 @@ function AnonPostCardInner({
             </View>
           </View>
         ) : viewContext === 'community' ? (
-          // コミュニティタブ: ユーザー名 + 時刻
+          // コミュニティ詳細: 投稿者の擬似ハンドル (tap で擬似プロフィール) + 時刻
           <View style={STYLES.anonRow}>
-            <Text style={anonLabelStyle} numberOfLines={1}>
-              {post.author_nickname ?? t('メンバー')}
-            </Text>
+            <PressableScale
+              onPress={goToPseudoProfile}
+              disabled={!pseudonymId}
+              scaleValue={0.98}
+            >
+              <Text style={[anonLabelStyle, { color: pseudo.color }]} numberOfLines={1}>
+                {pseudo.handle}
+              </Text>
+            </PressableScale>
             <View style={STYLES.anonMetaRow}>
               <Text style={STYLES.anonRelative} numberOfLines={1}>
                 {formatRelative(post.created_at)}
