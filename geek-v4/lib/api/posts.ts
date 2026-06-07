@@ -10,28 +10,26 @@ export type { PostVisibility } from '../../types/models';
 export type SortMode = 'for-you' | 'hot' | 'new' | 'top' | 'rising';
 
 // posts SELECT で取得するカラム一覧 (一箇所でメンテ可能)
-// author_id は公式コミュ管理者投稿を de-anonymize する判定に使う (RLS で誰でも読める)
+// ★ de-anon Phase2 (2b): anon/authenticated から SELECT(author_id) を REVOKE するため、
+//   client の REST SELECT から author_id を外す。投稿者アイデンティティ (avatar / pseudonym /
+//   official_author / is_own) はすべて feed/community/detail の RPC (get_home_feed /
+//   get_feed_page / get_community_feed) が server 側でマスクして供給する。
+//   REST 経路 (この SELECT) はカード本体 (本文 / media / counters 等) のみを担う。
 const POSTS_SELECT_COLS =
-  'id, content, title, last_activity_at, media_urls, media_blurhashes, video_urls, video_posters, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, qa_mode, created_at, author_id';
+  'id, content, title, last_activity_at, media_urls, media_blurhashes, video_urls, video_posters, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, qa_mode, created_at';
 
-// posts + post_communities + communities を 1 RTT で取得するための embed セット。
-// attachOfficialAuthor が必要としていた 2nd round-trip を畳み込み、
-// フィード描画の round-trip を半減させる。
-// 失敗時 (PostgREST schema cache 等) は legacy 2-step に自動 fallback。
-const POSTS_SELECT_COLS_WITH_COMM = `${POSTS_SELECT_COLS}, post_communities(community:communities(is_official, official_admin_user_id, official_admin_display_name, official_organization))`;
+// ★ de-anon Phase2 (2b): 公式管理者投稿の official_author は REST embed では
+//   判定できなくなった (判定に必要な author_id を SELECT から外したため)。
+//   feed / community / detail は useFeedPage / RPC (get_home_feed・get_feed_page・
+//   get_community_feed) が official_author を server 側でマスク供給するので、
+//   REST 側の embed 取得 + author_id マッチは廃止する。
+//   後方互換のため別名は残すが中身は base SELECT と同一 (embed 無し)。
+const POSTS_SELECT_COLS_WITH_COMM = POSTS_SELECT_COLS;
 
-// embed 結果 → official_author 派生フィールドを posts[] に書き戻すヘルパ。
-// (attachOfficialAuthor の純粋関数版 — supabase fetch なし)
-type EmbeddedCommunityRow = {
-  is_official?: boolean | null;
-  official_admin_user_id?: string | null;
-  official_admin_display_name?: string | null;
-  official_organization?: string | null;
-};
+// (旧 embed 経路の名残) post_communities embed を含み得る生 post 型。
+// 2b 以降 embed は撃たないが、後段の pass-through ヘルパ型を壊さないよう optional 保持。
 type PostWithEmbeddedComm = Post & {
-  post_communities?:
-    | Array<{ community: EmbeddedCommunityRow | EmbeddedCommunityRow[] | null }>
-    | null;
+  post_communities?: unknown;
 };
 
 // ============================================================
@@ -56,31 +54,16 @@ export async function deleteOwnPost(postId: string): Promise<void> {
   }
 }
 
+// ★ de-anon Phase2 (2b): official_author は RPC (useFeedPage 等) が供給するため、
+//   REST 経路では算出しない。embed フィールドが万一混ざっても Post 型に揃うよう
+//   落とすだけの pass-through (author_id 非依存)。
 function attachOfficialAuthorFromEmbed<T extends Post>(
   rawPosts: PostWithEmbeddedComm[],
 ): T[] {
   return rawPosts.map((p) => {
-    // post_communities embed (RLS で見れない場合は null/[])
-    const pcs = Array.isArray(p.post_communities) ? p.post_communities : [];
-    let official: { name: string; organization: string } | undefined;
-    for (const pc of pcs) {
-      const raw = pc.community;
-      if (!raw) continue;
-      const c = Array.isArray(raw) ? raw[0] : raw;
-      if (!c || !c.is_official || !c.official_admin_user_id) continue;
-      if (!p.author_id || p.author_id !== c.official_admin_user_id) continue;
-      official = {
-        name: c.official_admin_display_name ?? '',
-        organization: c.official_organization ?? '',
-      };
-      break; // 最初に該当する公式コミュ管理者を採用
-    }
     // embed フィールド (post_communities) を返却 shape から落として Post 型に揃える
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { post_communities: _ignored, ...rest } = p;
-    if (official) {
-      return { ...(rest as Post), official_author: official } as T;
-    }
     return rest as T;
   });
 }
@@ -746,37 +729,12 @@ export async function fetchCommunityPosts({
   // embed 経路で attach 済 → 2nd RTT を skip。
   const decorated = usedFallback ? await attachOfficialAuthor(posts) : posts;
 
-  // コミュニティタブ用: 名前付き投稿(is_anonymous=false。公式/実名)だけ profiles から
-  // nickname + avatar_url を引いて attach する。
-  // ★ 匿名投稿には実名を一切引かない。匿名性は RLS だけに頼らず「実名を要求するクエリ
-  //   自体を作らない」ことで担保する(将来 RLS が緩和されても匿名作者の身元が漏れない)。
-  const namedAuthorIds = Array.from(
-    new Set(
-      decorated
-        .filter((p) => p.is_anonymous === false)
-        .map((p) => p.author_id)
-        .filter((id): id is string => Boolean(id)),
-    ),
-  );
-  if (namedAuthorIds.length > 0) {
-    const { data: profs } = await supabase
-      .from('profiles')
-      .select('id, nickname, avatar_url')
-      .in('id', namedAuthorIds);
-    const profMap = new Map(
-      (profs ?? []).map((p) => [p.id, p as { id: string; nickname: string; avatar_url: string | null }]),
-    );
-    return {
-      posts: decorated.map((p) => {
-        if (p.is_anonymous !== false) return p; // 匿名は実名を付与しない
-        const prof = p.author_id ? profMap.get(p.author_id) : undefined;
-        if (!prof) return p;
-        return { ...p, author_nickname: prof.nickname, author_avatar_url: prof.avatar_url };
-      }),
-      nextCursor,
-    };
-  }
-
+  // ★ de-anon Phase2 (2b): 名前付き投稿 (is_anonymous=false) の nickname / avatar も
+  //   author_id 依存の REST join では引かない。コミュニティタブの投稿者表示
+  //   (author_nickname / avatar / pseudonym / official_author) は get_community_feed RPC
+  //   (0112 / community 用 RPC) が server 側で供給する。
+  //   ここでは「実名を要求するクエリ自体を作らない」ことで、SELECT(author_id) REVOKE 後も
+  //   匿名作者の身元が漏れないことを担保する。
   return { posts: decorated, nextCursor };
 }
 
@@ -856,59 +814,18 @@ export async function fetchPostsByIds(ids: string[]): Promise<Post[]> {
 }
 
 // ============================================================
-// 公式コミュ管理者投稿の de-anonymize
+// 公式コミュ管理者投稿の de-anonymize (★ de-anon Phase2 で REST 算出は廃止)
 // ------------------------------------------------------------
-// posts.author_id === communities.official_admin_user_id かつ
-// is_official=true の community に紐付いている post には、実名 + 所属
-// を派生フィールド official_author としてセットする。
-// post → post_communities → communities を 1 リクエストで集約。
-// 該当しない post は official_author = undefined のまま (anon 表示)。
+// 旧実装は posts.author_id === communities.official_admin_user_id を REST で
+// 突合して official_author を派生していた。2b で SELECT(author_id) を REVOKE
+// するため、この判定は server 側 RPC (get_home_feed / get_feed_page /
+// get_community_feed = useFeedPage 経由) に一本化した。
+// REST 経路 (fetchPosts/ById/ByIds/CommunityPosts) は official_author を算出
+// しない pass-through に縮退する。embed 失敗 fallback からも呼ばれ続けるため、
+// 呼び出し側を壊さないようシグネチャは維持 (no-op)。
 // ============================================================
 async function attachOfficialAuthor<T extends Post>(posts: T[]): Promise<T[]> {
-  if (posts.length === 0) return posts;
-  const postIds = posts.map((p) => p.id);
-  const { data, error } = await withApiTimeout(
-    supabase
-      .from('post_communities')
-      .select(
-        'post_id, community:communities(is_official, official_admin_user_id, official_admin_display_name, official_organization)',
-      )
-      .in('post_id', postIds),
-    'posts.attachOfficialAuthor',
-    8000,
-  );
-  if (error) {
-    // 致命的ではない — 公式表示が出ないだけで anon 表示にフォールバック
-    console.warn('[attachOfficialAuthor] join failed:', error.message);
-    return posts;
-  }
-  type CommunityCol = {
-    is_official?: boolean | null;
-    official_admin_user_id?: string | null;
-    official_admin_display_name?: string | null;
-    official_organization?: string | null;
-  };
-  type Row = { post_id: string; community: CommunityCol | CommunityCol[] | null };
-  const rows = (data ?? []) as unknown as Row[];
-  // post_id → official admin info (最初に該当する公式コミュ管理者を採用)
-  const officialByPostId: Record<string, { name: string; organization: string }> = {};
-  for (const r of rows) {
-    if (!r.community) continue;
-    const c = Array.isArray(r.community) ? r.community[0] : r.community;
-    if (!c || !c.is_official || !c.official_admin_user_id) continue;
-    const post = posts.find((p) => p.id === r.post_id);
-    if (!post || !post.author_id) continue;
-    if (post.author_id !== c.official_admin_user_id) continue;
-    officialByPostId[r.post_id] = {
-      name: c.official_admin_display_name ?? '',
-      organization: c.official_organization ?? '',
-    };
-  }
-  return posts.map((p) => {
-    const off = officialByPostId[p.id];
-    if (!off) return p;
-    return { ...p, official_author: off };
-  });
+  return posts;
 }
 
 // ============================================================
@@ -976,8 +893,11 @@ export async function fetchCommunitiesForPosts(
 // Q&A モード (migration 0067) — post の author が enable/disable
 // ------------------------------------------------------------
 // - 認証必須 (Not authenticated → throw)
-// - post.author_id === auth.uid() のチェックは server 側 RLS でも掛かるが、
-//   silent failure を避けるため client でも 1 行 fetch して比較する。
+// - ★ de-anon Phase2 (2b): author 判定を client の author_id 突合から外す。
+//   RLS (posts_update = `auth.uid() = author_id`) が本人以外の UPDATE を弾くので、
+//   `.select('id')` で実際に更新された行を確認し、0 行なら「権限なし」として明示
+//   error を出す (deleteOwnPost と同じパターン)。これで SELECT(author_id) REVOKE 後も
+//   silent success を避けつつ author_id を一切 SELECT しない。
 // - 並び替えは server で再計算せず client side (lib/utils/qaSort.ts) に置く
 //   → 既存 comments fetch / publication / cache key を一切いじらない契約。
 // ============================================================
@@ -990,22 +910,14 @@ export async function togglePostQAMode(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  // author check — RLS でも弾かれるが、UI で明示 error を出すために事前 fetch
-  const { data: row, error: readErr } = await supabase
-    .from('posts')
-    .select('author_id')
-    .eq('id', postId)
-    .maybeSingle();
-  if (readErr) throw readErr;
-  if (!row) throw new Error('Post not found');
-  const ownerId = (row as { author_id?: string | null }).author_id;
-  if (!ownerId || ownerId !== user.id) {
-    throw new Error('Q&A モードは投稿者のみが切替可能です');
-  }
-
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('posts')
     .update({ qa_mode: enabled })
-    .eq('id', postId);
+    .eq('id', postId)
+    .select('id');
   if (error) throw error;
+  if (!data || data.length === 0) {
+    // RLS で 0 行 update = 本人でない or post が存在しない
+    throw new Error('Q&A モードは投稿者のみが切替可能です');
+  }
 }

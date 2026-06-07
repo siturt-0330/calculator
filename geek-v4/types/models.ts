@@ -72,8 +72,20 @@ export type Comment = {
   content: string;
   avatar_color: string;
   created_at: string;
-  author_id?: string | null;  // コメント主の user id — モデレーション操作・own判定用 (fetchComments が SELECT)
+  author_id?: string | null;  // コメント主の user id — 旧 own/mod 判定の name残り。de-anon Phase2 で SELECT しない (write 経路と RLS のみ)
   trust_score?: number | null;  // 著者の現在の信頼スコア
+  // ============================================================
+  // de-anon Phase2 — コメント主アイデンティティ (author_id 非依存)。
+  //   get_post_comments RPC が server 側でマスクして供給する:
+  //   - avatar_url / avatar_emoji: 本人アバター (画像優先 → emoji → 色+頭文字 fallback)
+  //   - pseudonym_id: 安定した擬似ハンドル導出用トークン (lib/utils/pseudonym.ts)。
+  //     ★ author_id ではなくこのトークンを使う (実名特定を防ぐ)。
+  //   - is_own: 閲覧者自身のコメントか (author_id 比較を client から無くす置換)。
+  // ============================================================
+  avatar_url?: string | null;
+  avatar_emoji?: string | null;
+  pseudonym_id?: string | null;
+  is_own?: boolean;
   // ============================================================
   // コメントツリー (migration 0059)
   // ------------------------------------------------------------

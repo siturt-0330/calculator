@@ -26,7 +26,6 @@ import { pseudonymFor } from '../../lib/utils/pseudonym';
 import { COMMENT_MAX_DEPTH } from '../../lib/utils/commentTree';
 import { ModActionMenu } from '../community/ModActionMenu';
 import { useIsCommunityMod } from '../../hooks/useIsCommunityMod';
-import { useAuthStore } from '../../stores/authStore';
 import { useColors } from '../../hooks/useColors';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { SPRING_SNAPPY } from '../../design/motion';
@@ -233,14 +232,16 @@ export function CommentThreadItem({
   const reduceMotion = useReducedMotion();
   // mod 判定 (parentCommunityId が無ければ false で何も出さない)
   const isMod = useIsCommunityMod(parentCommunityId);
-  const currentUserId = useAuthStore((s) => s.user?.id);
-  const commentAuthorId = (comment as Comment & { author_id?: string }).author_id;
-  const isOwnComment = !!commentAuthorId && commentAuthorId === currentUserId;
+  // ★ de-anon Phase2: own 判定は server 供給の is_own を使う (author_id 非依存)。
+  //   author_id===currentUserId の突合をやめたので useAuthStore 購読は不要になった。
+  const isOwnComment = comment.is_own ?? false;
   // 匿名のまま「同じ人」を識別できる擬似名 (実名は出さない)。タップで擬似プロフィールへ。
+  //   ★ author_id ではなく server 供給の pseudonym_id から導出する (実名特定を防ぐ)。
   const router = useRouter();
-  const pseudo = pseudonymFor(commentAuthorId);
+  const pseudonymId = comment.pseudonym_id ?? null;
+  const pseudo = pseudonymFor(pseudonymId);
   const goToProfile = () => {
-    if (commentAuthorId) router.push(`/user/${commentAuthorId}` as never);
+    if (pseudonymId) router.push(`/user/${pseudonymId}` as never);
   };
   const depth = Math.min(COMMENT_MAX_DEPTH, comment.depth ?? 0);
   const children = comment.children ?? [];
@@ -405,13 +406,16 @@ export function CommentThreadItem({
           <Animated.View style={[{ width: AV, alignItems: 'center', gap: 2 }, avatarAnimStyle]}>
             <PressableScale
               onPress={goToProfile}
-              disabled={!commentAuthorId}
+              disabled={!pseudonymId}
               hitSlop={4}
               accessibilityRole="button"
               accessibilityLabel={`${pseudo.handle} のプロフィールを開く`}
             >
+              {/* ★ de-anon Phase2: 本人アバター (画像優先 → emoji → 色+頭文字 fallback)。 */}
               <Avatar
                 size={AV}
+                uri={comment.avatar_url}
+                emoji={comment.avatar_url ? undefined : comment.avatar_emoji}
                 color={pseudo.color}
                 name={pseudo.initial}
                 ring={unread ? 'accent' : 'none'}
@@ -447,7 +451,7 @@ export function CommentThreadItem({
               {/* 擬似名ハンドル (実名ではない・タップで擬似プロフィール) */}
               <PressableScale
                 onPress={goToProfile}
-                disabled={!commentAuthorId}
+                disabled={!pseudonymId}
                 hitSlop={4}
                 accessibilityRole="button"
                 accessibilityLabel={`${pseudo.handle} のプロフィールを開く`}
