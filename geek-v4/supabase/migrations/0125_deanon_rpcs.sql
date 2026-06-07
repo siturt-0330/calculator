@@ -32,16 +32,20 @@ as $fn$
 declare
   v_viewer uuid;
   v_author uuid;
+  v_avatar_url text;
+  v_avatar_emoji text;
   v_limit  int;
-  v_result json;
+  v_posts json;
 begin
   v_viewer := auth.uid();
   v_limit  := least(greatest(coalesce(p_limit, 30), 1), 60);
 
-  -- token → 実 author_id は server 内でだけ解決 (client には返さない)
-  select id into v_author from public.profiles where pseudonym_id = p_pseudonym_id;
+  -- token → 実 author_id + アバターは server 内でだけ解決 (author_id は client に返さない)
+  select id, avatar_url, avatar_emoji
+    into v_author, v_avatar_url, v_avatar_emoji
+  from public.profiles where pseudonym_id = p_pseudonym_id;
   if v_author is null then
-    return '[]'::json;
+    return json_build_object('avatar_url', null, 'avatar_emoji', null, 'posts', '[]'::json);
   end if;
 
   with their_posts as (
@@ -68,10 +72,15 @@ begin
              'is_own', tp.is_own
            ) order by tp.created_at desc
          ), '[]'::json)
-    into v_result
+    into v_posts
   from their_posts tp;
 
-  return v_result;
+  -- 擬似プロフィールのヘッダ用に avatar も同梱 (author_id は出さない)
+  return json_build_object(
+    'avatar_url', v_avatar_url,
+    'avatar_emoji', v_avatar_emoji,
+    'posts', v_posts
+  );
 end;
 $fn$;
 grant execute on function public.get_pseudo_profile_posts(uuid, int) to anon, authenticated;
@@ -111,7 +120,9 @@ begin
     select c.id, c.post_id, c.content, c.avatar_color, c.created_at,
            c.parent_comment_id, c.reply_to_comment_id, c.media_urls,
            prof.trust_score   as trust_score,
-           prof.pseudonym_id  as author_token,   -- ★ author_id は返さない
+           prof.avatar_url    as avatar_url,      -- 本人アイコン (擬似人格として表示)
+           prof.avatar_emoji  as avatar_emoji,
+           prof.pseudonym_id  as author_token,   -- ★ author_id は返さない (擬似ハンドルの種)
            (v_viewer is not null and c.author_id = v_viewer) as is_own
     from public.comments c
     join public.profiles prof on prof.id = c.author_id
@@ -126,6 +137,7 @@ begin
              'parent_comment_id', r.parent_comment_id,
              'reply_to_comment_id', r.reply_to_comment_id,
              'media_urls', r.media_urls, 'trust_score', r.trust_score,
+             'avatar_url', r.avatar_url, 'avatar_emoji', r.avatar_emoji,
              'author_token', r.author_token, 'is_own', r.is_own
            ) order by r.created_at asc
          ), '[]'::json))
