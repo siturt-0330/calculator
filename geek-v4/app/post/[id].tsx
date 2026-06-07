@@ -46,7 +46,7 @@ import { ObsidianSaveButton } from '../../components/ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
 import { CommentThreadItem } from '../../components/post/CommentThreadItem';
 import { ReportSheet } from '../../components/post/ReportSheet';
-import { MoreHorizontal, Film } from 'lucide-react-native';
+import { MoreHorizontal, Film, Send } from 'lucide-react-native';
 import { useCommentReactions, useCommentReactionToggle } from '../../hooks/useCommentReactions';
 import { CollapsedComment } from '../../components/post/CollapsedComment';
 import { buildCommentTree } from '../../lib/utils/commentTree';
@@ -69,6 +69,9 @@ const MAX_W = 720;
 
 // インライン返信コンポーザーで扱うローカル動画 (アップロード前)
 type LocalVideo = { uri: string; mime: string; ext: string; size: number };
+
+// クイック絵文字 (コメント欄でタップ挿入・YouTube 風)
+const QUICK_EMOJIS = ['❤️', '😂', '🎉', '😢', '😮', '😅', '😊'] as const;
 
 export default function PostDetailScreen() {
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
@@ -185,6 +188,7 @@ export default function PostDetailScreen() {
   const [posting, setPosting] = useState(false);
   const [pickingImage, setPickingImage] = useState(false);
   const [pickingVideo, setPickingVideo] = useState(false);
+  const [composerActive, setComposerActive] = useState(false);
   const composerRef = useRef<TextInput>(null);
   const canPost = (commentText.trim().length > 0 || images.length > 0 || !!video) && !posting;
 
@@ -402,6 +406,10 @@ export default function PostDetailScreen() {
   // フォーカスする (Reddit / X 風)。送信は submitComment が parent/reply id 付きで行う。
   const handleReply = (c: Comment) => {
     setReplyTarget(c);
+    setComposerActive(true);
+    // YouTube 風: @ハンドルを下書きに前置きしてフォーカス (既に入力中なら上書きしない)
+    const handle = pseudonymFor(c.pseudonym_id).handle;
+    setCommentText((prev) => (prev.trim().length === 0 ? `@${handle} ` : prev));
     setTimeout(() => composerRef.current?.focus(), 50);
   };
 
@@ -525,6 +533,7 @@ export default function PostDetailScreen() {
       setImages([]);
       setVideo(null);
       setReplyTarget(null);
+      setComposerActive(false);
       composerRef.current?.blur();
       void qc.invalidateQueries({ queryKey: ['post-comments', id] });
     } catch (e: unknown) {
@@ -1090,28 +1099,24 @@ export default function PostDetailScreen() {
           ============================================================ */}
       <View style={{ width: '100%', alignItems: 'center', borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.bg2 }}>
         <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: SP['3'], paddingTop: SP['2'], paddingBottom: insets.bottom + SP['2'], gap: SP['2'] }}>
-          {/* 返信先チップ */}
+          {/* 返信先ラベル「@◯◯ さんに返信しています」(YouTube 風)・×でキャンセル */}
           {replyTarget && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.bg3, borderRadius: R.md, paddingHorizontal: SP['3'], paddingVertical: SP['2'] }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: SP['1'] }}>
               <Icon.arrowUL size={13} color={C.accent} strokeWidth={2.4} />
-              <View style={{ flex: 1 }}>
-                <Text style={[T.caption, { color: C.accent, fontWeight: '700' }]} numberOfLines={1}>
-                  {`${pseudonymFor(replyTarget.pseudonym_id).handle} さんに返信`}
+              <Text style={[T.caption, { color: C.text3, flex: 1 }]} numberOfLines={1}>
+                <Text style={{ color: C.accent, fontWeight: '700' }}>
+                  {`@${pseudonymFor(replyTarget.pseudonym_id).handle}`}
                 </Text>
-                {!!replyTarget.content && (
-                  <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
-                    {replyTarget.content}
-                  </Text>
-                )}
-              </View>
+                {' さんに返信しています'}
+              </Text>
               <PressableScale
-                onPress={() => setReplyTarget(null)}
+                onPress={() => { setReplyTarget(null); setCommentText(''); }}
                 hitSlop={8}
                 accessibilityRole="button"
                 accessibilityLabel="返信をやめる"
-                style={{ width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' }}
+                style={{ width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}
               >
-                <Icon.close size={16} color={C.text3} strokeWidth={2.4} />
+                <Icon.close size={15} color={C.text3} strokeWidth={2.4} />
               </PressableScale>
             </View>
           )}
@@ -1127,7 +1132,25 @@ export default function PostDetailScreen() {
             />
           )}
 
-          {/* 入力行: 画像 / 動画 / テキスト / 送信 */}
+          {/* クイック絵文字 (フォーカス中・YouTube 風)。タップで本文末尾に挿入 */}
+          {composerActive && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'], paddingVertical: 2 }}>
+              {QUICK_EMOJIS.map((e) => (
+                <PressableScale
+                  key={e}
+                  onPress={() => { setCommentText((prev) => prev + e); composerRef.current?.focus(); }}
+                  hitSlop={4}
+                  accessibilityRole="button"
+                  accessibilityLabel={`絵文字 ${e} を挿入`}
+                  style={{ width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Text style={{ fontSize: 22 }}>{e}</Text>
+                </PressableScale>
+              ))}
+            </View>
+          )}
+
+          {/* 入力行: 画像 / 動画 / テキスト / 送信(丸) */}
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: SP['2'] }}>
             <PressableScale
               onPress={images.length >= 4 || pickingImage ? undefined : pickImage}
@@ -1156,6 +1179,7 @@ export default function PostDetailScreen() {
                 ref={composerRef}
                 value={commentText}
                 onChangeText={setCommentText}
+                onFocus={() => setComposerActive(true)}
                 placeholder={replyTarget ? '返信を入力…' : 'コメントを入力…'}
                 placeholderTextColor={C.text3}
                 multiline
@@ -1169,12 +1193,12 @@ export default function PostDetailScreen() {
               accessibilityRole="button"
               accessibilityLabel={replyTarget ? '返信を送信' : 'コメントを送信'}
               accessibilityState={{ disabled: !canPost }}
-              style={{ paddingHorizontal: SP['3'], height: 36, minWidth: 52, borderRadius: 18, backgroundColor: canPost ? C.accent : C.bg3, alignItems: 'center', justifyContent: 'center', opacity: canPost ? 1 : 0.6 }}
+              style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: canPost ? C.accent : C.bg3, alignItems: 'center', justifyContent: 'center', opacity: canPost ? 1 : 0.6 }}
             >
               {posting ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Text style={[T.smallB, { color: canPost ? '#fff' : C.text3 }]}>{replyTarget ? '返信' : '送信'}</Text>
+                <Send size={18} color={canPost ? '#fff' : C.text3} strokeWidth={2.2} />
               )}
             </PressableScale>
           </View>
