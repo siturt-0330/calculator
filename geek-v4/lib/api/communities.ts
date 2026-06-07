@@ -1273,10 +1273,18 @@ export async function fetchMyCommunityPostsRich(
     // RPC が直接返している community_id / author_nickname / official_author は
     // Post 型に乗っていない補助フィールドなので、Post 部分だけを取り出して返す。
     // (UI 側は communityByPost / post.official_author のみを参照する)
+    // ★ de-anon Phase2: 投稿者アイデンティティ表示用 (avatar_url / avatar_emoji /
+    //   pseudonym_id) も明示的に Post へ載せて、コミュニティタブのカードでも
+    //   author_id 非依存で投稿者を主役表示できるようにする (既定 null)。
     const posts: Post[] = rpcPosts.map((p) => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { community_id: _cid, author_nickname: _nick, community: _comm, ...rest } = p;
-      return rest as Post;
+      return {
+        ...(rest as Post),
+        avatar_url: p.avatar_url ?? null,
+        avatar_emoji: p.avatar_emoji ?? null,
+        pseudonym_id: p.pseudonym_id ?? null,
+      };
     });
 
     return { posts, communityByPost };

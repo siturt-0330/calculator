@@ -47,6 +47,10 @@ export type FeedPagePost = Post & {
   // de-anon Phase2: server が author_id をマスクして返す代わりに「自分の投稿か」を
   //   boolean で供給する (viewer 相対なので my_like 等と同じ FeedPagePost 側に置く)。
   is_own: boolean;
+  // de-anon Phase2: 投稿者アイデンティティ表示用 (author_id 非依存)。row から拾って既定 null。
+  avatar_url: string | null;
+  avatar_emoji: string | null;
+  pseudonym_id: string | null;
 };
 
 // RPC の生 row shape (server 側 json_build_object と一致)
@@ -78,6 +82,9 @@ export type RpcPostRow = Post & {
   added_tags?: string[] | null;
   poll?: RpcPollRow | null;
   is_own?: boolean | null;
+  avatar_url?: string | null;
+  avatar_emoji?: string | null;
+  pseudonym_id?: string | null;
 };
 
 /**
@@ -226,6 +233,13 @@ export function normalizeFeedPageRow(r: RpcPostRow): FeedPagePost {
     poll: _pl,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     is_own: _io,
+    // de-anon Phase2: 表示用フィールドは下で明示的に null 既定で再付与する
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    avatar_url: _av,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    avatar_emoji: _ae,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    pseudonym_id: _pid,
     ...post
   } = r;
 
@@ -240,6 +254,9 @@ export function normalizeFeedPageRow(r: RpcPostRow): FeedPagePost {
     added_tags,
     poll,
     is_own: !!r.is_own,
+    avatar_url: r.avatar_url ?? null,
+    avatar_emoji: r.avatar_emoji ?? null,
+    pseudonym_id: r.pseudonym_id ?? null,
   };
   return out;
 }

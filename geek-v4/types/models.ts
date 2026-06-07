@@ -41,6 +41,13 @@ export type Post = {
   // de-anon Phase2: server (feed/community RPC) が「閲覧者自身の投稿か」を boolean で供給する
   //   派生フィールド。author_id 比較を client から無くすための置換 (REVOKE 後は author_id が来ない)。
   is_own?: boolean;
+  // de-anon Phase2: 投稿者アイデンティティの表示用フィールド (author_id 非依存)。
+  //   - avatar_url / avatar_emoji: 投稿者アバター (画像優先 → emoji → 色+頭文字 fallback)。
+  //   - pseudonym_id: 安定した擬似ハンドルを導出するためのトークン (lib/utils/pseudonym.ts)。
+  //     ★ author_id ではなくサーバが供給するこのトークンを使う (実名特定を防ぐ)。
+  avatar_url?: string | null;
+  avatar_emoji?: string | null;
+  pseudonym_id?: string | null;
   // Reddit スタイル author 表示用。
   //   - home feed: communities prop から community 名/icon を使用するため不要。
   //   - community tab (viewContext='community'): fetchCommunityPosts が profiles から一括取得して attach。
