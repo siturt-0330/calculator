@@ -122,7 +122,7 @@ begin
            prof.trust_score   as trust_score,
            prof.avatar_url    as avatar_url,      -- 本人アイコン (擬似人格として表示)
            prof.avatar_emoji  as avatar_emoji,
-           prof.pseudonym_id  as author_token,   -- ★ author_id は返さない (擬似ハンドルの種)
+           prof.pseudonym_id  as pseudonym_id,   -- ★ author_id は返さない (擬似ハンドルの種)
            (v_viewer is not null and c.author_id = v_viewer) as is_own
     from public.comments c
     join public.profiles prof on prof.id = c.author_id
@@ -138,7 +138,7 @@ begin
              'reply_to_comment_id', r.reply_to_comment_id,
              'media_urls', r.media_urls, 'trust_score', r.trust_score,
              'avatar_url', r.avatar_url, 'avatar_emoji', r.avatar_emoji,
-             'author_token', r.author_token, 'is_own', r.is_own
+             'pseudonym_id', r.pseudonym_id, 'is_own', r.is_own
            ) order by r.created_at asc
          ), '[]'::json))
     into v_result
