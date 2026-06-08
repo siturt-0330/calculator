@@ -26,6 +26,7 @@ import {
   Moon, Sun, Palette,
   Play, Pause, TrendingUp,
   Volume2, VolumeX,
+  Instagram, Facebook,
 } from 'lucide-react-native';
 
 export const Icon = {
@@ -46,6 +47,7 @@ export const Icon = {
   moon: Moon, sun: Sun, palette: Palette,
   play: Play, pause: Pause, trendingUp: TrendingUp,
   volume: Volume2, volumeMute: VolumeX,
+  instagram: Instagram, facebook: Facebook,
   // TabIcon.tsx の TabKey 'game' から参照されている (dead route だが型に存在)
   game: Gamepad2,
 } as const;

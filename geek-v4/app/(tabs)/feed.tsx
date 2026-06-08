@@ -5,6 +5,7 @@ import {
   RefreshControl,
   Platform,
   StyleSheet,
+  ActivityIndicator,
   useWindowDimensions,
   type NativeSyntheticEvent,
   type NativeScrollEvent,
@@ -271,7 +272,7 @@ export default function FeedScreen() {
       },
     ],
   }));
-  const { posts, reasonsMap, communitiesByPost, ads, interestTags, loading, refreshing, refresh, loadMore } = useFeed();
+  const { posts, reasonsMap, communitiesByPost, ads, interestTags, loading, loadingMore, refreshing, refresh, loadMore } = useFeed();
   // Smart skeleton timing — skeleton only after 200ms of continuous loading.
   // <200ms loads (cache hits / fast network) skip skeleton entirely to avoid flash.
   const showSkeleton = useDelayedLoading(loading, 200);
@@ -397,7 +398,7 @@ export default function FeedScreen() {
   // 旧 6 hook (useLikes/useConcerns/useSaves/useReactions/useAddedTags/usePolls)
   // を 1 RPC に統合。失敗 / ENV flag 無効時は legacy hook 群へフォールバック。
   // rpcLoading / rpcEmpty は使わない (旧 fallback ロジック用) — 上記コメント参照。
-  const { fullPosts, isDisabled: rpcDisabled } = useFeedPage(postIds);
+  const { fullPosts, isDisabled: rpcDisabled, isEmpty: rpcEmpty } = useFeedPage(postIds);
 
   // ★ Realtime 反映 — RPC 経路でも post_reactions / likes / concerns / saves の
   //   変更を購読する。useReactions(legacyIds) の中の subscription は legacyIds=[]
@@ -417,7 +418,10 @@ export default function FeedScreen() {
   //   レイテンシ短縮 + Supabase row 引きの圧縮 (4-6x の query 数削減) を狙う。
   //   renderItem 側で full?.X ?? legacy[id] ?? EMPTY の順 — RPC 経路なら legacy は
   //   常に空 map になるが、依然として fallback 経路で安全。
-  const useLegacy = rpcDisabled;
+  // ★ 安全網 (2026-06): RPC が無効 (ENV flag) または「成功したのに 0 件 (= pseudonym_id 列欠落等で
+  //   degrade して空配列が返る)」のとき、legacy hook 群へフォールバックして反応(スタンプ)/いいね等が
+  //   消えないようにする。正常時 (RPC が周辺データを返す) は rpcEmpty=false なので従来どおり legacy は走らない。
+  const useLegacy = rpcDisabled || rpcEmpty;
   const legacyIds = useLegacy ? postIds : EMPTY_LEGACY_IDS;
 
   const { data: legacyMyLikes = EMPTY_BOOL_MAP } = useLikes(legacyIds);
@@ -920,6 +924,13 @@ export default function FeedScreen() {
         }
         onEndReached={loadMore}
         onEndReachedThreshold={0.6}
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={{ paddingVertical: SP['5'], alignItems: 'center' }}>
+              <ActivityIndicator size="small" color={C.accent} />
+            </View>
+          ) : null
+        }
         contentContainerStyle={{
           // フラット: 投稿は全幅・隙間なし。横余白は投稿側 (paddingHorizontal:16) に
           // 一元化し、下罫線 (hairline) を中央 720 列の端まで延ばす。先頭の上余白も

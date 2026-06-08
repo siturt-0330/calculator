@@ -108,12 +108,12 @@ export default function MyFriendsScreen() {
   // ============================================================
   // SegmentedControl の label 組み立て
   // ============================================================
-  // 申請タブ (incoming) は未読件数を括弧書きで強調 (例: 「申請 (3)」)。
-  // 0 件のときは数字を出さず「申請」のみ。
+  // 件数バッジは 3 タブで表記を統一する (「友達 5」「申請 3」「送信 2」)。
+  // 0 件のときは数字を出さずラベルのみ。
   const friendsLabel =
     friends.length > 0 ? `友達 ${friends.length}` : '友達';
   const incomingLabel =
-    incoming.length > 0 ? `申請 (${incoming.length})` : '申請';
+    incoming.length > 0 ? `申請 ${incoming.length}` : '申請';
   const outgoingLabel =
     outgoing.length > 0 ? `送信 ${outgoing.length}` : '送信';
 

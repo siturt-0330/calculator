@@ -1,103 +1,149 @@
 // ============================================================
-// Circular image cropper screen — fullscreen modal-like
+// Image cropper screen — fullscreen modal-like
 // ============================================================
-// `openCropper(uri)` (lib/imageCropper.ts) からこの画面を push して、
-// pan + pinch zoom + 90° rotate でユーザーが正方形 (円) に切り抜いた結果を
-// resolveCropper() で resolve する設計。
+// `openCropper(uri, opts?)` (lib/imageCropper.ts) からこの画面を push して、
+// pan + pinch zoom + 90° rotate でユーザーが切り抜いた結果を resolveCropper() で
+// resolve する設計。opts.shape で 2 モードを切り替える:
+//   - 'circle' (既定): アイコン用。円マスク / 1:1 正方形 / 512px 出力。
+//   - 'rect'        : 投稿写真用。任意アスペクトの矩形フレーム (元の比率/1:1/4:5/16:9) +
+//                     回転。出力は crop 解像度を活かしつつ長辺 outMaxEdge に収める。
 //
-// レイアウト:
-//   - 全画面 黒背景
-//   - 中央に円形マスク (周囲 55% 黒で暗転)
-//   - 画像は pinch/pan で動かせて、円の中身が crop される
-//   - 左上 ← 戻る / 右下 「次へ」 / 中央下 90° 回転
+// ★ WYSIWYG (回転時も「見えている範囲 == 切り出される範囲」):
+//   表示の <Image> は *元画像* を resizeMode='cover' で box に描き、box ごと rotate する。
+//   box には computeDisplayBoxDims で *元画像アスペクト* を持たせる (90/270 では fit を入れ替え)
+//   ので cover が回転前にクリップしない。box を回した footprint = cover footprint = 出力 crop
+//   と一致する (lib/cropMath.ts のコメント参照)。回転アニメは累積角で常に前進させる。
 //
-// crop の数学:
-//   円の中身に映っているソース画像の領域を、現在の transform から逆算して
-//   ImageManipulator.manipulateAsync に渡す。rotation は manipulator の
-//   actions に積んで先に回転させ、その後の正方形 crop を計算する。
+// crop の数学は lib/cropMath.ts に純関数として切り出し (Jest で検証)。
 // ============================================================
 
-import { useEffect, useState, useMemo } from 'react';
-import { View, Text, Dimensions, Image, StyleSheet, ActivityIndicator, Platform } from 'react-native';
+import { useEffect, useState, useMemo, useRef } from 'react';
+import {
+  View,
+  Text,
+  Image,
+  StyleSheet,
+  ActivityIndicator,
+  Platform,
+  useWindowDimensions,
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Icon } from '../constants/icons';
 import { C, SP } from '../design/tokens';
 import { PressableScale } from '../components/ui/PressableScale';
-import { resolveCropper, consumePendingSource } from '../lib/imageCropper';
+import { resolveCropper, consumePendingSource, type CropperOptions } from '../lib/imageCropper';
 import { cropImageOnWebCanvas } from '../lib/image';
+import { computeCropRect, computeFitDims, computeOutputDims, computeDisplayBoxDims } from '../lib/cropMath';
 
 type Rotation = 0 | 90 | 180 | 270;
+type AspectMode = 'original' | 'square' | 'portrait' | 'wide';
+
+const ASPECT_CHIPS: { key: AspectMode; label: string }[] = [
+  { key: 'original', label: '元の比率' },
+  { key: 'square', label: '1:1' },
+  { key: 'portrait', label: '4:5' },
+  { key: 'wide', label: '16:9' },
+];
 
 export default function ImageCropperScreen() {
-  // 旧仕様: params.uri に sourceUri を直接乗せていた (blob:/data: URL).
-  // 新仕様: params.id だけ受け取り, lib/imageCropper.ts の module-level Map から
-  // sourceUri を取得する. 4K HEIC を base64 化した 13MB+ の data URL を URL 長制限
-  // (iOS Safari ~80K chars) で truncate する事故 (cropper が「写真選んでも何も起きない」)
-  // を防ぐため. uri 互換は後方互換用に残す (古い caller / deeplink が事故らないように).
   const params = useLocalSearchParams<{ id?: string | string[]; uri?: string | string[] }>();
   const paramId =
     typeof params.id === 'string' ? params.id : Array.isArray(params.id) ? params.id[0] ?? '' : '';
   const legacyUri =
     typeof params.uri === 'string' ? params.uri : Array.isArray(params.uri) ? params.uri[0] ?? '' : '';
-  // useMemo で同一の id に対して同一の sourceUri を返す.
-  // (consumePendingSource 自体は副作用なしの read なので毎 render 呼んでも安全だが,
-  //  log scope の意味で useMemo に閉じ込めておく.)
-  const sourceUri = useMemo(() => {
+  const pending = useMemo(() => {
     if (paramId) {
       const fromMap = consumePendingSource(paramId);
       if (!fromMap) {
         console.warn('[image-cropper] paramId が Map に無い — refresh で in-memory が消えた可能性:', paramId);
+        return null;
       }
-      return fromMap ?? '';
+      return fromMap;
     }
-    return legacyUri;
+    if (legacyUri) return { uri: legacyUri, opts: {} };
+    return null;
   }, [paramId, legacyUri]);
+
+  const sourceUri = pending?.uri ?? '';
+  const opts: CropperOptions = pending?.opts ?? {};
+  const isRect = opts.shape === 'rect';
+  const outMaxEdge = opts.outMaxEdge ?? 1440;
+
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { width: screenW, height: screenH } = Dimensions.get('window');
-  const cropDiameter = Math.min(screenW, screenH) * 0.75;
+  // ★ useWindowDimensions: 初期 render で 0x0 を返す Dimensions.get の race を回避。reactive。
+  const { width: screenW, height: screenH } = useWindowDimensions();
 
   const [imageSize, setImageSize] = useState<{ w: number; h: number } | null>(null);
   const [rotation, setRotation] = useState<Rotation>(0);
+  const [aspectMode, setAspectMode] = useState<AspectMode>('original');
   const [busy, setBusy] = useState(false);
-  // ★「真っ黒」事故撲滅 (2026-05-31):
-  //   旧実装は Web で makeWebPreviewDataUrl(1024) を生成して displayUri を差し替えていたが、
-  //   iOS Safari / WKWebView (TikTok 等 in-app browser) では canvas.toDataURL の
-  //   結果が onLoad は通るが naturalWidth=0 になる silent decode failure が起きる
-  //   ことがあり、それが「円の中身だけ真っ黒」事故の正体だった。
-  //   preview は完全に撤去し、常に sourceUri を直描画する。pan/pinch のカクつき対策は
-  //   Web 側で will-change/translate3d による GPU layer 化 + 表示時の resize に置換。
   const [renderError, setRenderError] = useState(false);
 
-  // 動かす変数 — reanimated SharedValue で worklet スレッドからも触れる
+  // 二重ナビゲーション防止 (busy 中の戻る連打 + handleNext 完了の競合対策)
+  const navigatedRef = useRef(false);
+  // 回転アニメ用の累積角 (剰余を取らず常に +90 → 270→0 で逆回転しない)
+  const rotDegRef = useRef(0);
+
+  // 動かす変数 — reanimated SharedValue
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
   const scale = useSharedValue(1);
   const savedTranslateX = useSharedValue(0);
   const savedTranslateY = useSharedValue(0);
   const savedScale = useSharedValue(1);
-  const rotationSv = useSharedValue(0);
+  const rotationSv = useSharedValue(0); // 累積角 (deg) — 表示の rotate 用
+
+  // canGoBack フォールバック付きの退出 (refresh/deeplink で back stack が空でも詰まない)。
+  const safeExit = () => {
+    if (navigatedRef.current) return;
+    navigatedRef.current = true;
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)/feed' as never);
+  };
+
+  // ----- crop フレーム寸法 -----
+  const swap = rotation === 90 || rotation === 270;
+  const rotatedAspect = imageSize ? (swap ? imageSize.h / imageSize.w : imageSize.w / imageSize.h) : 1;
+  const aspectRatio = !isRect
+    ? 1
+    : aspectMode === 'original'
+      ? rotatedAspect
+      : aspectMode === 'square'
+        ? 1
+        : aspectMode === 'portrait'
+          ? 4 / 5
+          : 16 / 9;
+
+  // フレームは画面中央配置 (computeCropRect が中央前提)。ただし上下 chrome
+  // (戻る/下バー/アスペクト toolbar) に被らないよう利用可能高に収める。
+  const { frameW, frameH } = useMemo(() => {
+    const bottomChromeH = isRect ? 132 : 88;
+    const vClear = Math.max(insets.top + 56, insets.bottom + bottomChromeH);
+    const availH = Math.max(160, screenH - 2 * vClear);
+    const availW = screenW * 0.92;
+    if (!isRect) {
+      const d = Math.min(Math.min(screenW, screenH) * 0.75, availW, availH);
+      return { frameW: d, frameH: d };
+    }
+    if (aspectRatio >= availW / availH) return { frameW: availW, frameH: availW / aspectRatio };
+    return { frameW: availH * aspectRatio, frameH: availH };
+  }, [isRect, screenW, screenH, insets.top, insets.bottom, aspectRatio]);
 
   // uri が無ければ即 cancel して back
   useEffect(() => {
     if (!sourceUri) {
       resolveCropper(null);
-      router.back();
+      safeExit();
     }
-  }, [sourceUri, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceUri]);
 
-  // unmount 時の safety: 「次へ」「戻る」を経由せずに画面が消えた場合 (例: ブラウザ back,
-  // refresh, 他画面への deeplink 等) でも pending promise を必ず resolve(null) する。
-  // これをやらないと caller の `await openCropper(...)` が永久 hang して
-  // 「アイコン選択ボタンが反応しない」現象になる。
+  // unmount 時の safety: 「次へ」「戻る」を経由せず画面が消えても pending を resolve(null)。
   useEffect(() => {
     return () => {
       resolveCropper(null);
@@ -108,19 +154,19 @@ export default function ImageCropperScreen() {
   useEffect(() => {
     if (!sourceUri) return;
     let alive = true;
+    const stallTimer = setTimeout(() => {
+      if (alive && !imageSize) {
+        console.warn('[image-cropper] getSize stalled 12s — showing render error');
+        setRenderError(true);
+      }
+    }, 12_000);
     Image.getSize(
       sourceUri,
       (w, h) => {
         if (!alive) return;
-        // ★ HEIC silent-decode ガード: iOS Safari / WKWebView (TikTok 等 in-app)
-        //   は HEIC で onload を発火させつつ naturalWidth=0 を返す挙動を持つ.
-        //   その状態で setImageSize({w:0, h:0}) すると fitDims が NaN 化 → Image が
-        //   描画されず真っ黒画面のまま操作不能 (onError も発火しないので PR #122 の
-        //   Image onError revert が効かない) という事故になる. 明示的に検出してエラー表示.
+        clearTimeout(stallTimer);
         if (!w || !h || w < 1 || h < 1) {
           console.warn('[image-cropper] getSize returned invalid dims:', w, h, '— treating as decode failure');
-          // imageSize は null のまま (= ActivityIndicator も非表示にする条件にできる)
-          // 「画像を表示できません」 overlay を出してユーザに別画像を選んでもらう
           setRenderError(true);
           return;
         }
@@ -129,53 +175,53 @@ export default function ImageCropperScreen() {
       (err) => {
         console.warn('[image-cropper] getSize failed:', err);
         if (alive) {
+          clearTimeout(stallTimer);
           resolveCropper(null);
-          router.back();
+          safeExit();
         }
       },
     );
     return () => {
       alive = false;
+      clearTimeout(stallTimer);
     };
-  }, [sourceUri, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceUri]);
 
-  // ※ 旧 preview 生成 useEffect は撤去 (上記コメント参照)。displayUri 自体を廃止し
-  //    Animated.Image には sourceUri を直接渡す。
-
-  // cover-fit の dimensions (rotation 適用後の自然 aspect で考える)
+  // cover-fit の表示寸法 (rotation 適用後の footprint) + 表示 box (元画像アスペクト)
   const fitDims = useMemo(() => {
     if (!imageSize) return null;
-    // rotation 90/270 のときは画像の幅高が入れ替わる前提で fit する
-    const swap = rotation === 90 || rotation === 270;
-    const natW = swap ? imageSize.h : imageSize.w;
-    const natH = swap ? imageSize.w : imageSize.h;
-    const aspect = natW / natH;
-    let fitW: number;
-    let fitH: number;
-    // cover: 小さい辺を cropDiameter に合わせる
-    if (aspect >= 1) {
-      fitH = cropDiameter;
-      fitW = cropDiameter * aspect;
-    } else {
-      fitW = cropDiameter;
-      fitH = cropDiameter / aspect;
-    }
-    return { fitW, fitH };
-  }, [imageSize, rotation, cropDiameter]);
+    return computeFitDims({ imageW: imageSize.w, imageH: imageSize.h, rotation, frameW, frameH });
+  }, [imageSize, rotation, frameW, frameH]);
 
-  // gestures
+  const boxDims = useMemo(() => {
+    if (!fitDims) return null;
+    return computeDisplayBoxDims({ fitW: fitDims.fitW, fitH: fitDims.fitH, rotation });
+  }, [fitDims, rotation]);
+
+  const clampFitW = fitDims?.fitW ?? frameW;
+  const clampFitH = fitDims?.fitH ?? frameH;
+
+  const MIN_SCALE = 1;
+  const MAX_SCALE = 4;
+
   const panGesture = useMemo(
     () =>
       Gesture.Pan()
+        .minDistance(2)
         .onUpdate((e) => {
-          translateX.value = savedTranslateX.value + e.translationX;
-          translateY.value = savedTranslateY.value + e.translationY;
+          const maxTX = Math.max(0, (clampFitW * scale.value - frameW) / 2);
+          const maxTY = Math.max(0, (clampFitH * scale.value - frameH) / 2);
+          const nx = savedTranslateX.value + e.translationX;
+          const ny = savedTranslateY.value + e.translationY;
+          translateX.value = Math.min(maxTX, Math.max(-maxTX, nx));
+          translateY.value = Math.min(maxTY, Math.max(-maxTY, ny));
         })
         .onEnd(() => {
           savedTranslateX.value = translateX.value;
           savedTranslateY.value = translateY.value;
         }),
-    [translateX, translateY, savedTranslateX, savedTranslateY],
+    [translateX, translateY, savedTranslateX, savedTranslateY, scale, clampFitW, clampFitH, frameW, frameH],
   );
 
   const pinchGesture = useMemo(
@@ -183,12 +229,18 @@ export default function ImageCropperScreen() {
       Gesture.Pinch()
         .onUpdate((e) => {
           const next = savedScale.value * e.scale;
-          scale.value = Math.max(0.5, Math.min(4, next));
+          scale.value = Math.max(MIN_SCALE, Math.min(MAX_SCALE, next));
+          const maxTX = Math.max(0, (clampFitW * scale.value - frameW) / 2);
+          const maxTY = Math.max(0, (clampFitH * scale.value - frameH) / 2);
+          translateX.value = Math.min(maxTX, Math.max(-maxTX, translateX.value));
+          translateY.value = Math.min(maxTY, Math.max(-maxTY, translateY.value));
         })
         .onEnd(() => {
           savedScale.value = scale.value;
+          savedTranslateX.value = translateX.value;
+          savedTranslateY.value = translateY.value;
         }),
-    [scale, savedScale],
+    [scale, savedScale, translateX, translateY, savedTranslateX, savedTranslateY, clampFitW, clampFitH, frameW, frameH],
   );
 
   const composedGesture = useMemo(
@@ -196,7 +248,27 @@ export default function ImageCropperScreen() {
     [panGesture, pinchGesture],
   );
 
-  // animated image transform
+  const zoomBy = (factor: number) => {
+    const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale.value * factor));
+    scale.value = next;
+    savedScale.value = next;
+    const maxTX = Math.max(0, (clampFitW * next - frameW) / 2);
+    const maxTY = Math.max(0, (clampFitH * next - frameH) / 2);
+    translateX.value = Math.min(maxTX, Math.max(-maxTX, translateX.value));
+    translateY.value = Math.min(maxTY, Math.max(-maxTY, translateY.value));
+    savedTranslateX.value = translateX.value;
+    savedTranslateY.value = translateY.value;
+  };
+
+  const resetTransform = () => {
+    translateX.value = withTiming(0, { duration: 180 });
+    translateY.value = withTiming(0, { duration: 180 });
+    scale.value = withTiming(1, { duration: 180 });
+    savedTranslateX.value = 0;
+    savedTranslateY.value = 0;
+    savedScale.value = 1;
+  };
+
   const imgAnimStyle = useAnimatedStyle(() => ({
     transform: [
       { translateX: translateX.value },
@@ -206,23 +278,24 @@ export default function ImageCropperScreen() {
     ],
   }));
 
-  // 90° 回転 — pan/scale を reset (UX 的に大きく崩れるのを防ぐ)
+  // 90° 回転 — 累積角で常に前進アニメ (271°→360° 等)。crop 計算は %360 の state を使う。
   const handleRotate = () => {
-    const next: Rotation = (((rotation + 90) % 360) as Rotation);
-    setRotation(next);
-    // 軽い transition で違和感を緩和
-    rotationSv.value = withTiming(next, { duration: 180 });
-    translateX.value = withTiming(0, { duration: 180 });
-    translateY.value = withTiming(0, { duration: 180 });
-    scale.value = withTiming(1, { duration: 180 });
-    savedTranslateX.value = 0;
-    savedTranslateY.value = 0;
-    savedScale.value = 1;
+    if (!imageSize || busy) return;
+    rotDegRef.current += 90;
+    rotationSv.value = withTiming(rotDegRef.current, { duration: 180 });
+    setRotation((rotDegRef.current % 360) as Rotation);
+    resetTransform();
+  };
+
+  const handleAspect = (m: AspectMode) => {
+    if (m === aspectMode) return;
+    setAspectMode(m);
+    resetTransform();
   };
 
   const handleCancel = () => {
     resolveCropper(null);
-    router.back();
+    safeExit();
   };
 
   const handleNext = async () => {
@@ -230,69 +303,28 @@ export default function ImageCropperScreen() {
     setBusy(true);
     try {
       const { fitW, fitH } = fitDims;
-      // 現在の transform 値 (gesture スレッドと共有)
-      const sx = scale.value;
-      const tx = translateX.value;
-      const ty = translateY.value;
+      const { cropX, cropY, cropW, cropH } = computeCropRect({
+        screenW,
+        screenH,
+        frameW,
+        frameH,
+        scale: scale.value,
+        translateX: translateX.value,
+        translateY: translateY.value,
+        fitW,
+        fitH,
+        imageW: imageSize.w,
+        imageH: imageSize.h,
+        rotation,
+        square: !isRect,
+      });
 
-      // 画面上の描画サイズ (scale 後)
-      const renderedW = fitW * sx;
-      const renderedH = fitH * sx;
+      const out = isRect ? computeOutputDims(cropW, cropH, outMaxEdge) : { outW: 512, outH: 512 };
 
-      // 画面中央が画像の center で、そこから translate
-      const cx = screenW / 2 + tx;
-      const cy = screenH / 2 + ty;
-      const imgLeftOnScreen = cx - renderedW / 2;
-      const imgTopOnScreen = cy - renderedH / 2;
-
-      // 円の bounding rect (画面上)
-      const cropLeftOnScreen = (screenW - cropDiameter) / 2;
-      const cropTopOnScreen = (screenH - cropDiameter) / 2;
-
-      // 画像 local 座標系での crop offset (rotation 後の image 寸法に対応)
-      const offsetXOnImg = cropLeftOnScreen - imgLeftOnScreen;
-      const offsetYOnImg = cropTopOnScreen - imgTopOnScreen;
-
-      // rotation 適用後の自然サイズ (manipulator が rotate を先に処理するので
-      // それに合わせて crop 座標を計算する)
-      const swap = rotation === 90 || rotation === 270;
-      const rotatedNatW = swap ? imageSize.h : imageSize.w;
-      const rotatedNatH = swap ? imageSize.w : imageSize.h;
-
-      // screen pixels → source pixels への倍率
-      const srcPerScreenX = rotatedNatW / renderedW;
-      const srcPerScreenY = rotatedNatH / renderedH;
-
-      // crop rect (rotation 適用後の座標系)。raw は cropW === cropH の正方形。
-      const rawCropX = offsetXOnImg * srcPerScreenX;
-      const rawCropY = offsetYOnImg * srcPerScreenY;
-      const rawCropW = cropDiameter * srcPerScreenX;
-      const rawCropH = cropDiameter * srcPerScreenY;
-
-      // ★ clamp は「正方形を保ったまま」画像内に収める (2026-06 修正)。
-      //   旧実装は W/H を独立に詰めていたため、ズームアウトで crop 矩形が画像より
-      //   大きくなった時 (負の origin / はみ出し) に非正方形 (例 800x1200) へ化け、
-      //   それを 512x512 に引き伸ばして「拡大 + 縦圧縮 (下ズレ)」する事故になっていた。
-      //   raw の中心を保ったまま、画像内に収まる最大正方形へ補正する。
-      const side = Math.max(16, Math.min(rawCropW, rotatedNatW, rotatedNatH));
-      const rawCenterX = rawCropX + rawCropW / 2;
-      const rawCenterY = rawCropY + rawCropH / 2;
-      const cropX = Math.min(Math.max(0, rawCenterX - side / 2), Math.max(0, rotatedNatW - side));
-      const cropY = Math.min(Math.max(0, rawCenterY - side / 2), Math.max(0, rotatedNatH - side));
-      const cropW = side;
-      const cropH = side;
-
-      console.log('[image-cropper] crop rect:', { cropX, cropY, cropW, cropH, rotation, rotatedNatW, rotatedNatH });
+      console.log('[image-cropper] crop rect:', { cropX, cropY, cropW, cropH, rotation, isRect, out });
 
       let croppedUri: string | null = null;
 
-      // ============================================================
-      // Web パス: 純粋 Canvas API で crop (HEIC / 巨大画像 / blob revoke 全部回避)
-      // ============================================================
-      // 旧 manipulator パスは:
-      //  - HEIC で失敗 → FileReader fallback が元画像を crop なしで返す重大バグ
-      //  - blob URL の早期 revoke で fetch が「Load failed」
-      // を引き起こしていた。Canvas API なら crop が必ず効く + revoke もない。
       if (Platform.OS === 'web') {
         try {
           croppedUri = await cropImageOnWebCanvas({
@@ -303,12 +335,11 @@ export default function ImageCropperScreen() {
             cropY,
             cropW,
             cropH,
+            ...(isRect ? { outW: out.outW, outH: out.outH } : { outSize: 512 }),
           });
           console.log('[image-cropper] canvas crop ok, dataUrl size:', croppedUri.length);
         } catch (canvasErr) {
-          // Canvas でも失敗 = 画像が <img> で読めない (CORS / file format)
           console.warn('[image-cropper] canvas crop failed:', canvasErr);
-          // 最終手段: FileReader で元 blob を data URL に (crop は失われる)
           try {
             const res = await fetch(sourceUri);
             const blob = await res.blob();
@@ -325,9 +356,6 @@ export default function ImageCropperScreen() {
           }
         }
       } else {
-        // ============================================================
-        // Native パス: ImageManipulator で crop
-        // ============================================================
         const actions: ImageManipulator.Action[] = [];
         if (rotation !== 0) actions.push({ rotate: rotation });
         actions.push({
@@ -338,8 +366,7 @@ export default function ImageCropperScreen() {
             height: Math.round(cropH),
           },
         });
-        actions.push({ resize: { width: 512, height: 512 } });
-
+        actions.push({ resize: { width: out.outW, height: out.outH } });
         try {
           const result = await ImageManipulator.manipulateAsync(sourceUri, actions, {
             compress: 0.85,
@@ -349,6 +376,8 @@ export default function ImageCropperScreen() {
           console.log('[image-cropper] native manipulator ok:', result.uri);
         } catch (innerErr) {
           console.warn('[image-cropper] native manipulator failed, attempting center fallback:', innerErr);
+          const rotatedNatW = swap ? imageSize.h : imageSize.w;
+          const rotatedNatH = swap ? imageSize.w : imageSize.h;
           const side = Math.min(rotatedNatW, rotatedNatH);
           const fallbackX = Math.round((rotatedNatW - side) / 2);
           const fallbackY = Math.round((rotatedNatH - side) / 2);
@@ -356,7 +385,7 @@ export default function ImageCropperScreen() {
             const fb = await ImageManipulator.manipulateAsync(
               sourceUri,
               [
-                ...(rotation !== 0 ? [{ rotate: rotation }] as ImageManipulator.Action[] : []),
+                ...(rotation !== 0 ? ([{ rotate: rotation }] as ImageManipulator.Action[]) : []),
                 { crop: { originX: fallbackX, originY: fallbackY, width: side, height: side } },
                 { resize: { width: 512, height: 512 } },
               ],
@@ -371,20 +400,20 @@ export default function ImageCropperScreen() {
       }
 
       resolveCropper(croppedUri);
-      router.back();
+      safeExit();
     } catch (e) {
       console.warn('[image-cropper] crop failed:', e);
-      // クロップ失敗時もサーバ送信は成立させたい (UX 上「無反応」が最悪) ので source を返す
       resolveCropper(sourceUri || null);
-      router.back();
+      safeExit();
     } finally {
       setBusy(false);
     }
   };
 
-  // 円の bounding rect の四方を黒 55% で暗転 (中央は透過)
-  const maskOffsetV = (screenH - cropDiameter) / 2;
-  const maskOffsetH = (screenW - cropDiameter) / 2;
+  // フレームの bounding rect の四方を黒 55% で暗転 (中央は透過)
+  const maskOffsetV = (screenH - frameH) / 2;
+  const maskOffsetH = (screenW - frameW) / 2;
+  const frameRadius = isRect ? 12 : frameW / 2;
 
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
@@ -395,42 +424,34 @@ export default function ImageCropperScreen() {
             style={[
               StyleSheet.absoluteFill,
               { alignItems: 'center', justifyContent: 'center' },
+              Platform.OS === 'web'
+                ? ({ touchAction: 'none', userSelect: 'none', overscrollBehavior: 'none' } as object)
+                : null,
             ]}
           >
-            {imageSize && fitDims ? (
+            {imageSize && fitDims && boxDims ? (
               <Animated.Image
-                // ★ 真っ黒事故撲滅: preview を介さず sourceUri を直接描画。
-                //   crop 計算は imageSize の原寸座標系で正確 (preview 無くても結果不変)。
                 source={{ uri: sourceUri }}
                 onError={(e) => {
                   const err = (e as { nativeEvent?: { error?: string } })?.nativeEvent?.error ?? 'unknown';
                   console.warn('[image-cropper] image render failed:', err, 'uri:', sourceUri?.slice(0, 64));
-                  // sourceUri 自体が render 不能 (HEIC を WebView がデコードできない等) → エラー表示
                   setRenderError(true);
                 }}
                 onLoad={() => {
                   if (renderError) setRenderError(false);
                 }}
                 style={[
-                  { width: fitDims.fitW, height: fitDims.fitH },
+                  { width: boxDims.boxW, height: boxDims.boxH },
                   imgAnimStyle,
-                  // ★ Web で pan/pinch が滑らかになるよう GPU layer を確保。
-                  //   will-change + translate3d hint でブラウザに合成レイヤを促す。
                   Platform.OS === 'web'
                     ? ({ willChange: 'transform', backfaceVisibility: 'hidden' } as object)
                     : null,
                 ]}
                 resizeMode="cover"
               />
-            ) : renderError ? (
-              // H1: getSize が w=0,h=0 で success した場合 (HEIC silent-decode)
-              // imageSize=null のままなので Animated.Image は描画されない. ここでは
-              // ActivityIndicator も出さず, 下の renderError overlay だけ見せる.
-              null
-            ) : (
+            ) : renderError ? null : (
               <ActivityIndicator size="large" color="#fff" />
             )}
-            {/* render error 時に明示メッセージを出す — 真っ黒で何も分からない状態を防ぐ */}
             {renderError && (
               <View
                 style={{
@@ -459,87 +480,74 @@ export default function ImageCropperScreen() {
         </GestureDetector>
       </View>
 
-      {/* 円の外側を暗転 — 4 つの矩形で punch-out */}
+      {/* フレーム外側を暗転 — 4 つの矩形で punch-out (中央配置) */}
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
-        <View
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            height: maskOffsetV,
-            backgroundColor: 'rgba(0,0,0,0.55)',
-          }}
-        />
-        <View
-          style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: maskOffsetV,
-            backgroundColor: 'rgba(0,0,0,0.55)',
-          }}
-        />
-        <View
-          style={{
-            position: 'absolute',
-            top: maskOffsetV,
-            left: 0,
-            width: maskOffsetH,
-            height: cropDiameter,
-            backgroundColor: 'rgba(0,0,0,0.55)',
-          }}
-        />
-        <View
-          style={{
-            position: 'absolute',
-            top: maskOffsetV,
-            right: 0,
-            width: maskOffsetH,
-            height: cropDiameter,
-            backgroundColor: 'rgba(0,0,0,0.55)',
-          }}
-        />
-        {/* 円の枠 */}
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: maskOffsetV, backgroundColor: 'rgba(0,0,0,0.55)' }} />
+        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: maskOffsetV, backgroundColor: 'rgba(0,0,0,0.55)' }} />
+        <View style={{ position: 'absolute', top: maskOffsetV, left: 0, width: maskOffsetH, height: frameH, backgroundColor: 'rgba(0,0,0,0.55)' }} />
+        <View style={{ position: 'absolute', top: maskOffsetV, right: 0, width: maskOffsetH, height: frameH, backgroundColor: 'rgba(0,0,0,0.55)' }} />
         <View
           style={{
             position: 'absolute',
             top: maskOffsetV,
             left: maskOffsetH,
-            width: cropDiameter,
-            height: cropDiameter,
-            borderRadius: cropDiameter / 2,
+            width: frameW,
+            height: frameH,
+            borderRadius: frameRadius,
             borderWidth: 2,
             borderColor: 'rgba(255,255,255,0.85)',
           }}
         />
       </View>
 
-      {/* 上左: 戻る */}
-      <View
-        style={{
-          position: 'absolute',
-          top: insets.top + SP['2'],
-          left: SP['4'],
-        }}
-        pointerEvents="box-none"
-      >
-        <PressableScale onPress={handleCancel} haptic="tap" hitSlop={12}>
-          <View
-            style={{
-              width: 40,
-              height: 40,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
+      {/* 上左: 戻る (busy 中は無効化して二重 back を防ぐ) */}
+      <View style={{ position: 'absolute', top: insets.top + SP['2'], left: SP['4'] }} pointerEvents="box-none">
+        <PressableScale onPress={handleCancel} disabled={busy} haptic="tap" hitSlop={12}>
+          <View style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center', opacity: busy ? 0.4 : 1 }}>
             <Icon.arrowL size={28} color="#fff" strokeWidth={2.2} />
           </View>
         </PressableScale>
       </View>
 
-      {/* 下バー: rotate + 次へ */}
+      {/* rect: アスペクト切替チップ (下バーの少し上) */}
+      {isRect && (
+        <View
+          style={{
+            position: 'absolute',
+            bottom: insets.bottom + SP['4'] + 64,
+            left: 0,
+            right: 0,
+            flexDirection: 'row',
+            justifyContent: 'center',
+            gap: SP['2'],
+            paddingHorizontal: SP['4'],
+          }}
+        >
+          {ASPECT_CHIPS.map((chip) => {
+            const active = aspectMode === chip.key;
+            return (
+              <PressableScale
+                key={chip.key}
+                onPress={() => handleAspect(chip.key)}
+                haptic="tap"
+                disabled={busy}
+                accessibilityLabel={`アスペクト比 ${chip.label}`}
+                accessibilityState={{ selected: active }}
+                style={{
+                  paddingHorizontal: SP['3'],
+                  paddingVertical: SP['2'],
+                  borderRadius: 18,
+                  backgroundColor: active ? C.accent : 'rgba(255,255,255,0.15)',
+                }}
+              >
+                <Text style={{ color: '#fff', fontSize: 13, fontWeight: active ? '800' : '600' }}>{chip.label}</Text>
+              </PressableScale>
+            );
+          })}
+        </View>
+      )}
+
+      {/* 下バー: (web ズーム±) + rotate + 決定 */}
       <View
         style={{
           position: 'absolute',
@@ -552,36 +560,43 @@ export default function ImageCropperScreen() {
           paddingHorizontal: SP['6'],
         }}
       >
-        {/* spacer (左) — symmetry */}
-        <View style={{ width: 80 }} />
+        {Platform.OS === 'web' ? (
+          <View style={{ flexDirection: 'row', gap: SP['2'] }}>
+            <PressableScale
+              onPress={() => zoomBy(1 / 1.25)}
+              haptic="tap"
+              disabled={busy}
+              accessibilityLabel="縮小"
+              style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700', lineHeight: 24 }}>−</Text>
+            </PressableScale>
+            <PressableScale
+              onPress={() => zoomBy(1.25)}
+              haptic="tap"
+              disabled={busy}
+              accessibilityLabel="拡大"
+              style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Text style={{ color: '#fff', fontSize: 20, fontWeight: '700', lineHeight: 22 }}>＋</Text>
+            </PressableScale>
+          </View>
+        ) : (
+          <View style={{ width: 80 }} />
+        )}
 
         {/* 90° 回転 */}
         <PressableScale
           onPress={handleRotate}
           haptic="tap"
-          disabled={busy}
-          style={{
-            width: 56,
-            height: 56,
-            borderRadius: 28,
-            backgroundColor: 'rgba(255,255,255,0.15)',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
+          disabled={busy || !imageSize}
+          accessibilityLabel="90度回転"
+          style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', opacity: !imageSize ? 0.5 : 1 }}
         >
-          <Text
-            style={{
-              color: '#fff',
-              fontSize: 13,
-              fontWeight: '700',
-              letterSpacing: 0.2,
-            }}
-          >
-            90°
-          </Text>
+          <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700', letterSpacing: 0.2 }}>90°</Text>
         </PressableScale>
 
-        {/* 次へ — 明確な CTA ボタン */}
+        {/* 決定 — 明確な CTA */}
         <PressableScale
           onPress={handleNext}
           haptic="confirm"
@@ -605,7 +620,7 @@ export default function ImageCropperScreen() {
             </View>
           ) : (
             <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 0.3 }}>
-              この範囲で決定
+              {isRect ? '完了' : 'この範囲で決定'}
             </Text>
           )}
         </PressableScale>

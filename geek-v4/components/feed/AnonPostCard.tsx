@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react-native';
-import { View, Text, Platform, Image as RNImage, StyleSheet, Pressable, type TextStyle } from 'react-native';
+import { View, Text, Platform, useWindowDimensions, Image as RNImage, StyleSheet, Pressable, type TextStyle } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -32,7 +32,7 @@ import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { ProgressiveImage } from '../ui/ProgressiveImage';
 import { VideoPlayer } from '../ui/VideoPlayer';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
-import { extractFirstUrl } from '../../lib/utils/extractUrl';
+import { extractFirstUrl, stripPreviewUrl } from '../../lib/utils/extractUrl';
 import { DoubleTapHeart } from '../ui/DoubleTapHeart';
 // NOTE: tag chip と「+ タグ追加」 UI は撤去 (周りの人が他人投稿に tag を付与
 // できないようにする方針 + ハッシュタグは feed カード上に表示しない方針)。
@@ -381,8 +381,24 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 //   - base 側 (StyleSheet ID) は安定なので reconciliation コストは差分分のみ
 // ────────────────────────────────────────────────────────────────────
 
-function mediaItemAspect(aspect: number): { aspectRatio: number } {
-  return { aspectRatio: aspect };
+// 投稿画像の表示アスペクト比の下限 (= 許容する最も縦長の比)。aspectRatio = width/height
+// なので、値が小さいほど縦長。極端に縦長の写真はフィードを画面いっぱいに占有して
+// しまうため、4:5 (0.8) でクランプし、それより縦長は ProgressiveImage の
+// contentFit='cover' でクロップ表示する。画像全体はタップ→ライトボックス
+// (contentFit='contain') で確認できる。横長 (>1) はそのまま全体表示。
+const MEDIA_MIN_ASPECT = 0.8; // 4:5
+function mediaItemAspect(
+  aspect: number,
+  portraitMaxH?: number,
+): { aspectRatio: number; maxHeight?: number } {
+  const aspectRatio = Math.max(MEDIA_MIN_ASPECT, aspect);
+  // 縦長 (aspect < 1) のみ絶対高さでクランプ。aspectRatio は「形」を抑えるだけなので、
+  // これが無いと web の広いカラム(最大720)で全幅×1.25 ≈ 860px と画面を占有する。
+  // クランプ時は overflow:hidden + contentFit='cover' でクロップ表示 (全体はライトボックス)。
+  if (aspect < 1 && portraitMaxH && portraitMaxH > 0) {
+    return { aspectRatio, maxHeight: portraitMaxH };
+  }
+  return { aspectRatio };
 }
 
 function reactionPillColors(C: ColorPalette, mine: boolean): { backgroundColor: string; borderColor: string } {
@@ -890,6 +906,12 @@ function AnonPostCardInner({
   const useOgPreview = useFeatureFlag('og_preview');
   const useQuickReaction = useFeatureFlag('quick_reaction');
 
+  // 縦長写真がフィードを占有しないための絶対最大高さ (mediaItemAspect に渡す)。
+  // 「デカすぎる」フィードバックを受けて縮小: web 440px / モバイルは画面高の 50%。
+  // contain 表示なので、この box 内に写真全体が収まる (はみ出しは letterbox)。
+  const { height: winH } = useWindowDimensions();
+  const portraitMaxH = Platform.OS === 'web' ? 440 : Math.round(winH * 0.5);
+
   // OG カード対象 URL: 明示的な source_url を優先し、無ければ本文中の最初の URL を拾う。
   const previewUrl = useMemo(
     () => post.source_url || extractFirstUrl(post.content),
@@ -919,7 +941,11 @@ function AnonPostCardInner({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoTranslate, canTranslate, translated, translating]);
-  const displayContent = (autoTranslate && translated) ? translated : post.content;
+  // リンクカードを出すときは本文から対象 URL/「[リンク]」を隠す (URLはカードに置き換え)
+  const displayContent = stripPreviewUrl(
+    (autoTranslate && translated) ? translated : post.content,
+    (previewUrl && useOgPreview) ? previewUrl : null,
+  );
   // データ欠落でクラッシュしないよう全フィールドを安全化。
   // post ref は memo の arePropsEqual で stable なので、これらは
   // post 変化時のみ新規 array になる (= ほぼ常に同 ref)。
@@ -1385,7 +1411,8 @@ function AnonPostCardInner({
 
       {/* メディア — 文章の下に表示 (文章 → 写真/動画 の順)。
           自然なアスペクト比で表示 (square crop しない)
-          tall portrait (5:6 等) や wide landscape も切れず全体が見える
+          縦長は 4:5 (MEDIA_MIN_ASPECT) を上限にクロップ表示しフィードを占有させない
+          (画像全体はタップ→ライトボックスで確認可)。横長はそのまま全体表示
           複数枚は縦に積む (各画像が自身のアスペクト比を保持)
           外側カードの paddingHorizontal に揃え、premium feel の rounded corners
 
@@ -1405,7 +1432,7 @@ function AnonPostCardInner({
               return (
                 <View
                   key={url}
-                  style={[STYLES.mediaItemBase, mediaItemAspect(aspect)]}
+                  style={[STYLES.mediaItemBase, mediaItemAspect(aspect, portraitMaxH)]}
                 >
                   <MediaWithCWGuard cwCategory={cwCategory} blurhash={blurhash}>
                     {/* Pressable で wrap — single-tap で全画面ライトボックスを開く。
@@ -1424,6 +1451,10 @@ function AnonPostCardInner({
                         width="100%"
                         height="100%"
                         radius={16}
+                        // ★ contain: 写真の「全体」を必ず表示する (cover だと縦長/比率
+                        //   未解決時に大きくクロップ拡大され「全体が写らない」事故になる)。
+                        //   余白は box 背景 (C.bg3) のレターボックスで埋まる。
+                        contentFit="contain"
                         lazy
                         // フィード 1 列幅 (max 720) の 1x DPR で 480 が綺麗 + 軽い。
                         // 旧 720 default は retina 換算でも過剰だった (1 枚 ~120KB 多い)。

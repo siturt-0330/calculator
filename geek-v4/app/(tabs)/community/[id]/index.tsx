@@ -203,6 +203,14 @@ export default function CommunityDetailScreen() {
           };
         },
       );
+    } else if (!wasMember) {
+      // 参加申請 (request 制): has_pending_request を即時 true にして
+      // 「申請」→「申請中」のボタン反転を確定する (refetch までのチラつき防止)。
+      qc.setQueryData(
+        ['community', id],
+        (prev: CommunityWithMembership | undefined) =>
+          prev ? { ...prev, has_pending_request: true } : prev,
+      );
     }
 
     let err: string | null = null;

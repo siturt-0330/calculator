@@ -357,7 +357,7 @@ export default function CommentComposer() {
                   <ComposerMediaGrid
                     images={images}
                     video={video ? { uri: video.uri, sizeMb: video.size / 1024 / 1024 } : null}
-                    onRemoveImage={(uri) => setImages(images.filter((u) => u !== uri))}
+                    onRemoveImage={(index) => setImages(images.filter((_, i) => i !== index))}
                     onRemoveVideo={() => setVideo(null)}
                     containerPaddingH={0}
                   />

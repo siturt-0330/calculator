@@ -49,11 +49,15 @@ export async function cropImageOnWebCanvas(input: {
   cropY: number;
   cropW: number;
   cropH: number;
-  outSize?: number; // default 512
+  outSize?: number; // default 512 (正方形出力時)
+  outW?: number; // 矩形出力時の幅 (outH とセット。指定時は outSize より優先)
+  outH?: number; // 矩形出力時の高さ
   quality?: number; // default 0.85
 }): Promise<string> {
   const { sourceUri, imageSize, rotation, cropX, cropY, cropW, cropH } = input;
-  const outSize = input.outSize ?? 512;
+  // 出力寸法: outW/outH 指定があれば矩形 (投稿写真)、無ければ正方形 outSize (icon)。
+  const outW = input.outW ?? input.outSize ?? 512;
+  const outH = input.outH ?? input.outSize ?? 512;
   const quality = input.quality ?? 0.85;
 
   // 1) 画像を <img> で読み込み
@@ -101,14 +105,14 @@ export async function cropImageOnWebCanvas(input: {
   const safeH = Math.max(1, Math.min(cropH, rotatedNatH - safeY));
 
   const outCanvas = document.createElement('canvas');
-  outCanvas.width = outSize;
-  outCanvas.height = outSize;
+  outCanvas.width = outW;
+  outCanvas.height = outH;
   const octx = outCanvas.getContext('2d');
   if (!octx) throw new Error('out canvas 2d context unavailable');
   // 高品質補間
   octx.imageSmoothingEnabled = true;
   octx.imageSmoothingQuality = 'high';
-  octx.drawImage(interCanvas, safeX, safeY, safeW, safeH, 0, 0, outSize, outSize);
+  octx.drawImage(interCanvas, safeX, safeY, safeW, safeH, 0, 0, outW, outH);
 
   // 5) JPEG data URL を生成
   const out = outCanvas.toDataURL('image/jpeg', quality);
@@ -173,6 +177,9 @@ export async function makeWebPreviewDataUrl(
   if (outW < 1 || outH < 1) {
     throw new Error(`preview: 計算後サイズが無効 (${outW}x${outH})`);
   }
+  // ★UI ブロック緩和: 同期的な canvas 処理 (drawImage + toDataURL) の前に 1 回
+  //   マイクロタスクへ yield し、複数画像処理中も React に再描画の隙を与える。
+  await Promise.resolve();
   const canvas = document.createElement('canvas');
   canvas.width = outW;
   canvas.height = outH;
@@ -244,20 +251,35 @@ export function safeExtension(mime: string): string {
 
 // 画像をリサイズ + 再エンコード = EXIF が自動的に除去される
 // 戻り値は新しい URI (ローカルファイル) — caller が fetch(uri).blob() で読み込む
+//
+// ★ アスペクト維持 (2026-06 修正): 旧実装は resize:{width:max, height:max} と
+//   両軸を渡していたが、expo-image-manipulator は両軸指定だと比率を無視して
+//   exact resize する → 16:9 等の非正方写真が 1:1 に潰れる (新 rect クロッパーの
+//   native 出力が破壊される) + 512px アイコンが 1600px に upscale される無駄も
+//   あった。まず無 resize で JPEG 化 (= EXIF strip) しつつ寸法を得て、長辺が
+//   上限超のときだけ「長辺のみ」を指定して比率を保ったまま縮小する。
+//   (長辺以下の画像は再エンコードのみ = 歪み無し・upscale 無し)
 export async function stripExifAndResize(
   uri: string,
   opts: { maxWidth?: number; maxHeight?: number; quality?: number } = {},
 ): Promise<{ uri: string; width: number; height: number }> {
   const { maxWidth = 1600, maxHeight = 1600, quality = 0.85 } = opts;
-  const result = await ImageManipulator.manipulateAsync(
-    uri,
-    [{ resize: { width: maxWidth, height: maxHeight } }],
-    {
+  // 1) 無 resize で JPEG 化 (EXIF strip) + 寸法取得
+  const first = await ImageManipulator.manipulateAsync(uri, [], {
+    compress: quality,
+    format: ImageManipulator.SaveFormat.JPEG,
+  });
+  const { width: w, height: h } = first;
+  // 2) 長辺が上限超なら「長辺のみ」を上限に縮小 (短辺は比率維持で自動計算)
+  if ((w > maxWidth || h > maxHeight) && w > 0 && h > 0) {
+    const resizeAction = w >= h ? { resize: { width: maxWidth } } : { resize: { height: maxHeight } };
+    const second = await ImageManipulator.manipulateAsync(first.uri, [resizeAction], {
       compress: quality,
-      format: ImageManipulator.SaveFormat.JPEG, // JPEG で出力 → EXIF が破棄される
-    },
-  );
-  return { uri: result.uri, width: result.width, height: result.height };
+      format: ImageManipulator.SaveFormat.JPEG,
+    });
+    return { uri: second.uri, width: second.width, height: second.height };
+  }
+  return { uri: first.uri, width: w, height: h };
 }
 
 // uri → アップロード可能な body (sanitize + validate 込み)

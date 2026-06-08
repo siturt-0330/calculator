@@ -49,6 +49,7 @@ import { useDraftsStore, newDraftId } from '../../../stores/draftsStore';
 
 import { EditorialFormHeader } from '../../../components/community/EditorialFormHeader';
 import { EditorialIconPicker } from '../../../components/community/EditorialIconPicker';
+import { getClipboardImageUri } from '../../../lib/clipboardImage';
 import { EditorialField } from '../../../components/community/EditorialField';
 import { SimilarCommunityNotice } from '../../../components/community/SimilarCommunityNotice';
 import { EditorialTagEditor } from '../../../components/community/EditorialTagEditor';
@@ -271,6 +272,45 @@ export default function CreateCommunityScreen() {
     }
   };
 
+  // クリップボードの画像をアイコンにする (= ネットでコピーした画像を貼り付け)。
+  // 取得後は pickIcon と同じ openCropper → prepareImageUpload の経路に通す。
+  const pasteIcon = async () => {
+    if (iconLoading || submitting) return;
+    const uri = await getClipboardImageUri();
+    if (!uri) {
+      show('クリップボードに画像がありません。画像をコピーしてからお試しください', 'warn');
+      return;
+    }
+    let croppedUri: string | null = null;
+    try {
+      croppedUri = await openCropper(uri);
+    } catch (cropErr) {
+      console.warn('[community/create] cropper threw (paste):', cropErr);
+      show('画像の切り抜きでエラーが発生しました', 'error');
+      return;
+    }
+    if (!croppedUri) return;
+    setIconLoading(true);
+    try {
+      const prepared = await prepareImageUpload(croppedUri, {
+        maxSizeBytes: 5 * 1024 * 1024,
+        maxWidth: 512,
+        maxHeight: 512,
+        quality: 0.85,
+      });
+      setLocalIconUri(croppedUri);
+      setLocalIconBlob(prepared.blob);
+      setLocalIconMime(prepared.mime);
+      show('貼り付けた画像をアイコンにしました', 'success');
+    } catch (e) {
+      console.warn('[community/create] prepareImageUpload failed (paste):', e);
+      const msg = e instanceof Error ? e.message : '画像処理に失敗しました';
+      show(`画像処理エラー: ${msg}`, 'warn');
+    } finally {
+      setIconLoading(false);
+    }
+  };
+
   const removeIcon = () => {
     setLocalIconUri(null);
     setLocalIconBlob(null);
@@ -409,6 +449,7 @@ export default function CreateCommunityScreen() {
           uri={localIconUri}
           loading={iconLoading}
           onPick={pickIcon}
+          onPaste={pasteIcon}
           onRemove={removeIcon}
         />
 

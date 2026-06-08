@@ -34,6 +34,10 @@ export type Post = {
   //   author が返信したスレッドが上位に来る (lib/utils/qaSort.ts)。AMA 用途。
   qa_mode?: boolean;
   created_at: string;
+  // 0133: 本文/メディアが実際に編集された時刻 (NULL/undefined = 未編集)。「編集済み」
+  //   バッジの唯一の信号。★ updated_at は like 等でも動くため使わない。DB トリガが
+  //   content/media/video の実変化時のみ stamp する。
+  edited_at?: string | null;
   // posts.author_id — RLS で誰でも読める。公式管理者識別のため fetch する。
   // ★ de-anon Phase2: 2b で anon/authenticated から SELECT(author_id) を REVOKE するため、
   //   段階的に client から author_id 参照を外していく (移行中は fallback 用に optional 保持)。
@@ -157,7 +161,11 @@ export type Notification = {
     | 'join_request'
     // 'system' はアカウント状態変更通知 (警告 / 停止 / 解除 等、migration 0060 の
     // account_state_history AFTER INSERT トリガー由来)。
-    | 'system';
+    | 'system'
+    // 'mod_action' はコミュニティ管理人の処置通知 (投稿削除 / キック / BAN、
+    // migration 0136 の trigger / RPC 由来)。data.community_id / action / reason を持つ。
+    // ★mod の身元は含めない (匿名性)。
+    | 'mod_action';
   tag_name: string | null;
   message: string;
   read: boolean;

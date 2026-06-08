@@ -63,7 +63,8 @@ function matchesFilter(type: Notification['type'], f: NFilter): boolean {
       type === 'official_post' ||
       type === 'join_request' ||
       type === 'event' ||
-      type === 'announcement'
+      type === 'announcement' ||
+      type === 'mod_action'
     );
   }
   return type === 'follow' || type === 'system'; // other / お知らせ
@@ -98,6 +99,9 @@ function visualFor(type: Notification['type']): NotifVisual {
       return { icon: '📅', color: C.amber, bgSoft: C.amberBg, borderSoft: C.amber + '55' };
     case 'official_post':
       return { icon: '📣', color: C.accent, bgSoft: C.accentBg, borderSoft: C.accent };
+    case 'mod_action':
+      // コミュニティ管理人の処置 (投稿削除 / キック / BAN) — amber の盾で警告系
+      return { icon: '🛡️', color: C.amber, bgSoft: C.amberBg, borderSoft: C.amber + '55' };
     default:
       return { icon: '🔔', color: C.text2, bgSoft: C.bg3, borderSoft: C.border };
   }
@@ -188,6 +192,18 @@ export default function NotificationsScreen() {
         return;
       }
       router.push('/(tabs)/community' as never);
+      return;
+    }
+    // モデレーション処置通知 (migration 0136) — data.community_id を読んでコミュニティへ。
+    // 投稿削除の場合 post は既に消えているのでコミュニティ home に飛ばす。
+    if (n.type === 'mod_action') {
+      const data = n.data as { community_id?: unknown } | null;
+      const cid = data && typeof data.community_id === 'string' ? data.community_id : null;
+      if (cid) {
+        router.push(`/community/${cid}` as never);
+        return;
+      }
+      router.push('/(tabs)/feed' as never);
       return;
     }
     // 投稿への反応 (いいね/コメント/リアクション/返信) — data.post_id があれば

@@ -26,6 +26,19 @@ function assertUuid(value: string, label: string): void {
   }
 }
 
+// RPC が「まだ存在しない」(= migration 未適用) を検知する。PostgREST は
+// 関数未検出を PGRST202 (schema cache) で返す。これを使って「新 RPC があれば
+// 使う / 無ければ旧経路にフォールバック」のデプロイ順序耐性を作る。
+function isMissingFunction(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const code = (error as { code?: string }).code ?? '';
+  const msg = (error as { message?: string }).message ?? '';
+  return (
+    code === 'PGRST202' ||
+    /could not find the function|function .* does not exist|schema cache/i.test(msg)
+  );
+}
+
 // ============================================================
 // 型定義
 // ============================================================
@@ -68,7 +81,8 @@ export type ModAction =
   | 'ban'
   | 'unban'
   | 'promote'
-  | 'demote';
+  | 'demote'
+  | 'transfer_owner';
 
 export type ModActionLog = {
   id: string;
@@ -340,6 +354,28 @@ export async function demoteMember(
   }
 }
 
+// オーナー譲渡 (owner → 別メンバー)。現 owner だけが呼べる (RPC 内で owner 判定)。
+// 旧 owner は admin に降りる。自分自身 / 非メンバー / 既に owner は RPC が exception を返す。
+export async function transferOwnership(
+  communityId: string,
+  newOwnerId: string,
+): Promise<void> {
+  assertUuid(communityId, 'communityId');
+  assertUuid(newOwnerId, 'newOwnerId');
+
+  const { error } = await withApiTimeout(
+    supabase.rpc('mod_transfer_ownership', {
+      target_community_id: communityId,
+      new_owner_id: newOwnerId,
+    }),
+    'communityMods.transferOwnership',
+    8000,
+  );
+  if (error) {
+    throw new Error(`オーナーの譲渡に失敗しました: ${error.message}`);
+  }
+}
+
 // ============================================================
 // 投稿 / コメント / 返信 の mod 削除
 // ============================================================
@@ -437,14 +473,30 @@ async function insertModLog(input: {
   }
 }
 
-// 投稿削除 — RLS 経路で削除 + log を残す。
-// reason は audit 用 (任意)。
+// 投稿削除 — まず mod_delete_post RPC (server 内で author を解決して本人へ通知 +
+// 匿名性維持) を試し、未適用 (0136 前) なら旧 RLS 直 DELETE 経路にフォールバック。
+// reason は対象本人への通知に使われる (任意)。
 export async function deletePostAsMod(
   postId: string,
   reason?: string,
 ): Promise<void> {
   assertUuid(postId, 'postId');
 
+  const { error } = await withApiTimeout(
+    supabase.rpc('mod_delete_post', { p_post_id: postId, p_reason: reason ?? null }),
+    'communityMods.modDeletePost',
+    8000,
+  );
+  if (!error) return;
+  if (!isMissingFunction(error)) {
+    throw new Error(`投稿の削除に失敗しました: ${error.message}`);
+  }
+  // 0136 未適用 → 旧経路 (通知は飛ばない)
+  await legacyDeletePostAsMod(postId, reason);
+}
+
+// 旧経路: RLS 直 DELETE + client log (0136 未適用時のフォールバック)。
+async function legacyDeletePostAsMod(postId: string, reason?: string): Promise<void> {
   // log 用に community_id を先に取得 (削除後だと post_communities が cascade で消えるため)
   const communityId = await fetchPostCommunityId(postId);
 
@@ -458,22 +510,36 @@ export async function deletePostAsMod(
   }
 
   if (communityId) {
+    // ★target_post_id は残さない: (1) 0136 RPC 経路と一貫 (匿名維持の defense-in-depth)、
+    //   (2) 削除済み post への FK 参照を避ける (旧実装は FK 違反で log 自体が無言失敗していた)。
     await insertModLog({
       community_id: communityId,
       action: 'delete_post',
-      target_post_id: postId,
       reason,
     });
   }
 }
 
-// コメント削除 — RLS 経路で削除 + log。
+// コメント削除 — RPC 優先 (本人通知 + 匿名維持) → 未適用なら旧経路。
 export async function deleteCommentAsMod(
   commentId: string,
   reason?: string,
 ): Promise<void> {
   assertUuid(commentId, 'commentId');
 
+  const { error } = await withApiTimeout(
+    supabase.rpc('mod_delete_comment', { p_comment_id: commentId, p_reason: reason ?? null }),
+    'communityMods.modDeleteComment',
+    8000,
+  );
+  if (!error) return;
+  if (!isMissingFunction(error)) {
+    throw new Error(`コメントの削除に失敗しました: ${error.message}`);
+  }
+  await legacyDeleteCommentAsMod(commentId, reason);
+}
+
+async function legacyDeleteCommentAsMod(commentId: string, reason?: string): Promise<void> {
   // post_id → post_communities で community_id を逆引き (log 用)
   const postId = await fetchCommentPostId(commentId);
   const communityId = postId ? await fetchPostCommunityId(postId) : null;
@@ -488,23 +554,36 @@ export async function deleteCommentAsMod(
   }
 
   if (communityId) {
+    // target_comment_id は残さない (0136 RPC 経路と一貫 + 削除済み行への FK 違反回避)
     await insertModLog({
       community_id: communityId,
       action: 'delete_comment',
-      target_comment_id: commentId,
       reason,
     });
   }
 }
 
-// BBS 返信削除 — RLS 経路で削除 + log。
-// thread.community_id が null の場合は全体スレなので mod 権限はない (RLS が deny)。
+// BBS 返信削除 — RPC 優先 (本人通知 + 匿名維持) → 未適用なら旧経路。
+// thread.community_id が null の場合は全体スレなので mod 権限はない (RLS / RPC が deny)。
 export async function deleteBBSReplyAsMod(
   replyId: string,
   reason?: string,
 ): Promise<void> {
   assertUuid(replyId, 'replyId');
 
+  const { error } = await withApiTimeout(
+    supabase.rpc('mod_delete_bbs_reply', { p_reply_id: replyId, p_reason: reason ?? null }),
+    'communityMods.modDeleteBBSReply',
+    8000,
+  );
+  if (!error) return;
+  if (!isMissingFunction(error)) {
+    throw new Error(`BBS 返信の削除に失敗しました: ${error.message}`);
+  }
+  await legacyDeleteBBSReplyAsMod(replyId, reason);
+}
+
+async function legacyDeleteBBSReplyAsMod(replyId: string, reason?: string): Promise<void> {
   const communityId = await fetchBBSReplyCommunityId(replyId);
 
   const { error } = await withApiTimeout(
@@ -517,11 +596,92 @@ export async function deleteBBSReplyAsMod(
   }
 
   if (communityId) {
+    // target_bbs_reply_id は残さない (0136 RPC 経路と一貫 + 削除済み行への FK 違反回避)
     await insertModLog({
       community_id: communityId,
       action: 'delete_bbs_reply',
-      target_bbs_reply_id: replyId,
       reason,
     });
+  }
+}
+
+// ============================================================
+// コミュニティ通報キュー (0108 + 0136) — mod が自コミュの通報を確認/対応
+// ============================================================
+// ★get_community_reports は 0136 で author_id を返さない形に硬化済 (匿名維持)。
+//   UI は post_id ベースで「投稿を開く / 削除 / 対応済み」する。
+export type CommunityReport = {
+  post_id: string;
+  report_count: number;
+  /** 通報理由 (重複排除済。null を含み得るので UI 側で filter する) */
+  reasons: (string | null)[];
+  latest_reported_at: string;
+  content_preview: string | null;
+};
+
+// 未対応の通報を集計取得 (mod 限定 RPC)。RPC 未適用 (0108/0136 前) は空配列で
+// graceful degrade (画面を壊さない)。mod でない等の実エラーは throw。
+export async function fetchCommunityReports(
+  communityId: string,
+): Promise<CommunityReport[]> {
+  assertUuid(communityId, 'communityId');
+
+  const { data, error } = await withApiTimeout(
+    supabase.rpc('get_community_reports', { p_community_id: communityId }),
+    'communityMods.fetchCommunityReports',
+    8000,
+  );
+  if (error) {
+    if (isMissingFunction(error)) return []; // RPC 未適用 → 通報キューは「準備中」= 空
+    console.warn('[communityMods] fetchCommunityReports failed:', error.message);
+    throw new Error(`通報の取得に失敗しました: ${error.message}`);
+  }
+  type Row = {
+    post_id: string;
+    report_count: number | string;
+    reasons: (string | null)[] | null;
+    latest_reported_at: string;
+    content_preview: string | null;
+  };
+  const rows = (data ?? []) as Row[];
+  // ★de-anon ガード (defense-in-depth):
+  //   0136 未適用で 0108 旧 RPC が応答に author_id を載せている場合は、匿名投稿の
+  //   作者が漏れるため UI に出さない (空キュー扱い)。0136 適用後は author_id を
+  //   返さないので通常表示される。応答が既に網を通った点は server 側 (0136) が真の
+  //   修正だが、UI で確実に出さないためのガード。
+  if (rows.some((r) => Object.prototype.hasOwnProperty.call(r, 'author_id'))) {
+    console.warn(
+      '[communityMods] get_community_reports returned author_id — 0136 未適用の可能性。' +
+        '匿名性保護のため通報キューを非表示にします (migration 0136 を適用してください)。',
+    );
+    return [];
+  }
+  return rows.map((r) => ({
+    post_id: r.post_id,
+    report_count: Number(r.report_count) || 0,
+    reasons: Array.isArray(r.reasons) ? r.reasons : [],
+    latest_reported_at: r.latest_reported_at,
+    content_preview: r.content_preview ?? null,
+  }));
+}
+
+// 通報を「対応済み」にする (mod 限定 / idempotent)。
+export async function resolveCommunityReport(
+  communityId: string,
+  postId: string,
+): Promise<void> {
+  assertUuid(communityId, 'communityId');
+  assertUuid(postId, 'postId');
+
+  const { error } = await withApiTimeout(
+    supabase.rpc('resolve_community_report', {
+      p_community_id: communityId,
+      p_post_id: postId,
+    }),
+    'communityMods.resolveCommunityReport',
+    8000,
+  );
+  if (error && !isMissingFunction(error)) {
+    throw new Error(`通報の対応済み化に失敗しました: ${error.message}`);
   }
 }

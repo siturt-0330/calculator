@@ -18,6 +18,7 @@ import { R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { formatRelative } from '../../lib/utils/date';
 import { getDisplayCommentLikes } from '../../lib/utils/commentDisplay';
+import { useToastStore } from '../../stores/toastStore';
 import { ObsidianSaveButton } from '../ui/ObsidianSaveButton';
 import { commentToObsidianNote } from '../../hooks/useObsidian';
 import { Icon } from '../../constants/icons';
@@ -625,7 +626,7 @@ export function CommentThreadItem({
                 </PressableScale>
               )}
 
-              {onReply && depth < COMMENT_MAX_DEPTH && (
+              {onReply && (depth < COMMENT_MAX_DEPTH ? (
                 <PressableScale
                   onPress={() => onReply(comment)}
                   haptic="tap"
@@ -645,7 +646,33 @@ export function CommentThreadItem({
                   <Icon.arrowUL size={12} color={C.text2} strokeWidth={2.2} />
                   <Text style={{ fontSize: 11, color: C.text2, fontWeight: '700' }}>返信</Text>
                 </PressableScale>
-              )}
+              ) : (
+                // ネスト上限: ボタンを消すと「返信できない」と気づけないので、
+                // 薄く残しタップで理由を伝える (1つ上のコメントへ返信を促す)。
+                <PressableScale
+                  onPress={() =>
+                    useToastStore
+                      .getState()
+                      .show('返信の階層が上限です。1つ上のコメントへ返信してください', 'info')
+                  }
+                  haptic="tap"
+                  hitSlop={6}
+                  accessibilityLabel="返信の階層が上限に達しています"
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    paddingHorizontal: SP['2'],
+                    paddingVertical: 3,
+                    borderRadius: R.full,
+                    backgroundColor: C.bg3,
+                    opacity: 0.5,
+                  }}
+                >
+                  <Icon.arrowUL size={12} color={C.text3} strokeWidth={2.2} />
+                  <Text style={{ fontSize: 11, color: C.text3, fontWeight: '700' }}>返信</Text>
+                </PressableScale>
+              ))}
               {isCollapsible && (
                 <PressableScale
                   onPress={toggleCollapsed}

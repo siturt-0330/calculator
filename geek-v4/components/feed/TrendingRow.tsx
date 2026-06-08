@@ -96,6 +96,11 @@ function TrendingRowInner() {
               onPress={() => router.push(`/tag/${encodeURIComponent(t.name)}` as never)}
               haptic="tap"
               onLayout={(e) => handleChipLayout(t.name, e)}
+              accessibilityLabel={
+                i === 0
+                  ? `注目のトレンドタグ #${t.name} ${t.postCount}件`
+                  : `トレンドタグ #${t.name} ${t.postCount}件`
+              }
               style={{
                 paddingHorizontal: SP['3'],
                 paddingVertical: SP['2'],

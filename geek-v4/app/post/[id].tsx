@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, ScrollView, Pressable, StyleSheet, Image as RNImage,
+  View, Text, TextInput, KeyboardAvoidingView, Platform, useWindowDimensions, ActivityIndicator, RefreshControl, ScrollView, Pressable, StyleSheet, Image as RNImage,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,9 +15,9 @@ import Animated, {
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { getLastViewed, setLastViewed } from '../../lib/utils/lastViewed';
-import { fetchPostById, fetchCommunitiesForPosts } from '../../lib/api/posts';
+import { fetchPostById, fetchCommunitiesForPosts, deleteOwnPost, fetchPostEditedAt } from '../../lib/api/posts';
 import { fetchSimilarPosts } from '../../lib/api/similarPosts';
-import { fetchComments } from '../../lib/api/comments';
+import { fetchComments, createComment } from '../../lib/api/comments';
 import { attachChannel } from '../../lib/realtime';
 import { useFeedPage } from '../../hooks/useFeedPage';
 import { useReactionToggle } from '../../hooks/useReactions';
@@ -37,7 +37,7 @@ import { VideoPlayer } from '../../components/ui/VideoPlayer';
 import { MediaWithCWGuard } from '../../components/post/MediaWithCWGuard';
 import { ImageLightbox } from '../../components/ui/ImageLightbox';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
-import { extractFirstUrl } from '../../lib/utils/extractUrl';
+import { extractFirstUrl, stripPreviewUrl } from '../../lib/utils/extractUrl';
 import { Spinner } from '../../components/ui/Spinner';
 import { formatRelative } from '../../lib/utils/date';
 import type { Comment } from '../../types/models';
@@ -46,7 +46,8 @@ import { ObsidianSaveButton } from '../../components/ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
 import { CommentThreadItem } from '../../components/post/CommentThreadItem';
 import { ReportSheet } from '../../components/post/ReportSheet';
-import { MoreHorizontal } from 'lucide-react-native';
+import { PostAuthorSheet } from '../../components/post/PostAuthorSheet';
+import { MoreHorizontal, Film, Send } from 'lucide-react-native';
 import { useCommentReactions, useCommentReactionToggle } from '../../hooks/useCommentReactions';
 import { CollapsedComment } from '../../components/post/CollapsedComment';
 import { buildCommentTree } from '../../lib/utils/commentTree';
@@ -56,8 +57,22 @@ import {
 } from '../../lib/utils/commentCollapse';
 import { isValidUuid } from '../../lib/validation';
 import { pseudonymFor } from '../../lib/utils/pseudonym';
+import * as ImagePicker from 'expo-image-picker';
+import { useToastStore } from '../../stores/toastStore';
+import { useAuthStore } from '../../stores/authStore';
+import { hap } from '../../design/haptics';
+import { peekRate, rateLimitMessage } from '../../lib/rateLimit';
+import { validateVideoSource, uploadPostImage, uploadPostVideo } from '../../lib/media';
+import { makeWebPreviewDataUrl } from '../../lib/image';
+import { ComposerMediaGrid } from '../../components/post/composer/ComposerMediaGrid';
 
 const MAX_W = 720;
+
+// インライン返信コンポーザーで扱うローカル動画 (アップロード前)
+type LocalVideo = { uri: string; mime: string; ext: string; size: number };
+
+// クイック絵文字 (コメント欄でタップ挿入・YouTube 風)
+const QUICK_EMOJIS = ['❤️', '😂', '🎉', '😢', '😮', '😅', '😊'] as const;
 
 export default function PostDetailScreen() {
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
@@ -144,6 +159,15 @@ export default function PostDetailScreen() {
   const postIdsForFeedPage = useMemo(() => (id ? [id] : []), [id]);
   const { fullPosts, isLoading: feedPageLoading } = useFeedPage(postIdsForFeedPage);
   const fullPost = id ? fullPosts.get(id) : undefined;
+
+  // 「編集済み」バッジ用に edited_at を耐性付き取得 (0133 未適用なら null=バッジ非表示)。
+  //   POSTS_SELECT_COLS とは分離して deploy-ordering 結合を避けている。
+  const { data: editedAt } = useQuery({
+    queryKey: ['post-edited-at', id],
+    queryFn: () => fetchPostEditedAt(id!),
+    enabled: !!id,
+    staleTime: 60_000,
+  });
   // ★ de-anon Phase2: 投稿者の擬似アイデンティティ (handle / 色 / 頭文字) を
   //   server 供給の pseudonym_id から導出 (author_id 非依存・AnonPostCard と同方針)。
   const pseudo = useMemo(() => pseudonymFor(fullPost?.pseudonym_id), [fullPost?.pseudonym_id]);
@@ -159,6 +183,24 @@ export default function PostDetailScreen() {
   const [memePickerOpen, setMemePickerOpen] = useState(false);
   // 「…」タップで「押された全スタンプ」一覧シートを開く
   const [reactionsDetailOpen, setReactionsDetailOpen] = useState(false);
+
+  // ============================================================
+  // インライン コメント / 返信 コンポーザー (別画面に遷移しない)
+  // ------------------------------------------------------------
+  // replyTarget=null: ルートコメント / 非null: そのコメントへの返信。
+  // 送信は submitComment が parent/reply id 付きで createComment を呼ぶ。
+  // ============================================================
+  const show = useToastStore((s) => s.show);
+  const [replyTarget, setReplyTarget] = useState<Comment | null>(null);
+  const [commentText, setCommentText] = useState('');
+  const [images, setImages] = useState<string[]>([]);
+  const [video, setVideo] = useState<LocalVideo | null>(null);
+  const [posting, setPosting] = useState(false);
+  const [pickingImage, setPickingImage] = useState(false);
+  const [pickingVideo, setPickingVideo] = useState(false);
+  const [composerActive, setComposerActive] = useState(false);
+  const composerRef = useRef<TextInput>(null);
+  const canPost = (commentText.trim().length > 0 || images.length > 0 || !!video) && !posting;
 
   const { data: replies = [], isLoading: repliesLoading, refetch, isRefetching } = useQuery({
     queryKey: ['post-comments', id],
@@ -224,6 +266,11 @@ export default function PostDetailScreen() {
   // OG リンクプレビュー対象 URL: 明示的な source_url を優先し、
   // 無ければ本文中の最初の URL を拾って OG カード化する (フィードカードと同方針)。
   const useOgPreview = useFeatureFlag('og_preview');
+
+  // 縦長写真が詳細画面を占有しないための絶対最大高さ (フィードカードと同方針)。
+  // web は固定 600px、モバイルは画面高の 65%。
+  const { height: winH } = useWindowDimensions();
+  const portraitMaxH = Platform.OS === 'web' ? 600 : Math.round(winH * 0.65);
   const previewUrl = useMemo(
     () => post?.source_url || extractFirstUrl(post?.content),
     [post?.source_url, post?.content],
@@ -274,6 +321,7 @@ export default function PostDetailScreen() {
   const [lightboxUri, setLightboxUri] = useState<string | null>(null);
   // 運営への通報シート (この投稿が対象)
   const [reportOpen, setReportOpen] = useState(false);
+  const [authorSheetOpen, setAuthorSheetOpen] = useState(false);
 
   // Smart skeleton timing — Spinner only after 200ms of continuous loading.
   // <200ms loads (cache hits via TanStack staleTime) skip flash entirely.
@@ -370,26 +418,155 @@ export default function PostDetailScreen() {
     };
   }, [id, qc]);
 
-  // 返信ボタン押下: 全画面コメント作成画面へ遷移。
-  // parent / 返信先 comment id と、表示用の擬似名・本文プレビューを params で渡す。
+  // 返信ボタン押下: 別画面に遷移せず、下部インラインコンポーザーを返信モードにして
+  // フォーカスする (Reddit / X 風)。送信は submitComment が parent/reply id 付きで行う。
   const handleReply = (c: Comment) => {
-    // ★ de-anon Phase2: 返信先の擬似名は author_id ではなく pseudonym_id から導出。
-    const ps = pseudonymFor(c.pseudonym_id);
-    router.push({
-      pathname: '/post/comment',
-      params: {
-        postId: id!,
-        parentId: c.id,
-        replyToId: c.id,
-        replyHandle: ps.handle,
-        replyPreview: (c.content ?? '').slice(0, 80),
-      },
-    } as never);
+    setReplyTarget(c);
+    setComposerActive(true);
+    // YouTube 風: @ハンドルを下書きに前置きしてフォーカス (既に入力中なら上書きしない)
+    const handle = pseudonymFor(c.pseudonym_id).handle;
+    setCommentText((prev) => (prev.trim().length === 0 ? `@${handle} ` : prev));
+    setTimeout(() => composerRef.current?.focus(), 50);
   };
 
-  // 下部「コメントを入力」バー → 全画面コメント作成画面 (root コメント) へ遷移。
-  const openCommentComposer = () => {
-    router.push({ pathname: '/post/comment', params: { postId: id! } } as never);
+  // 画像ピッカー (create.tsx / comment.tsx と同方針 — Web は data URL 前処理で blob 地雷回避)
+  const pickImage = async () => {
+    if (pickingImage) return;
+    setPickingImage(true);
+    try {
+      const r = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: 'images',
+        allowsMultipleSelection: true,
+        quality: 0.85,
+        selectionLimit: 4,
+      });
+      if (!r.canceled) {
+        const uris = r.assets.map((a) => a.uri).slice(0, 4);
+        if (Platform.OS === 'web') {
+          const processed = await Promise.all(
+            uris.map(async (u) => {
+              try {
+                return await makeWebPreviewDataUrl(u, 1600, 0.85);
+              } catch (e) {
+                console.warn('[post detail] web image pre-process failed:', e);
+                return u;
+              }
+            }),
+          );
+          setImages(processed.slice(0, 4));
+        } else {
+          setImages(uris);
+        }
+        hap.tap();
+      }
+    } catch (e) {
+      console.warn('[post detail] pick image failed:', e);
+      show('画像の取得に失敗しました', 'error');
+    } finally {
+      setPickingImage(false);
+    }
+  };
+
+  // 動画ピッカー
+  const pickVideo = async () => {
+    if (pickingVideo) return;
+    setPickingVideo(true);
+    try {
+      const r = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: 'videos',
+        allowsMultipleSelection: false,
+        quality: 1,
+      });
+      if (r.canceled || r.assets.length === 0) return;
+      const asset = r.assets[0];
+      if (!asset) return;
+      const v = await validateVideoSource({ uri: asset.uri, fileSize: asset.fileSize, mimeType: asset.mimeType });
+      if (!v.ok) {
+        hap.warn();
+        show(v.reason, 'warn');
+        return;
+      }
+      setVideo({ uri: asset.uri, mime: v.mime, ext: v.ext, size: v.size });
+      hap.confirm();
+    } catch (e) {
+      console.warn('[post detail] pick video failed:', e);
+      show('動画の取得に失敗しました', 'error');
+    } finally {
+      setPickingVideo(false);
+    }
+  };
+
+  // コメント / 返信の送信 — 別画面に遷移せず、その場で createComment を呼ぶ。
+  // 成功したら入力をクリアし ['post-comments', id] を invalidate (スレッドへ反映)。
+  const submitComment = async () => {
+    if (posting) return;
+    if (!id) {
+      show('投稿が見つかりませんでした', 'error');
+      return;
+    }
+    if (!commentText.trim() && images.length === 0 && !video) {
+      show('本文・画像・動画のいずれかを入力してください。', 'warn');
+      return;
+    }
+    setPosting(true);
+    try {
+      const userId = useAuthStore.getState().user?.id;
+      if (!userId) {
+        show('ログインし直してください', 'error');
+        return;
+      }
+      // レート制限を upload 前に先読み (超過なら upload せず即 return → 孤児メディア防止)
+      const rl = peekRate('comment');
+      if (!rl.ok) {
+        show(rateLimitMessage('comment', rl.retryAfterMs), 'error');
+        return;
+      }
+      let mediaUrls: string[] = [];
+      try {
+        const [imageUrls, vidUrls] = await Promise.all([
+          images.length > 0
+            ? Promise.all(images.map((uri) => uploadPostImage(uri, userId)))
+            : Promise.resolve<string[]>([]),
+          video
+            ? uploadPostVideo(video.uri, userId, { mime: video.mime, ext: video.ext }).then((url) => [url])
+            : Promise.resolve<string[]>([]),
+        ]);
+        mediaUrls = [...imageUrls, ...vidUrls];
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), 'error');
+        return;
+      }
+
+      await createComment(id, commentText, {
+        parentId: replyTarget?.id ?? null,
+        replyToId: replyTarget?.id ?? null,
+        mediaUrls,
+      });
+
+      hap.success();
+      show(replyTarget ? '返信しました' : 'コメントしました', 'success');
+      setCommentText('');
+      setImages([]);
+      setVideo(null);
+      setReplyTarget(null);
+      setComposerActive(false);
+      composerRef.current?.blur();
+      void qc.invalidateQueries({ queryKey: ['post-comments', id] });
+      // 送信後、新規コメントが見える位置まで自動スクロール (再フェッチ反映待ち 80ms)。
+      // 返信(ネスト)は末尾に出ないこともあるが、最低限「動いた」フィードバックになる。
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    } catch (e: unknown) {
+      hap.error();
+      const msg = e instanceof Error ? e.message : String(e);
+      let userMsg = '送信に失敗しました。再度お試しください。';
+      if (msg.includes('row-level security') || msg.includes('RLS')) userMsg = '権限エラー。ログインし直してください。';
+      else if (msg.includes('Not authenticated') || msg.includes('未ログイン')) userMsg = 'ログインし直してください。';
+      else if (msg.includes('Network') || msg.includes('Failed to fetch')) userMsg = '通信エラー。電波を確認してください。';
+      else if (msg.includes('速すぎ') || msg.includes('時間を置いて') || msg.includes('ペースが')) userMsg = msg;
+      show(userMsg, 'error');
+    } finally {
+      setPosting(false);
+    }
   };
 
   // route param validation 失敗 → cache 汚染を防ぐため早期 return
@@ -459,12 +636,12 @@ export default function PostDetailScreen() {
           </PressableScale>
           <Text style={[T.smallM, { color: C.text3, marginLeft: SP['2'] }]}>投稿</Text>
           <View style={{ flex: 1 }} />
-          {/* ⋯ → 運営に通報 (理由選択シート) */}
+          {/* ⋯ → 著者本人は編集/削除シート、他人は通報シート */}
           <PressableScale
-            onPress={() => setReportOpen(true)}
+            onPress={() => (fullPost?.is_own ? setAuthorSheetOpen(true) : setReportOpen(true))}
             haptic="tap"
             hitSlop={12}
-            accessibilityLabel="この投稿を通報"
+            accessibilityLabel={fullPost?.is_own ? 'この投稿の操作' : 'この投稿を通報'}
             style={{ padding: SP['2'] }}
           >
             <MoreHorizontal size={20} color={C.text2} strokeWidth={2.2} />
@@ -553,6 +730,9 @@ export default function PostDetailScreen() {
                   </Text>
                 )}
                 <Text style={[T.caption, { color: C.text3 }]}>{formatRelative(post.created_at)}</Text>
+                {editedAt ? (
+                  <Text style={[T.caption, { color: C.text3 }]}> ・編集済み</Text>
+                ) : null}
               </View>
               <ObsidianSaveButton note={postToObsidianNote(post)} size={18} />
             </View>
@@ -561,7 +741,9 @@ export default function PostDetailScreen() {
                 {post.title}
               </Text>
             )}
-            <Text style={[T.body, { color: C.text, lineHeight: 24 }]}>{post.content}</Text>
+            <Text style={[T.body, { color: C.text, lineHeight: 24 }]}>
+              {stripPreviewUrl(post.content, (previewUrl && useOgPreview) ? previewUrl : null)}
+            </Text>
             {/* ============================================================
                 メディア (写真 / 動画) — フィードカードと同じ表示方針。
                 画像タップで全画面ライトボックス、動画は VideoPlayer。
@@ -576,7 +758,11 @@ export default function PostDetailScreen() {
                       key={url}
                       style={{
                         width: '100%',
-                        aspectRatio: aspect,
+                        // 縦長は 4:5 を上限にクロップ表示 (フィードカードと同方針)。
+                        // 画像全体はタップ→ライトボックスで確認できる。
+                        aspectRatio: Math.max(0.8, aspect),
+                        // 縦長 (aspect < 1) は絶対高さでもクランプ — 画面占有を防ぐ。
+                        maxHeight: aspect < 1 ? portraitMaxH : undefined,
                         borderRadius: R.md,
                         overflow: 'hidden',
                         backgroundColor: C.bg3,
@@ -595,6 +781,8 @@ export default function PostDetailScreen() {
                             width="100%"
                             height="100%"
                             radius={R.md}
+                            // ★ contain: 写真全体を表示 (cover だとクロップ拡大される)
+                            contentFit="contain"
                             thumbWidth={720}
                           />
                         </Pressable>
@@ -931,45 +1119,137 @@ export default function PostDetailScreen() {
 
       {/* 「新着 N 件」フローティング pill は廃止 (セッション中ずっと残り「消えない」
           UX だったため)。未読ハイライト (unreadIds) は各コメント側で維持。 */}
+      {/* ============================================================
+          インライン コメント / 返信 コンポーザー (別画面に遷移しない)
+          - 返信時は上部に「○○ さんに返信」チップ (✕でキャンセル)
+          - 画像/動画を添付 → ComposerMediaGrid でプレビュー
+          - キーボードは KeyboardAvoidingView がこのバーごと押し上げる
+          ============================================================ */}
       <View style={{ width: '100%', alignItems: 'center', borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.bg2 }}>
-        {/* 全画面コメント作成への誘導バー (Instagram/Threads 風)。
-            タップで /post/comment へ遷移し、本文 + 画像/動画を全画面で作成する。
-            入力自体はこのバーでは行わない (インライン入力は廃止)。 */}
-        <PressableScale
-          onPress={openCommentComposer}
-          haptic="tap"
-          accessibilityRole="button"
-          accessibilityLabel="コメントを作成"
-          style={{
-            width: '100%', maxWidth: MAX_W,
-            paddingHorizontal: SP['3'],
-            paddingTop: SP['2'],
-            paddingBottom: insets.bottom + SP['2'],
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: SP['2'],
-          }}
-        >
-          {/* 自分の匿名アバター */}
-          <Avatar size={32} anonymous />
-          <View style={{
-            flex: 1,
-            backgroundColor: C.bg3,
-            borderRadius: R.full,
-            borderWidth: 1,
-            borderColor: C.border,
-            paddingHorizontal: SP['4'],
-            paddingVertical: 10,
-          }}>
-            <Text style={[T.body, { color: C.text3 }]} numberOfLines={1}>
-              コメントを入力…
-            </Text>
+        <View style={{ width: '100%', maxWidth: MAX_W, paddingHorizontal: SP['3'], paddingTop: SP['2'], paddingBottom: insets.bottom + SP['2'], gap: SP['2'] }}>
+          {/* 返信先ラベル「@◯◯ さんに返信しています」(YouTube 風)・×でキャンセル */}
+          {replyTarget && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: SP['1'] }}>
+              <Icon.arrowUL size={13} color={C.accent} strokeWidth={2.4} />
+              <Text style={[T.caption, { color: C.text3, flex: 1 }]} numberOfLines={1}>
+                <Text style={{ color: C.accent, fontWeight: '700' }}>
+                  {`@${pseudonymFor(replyTarget.pseudonym_id).handle}`}
+                </Text>
+                {' さんに返信しています'}
+              </Text>
+              <PressableScale
+                onPress={() => setReplyTarget(null)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="返信をやめる"
+                style={{ width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Icon.close size={15} color={C.text3} strokeWidth={2.4} />
+              </PressableScale>
+            </View>
+          )}
+
+          {/* 添付メディアのプレビュー */}
+          {(images.length > 0 || video) && (
+            <ComposerMediaGrid
+              images={images}
+              video={video ? { uri: video.uri, sizeMb: video.size / 1024 / 1024 } : null}
+              onRemoveImage={(index) => setImages(images.filter((_, i) => i !== index))}
+              onRemoveVideo={() => setVideo(null)}
+              containerPaddingH={0}
+            />
+          )}
+
+          {/* クイック絵文字 (フォーカス中・YouTube 風)。タップで本文末尾に挿入 */}
+          {composerActive && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['1'], paddingVertical: 2 }}>
+              {QUICK_EMOJIS.map((e) => (
+                <PressableScale
+                  key={e}
+                  onPress={() => { setCommentText((prev) => prev + e); composerRef.current?.focus(); }}
+                  hitSlop={4}
+                  accessibilityRole="button"
+                  accessibilityLabel={`絵文字 ${e} を挿入`}
+                  style={{ width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Text style={{ fontSize: 22 }}>{e}</Text>
+                </PressableScale>
+              ))}
+            </View>
+          )}
+
+          {/* 入力行: 画像 / 動画 / テキスト / 送信(丸) */}
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: SP['2'] }}>
+            <PressableScale
+              onPress={images.length >= 4 || pickingImage || posting ? undefined : pickImage}
+              disabled={images.length >= 4 || pickingImage || posting}
+              haptic="select"
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel="画像を追加"
+              style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', opacity: images.length >= 4 || pickingImage || posting ? 0.4 : 1 }}
+            >
+              <Icon.image size={22} color={C.text2} strokeWidth={2} />
+            </PressableScale>
+            <PressableScale
+              onPress={!!video || pickingVideo || posting ? undefined : pickVideo}
+              disabled={!!video || pickingVideo || posting}
+              haptic="select"
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel="動画を追加"
+              style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', opacity: video || posting ? 0.4 : 1 }}
+            >
+              <Film size={22} color={C.text2} strokeWidth={2} />
+            </PressableScale>
+            <View style={{ flex: 1, backgroundColor: C.bg3, borderRadius: R.lg, borderWidth: 1, borderColor: C.border, paddingHorizontal: SP['3'], minHeight: 40, justifyContent: 'center' }}>
+              <TextInput
+                ref={composerRef}
+                value={commentText}
+                onChangeText={setCommentText}
+                onFocus={() => setComposerActive(true)}
+                editable={!posting}
+                placeholder={replyTarget ? '返信を入力…' : 'コメントを入力…'}
+                placeholderTextColor={C.text3}
+                multiline
+                returnKeyType="send"
+                onKeyPress={
+                  Platform.OS === 'web'
+                    ? (e) => {
+                        // Web/Desktop: Enter で送信、Shift+Enter で改行 (チャット系の慣習)。
+                        // モバイルは multiline の改行挙動をそのまま維持 (この分岐に入らない)。
+                        const ne = e.nativeEvent as unknown as { key?: string; shiftKey?: boolean };
+                        if (ne.key === 'Enter' && !ne.shiftKey) {
+                          (e as unknown as { preventDefault?: () => void }).preventDefault?.();
+                          if (canPost) submitComment();
+                        }
+                      }
+                    : undefined
+                }
+                style={{ color: C.text, fontSize: 15, lineHeight: 20, paddingTop: Platform.OS === 'ios' ? 10 : 6, paddingBottom: Platform.OS === 'ios' ? 10 : 6, maxHeight: 120 }}
+              />
+            </View>
+            <PressableScale
+              onPress={canPost ? submitComment : () => {
+                // disabled にせず「押せない理由」を提示 (無言の無反応を避ける)
+                if (!posting && commentText.trim().length === 0 && images.length === 0 && !video) {
+                  show('コメントを入力してください。', 'warn');
+                }
+              }}
+              haptic="tap"
+              accessibilityRole="button"
+              accessibilityLabel={replyTarget ? '返信を送信' : 'コメントを送信'}
+              accessibilityState={{ disabled: !canPost }}
+              style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: canPost ? C.accent : C.bg3, alignItems: 'center', justifyContent: 'center', opacity: canPost ? 1 : 0.6 }}
+            >
+              {posting ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Send size={18} color={canPost ? '#fff' : C.text3} strokeWidth={2.2} />
+              )}
+            </PressableScale>
           </View>
-          {/* 画像/動画も添付できることを示すヒント */}
-          <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon.image size={22} color={C.text2} strokeWidth={2} />
-          </View>
-        </PressableScale>
+        </View>
       </View>
 
       {/* テキストスタンプ Picker — フィードカードと同じ component を再利用 */}
@@ -1001,6 +1281,36 @@ export default function PostDetailScreen() {
         visible={reportOpen}
         postId={id}
         onClose={() => setReportOpen(false)}
+      />
+      <PostAuthorSheet
+        visible={authorSheetOpen}
+        onClose={() => setAuthorSheetOpen(false)}
+        onEdit={() => {
+          if (id) router.push(`/post/create?editId=${id}` as never);
+        }}
+        onDelete={() => {
+          if (!id) return;
+          void (async () => {
+            try {
+              await deleteOwnPost(id);
+              hap.success();
+              show('削除しました', 'success');
+              void qc.invalidateQueries({ queryKey: ['feed'] });
+              invalidateFeedPage(qc);
+              void qc.invalidateQueries({ queryKey: ['user-posts'] });
+              void qc.invalidateQueries({ queryKey: ['community'] });
+              if (router.canGoBack()) router.back();
+              else router.replace('/(tabs)/feed' as never);
+            } catch (e) {
+              show(
+                e instanceof Error && e.message.includes('権限')
+                  ? '削除権限がありません。'
+                  : '削除に失敗しました。',
+                'error',
+              );
+            }
+          })();
+        }}
       />
     </KeyboardAvoidingView>
     </Animated.View>

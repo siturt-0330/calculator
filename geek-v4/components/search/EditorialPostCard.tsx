@@ -25,6 +25,7 @@ import Animated, {
   FadeInDown,
 } from 'react-native-reanimated';
 import { Image as ExpoImage } from 'expo-image';
+import { VideoPlayer } from '../ui/VideoPlayer';
 
 import type { Post } from '../../types/models';
 import { formatRelative } from '../../lib/utils/date';
@@ -80,6 +81,15 @@ export function EditorialPostCard({ post, rank, terms, onPress, onExplain }: Pro
   // 88px 角に対し full-res は過剰なので thumbedUrl(264 = 88@3x) で軽量化
   const rawThumb = post.media_urls?.[0];
   const thumbUrl: string | null = isHttpUrl(rawThumb) ? thumbedUrl(rawThumb, 264) : null;
+
+  // 動画: video_urls[0] が http(s) のとき、検索結果でも小枠の中でそのまま再生する
+  // (画像が無い動画のみ投稿でもサムネ枠を出す)。poster は最初フレーム。
+  const rawVideo = post.video_urls?.[0];
+  const videoUrl: string | null = isHttpUrl(rawVideo) ? rawVideo : null;
+  const rawVideoPoster = post.video_posters?.[0];
+  const videoPoster: string | undefined = isHttpUrl(rawVideoPoster)
+    ? thumbedUrl(rawVideoPoster, 264)
+    : undefined;
 
   // 巻頭特集の accent 下線: マウント時に opacity 0→1→0.6 を1パルスのみ
   const pulse = useSharedValue(isLead ? 0 : 0.6);
@@ -177,8 +187,13 @@ export function EditorialPostCard({ post, rank, terms, onPress, onExplain }: Pro
             </View>
           </View>
 
-          {/* 右: サムネ(http(s) のときのみ) */}
-          {thumbUrl !== null ? (
+          {/* 右: 動画があれば小枠でインライン再生(ミュート自動再生)、無ければ画像サムネ。
+              タップは親カードの onPress(投稿を開く)に委ねる (expandable=false)。 */}
+          {videoUrl !== null ? (
+            <View style={styles.thumbVideoWrap}>
+              <VideoPlayer uri={videoUrl} poster={videoPoster} expandable={false} style={styles.thumbVideo} />
+            </View>
+          ) : thumbUrl !== null ? (
             <ExpoImage
               source={{ uri: thumbUrl }}
               style={styles.thumb}
@@ -297,5 +312,17 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: R.md,
+  },
+  // --- 動画サムネ枠 (小枠インライン再生) ---
+  thumbVideoWrap: {
+    width: 88,
+    height: 88,
+    borderRadius: R.md,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+  },
+  thumbVideo: {
+    width: '100%',
+    height: '100%',
   },
 });

@@ -181,13 +181,14 @@ export async function uploadPostVideo(
     body = fd;
   }
 
-  // 動画は大きいので timeout は 5 分まで許す
+  // timeout: 5分は切断時に長く放置される。一方 90秒は遅い回線で正当な大容量動画を
+  // 失敗させる回帰リスクがあるため、3分に短縮 (待ち過ぎ解消 ↔ 大容量耐性 の折衷)。
   const upload = supabase.storage.from(BUCKET).upload(path, body, {
     contentType: mime,
     cacheControl: '31536000',
     upsert: false,
   });
-  const { error } = await withApiTimeout(upload, 'media.upload.video', 5 * 60_000);
+  const { error } = await withApiTimeout(upload, 'media.upload.video', 180_000);
   if (error) {
     throw new Error(`動画アップロード失敗: ${error.message}`);
   }

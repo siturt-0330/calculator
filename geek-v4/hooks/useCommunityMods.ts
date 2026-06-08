@@ -21,15 +21,19 @@ import {
   unbanMember,
   promoteMember,
   demoteMember,
+  transferOwnership,
   fetchCommunityMembers,
   fetchCommunityBans,
   fetchModActionLogs,
   deletePostAsMod,
   deleteCommentAsMod,
   deleteBBSReplyAsMod,
+  fetchCommunityReports,
+  resolveCommunityReport,
   type MemberWithProfile,
   type BanWithProfile,
   type ModActionLog,
+  type CommunityReport,
 } from '../lib/api/communityMods';
 import { useToastStore } from '../stores/toastStore';
 
@@ -89,6 +93,25 @@ export function useModActionLogs(
   });
   return {
     logs: q.data ?? [],
+    isLoading: q.isLoading,
+    isError: q.isError,
+  };
+}
+
+// コミュニティ通報キュー (mod が自コミュの未対応通報を一覧)
+export function useCommunityReports(communityId: string | undefined): {
+  reports: CommunityReport[];
+  isLoading: boolean;
+  isError: boolean;
+} {
+  const q = useQuery({
+    queryKey: ['community-mods', 'reports', communityId ?? 'none'],
+    queryFn: () => fetchCommunityReports(communityId as string),
+    staleTime: 30_000,
+    enabled: !!communityId,
+  });
+  return {
+    reports: q.data ?? [],
     isLoading: q.isLoading,
     isError: q.isError,
   };
@@ -288,6 +311,49 @@ export function useDemoteMember(communityId: string | undefined) {
 }
 
 // ============================================================
+// mutation: オーナー譲渡 (owner 専用 — 0135)
+// ============================================================
+// optimistic: 新オーナー → owner、現 owner(自分) → admin に入れ替える。
+type TransferInput = { communityId: string; userId: string };
+
+export function useTransferOwnership(communityId: string | undefined) {
+  const qc = useQueryClient();
+  const invalidate = useInvalidateMods(communityId);
+  const membersKey = ['community-mods', 'members', communityId ?? 'none'];
+
+  return useMutation({
+    mutationFn: (input: TransferInput) =>
+      transferOwnership(input.communityId, input.userId),
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: membersKey });
+      const prev = qc.getQueryData<MemberWithProfile[]>(membersKey);
+      if (prev) {
+        qc.setQueryData<MemberWithProfile[]>(
+          membersKey,
+          prev.map((m) =>
+            m.user_id === input.userId
+              ? { ...m, role: 'owner' as const }
+              : m.role === 'owner'
+                ? { ...m, role: 'admin' as const }
+                : m,
+          ),
+        );
+      }
+      return { prev };
+    },
+    onError: (err, _input, ctx) => {
+      if (ctx?.prev) qc.setQueryData(membersKey, ctx.prev);
+      const message = err instanceof Error ? err.message : 'オーナーの譲渡に失敗しました';
+      showErrorToast(message);
+    },
+    onSuccess: () => {
+      useToastStore.getState().show('オーナーを譲渡しました', 'success');
+    },
+    onSettled: () => invalidate(),
+  });
+}
+
+// ============================================================
 // mutation: 投稿 / コメント / 返信 の削除
 // ============================================================
 // optimistic update は対象が広範囲 (feed-page cache など) のため、
@@ -312,6 +378,10 @@ export function useDeletePostAsMod(communityId: string | undefined) {
       qc.invalidateQueries({ queryKey: ['feed'] });
       qc.invalidateQueries({ queryKey: ['feed-page'] });
       qc.invalidateQueries({ queryKey: ['community-feed'] });
+      // 削除した投稿が通報キューにあれば消える → reports も更新
+      if (communityId) {
+        qc.invalidateQueries({ queryKey: ['community-mods', 'reports', communityId] });
+      }
     },
     onSettled: () => invalidate(),
   });
@@ -353,5 +423,45 @@ export function useDeleteBBSReplyAsMod(communityId: string | undefined) {
       qc.invalidateQueries({ queryKey: ['bbs-replies'] });
     },
     onSettled: () => invalidate(),
+  });
+}
+
+// ============================================================
+// mutation: 通報を「対応済み」にする
+// ============================================================
+// optimistic: reports キューから該当 post を即座に消す → 失敗時 revert。
+type ResolveReportInput = { communityId: string; postId: string };
+
+export function useResolveCommunityReport(communityId: string | undefined) {
+  const qc = useQueryClient();
+  const reportsKey = ['community-mods', 'reports', communityId ?? 'none'];
+
+  return useMutation({
+    mutationFn: (input: ResolveReportInput) =>
+      resolveCommunityReport(input.communityId, input.postId),
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: reportsKey });
+      const prev = qc.getQueryData<CommunityReport[]>(reportsKey);
+      if (prev) {
+        qc.setQueryData<CommunityReport[]>(
+          reportsKey,
+          prev.filter((r) => r.post_id !== input.postId),
+        );
+      }
+      return { prev };
+    },
+    onError: (err, _input, ctx) => {
+      if (ctx?.prev) qc.setQueryData(reportsKey, ctx.prev);
+      const message = err instanceof Error ? err.message : '対応済みにできませんでした';
+      showErrorToast(message);
+    },
+    onSuccess: () => {
+      useToastStore.getState().show('対応済みにしました', 'success');
+    },
+    onSettled: () => {
+      if (communityId) {
+        qc.invalidateQueries({ queryKey: ['community-mods', 'reports', communityId] });
+      }
+    },
   });
 }

@@ -1343,9 +1343,11 @@ async function fetchMyCommunityPostsRichLegacy(
   const postIds = order.slice(0, limit);
 
   // 3) posts を AnonPostCard 互換の完全な列セットで取得
-  // POSTS_SELECT_COLS (lib/api/posts.ts) と同じセット
+  // ★ 動画3列 (video_urls / video_durations / video_posters) を必ず含める。これが
+  //   抜けていると、RPC (get_community_feed) が失敗してこの legacy 経路に落ちたとき、
+  //   コミュニティの投稿で動画が一切表示されなくなる (bug fix)。
   const POSTS_SELECT_COLS =
-    'id, content, media_urls, media_blurhashes, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, created_at, author_id';
+    'id, content, media_urls, media_blurhashes, video_urls, video_durations, video_posters, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, created_at, author_id';
   const { data: postRows, error: postErr } = await supabase
     .from('posts')
     .select(POSTS_SELECT_COLS)
