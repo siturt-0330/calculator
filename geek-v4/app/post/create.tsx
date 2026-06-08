@@ -40,7 +40,7 @@ import { usePostDraftStore } from '../../stores/postDraftStore';
 import { useDraftsStore, newDraftId } from '../../stores/draftsStore';
 import { hap } from '../../design/haptics';
 import { fetchCommunity, fetchMyCommunities, type Community } from '../../lib/api/communities';
-import { createPost } from '../../lib/api/posts';
+import { createPost, fetchPostById, updatePost } from '../../lib/api/posts';
 import { checkContent } from '../../lib/ai/checkContent';
 import { validateVideoSource, uploadPostImage, uploadPostVideo } from '../../lib/media';
 import { makeWebPreviewDataUrl } from '../../lib/image';
@@ -71,6 +71,7 @@ export default function CreatePost() {
     community_id?: string;
     prefill_tag?: string;
     draftId?: string;
+    editId?: string;
   }>();
   const insets = useSafeAreaInsets();
   const show = useToastStore((s) => s.show);
@@ -117,6 +118,11 @@ export default function CreatePost() {
   const [communityQuery, setCommunityQuery] = useState('');
   const [tagInput, setTagInput] = useState('');
   const [posting, setPosting] = useState(false);
+  // ?editId= で開いた編集モード (空文字 = 通常の新規作成)。
+  const [editId, setEditId] = useState('');
+  // 編集対象が動画を持つか。動画は composer に出さず据え置くため、空本文+空画像でも
+  //   保存を許可する判定に使う (= 動画のみ投稿の編集が validation で弾かれないように)。
+  const [editHasVideo, setEditHasVideo] = useState(false);
   const qc = useQueryClient();
 
   // 参加コミュニティ一覧 (Reddit 風の「投稿先」ピッカー用)。
@@ -135,6 +141,8 @@ export default function CreatePost() {
   // refs
   // -----------------------------------------------------------
   const draftRestored = useRef(false);
+  const editRestored = useRef(false);
+  const editIdRef = useRef(''); // 自動保存 guard 用 (state より先に同期確定させる)
   const bodyRef = useRef<TextInput>(null);
   // 本文の選択範囲 — FormatToolbar の markdown 挿入に使う
   const selectionRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
@@ -170,10 +178,42 @@ export default function CreatePost() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ?editId=xxx — 既存投稿を編集モードで開く (mount 1 回)。fetchPostById で取得して
+  // store に prefill。コミュニティ/poll/タイトルは編集対象外なので prefill しない。
+  useEffect(() => {
+    if (editRestored.current) return;
+    editRestored.current = true;
+    const eid = typeof params.editId === 'string' ? params.editId : '';
+    if (!eid) return;
+    editIdRef.current = eid; // 自動保存を即無効化するため同期セット
+    setEditId(eid);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const p = await fetchPostById(eid);
+        if (cancelled || !p) return;
+        const st = usePostDraftStore.getState();
+        st.setContent(p.content ?? '');
+        st.setImages(p.media_urls ?? []); // 既存は https — 温存 (保存時に再 upload しない)
+        st.setTags(p.tag_names ?? []);
+        setEditHasVideo((p.video_urls?.length ?? 0) > 0); // 動画は据え置き (composer 非表示)
+        show('編集モードで開きました', 'info');
+      } catch (e) {
+        console.warn('[post/create] failed to load post for edit:', e);
+        show('投稿の読み込みに失敗しました', 'error');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 下書き自動保存 (debounce 600ms)
   // 「一度でも何か入力したら」自動で下書き登録 → 以後は同一 draftId を更新。
   // Step 1 の content フィールド (title/content/images/video) を契機に store 全体を snapshot する。
   useEffect(() => {
+    if (editIdRef.current) return; // 編集モードは下書きへ書き戻さない
     const meaningful = title.trim() || content.trim() || images.length > 0 || !!video;
     if (!meaningful) return;
     const t = setTimeout(() => {
@@ -427,17 +467,79 @@ export default function CreatePost() {
   // 投稿 — 旧 Step2 (create-settings) の送信ロジックを 1 画面に統合
   // -----------------------------------------------------------
   const canPost =
-    (content.trim().length > 0 || images.length > 0 || !!video) &&
-    selectedCommunityIds.length > 0 &&
+    (content.trim().length > 0 || images.length > 0 || !!video || editHasVideo) &&
+    (editId !== '' || selectedCommunityIds.length > 0) &&
     !posting;
 
   const handlePost = async () => {
     if (posting) return;
     const s = usePostDraftStore.getState();
-    if (!s.content.trim() && s.images.length === 0 && !s.video) {
+    if (!s.content.trim() && s.images.length === 0 && !s.video && !editHasVideo) {
       show('本文・画像・動画のいずれかを入力してください。', 'warn');
       return;
     }
+
+    // ---- 編集モード: 既存投稿を updatePost で更新 (コミュニティ/poll は変更しない) ----
+    if (editId) {
+      setPosting(true);
+      try {
+        const userId = useAuthStore.getState().user?.id;
+        if (!userId) {
+          show('ログインし直してください', 'error');
+          return;
+        }
+        // 編集後の本文も AI チェック (UX ガード。※ fail-open + client のみなので
+        //   セキュリティ境界ではない — 真の防御は通報+事後モデレーション)。
+        const check = await checkContent({ content: s.content, tags: s.tags });
+        if (!check.ok) {
+          hap.error();
+          show(check.reason ?? 'コンテンツポリシーに反する可能性があります', 'error');
+          return;
+        }
+        // 既存の https 画像は温存、新規ローカル URI のみ upload。
+        const finalImageUrls = await Promise.all(
+          s.images.map((uri) =>
+            /^https?:\/\//i.test(uri) ? Promise.resolve(uri) : uploadPostImage(uri, userId),
+          ),
+        );
+        await updatePost(editId, {
+          content: s.content,
+          tagNames: s.tags,
+          mediaUrls: finalImageUrls,
+        });
+        hap.success();
+        show('更新しました', 'success');
+        // 反映: 詳細(REST)/フィード周辺(RPC)/各フィードを再取得。
+        void qc.invalidateQueries({ queryKey: ['post', editId] });
+        void qc.invalidateQueries({ queryKey: ['feed-page'] });
+        void qc.invalidateQueries({ queryKey: ['feed'] });
+        void qc.invalidateQueries({ queryKey: ['user-posts', userId] });
+        void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'] });
+        void qc.invalidateQueries({ queryKey: ['community'] }); // コミュニティ各フィードの古い本文を除去
+        void qc.invalidateQueries({ queryKey: ['post-edited-at', editId] }); // 編集済みバッジ更新
+        usePostDraftStore.getState().reset();
+        if (router.canGoBack()) router.back();
+        else router.replace('/(tabs)/feed' as never);
+      } catch (e: unknown) {
+        hap.error();
+        const msg = e instanceof Error ? e.message : String(e);
+        let userMsg = '編集に失敗しました。再度お試しください。';
+        if (msg.includes('23514') || msg.includes('content_check')) {
+          userMsg = '本文・画像・動画のいずれかが必要です。';
+        } else if (
+          msg.includes('row-level security') ||
+          msg.includes('権限') ||
+          msg.includes('編集できませんでした')
+        ) {
+          userMsg = '編集権限がありません (自分の投稿のみ編集できます)。';
+        }
+        show(userMsg, 'error');
+      } finally {
+        setPosting(false);
+      }
+      return;
+    }
+
     if (s.selectedCommunityIds.length === 0) {
       show('投稿するコミュニティを選んでください。', 'warn');
       return;
@@ -585,7 +687,7 @@ export default function CreatePost() {
           onPress={handlePost}
           haptic="tap"
           accessibilityRole="button"
-          accessibilityLabel="投稿"
+          accessibilityLabel={editId ? '更新' : '投稿'}
           accessibilityState={{ disabled: !canPost }}
           disabled={!canPost}
           style={{
@@ -597,7 +699,7 @@ export default function CreatePost() {
           }}
         >
           <Text style={[T.smallB, { color: canPost ? '#fff' : C.text3 }]}>
-            {posting ? '投稿中…' : '投稿'}
+            {posting ? (editId ? '更新中…' : '投稿中…') : (editId ? '更新' : '投稿')}
           </Text>
         </PressableScale>
       </View>
@@ -619,6 +721,7 @@ export default function CreatePost() {
           {/* ============================================================
               投稿先コミュニティ (必須・Reddit 風の上部ピッカー)
               ============================================================ */}
+          {!editId && (
           <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'] }}>
             <PressableScale
               onPress={() => {
@@ -652,6 +755,7 @@ export default function CreatePost() {
               <Icon.chevronD size={16} color={selectedCommunity ? C.accent : C.text3} strokeWidth={2.2} />
             </PressableScale>
           </View>
+          )}
 
           {/* ============================================================
               2カラムレイアウト: [アバター列 | スレッドライン] + [コンテンツ列]
@@ -824,6 +928,8 @@ export default function CreatePost() {
           hasVideo={!!video}
           pollActive={showPoll}
           formatActive={formatActive}
+          hideVideo={!!editId}
+          hidePoll={!!editId}
           bottomInset={insets.bottom}
         />
       </KeyboardAvoidingView>
@@ -832,7 +938,7 @@ export default function CreatePost() {
           Bottom sheets
           ================================================================ */}
       <PollEditorSheet
-        visible={showPollSheet}
+        visible={showPollSheet && !editId}
         onClose={() => setShowPollSheet(false)}
         question={pollQuestion}
         onQuestionChange={(q) => setPoll(true, q, pollOptions, pollMulti, pollHours)}

@@ -17,6 +17,10 @@ export type SortMode = 'for-you' | 'hot' | 'new' | 'top' | 'rising';
 //   REST 経路 (この SELECT) はカード本体 (本文 / media / counters 等) のみを担う。
 const POSTS_SELECT_COLS =
   'id, content, title, last_activity_at, media_urls, media_blurhashes, video_urls, video_posters, tag_names, likes_count, comments_count, score, hot_score, concern_count, kind, source_url, is_public, trust_score_at_post, is_anonymous, content_warning, cw_category, visibility, qa_mode, created_at';
+// ★ edited_at は POSTS_SELECT_COLS に入れない。0133(edited_at列追加)未適用の本番に
+//   コードが先に出ると PostgREST が 42703(column does not exist)で全 post 取得を
+//   落とすため(deploy-ordering 結合)。「編集済み」バッジが要る詳細画面だけ、下記
+//   fetchPostEditedAt で edited_at を *耐性付き* に取りに行く(列欠落は null 扱い)。
 
 // ★ de-anon Phase2 (2b): 公式管理者投稿の official_author は REST embed では
 //   判定できなくなった (判定に必要な author_id を SELECT から外したため)。
@@ -783,6 +787,29 @@ export async function fetchPostById(id: string): Promise<Post | null> {
   return decorated ?? null;
 }
 
+// ============================================================
+// fetchPostEditedAt — 「編集済み」バッジ用に edited_at だけを耐性付きで取得
+// ------------------------------------------------------------
+// ★ 0133 (edited_at 列追加) が未適用の環境でも壊れないよう、列欠落 (42703) や
+//   その他エラーは握り潰して null を返す = バッジが出ないだけで他機能に無影響。
+//   これにより POSTS_SELECT_COLS に edited_at を入れずに済み、全 post 取得経路を
+//   migration の適用順から切り離せる (deploy-ordering 結合の解消)。
+// ============================================================
+export async function fetchPostEditedAt(postId: string): Promise<string | null> {
+  if (!postId || !UUID_RE.test(postId)) return null;
+  try {
+    const { data, error } = await withApiTimeout(
+      supabase.from('posts').select('edited_at').eq('id', postId).maybeSingle(),
+      'posts.fetchEditedAt',
+      8000,
+    );
+    if (error || !data) return null; // 列欠落(0133未適用)/RLS/通信失敗 → 「未編集」扱い
+    return (data as { edited_at?: string | null }).edited_at ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // 複数 post id をまとめて 1 RTT で取得 (検索結果の hydrate 用)。順不同で返るので
 // 呼び出し側でランキング順に並べ直す。embed 失敗時は legacy SELECT に fallback。
 // (旧: 検索が 1 件ずつ最大 30 RTT のウォーターフォールだったのを 1 RTT に畳む)
@@ -922,5 +949,96 @@ export async function togglePostQAMode(
   if (!data || data.length === 0) {
     // RLS で 0 行 update = 本人でない or post が存在しない
     throw new Error('Q&A モードは投稿者のみが切替可能です');
+  }
+}
+
+// ============================================================
+// updatePost — 自分の投稿を後から編集する (author 本人のみ)
+// ------------------------------------------------------------
+// - RLS posts_update = `auth.uid()=author_id` + with check(0133) が本人以外/
+//   author_id 改竄を弾く。client は author_id を持たない/送らない。
+// - `.select('id')` の 0 行で「権限なし or 不在」を明示 error 化 (togglePostQAMode 同型)。
+// - edited_at は DB トリガ(0133)が content/media/video 実変化時のみスタンプ。手動不要。
+// - 送るのは編集可能列のみ (content/title/tags/cw/media/video)。likes_count 等は
+//   送らない (サーバ硬化 follow-up までの実用的封じ込め)。
+// - media/video は「自分の Supabase posts-media バケットの https URL」のみ許可
+//   (外部 URL / トラッキング pixel / 他バケットの差し込みを拒否 = bait-and-switch 対策)。
+// - undefined のフィールドは触らない (部分更新)。
+// ============================================================
+const SB_URL_FOR_MEDIA = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/+$/, '');
+
+function assertOwnMediaUrl(u: string): void {
+  if (!u) return;
+  const ok =
+    /^https:\/\//i.test(u) &&
+    (SB_URL_FOR_MEDIA ? u.startsWith(SB_URL_FOR_MEDIA) : true) &&
+    /\/posts-media\//.test(u);
+  if (!ok) {
+    throw new Error('メディアの URL が不正です (アップロード済みの画像/動画のみ編集できます)');
+  }
+}
+
+export async function updatePost(
+  postId: string,
+  fields: {
+    content?: string;
+    title?: string | null;
+    tagNames?: string[];
+    contentWarning?: string | null;
+    cwCategory?: string | null;
+    mediaUrls?: string[];
+    videoUrls?: string[];
+    videoDurations?: number[];
+    videoPosters?: string[];
+  },
+): Promise<void> {
+  if (!postId || !UUID_RE.test(postId)) throw new Error('Invalid post id');
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  // 送る列だけを組み立てる (undefined は触らない = 部分更新)。
+  const patch: Record<string, unknown> = {};
+  if (fields.content !== undefined) {
+    patch.content = sanitizeContent(fields.content, { maxLength: 2000 });
+  }
+  if (fields.title !== undefined) {
+    patch.title = fields.title
+      ? sanitizeContent(fields.title, { maxLength: 80 }).trim() || null
+      : null;
+  }
+  if (fields.tagNames !== undefined) {
+    patch.tag_names = fields.tagNames.map(sanitizeTag).filter(Boolean);
+  }
+  if (fields.contentWarning !== undefined) {
+    patch.content_warning = fields.contentWarning
+      ? sanitizeContent(fields.contentWarning, { maxLength: 200 })
+      : null;
+  }
+  if (fields.cwCategory !== undefined) patch.cw_category = fields.cwCategory;
+
+  if (fields.mediaUrls !== undefined) {
+    fields.mediaUrls.forEach(assertOwnMediaUrl);
+    patch.media_urls = fields.mediaUrls;
+    // media を差し替えたら blurhash の index 対応が崩れるのでリセット (createPost も [])。
+    patch.media_blurhashes = [];
+  }
+  if (fields.videoUrls !== undefined) {
+    fields.videoUrls.forEach(assertOwnMediaUrl);
+    patch.video_urls = fields.videoUrls;
+    patch.video_durations = fields.videoDurations ?? [];
+    patch.video_posters = fields.videoPosters ?? [];
+  }
+
+  if (Object.keys(patch).length === 0) return; // 変更なし
+
+  const { data, error } = await withApiTimeout(
+    supabase.from('posts').update(patch).eq('id', postId).select('id'),
+    'posts.update',
+    8000,
+  );
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('編集できませんでした (権限が無いか、投稿が見つかりません)');
   }
 }

@@ -15,7 +15,7 @@ import Animated, {
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { getLastViewed, setLastViewed } from '../../lib/utils/lastViewed';
-import { fetchPostById, fetchCommunitiesForPosts } from '../../lib/api/posts';
+import { fetchPostById, fetchCommunitiesForPosts, deleteOwnPost, fetchPostEditedAt } from '../../lib/api/posts';
 import { fetchSimilarPosts } from '../../lib/api/similarPosts';
 import { fetchComments, createComment } from '../../lib/api/comments';
 import { attachChannel } from '../../lib/realtime';
@@ -46,6 +46,7 @@ import { ObsidianSaveButton } from '../../components/ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
 import { CommentThreadItem } from '../../components/post/CommentThreadItem';
 import { ReportSheet } from '../../components/post/ReportSheet';
+import { PostAuthorSheet } from '../../components/post/PostAuthorSheet';
 import { MoreHorizontal, Film, Send } from 'lucide-react-native';
 import { useCommentReactions, useCommentReactionToggle } from '../../hooks/useCommentReactions';
 import { CollapsedComment } from '../../components/post/CollapsedComment';
@@ -158,6 +159,15 @@ export default function PostDetailScreen() {
   const postIdsForFeedPage = useMemo(() => (id ? [id] : []), [id]);
   const { fullPosts, isLoading: feedPageLoading } = useFeedPage(postIdsForFeedPage);
   const fullPost = id ? fullPosts.get(id) : undefined;
+
+  // 「編集済み」バッジ用に edited_at を耐性付き取得 (0133 未適用なら null=バッジ非表示)。
+  //   POSTS_SELECT_COLS とは分離して deploy-ordering 結合を避けている。
+  const { data: editedAt } = useQuery({
+    queryKey: ['post-edited-at', id],
+    queryFn: () => fetchPostEditedAt(id!),
+    enabled: !!id,
+    staleTime: 60_000,
+  });
   // ★ de-anon Phase2: 投稿者の擬似アイデンティティ (handle / 色 / 頭文字) を
   //   server 供給の pseudonym_id から導出 (author_id 非依存・AnonPostCard と同方針)。
   const pseudo = useMemo(() => pseudonymFor(fullPost?.pseudonym_id), [fullPost?.pseudonym_id]);
@@ -311,6 +321,7 @@ export default function PostDetailScreen() {
   const [lightboxUri, setLightboxUri] = useState<string | null>(null);
   // 運営への通報シート (この投稿が対象)
   const [reportOpen, setReportOpen] = useState(false);
+  const [authorSheetOpen, setAuthorSheetOpen] = useState(false);
 
   // Smart skeleton timing — Spinner only after 200ms of continuous loading.
   // <200ms loads (cache hits via TanStack staleTime) skip flash entirely.
@@ -622,12 +633,12 @@ export default function PostDetailScreen() {
           </PressableScale>
           <Text style={[T.smallM, { color: C.text3, marginLeft: SP['2'] }]}>投稿</Text>
           <View style={{ flex: 1 }} />
-          {/* ⋯ → 運営に通報 (理由選択シート) */}
+          {/* ⋯ → 著者本人は編集/削除シート、他人は通報シート */}
           <PressableScale
-            onPress={() => setReportOpen(true)}
+            onPress={() => (fullPost?.is_own ? setAuthorSheetOpen(true) : setReportOpen(true))}
             haptic="tap"
             hitSlop={12}
-            accessibilityLabel="この投稿を通報"
+            accessibilityLabel={fullPost?.is_own ? 'この投稿の操作' : 'この投稿を通報'}
             style={{ padding: SP['2'] }}
           >
             <MoreHorizontal size={20} color={C.text2} strokeWidth={2.2} />
@@ -716,6 +727,9 @@ export default function PostDetailScreen() {
                   </Text>
                 )}
                 <Text style={[T.caption, { color: C.text3 }]}>{formatRelative(post.created_at)}</Text>
+                {editedAt ? (
+                  <Text style={[T.caption, { color: C.text3 }]}> ・編集済み</Text>
+                ) : null}
               </View>
               <ObsidianSaveButton note={postToObsidianNote(post)} size={18} />
             </View>
@@ -1243,6 +1257,36 @@ export default function PostDetailScreen() {
         visible={reportOpen}
         postId={id}
         onClose={() => setReportOpen(false)}
+      />
+      <PostAuthorSheet
+        visible={authorSheetOpen}
+        onClose={() => setAuthorSheetOpen(false)}
+        onEdit={() => {
+          if (id) router.push(`/post/create?editId=${id}` as never);
+        }}
+        onDelete={() => {
+          if (!id) return;
+          void (async () => {
+            try {
+              await deleteOwnPost(id);
+              hap.success();
+              show('削除しました', 'success');
+              void qc.invalidateQueries({ queryKey: ['feed'] });
+              invalidateFeedPage(qc);
+              void qc.invalidateQueries({ queryKey: ['user-posts'] });
+              void qc.invalidateQueries({ queryKey: ['community'] });
+              if (router.canGoBack()) router.back();
+              else router.replace('/(tabs)/feed' as never);
+            } catch (e) {
+              show(
+                e instanceof Error && e.message.includes('権限')
+                  ? '削除権限がありません。'
+                  : '削除に失敗しました。',
+                'error',
+              );
+            }
+          })();
+        }}
       />
     </KeyboardAvoidingView>
     </Animated.View>
