@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl, ScrollView, Pressable, StyleSheet, Image as RNImage,
+  View, Text, TextInput, KeyboardAvoidingView, Platform, useWindowDimensions, ActivityIndicator, RefreshControl, ScrollView, Pressable, StyleSheet, Image as RNImage,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -256,6 +256,11 @@ export default function PostDetailScreen() {
   // OG リンクプレビュー対象 URL: 明示的な source_url を優先し、
   // 無ければ本文中の最初の URL を拾って OG カード化する (フィードカードと同方針)。
   const useOgPreview = useFeatureFlag('og_preview');
+
+  // 縦長写真が詳細画面を占有しないための絶対最大高さ (フィードカードと同方針)。
+  // web は固定 600px、モバイルは画面高の 65%。
+  const { height: winH } = useWindowDimensions();
+  const portraitMaxH = Platform.OS === 'web' ? 600 : Math.round(winH * 0.65);
   const previewUrl = useMemo(
     () => post?.source_url || extractFirstUrl(post?.content),
     [post?.source_url, post?.content],
@@ -739,6 +744,8 @@ export default function PostDetailScreen() {
                         // 縦長は 4:5 を上限にクロップ表示 (フィードカードと同方針)。
                         // 画像全体はタップ→ライトボックスで確認できる。
                         aspectRatio: Math.max(0.8, aspect),
+                        // 縦長 (aspect < 1) は絶対高さでもクランプ — 画面占有を防ぐ。
+                        maxHeight: aspect < 1 ? portraitMaxH : undefined,
                         borderRadius: R.md,
                         overflow: 'hidden',
                         backgroundColor: C.bg3,

@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react-native';
-import { View, Text, Platform, Image as RNImage, StyleSheet, Pressable, type TextStyle } from 'react-native';
+import { View, Text, Platform, useWindowDimensions, Image as RNImage, StyleSheet, Pressable, type TextStyle } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -387,8 +387,18 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 // contentFit='cover' でクロップ表示する。画像全体はタップ→ライトボックス
 // (contentFit='contain') で確認できる。横長 (>1) はそのまま全体表示。
 const MEDIA_MIN_ASPECT = 0.8; // 4:5
-function mediaItemAspect(aspect: number): { aspectRatio: number } {
-  return { aspectRatio: Math.max(MEDIA_MIN_ASPECT, aspect) };
+function mediaItemAspect(
+  aspect: number,
+  portraitMaxH?: number,
+): { aspectRatio: number; maxHeight?: number } {
+  const aspectRatio = Math.max(MEDIA_MIN_ASPECT, aspect);
+  // 縦長 (aspect < 1) のみ絶対高さでクランプ。aspectRatio は「形」を抑えるだけなので、
+  // これが無いと web の広いカラム(最大720)で全幅×1.25 ≈ 860px と画面を占有する。
+  // クランプ時は overflow:hidden + contentFit='cover' でクロップ表示 (全体はライトボックス)。
+  if (aspect < 1 && portraitMaxH && portraitMaxH > 0) {
+    return { aspectRatio, maxHeight: portraitMaxH };
+  }
+  return { aspectRatio };
 }
 
 function reactionPillColors(C: ColorPalette, mine: boolean): { backgroundColor: string; borderColor: string } {
@@ -895,6 +905,11 @@ function AnonPostCardInner({
   const useMarkdown = useFeatureFlag('markdown_render');
   const useOgPreview = useFeatureFlag('og_preview');
   const useQuickReaction = useFeatureFlag('quick_reaction');
+
+  // 縦長写真がフィードを占有しないための絶対最大高さ (mediaItemAspect に渡す)。
+  // web は固定 600px、モバイルは画面高の 65%。横長/動画は対象外 (mediaItemAspect 内で判定)。
+  const { height: winH } = useWindowDimensions();
+  const portraitMaxH = Platform.OS === 'web' ? 600 : Math.round(winH * 0.65);
 
   // OG カード対象 URL: 明示的な source_url を優先し、無ければ本文中の最初の URL を拾う。
   const previewUrl = useMemo(
@@ -1416,7 +1431,7 @@ function AnonPostCardInner({
               return (
                 <View
                   key={url}
-                  style={[STYLES.mediaItemBase, mediaItemAspect(aspect)]}
+                  style={[STYLES.mediaItemBase, mediaItemAspect(aspect, portraitMaxH)]}
                 >
                   <MediaWithCWGuard cwCategory={cwCategory} blurhash={blurhash}>
                     {/* Pressable で wrap — single-tap で全画面ライトボックスを開く。
