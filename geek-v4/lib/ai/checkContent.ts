@@ -16,9 +16,12 @@ export async function checkContent({
 }): Promise<CheckResult> {
   try {
     const { data, error } = await withApiTimeout(
+      // ★ timeout 3000ms: 中身は warm なら <1s。8s 丸ごと待つのは cold-start /
+      //   half-open 接続の tail だけなので 3s に圧縮し「投稿ボタンが数秒固まる」を緩和。
+      //   fail-open(timeout→ok:true)なのでセキュリティ後退なし(真の防御は通報+事後審査)。
       supabase.functions.invoke('check-content', { body: { content, tags } }),
       'checkContent',
-      8000,
+      3000,
     );
     if (error) return { ok: true }; // edge function 未設定時はパス
     return data as CheckResult;

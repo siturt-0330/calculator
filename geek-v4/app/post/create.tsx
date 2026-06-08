@@ -123,6 +123,8 @@ export default function CreatePost() {
   // 編集対象が動画を持つか。動画は composer に出さず据え置くため、空本文+空画像でも
   //   保存を許可する判定に使う (= 動画のみ投稿の編集が validation で弾かれないように)。
   const [editHasVideo, setEditHasVideo] = useState(false);
+  // 送信の進捗フェーズ (pill 表示用)。アップロード中を可視化して「固まった?」不安を減らす。
+  const [postPhase, setPostPhase] = useState<'idle' | 'uploading' | 'saving'>('idle');
   const qc = useQueryClient();
 
   // 参加コミュニティ一覧 (Reddit 風の「投稿先」ピッカー用)。
@@ -471,6 +473,10 @@ export default function CreatePost() {
     (editId !== '' || selectedCommunityIds.length > 0) &&
     !posting;
 
+  // 送信ボタンの文言: 送信中はフェーズ (アップロード中… / 投稿中…) を出す。
+  const phaseLabel =
+    postPhase === 'uploading' ? 'アップロード中…' : editId ? '更新中…' : '投稿中…';
+
   const handlePost = async () => {
     if (posting) return;
     const s = usePostDraftStore.getState();
@@ -496,12 +502,14 @@ export default function CreatePost() {
           show(check.reason ?? 'コンテンツポリシーに反する可能性があります', 'error');
           return;
         }
+        setPostPhase('uploading');
         // 既存の https 画像は温存、新規ローカル URI のみ upload。
         const finalImageUrls = await Promise.all(
           s.images.map((uri) =>
             /^https?:\/\//i.test(uri) ? Promise.resolve(uri) : uploadPostImage(uri, userId),
           ),
         );
+        setPostPhase('saving');
         await updatePost(editId, {
           content: s.content,
           tagNames: s.tags,
@@ -569,6 +577,7 @@ export default function CreatePost() {
           show(check.reason ?? 'コンテンツポリシーに反する可能性があります', 'error');
           return;
         }
+        setPostPhase('uploading');
         [uploadedImageUrls, uploadedVideoUrls] = await Promise.all([
           s.images.length > 0
             ? Promise.all(s.images.map((uri) => uploadPostImage(uri, userId)))
@@ -593,6 +602,7 @@ export default function CreatePost() {
             }
           : undefined;
 
+      setPostPhase('saving');
       await createPost({
         content: s.content,
         title: null, // タイトルと本文を分けない (1画面化)
@@ -699,7 +709,7 @@ export default function CreatePost() {
           }}
         >
           <Text style={[T.smallB, { color: canPost ? '#fff' : C.text3 }]}>
-            {posting ? (editId ? '更新中…' : '投稿中…') : (editId ? '更新' : '投稿')}
+            {posting ? phaseLabel : (editId ? '更新' : '投稿')}
           </Text>
         </PressableScale>
       </View>
