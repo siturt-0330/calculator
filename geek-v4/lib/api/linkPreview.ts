@@ -1,5 +1,19 @@
 import { supabase } from '../supabase';
 
+// ------------------------------------------------------------
+// 画像プロキシ (og-image Edge Function) — 匿名性保護の要
+// ------------------------------------------------------------
+// OG/サムネ画像を GEEK サーバー経由で配信し、閲覧者の IP/UA/Referer を相手ホスト
+// (YouTube 等) に一切渡さない。og-image 未 deploy / 失敗時は 1x1 透明PNG が返るため、
+// クライアントは「画像なし」として安全に degrade する (リーク無し)。
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+export function ogImageProxyUrl(raw: string | null | undefined): string | null {
+  if (!raw || !/^https?:\/\//i.test(raw)) return null;
+  if (!SUPABASE_URL) return raw; // 構成不備時はそのまま (劣化動作)
+  if (raw.includes('/functions/v1/og-image')) return raw; // 二重プロキシ防止
+  return `${SUPABASE_URL}/functions/v1/og-image?url=${encodeURIComponent(raw)}`;
+}
+
 export type LinkPreview = {
   url: string;
   title: string | null;

@@ -37,7 +37,7 @@ import { VideoPlayer } from '../../components/ui/VideoPlayer';
 import { MediaWithCWGuard } from '../../components/post/MediaWithCWGuard';
 import { ImageLightbox } from '../../components/ui/ImageLightbox';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
-import { extractFirstUrl } from '../../lib/utils/extractUrl';
+import { extractFirstUrl, stripPreviewUrl } from '../../lib/utils/extractUrl';
 import { Spinner } from '../../components/ui/Spinner';
 import { formatRelative } from '../../lib/utils/date';
 import type { Comment } from '../../types/models';
@@ -719,7 +719,9 @@ export default function PostDetailScreen() {
                 {post.title}
               </Text>
             )}
-            <Text style={[T.body, { color: C.text, lineHeight: 24 }]}>{post.content}</Text>
+            <Text style={[T.body, { color: C.text, lineHeight: 24 }]}>
+              {stripPreviewUrl(post.content, (previewUrl && useOgPreview) ? previewUrl : null)}
+            </Text>
             {/* ============================================================
                 メディア (写真 / 動画) — フィードカードと同じ表示方針。
                 画像タップで全画面ライトボックス、動画は VideoPlayer。

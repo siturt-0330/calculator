@@ -32,7 +32,7 @@ import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { ProgressiveImage } from '../ui/ProgressiveImage';
 import { VideoPlayer } from '../ui/VideoPlayer';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
-import { extractFirstUrl } from '../../lib/utils/extractUrl';
+import { extractFirstUrl, stripPreviewUrl } from '../../lib/utils/extractUrl';
 import { DoubleTapHeart } from '../ui/DoubleTapHeart';
 // NOTE: tag chip と「+ タグ追加」 UI は撤去 (周りの人が他人投稿に tag を付与
 // できないようにする方針 + ハッシュタグは feed カード上に表示しない方針)。
@@ -925,7 +925,11 @@ function AnonPostCardInner({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoTranslate, canTranslate, translated, translating]);
-  const displayContent = (autoTranslate && translated) ? translated : post.content;
+  // リンクカードを出すときは本文から対象 URL/「[リンク]」を隠す (URLはカードに置き換え)
+  const displayContent = stripPreviewUrl(
+    (autoTranslate && translated) ? translated : post.content,
+    (previewUrl && useOgPreview) ? previewUrl : null,
+  );
   // データ欠落でクラッシュしないよう全フィールドを安全化。
   // post ref は memo の arePropsEqual で stable なので、これらは
   // post 変化時のみ新規 array になる (= ほぼ常に同 ref)。
