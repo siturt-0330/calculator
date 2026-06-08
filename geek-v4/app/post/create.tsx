@@ -44,7 +44,7 @@ import { createPost, fetchPostById, updatePost } from '../../lib/api/posts';
 import { checkContent } from '../../lib/ai/checkContent';
 import { validateVideoSource, uploadPostImage, uploadPostVideo } from '../../lib/media';
 import { makeWebPreviewDataUrl } from '../../lib/image';
-import { openCropper } from '../../lib/imageCropper';
+import { openPhotoEditor } from '../../lib/photoEditor';
 import { sanitizeTag } from '../../lib/sanitize';
 import { peekRate, rateLimitMessage } from '../../lib/rateLimit';
 import { isOnline } from '../../lib/offline/networkMonitor';
@@ -395,15 +395,16 @@ export default function CreatePost() {
     const uri = usePostDraftStore.getState().images[index];
     if (!uri) return;
     try {
-      const cropped = await openCropper(uri, { shape: 'rect', aspect: 'original', outMaxEdge: 1440 });
-      if (!cropped || cropped === uri) return; // キャンセル or 変更なし
+      // web: フル編集 (描く/文字/スタンプ/モザイク/フィルター/切り抜き)。native: 切り抜き+回転。
+      const edited = await openPhotoEditor(uri);
+      if (!edited || edited === uri) return; // キャンセル or 変更なし
       const cur = usePostDraftStore.getState().images;
       // 編集中に配列が変わった可能性 → 同 index が同 uri のときだけ差し替える (重複/並べ替え対策)
       if (cur[index] !== uri) return;
       const next = cur.slice();
-      next[index] = cropped;
+      next[index] = edited;
       setImages(next);
-      kickImageUpload(cropped); // 編集後の画像を先行 upload (旧 prefetch は破棄=無害)
+      kickImageUpload(edited); // 編集後の画像を先行 upload (旧 prefetch は破棄=無害)
       hap.tap();
     } catch (e) {
       console.warn('[post/create] edit image failed:', e);

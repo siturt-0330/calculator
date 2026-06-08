@@ -48,6 +48,8 @@ export interface CropperOptions {
   aspect?: number | 'original';
   /** rect 時の出力の長辺上限 px。既定 1440。circle 時は無視 (常に 512 正方形)。 */
   outMaxEdge?: number;
+  /** hard timeout (ms)。既定 60000。長時間操作する写真エディタからの呼び出しは延長する。 */
+  timeoutMs?: number;
 }
 
 interface PendingEntry {
@@ -115,11 +117,11 @@ export function openCropper(sourceUri: string, opts: CropperOptions = {}): Promi
     const id = generateId();
     pendingId = id;
     pendingSources.set(id, { uri: sourceUri, opts });
-    // 60 秒の hard timeout — どんなに想定外でも caller を hang させない
+    // hard timeout — どんなに想定外でも caller を hang させない (既定 60s)。
     pendingTimeout = setTimeout(() => {
-      console.warn('[imageCropper] timed out after 60s — resolving null');
+      console.warn('[imageCropper] timed out — resolving null');
       flush(null);
-    }, 60_000);
+    }, opts.timeoutMs ?? 60_000);
     try {
       router.push({
         pathname: '/image-cropper' as never,

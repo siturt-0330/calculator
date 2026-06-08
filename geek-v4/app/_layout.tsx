@@ -790,6 +790,13 @@ export default function RootLayout() {
                       animation: 'slide_from_bottom',
                     }}
                   />
+                  <Stack.Screen
+                    name="photo-editor"
+                    options={{
+                      presentation: 'modal',
+                      animation: 'slide_from_bottom',
+                    }}
+                  />
                   <Stack.Screen name="settings/obsidian" />
                   <Stack.Screen name="settings/terms" />
                   <Stack.Screen name="settings/privacy-policy" />
