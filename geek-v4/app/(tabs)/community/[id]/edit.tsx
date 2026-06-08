@@ -38,6 +38,7 @@ import {
 import { prepareImageUpload } from '../../../../lib/image';
 import { openCropper } from '../../../../lib/imageCropper';
 import { sanitizeUrl } from '../../../../lib/sanitize';
+import { getClipboardImageUri } from '../../../../lib/clipboardImage';
 import { TABBAR } from '../../../../design/tabbar';
 
 export default function EditCommunityScreen() {
@@ -142,6 +143,44 @@ export default function EditCommunityScreen() {
       setNewIconUri(croppedUri);
       setNewIconBlob(prepared.blob);
       setNewIconMime(prepared.mime);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '画像処理に失敗しました';
+      show(`画像処理エラー: ${msg}`, 'error');
+    } finally {
+      setIconLoading(false);
+    }
+  };
+
+  // クリップボードの画像をアイコンにする (ネットでコピーした画像を貼り付け)。
+  // picker と違い OS crop が無いので、paste は web/native 双方で openCropper を通す。
+  const pasteIcon = async () => {
+    if (iconLoading || submitting) return;
+    const uri = await getClipboardImageUri();
+    if (!uri) {
+      show('クリップボードに画像がありません。画像をコピーしてからお試しください', 'warn');
+      return;
+    }
+    let croppedUri: string | null = null;
+    try {
+      croppedUri = await openCropper(uri);
+    } catch (cropErr) {
+      console.warn('[community/edit] cropper threw (paste):', cropErr);
+      show('画像の切り抜きでエラーが発生しました', 'error');
+      return;
+    }
+    if (!croppedUri) return;
+    setIconLoading(true);
+    try {
+      const prepared = await prepareImageUpload(croppedUri, {
+        maxSizeBytes: 5 * 1024 * 1024,
+        maxWidth: 512,
+        maxHeight: 512,
+        quality: 0.85,
+      });
+      setNewIconUri(croppedUri);
+      setNewIconBlob(prepared.blob);
+      setNewIconMime(prepared.mime);
+      show('貼り付けた画像をアイコンにしました', 'success');
     } catch (e) {
       const msg = e instanceof Error ? e.message : '画像処理に失敗しました';
       show(`画像処理エラー: ${msg}`, 'error');
@@ -367,6 +406,30 @@ export default function EditCommunityScreen() {
                 )}
                 <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>
                   {iconLoading ? '処理中…' : '画像を選ぶ'}
+                </Text>
+              </PressableScale>
+              {/* コピーした画像 (ネット画像など) を貼り付け */}
+              <PressableScale
+                onPress={pasteIcon}
+                disabled={iconLoading}
+                haptic="tap"
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  paddingVertical: SP['2'] + 2,
+                  paddingHorizontal: SP['3'],
+                  backgroundColor: C.bg2,
+                  borderRadius: R.md,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  opacity: iconLoading ? 0.6 : 1,
+                }}
+              >
+                <Icon.copy size={14} color={C.text2} strokeWidth={2.4} />
+                <Text style={{ color: C.text2, fontSize: 13, fontWeight: '700' }}>
+                  画像を貼り付け
                 </Text>
               </PressableScale>
               {newIconUri && (

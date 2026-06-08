@@ -44,6 +44,9 @@ export interface EditorialIconPickerProps {
   onPick: () => void;
   /** 「削除」押下。渡され、かつ uri がある時だけ削除リンクを描画。 */
   onRemove?: () => void;
+  /** 「貼り付け」押下。クリップボードの画像をアイコンにする想定(親が実装)。
+   *  渡された時だけ貼り付けリンクを描画。 */
+  onPaste?: () => void;
 }
 
 // -----------------------------------------------------------------------------
@@ -54,12 +57,14 @@ export function EditorialIconPicker({
   loading = false,
   onPick,
   onRemove,
+  onPaste,
 }: EditorialIconPickerProps) {
   const reduceMotion = useReducedMotion();
 
   const hasIcon = uri !== null && uri.length > 0;
   const pickLabel = hasIcon ? 'アイコンを変更' : 'アイコンを選ぶ';
   const showRemove = hasIcon && typeof onRemove === 'function';
+  const showPaste = typeof onPaste === 'function';
 
   return (
     <Animated.View
@@ -111,6 +116,20 @@ export function EditorialIconPicker({
           {/* accent 下線(文字幅に合わせる) */}
           <View style={styles.linkUnderline} />
         </PressableScale>
+
+        {showPaste ? (
+          <PressableScale
+            onPress={onPaste}
+            haptic="tap"
+            disabled={loading}
+            style={styles.linkBtn}
+            accessibilityRole="button"
+            accessibilityLabel="コピーした画像を貼り付け"
+          >
+            <Text style={styles.linkText}>貼り付け</Text>
+            <View style={styles.linkUnderline} />
+          </PressableScale>
+        ) : null}
 
         {showRemove ? (
           <PressableScale
