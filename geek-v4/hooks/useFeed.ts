@@ -465,5 +465,5 @@ export function useFeed() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firstPageKey, qc]);
 
-  return { posts, reasonsMap, communitiesByPost, ads, interestTags, loading: isLoading, refreshing, refresh, loadMore };
+  return { posts, reasonsMap, communitiesByPost, ads, interestTags, loading: isLoading, loadingMore: isFetchingNextPage, refreshing, refresh, loadMore };
 }

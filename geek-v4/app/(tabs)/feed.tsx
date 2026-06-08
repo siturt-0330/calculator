@@ -5,6 +5,7 @@ import {
   RefreshControl,
   Platform,
   StyleSheet,
+  ActivityIndicator,
   useWindowDimensions,
   type NativeSyntheticEvent,
   type NativeScrollEvent,
@@ -271,7 +272,7 @@ export default function FeedScreen() {
       },
     ],
   }));
-  const { posts, reasonsMap, communitiesByPost, ads, interestTags, loading, refreshing, refresh, loadMore } = useFeed();
+  const { posts, reasonsMap, communitiesByPost, ads, interestTags, loading, loadingMore, refreshing, refresh, loadMore } = useFeed();
   // Smart skeleton timing — skeleton only after 200ms of continuous loading.
   // <200ms loads (cache hits / fast network) skip skeleton entirely to avoid flash.
   const showSkeleton = useDelayedLoading(loading, 200);
@@ -923,6 +924,13 @@ export default function FeedScreen() {
         }
         onEndReached={loadMore}
         onEndReachedThreshold={0.6}
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={{ paddingVertical: SP['5'], alignItems: 'center' }}>
+              <ActivityIndicator size="small" color={C.accent} />
+            </View>
+          ) : null
+        }
         contentContainerStyle={{
           // フラット: 投稿は全幅・隙間なし。横余白は投稿側 (paddingHorizontal:16) に
           // 一元化し、下罫線 (hairline) を中央 720 列の端まで延ばす。先頭の上余白も
