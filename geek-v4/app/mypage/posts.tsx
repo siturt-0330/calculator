@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, ActivityIndicator, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -16,7 +16,9 @@ import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { formatRelative } from '../../lib/utils/date';
 import { invalidateFeedPage } from '../../lib/cacheUpdates/feedPagePatcher';
-import { useState } from 'react';
+import { fetchCommunitiesForPosts, type PostCommunityRef } from '../../lib/api/posts';
+import { CommunityIcon } from '../../components/ui/CommunityIcon';
+import { useState, useMemo } from 'react';
 import { ObsidianSaveButton } from '../../components/ui/ObsidianSaveButton';
 import { postToObsidianNote } from '../../hooks/useObsidian';
 
@@ -46,6 +48,46 @@ async function fetchMyPosts(): Promise<Item[]> {
   return (Array.isArray(data) ? data : []) as Item[];
 }
 
+// 投稿がどのコミュニティに属するかを示す chip (マイページタブの CommunityChip と同じ見た目)。
+function CommunityChip({ community, onPress }: { community: PostCommunityRef; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={(e) => {
+        e.stopPropagation();
+        onPress();
+      }}
+      hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={`コミュニティ ${community.name} を開く`}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        alignSelf: 'flex-start',
+        maxWidth: '80%',
+        paddingVertical: 3,
+        paddingLeft: 3,
+        paddingRight: 9,
+        backgroundColor: C.bg3,
+        borderRadius: R.full,
+        borderWidth: 1,
+        borderColor: C.border,
+      }}
+    >
+      <CommunityIcon
+        size={18}
+        iconUrl={community.icon_url}
+        iconEmoji={community.icon_emoji}
+        iconColor={community.icon_color}
+        name={community.name}
+      />
+      <Text style={[T.caption, { color: C.text2, fontWeight: '700', flexShrink: 1 }]} numberOfLines={1}>
+        {community.name}
+      </Text>
+    </Pressable>
+  );
+}
+
 export default function MyPosts() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -58,6 +100,16 @@ export default function MyPosts() {
     queryKey: ['my-posts', user?.id],
     queryFn: () => fetchMyPosts(),
     enabled: !!user,
+  });
+
+  // 各投稿が「どのコミュニティに投稿されたか」(ホーム/マイページタブと同じ表示)。
+  // get_my_posts はコミュニティを返さないので、フィードと同じ fetchCommunitiesForPosts で集約取得。
+  const postIds = useMemo(() => items.map((p) => p.id), [items]);
+  const { data: postCommunities = {} } = useQuery({
+    queryKey: ['my-posts-communities', postIds.join('|')],
+    queryFn: () => fetchCommunitiesForPosts(postIds),
+    enabled: postIds.length > 0,
+    staleTime: 60_000,
   });
 
   const { mutate: deletePost, isPending: deleting } = useMutation({
@@ -110,7 +162,9 @@ export default function MyPosts() {
                 </Text>
                 <Text style={[T.caption, { color: C.text3 }]}>· 新しい順</Text>
               </View>
-              {items.map((p) => (
+              {items.map((p) => {
+              const community = postCommunities[p.id]?.[0] ?? null;
+              return (
               <View
                 key={p.id}
                 style={{
@@ -122,6 +176,12 @@ export default function MyPosts() {
                   gap: SP['2'],
                 }}
               >
+                {community ? (
+                  <CommunityChip
+                    community={community}
+                    onPress={() => router.push(`/community/${community.community_id}` as never)}
+                  />
+                ) : null}
                 <PressableScale onPress={() => router.push(`/post/${p.id}` as never)} haptic="tap">
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
                     {!p.is_public && (
@@ -158,7 +218,8 @@ export default function MyPosts() {
                   </PressableScale>
                 </View>
               </View>
-            ))}
+              );
+            })}
             </>
           )}
         </ScrollView>
