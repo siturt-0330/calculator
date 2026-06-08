@@ -115,6 +115,7 @@ function MediaCell({
   aspectRatio,
   height,
   extra,
+  contentFit = 'cover',
   onOpenImage,
   onPressVideo,
 }: {
@@ -123,6 +124,8 @@ function MediaCell({
   aspectRatio?: number;
   height?: number;
   extra?: number;
+  /** 単一画像は 'contain' で全体表示、グリッドは 'cover' でタイル充填 */
+  contentFit?: 'cover' | 'contain';
   onOpenImage?: (url: string) => void;
   onPressVideo: () => void;
 }) {
@@ -145,7 +148,7 @@ function MediaCell({
         source={{ uri: thumbedUrl(src, 720) }}
         placeholder={item.blurhash ? { blurhash: item.blurhash } : undefined}
         style={{ width: '100%', height: '100%' }}
-        contentFit="cover"
+        contentFit={contentFit}
         transition={160}
         cachePolicy="memory-disk"
         recyclingKey={src}
@@ -205,10 +208,12 @@ function MediaGrid({
         </View>
       );
     }
-    // 1枚画像: 全幅やや背高 4:3 で「写真らしさ」。
+    // 1枚画像: 写真「全体」を見せる (contain)。縦長/横長どちらも収まるよう正方 box +
+    // 最大高さでクランプ。旧版は 4:3 の横長 box に cover だったため、縦長写真が
+    // 激しくクロップ拡大され「全体が写らない/デカすぎる」事故になっていた。
     return (
-      <View style={[wrap, { aspectRatio: 4 / 3 }]}>
-        <MediaCell item={single} flex={1} {...cellProps} />
+      <View style={[wrap, { aspectRatio: 1, maxHeight: 420 }]}>
+        <MediaCell item={single} flex={1} contentFit="contain" {...cellProps} />
       </View>
     );
   }

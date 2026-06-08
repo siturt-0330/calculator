@@ -781,6 +781,8 @@ export default function PostDetailScreen() {
                             width="100%"
                             height="100%"
                             radius={R.md}
+                            // ★ contain: 写真全体を表示 (cover だとクロップ拡大される)
+                            contentFit="contain"
                             thumbWidth={720}
                           />
                         </Pressable>

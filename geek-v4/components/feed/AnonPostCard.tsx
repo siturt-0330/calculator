@@ -907,9 +907,10 @@ function AnonPostCardInner({
   const useQuickReaction = useFeatureFlag('quick_reaction');
 
   // 縦長写真がフィードを占有しないための絶対最大高さ (mediaItemAspect に渡す)。
-  // web は固定 600px、モバイルは画面高の 65%。横長/動画は対象外 (mediaItemAspect 内で判定)。
+  // 「デカすぎる」フィードバックを受けて縮小: web 440px / モバイルは画面高の 50%。
+  // contain 表示なので、この box 内に写真全体が収まる (はみ出しは letterbox)。
   const { height: winH } = useWindowDimensions();
-  const portraitMaxH = Platform.OS === 'web' ? 600 : Math.round(winH * 0.65);
+  const portraitMaxH = Platform.OS === 'web' ? 440 : Math.round(winH * 0.5);
 
   // OG カード対象 URL: 明示的な source_url を優先し、無ければ本文中の最初の URL を拾う。
   const previewUrl = useMemo(
@@ -1450,6 +1451,10 @@ function AnonPostCardInner({
                         width="100%"
                         height="100%"
                         radius={16}
+                        // ★ contain: 写真の「全体」を必ず表示する (cover だと縦長/比率
+                        //   未解決時に大きくクロップ拡大され「全体が写らない」事故になる)。
+                        //   余白は box 背景 (C.bg3) のレターボックスで埋まる。
+                        contentFit="contain"
                         lazy
                         // フィード 1 列幅 (max 720) の 1x DPR で 480 が綺麗 + 軽い。
                         // 旧 720 default は retina 換算でも過剰だった (1 枚 ~120KB 多い)。
