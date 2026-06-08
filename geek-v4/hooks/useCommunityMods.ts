@@ -21,6 +21,7 @@ import {
   unbanMember,
   promoteMember,
   demoteMember,
+  transferOwnership,
   fetchCommunityMembers,
   fetchCommunityBans,
   fetchModActionLogs,
@@ -282,6 +283,49 @@ export function useDemoteMember(communityId: string | undefined) {
     },
     onSuccess: () => {
       useToastStore.getState().show('member に降格しました', 'success');
+    },
+    onSettled: () => invalidate(),
+  });
+}
+
+// ============================================================
+// mutation: オーナー譲渡 (owner 専用 — 0135)
+// ============================================================
+// optimistic: 新オーナー → owner、現 owner(自分) → admin に入れ替える。
+type TransferInput = { communityId: string; userId: string };
+
+export function useTransferOwnership(communityId: string | undefined) {
+  const qc = useQueryClient();
+  const invalidate = useInvalidateMods(communityId);
+  const membersKey = ['community-mods', 'members', communityId ?? 'none'];
+
+  return useMutation({
+    mutationFn: (input: TransferInput) =>
+      transferOwnership(input.communityId, input.userId),
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: membersKey });
+      const prev = qc.getQueryData<MemberWithProfile[]>(membersKey);
+      if (prev) {
+        qc.setQueryData<MemberWithProfile[]>(
+          membersKey,
+          prev.map((m) =>
+            m.user_id === input.userId
+              ? { ...m, role: 'owner' as const }
+              : m.role === 'owner'
+                ? { ...m, role: 'admin' as const }
+                : m,
+          ),
+        );
+      }
+      return { prev };
+    },
+    onError: (err, _input, ctx) => {
+      if (ctx?.prev) qc.setQueryData(membersKey, ctx.prev);
+      const message = err instanceof Error ? err.message : 'オーナーの譲渡に失敗しました';
+      showErrorToast(message);
+    },
+    onSuccess: () => {
+      useToastStore.getState().show('オーナーを譲渡しました', 'success');
     },
     onSettled: () => invalidate(),
   });

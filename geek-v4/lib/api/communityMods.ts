@@ -68,7 +68,8 @@ export type ModAction =
   | 'ban'
   | 'unban'
   | 'promote'
-  | 'demote';
+  | 'demote'
+  | 'transfer_owner';
 
 export type ModActionLog = {
   id: string;
@@ -337,6 +338,28 @@ export async function demoteMember(
   );
   if (error) {
     throw new Error(`member への降格に失敗しました: ${error.message}`);
+  }
+}
+
+// オーナー譲渡 (owner → 別メンバー)。現 owner だけが呼べる (RPC 内で owner 判定)。
+// 旧 owner は admin に降りる。自分自身 / 非メンバー / 既に owner は RPC が exception を返す。
+export async function transferOwnership(
+  communityId: string,
+  newOwnerId: string,
+): Promise<void> {
+  assertUuid(communityId, 'communityId');
+  assertUuid(newOwnerId, 'newOwnerId');
+
+  const { error } = await withApiTimeout(
+    supabase.rpc('mod_transfer_ownership', {
+      target_community_id: communityId,
+      new_owner_id: newOwnerId,
+    }),
+    'communityMods.transferOwnership',
+    8000,
+  );
+  if (error) {
+    throw new Error(`オーナーの譲渡に失敗しました: ${error.message}`);
   }
 }
 

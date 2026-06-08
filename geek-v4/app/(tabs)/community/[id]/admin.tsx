@@ -41,6 +41,7 @@ import {
   useUnbanMember,
   usePromoteMember,
   useDemoteMember,
+  useTransferOwnership,
 } from '../../../../hooks/useCommunityMods';
 import {
   useCommunityJoinRequests,
@@ -62,6 +63,7 @@ type PendingAction =
   | { kind: 'unban'; ban: BanWithProfile }
   | { kind: 'promote'; member: MemberRowItem }
   | { kind: 'demote'; member: MemberRowItem }
+  | { kind: 'transfer'; member: MemberRowItem }
   | null;
 
 export default function CommunityAdminScreen() {
@@ -100,6 +102,7 @@ export default function CommunityAdminScreen() {
   const unban = useUnbanMember(id);
   const promote = usePromoteMember(id);
   const demote = useDemoteMember(id);
+  const transfer = useTransferOwnership(id);
 
   // 参加申請 (owner / admin) — visibility が open のときは UI を隠す
   const showJoinRequests = isMod && !!community && community.visibility !== 'open';
@@ -172,6 +175,7 @@ export default function CommunityAdminScreen() {
     : pending?.kind === 'unban' ? 'BAN を解除'
     : pending?.kind === 'promote' ? '管理人に昇格'
     : pending?.kind === 'demote' ? 'member に降格'
+    : pending?.kind === 'transfer' ? 'オーナーを譲渡'
     : '';
   const dialogMessage = (() => {
     if (!pending) return '';
@@ -187,6 +191,9 @@ export default function CommunityAdminScreen() {
     if (pending.kind === 'promote') {
       return `「${pending.member.nickname}」さんを管理人に昇格しますか?\n\n投稿削除 / キック / BAN の権限を持ちます。`;
     }
+    if (pending.kind === 'transfer') {
+      return `「${pending.member.nickname}」さんにこのコミュニティのオーナーを譲渡しますか?\n\nあなたは「管理者」になります。オーナー権限(コミュニティ削除・管理人の任命/解任など)は相手に移ります。元に戻すには新しいオーナーから譲り返してもらう必要があります。`;
+    }
     // demote
     return `「${pending.member.nickname}」さんを member に降格しますか?\n\n管理権限はすべて失われます。`;
   })();
@@ -198,6 +205,7 @@ export default function CommunityAdminScreen() {
     : pending?.kind === 'unban' ? '解除する'
     : pending?.kind === 'promote' ? '昇格する'
     : pending?.kind === 'demote' ? '降格する'
+    : pending?.kind === 'transfer' ? '譲渡する'
     : '確認';
 
   // destructive 表示 (赤系) は kick / ban / demote。
@@ -205,7 +213,8 @@ export default function CommunityAdminScreen() {
   const isDestructive =
     pending?.kind === 'kick' ||
     pending?.kind === 'ban' ||
-    pending?.kind === 'demote';
+    pending?.kind === 'demote' ||
+    pending?.kind === 'transfer';
 
   const onConfirm = () => {
     if (!pending) return;
@@ -217,6 +226,8 @@ export default function CommunityAdminScreen() {
       unban.mutate({ communityId: id, userId: pending.ban.user_id });
     } else if (pending.kind === 'promote') {
       promote.mutate({ communityId: id, userId: pending.member.user_id });
+    } else if (pending.kind === 'transfer') {
+      transfer.mutate({ communityId: id, userId: pending.member.user_id });
     } else {
       demote.mutate({ communityId: id, userId: pending.member.user_id });
     }
@@ -357,6 +368,7 @@ export default function CommunityAdminScreen() {
                     onBan={(target) => setPending({ kind: 'ban', member: target })}
                     onPromote={(target) => setPending({ kind: 'promote', member: target })}
                     onDemote={(target) => setPending({ kind: 'demote', member: target })}
+                    onTransferOwner={(target) => setPending({ kind: 'transfer', member: target })}
                   />
                 );
               })}
@@ -799,4 +811,5 @@ const ACTION_META: Record<
   unban:            { label: 'BAN 解除',     color: C.accent, bg: C.accentBg, border: C.accent + '55' },
   promote:          { label: '昇格',         color: C.accent, bg: C.accentBg, border: C.accent + '55' },
   demote:           { label: '降格',         color: C.text3,  bg: C.bg3,      border: C.border },
+  transfer_owner:   { label: 'オーナー譲渡', color: '#F5C842', bg: 'rgba(245,200,66,0.16)', border: 'rgba(245,200,66,0.55)' },
 };

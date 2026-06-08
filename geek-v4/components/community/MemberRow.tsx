@@ -61,6 +61,7 @@ export function MemberRow({
   onBan,
   onPromote,
   onDemote,
+  onTransferOwner,
 }: {
   member: MemberRowItem;
   /** 操作する側 (current user) の role。null は読み取り専用扱い */
@@ -71,6 +72,8 @@ export function MemberRow({
   onBan?: (m: MemberRowItem) => void;
   onPromote?: (m: MemberRowItem) => void;
   onDemote?: (m: MemberRowItem) => void;
+  /** owner がこのメンバーへオーナー権限を譲渡 (owner 限定・対象は非 owner)。 */
+  onTransferOwner?: (m: MemberRowItem) => void;
 }) {
   const meta = ROLE_META[member.role];
 
@@ -83,12 +86,15 @@ export function MemberRow({
   let canBan = false;
   let canPromote = false;
   let canDemote = false;
+  let canTransfer = false;
   if (!isSelf && currentRole === 'owner') {
-    // owner: admin/member 両方 kick/ban 可、promote=member→admin、demote=admin→member
+    // owner: admin/member 両方 kick/ban 可、promote=member→admin、demote=admin→member。
+    //   オーナー譲渡は非 owner メンバー (member / admin) 全員が対象。
     canKick = member.role !== 'owner';
     canBan = member.role !== 'owner';
     canPromote = member.role === 'member';
     canDemote = member.role === 'admin';
+    canTransfer = member.role !== 'owner';
   } else if (!isSelf && currentRole === 'admin') {
     // admin は member のみ kick/ban 可。role 変更は owner 限定
     canKick = member.role === 'member';
@@ -162,6 +168,27 @@ export function MemberRow({
       </View>
       {/* 操作ボタン群 — currentRole + 対象 role の組み合わせで出し分け */}
       <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        {canTransfer && onTransferOwner && (
+          <PressableScale
+            onPress={() => onTransferOwner(member)}
+            haptic="warn"
+            accessibilityLabel={`${member.nickname} にオーナーを譲渡`}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 4,
+              paddingHorizontal: SP['2'],
+              paddingVertical: 6,
+              backgroundColor: 'rgba(245,200,66,0.16)',
+              borderRadius: R.full,
+              borderWidth: 1,
+              borderColor: 'rgba(245,200,66,0.55)',
+            }}
+          >
+            <Icon.award size={11} color="#F5C842" strokeWidth={2.4} />
+            <Text style={{ color: '#F5C842', fontSize: 10, fontWeight: '700' }}>オーナー譲渡</Text>
+          </PressableScale>
+        )}
         {canPromote && onPromote && (
           <PressableScale
             onPress={() => onPromote(member)}
