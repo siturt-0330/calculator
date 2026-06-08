@@ -505,6 +505,7 @@ export async function createPost({
   poll,
   visibility = 'public',
   community_ids = [],
+  onInserted,
 }: {
   content: string;
   /** ★ BBS 統合 (migration 0075): スレ形式 post の title。 null なら通常の写真投稿。 */
@@ -533,6 +534,15 @@ export async function createPost({
   visibility?: PostVisibility;
   // visibility が community_only / community_public の時に attach する community 一覧
   community_ids?: string[];
+  /**
+   * ★ v2 楽観的即遷移 (optional・後方互換):
+   *   INSERT 成功直後 (postId 確定後・attach/poll の前) に同期で呼ばれる。
+   *   呼出側はここで navigate + toast + reset し、attach/poll の往復を待たない。
+   *   - 渡さなければ (他 2 画面) 従来どおり全 await。挙動は一切変わらない。
+   *   - throw しないこと。ここで投げると attach/poll に到達せず post が孤児になる。
+   *   - レート increment はこの関数冒頭の checkRate が 1 回だけ行う (onInserted は navigate のみ)。
+   */
+  onInserted?: (postId: string) => void;
 }): Promise<void> {
   // Rate limit (client-side, defense-in-depth)
   const rl = checkRate('post');
@@ -586,6 +596,17 @@ export async function createPost({
   if (error) throw error;
 
   const postId = (post as { id: string }).id;
+
+  // ★ v2 楽観的即遷移: INSERT 成功 = postId 確定。ここで呼出側に navigate を許す。
+  //   attach (post_communities) / poll はこの後 await で続行する (=呼出側から見ると背後)。
+  //   onInserted が throw すると attach/poll に到達できず孤児 post が残るため try/catch でガード。
+  if (onInserted) {
+    try {
+      onInserted(postId);
+    } catch (e) {
+      console.warn('[createPost] onInserted callback threw (ignored):', e);
+    }
+  }
 
   // community attach (post insert 成功後 — RLS が author を見るため順序が重要)
   // 重複排除 + 空文字弾き

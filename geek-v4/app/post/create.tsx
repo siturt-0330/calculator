@@ -46,6 +46,7 @@ import { validateVideoSource, uploadPostImage, uploadPostVideo } from '../../lib
 import { makeWebPreviewDataUrl } from '../../lib/image';
 import { sanitizeTag } from '../../lib/sanitize';
 import { peekRate, rateLimitMessage } from '../../lib/rateLimit';
+import { isOnline } from '../../lib/offline/networkMonitor';
 import { Icon } from '../../constants/icons';
 import { SP, R } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -64,6 +65,14 @@ const MAX_TAGS = 5;
 // ============================================================
 // CreatePost — Step 1
 // ============================================================
+
+// ピック時先行アップロードの投機キャッシュの 1 エントリ (key=ローカルURI)。
+type PrefetchEntry = {
+  localUri: string;
+  promise: Promise<string>; // 解決値 = remoteUrl (公開 https URL)
+  remoteUrl?: string;
+  errored: boolean;
+};
 
 export default function CreatePost() {
   const router = useRouter();
@@ -148,6 +157,13 @@ export default function CreatePost() {
   const bodyRef = useRef<TextInput>(null);
   // 本文の選択範囲 — FormatToolbar の markdown 挿入に使う
   const selectionRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
+
+  // ピック時先行アップロードの投機キャッシュ (remove は一切しない = データ消失ゼロ)。
+  //   key=ローカルURI / value={promise(→remoteUrl), remoteUrl?, errored}。
+  //   未採用 prefetch は storage に orphan として残す (client から消すと採用済み media を
+  //   消す race が原理的に避けられないため。回収はサーバ側 GC に委ねる=申し送り)。
+  const imageUploadsRef = useRef<Map<string, PrefetchEntry>>(new Map());
+  const videoUploadsRef = useRef<Map<string, PrefetchEntry>>(new Map());
 
   const placeholder = PLACEHOLDER;
 
@@ -308,8 +324,10 @@ export default function CreatePost() {
             }),
           );
           setImages(processed);
+          processed.forEach(kickImageUpload); // ★各画像の先行 upload を開始 (掃除はしない)
         } else {
           setImages(uris);
+          uris.forEach(kickImageUpload);
         }
         hap.tap();
       }
@@ -347,6 +365,7 @@ export default function CreatePost() {
         return;
       }
       setVideo({ uri: asset.uri, mime: v.mime, ext: v.ext, size: v.size });
+      kickVideoUpload({ uri: asset.uri, mime: v.mime, ext: v.ext }); // ★先行 upload (掃除はしない)
       hap.confirm();
     } catch (e) {
       console.warn('[post/create] pick video failed:', e);
@@ -477,6 +496,48 @@ export default function CreatePost() {
   const phaseLabel =
     postPhase === 'uploading' ? 'アップロード中…' : editId ? '更新中…' : '投稿中…';
 
+  // 画像 1 枚の先行 upload を起こして Map に登録 (既に登録済み / https ならスキップ)。
+  const kickImageUpload = (uri: string) => {
+    if (!uri || /^https?:\/\//i.test(uri)) return; // 既存リモートは温存 (編集経路)
+    if (imageUploadsRef.current.has(uri)) return; // 同一 URI の二重 upload 防止
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) return; // 未ログイン → 送信時にまとめて処理
+    const entry: PrefetchEntry = { localUri: uri, errored: false, promise: Promise.resolve('') };
+    entry.promise = uploadPostImage(uri, userId).then(
+      (remoteUrl) => {
+        entry.remoteUrl = remoteUrl;
+        return remoteUrl;
+      },
+      (e) => {
+        entry.errored = true;
+        throw e;
+      },
+    );
+    entry.promise.catch(() => {}); // 送信まで誰も await しない間の unhandled rejection 回避
+    imageUploadsRef.current.set(uri, entry);
+  };
+
+  // 動画 1 件の先行 upload 版。
+  const kickVideoUpload = (v: { uri: string; mime: string; ext: string }) => {
+    if (!v.uri || /^https?:\/\//i.test(v.uri)) return;
+    if (videoUploadsRef.current.has(v.uri)) return;
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) return;
+    const entry: PrefetchEntry = { localUri: v.uri, errored: false, promise: Promise.resolve('') };
+    entry.promise = uploadPostVideo(v.uri, userId, { mime: v.mime, ext: v.ext }).then(
+      (remoteUrl) => {
+        entry.remoteUrl = remoteUrl;
+        return remoteUrl;
+      },
+      (e) => {
+        entry.errored = true;
+        throw e;
+      },
+    );
+    entry.promise.catch(() => {});
+    videoUploadsRef.current.set(v.uri, entry);
+  };
+
   const handlePost = async () => {
     if (posting) return;
     const s = usePostDraftStore.getState();
@@ -553,6 +614,7 @@ export default function CreatePost() {
       return;
     }
     setPosting(true);
+    let navigated = false; // ★ try/catch 両方から参照するため try の外で宣言 (楽観遷移の二重実行/ロールバック判定)
     try {
       const userId = useAuthStore.getState().user?.id;
       if (!userId) {
@@ -578,12 +640,43 @@ export default function CreatePost() {
           return;
         }
         setPostPhase('uploading');
+
+        // ★ v2: prefetch 優先 — https 即返し / prefetch await / 無ければ今 upload (欠落ゼロ)。
+        const resolveImage = async (uri: string): Promise<string> => {
+          if (/^https?:\/\//i.test(uri)) return uri; // 編集由来の温存
+          const entry = imageUploadsRef.current.get(uri);
+          if (entry && !entry.errored) {
+            try {
+              return await entry.promise; // 完了/進行中いずれも待つ
+            } catch {
+              // prefetch 失敗 → 今 upload にフォールバック
+            }
+          }
+          return uploadPostImage(uri, userId);
+        };
+        const resolveVideo = async (v: {
+          uri: string;
+          mime: string;
+          ext: string;
+        }): Promise<string> => {
+          if (/^https?:\/\//i.test(v.uri)) return v.uri;
+          const entry = videoUploadsRef.current.get(v.uri);
+          if (entry && !entry.errored) {
+            try {
+              return await entry.promise;
+            } catch {
+              /* fallthrough → 今 upload */
+            }
+          }
+          return uploadPostVideo(v.uri, userId, { mime: v.mime, ext: v.ext });
+        };
+
         [uploadedImageUrls, uploadedVideoUrls] = await Promise.all([
           s.images.length > 0
-            ? Promise.all(s.images.map((uri) => uploadPostImage(uri, userId)))
+            ? Promise.all(s.images.map(resolveImage))
             : Promise.resolve<string[]>([]),
           s.video
-            ? uploadPostVideo(s.video.uri, userId, { mime: s.video.mime, ext: s.video.ext }).then((url) => [url])
+            ? resolveVideo({ uri: s.video.uri, mime: s.video.mime, ext: s.video.ext }).then((u) => [u])
             : Promise.resolve<string[]>([]),
         ]);
       } catch (e) {
@@ -602,6 +695,36 @@ export default function CreatePost() {
             }
           : undefined;
 
+      // 投稿成功後の共通後始末 (navigate + toast + draft 削除 + invalidate + prefetch Map clear)。
+      // onInserted (楽観) からも、従来 await 後からも、同一処理を navigated ガードで1回だけ実行。
+      const finishPostSuccess = () => {
+        if (navigated) return;
+        navigated = true;
+        hap.success();
+        show('投稿しました', 'success');
+        {
+          const did = usePostDraftStore.getState().draftId;
+          if (did) useDraftsStore.getState().remove(did);
+        }
+        void qc.invalidateQueries({ queryKey: ['my-community-feed'] });
+        void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'] });
+        void qc.invalidateQueries({ queryKey: ['my-communities'] });
+        for (const cid of s.selectedCommunityIds) {
+          void qc.invalidateQueries({ queryKey: ['community', cid, 'feed'] });
+          void qc.invalidateQueries({ queryKey: ['community', cid] });
+        }
+        void qc.invalidateQueries({ queryKey: ['feed'] });
+        void qc.invalidateQueries({ queryKey: ['feed-page'] }); // ★ 遷移先 feed の RPC cache も更新
+        // ★ 4-F: prefetch Map は clear のみ (storage.remove は一切しない=採用済み media を消す race 根絶)。
+        imageUploadsRef.current.clear();
+        videoUploadsRef.current.clear();
+        usePostDraftStore.getState().reset();
+        router.replace('/(tabs)/feed' as never);
+      };
+
+      // ★ v2: online かつ poll 無し のときだけ楽観的即遷移 (offline/poll は従来同期フロー)。
+      const optimisticNav = isOnline() && !pollPayload;
+
       setPostPhase('saving');
       await createPost({
         content: s.content,
@@ -619,24 +742,13 @@ export default function CreatePost() {
         poll: pollPayload,
         visibility: 'community_public',
         community_ids: s.selectedCommunityIds,
+        // ★ v2: 楽観遷移が有効な時のみ INSERT 直後に finishPostSuccess (attach/poll は背後)。
+        onInserted: optimisticNav ? () => finishPostSuccess() : undefined,
       });
 
-      hap.success();
-      show('投稿しました', 'success');
-      {
-        const did = usePostDraftStore.getState().draftId;
-        if (did) useDraftsStore.getState().remove(did);
-      }
-      void qc.invalidateQueries({ queryKey: ['my-community-feed'] });
-      void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'] });
-      void qc.invalidateQueries({ queryKey: ['my-communities'] });
-      for (const cid of s.selectedCommunityIds) {
-        void qc.invalidateQueries({ queryKey: ['community', cid, 'feed'] });
-        void qc.invalidateQueries({ queryKey: ['community', cid] });
-      }
-      void qc.invalidateQueries({ queryKey: ['feed'] });
-      usePostDraftStore.getState().reset();
-      router.replace('/(tabs)/feed' as never);
+      // 楽観時は onInserted で実行済み (navigated=true で no-op)。
+      // 非楽観 (offline / poll あり) はここで初めて実行 = 従来どおり全 await 後に遷移。
+      finishPostSuccess();
     } catch (e: unknown) {
       hap.error();
       const msg = e instanceof Error ? e.message : String(e);
@@ -645,8 +757,21 @@ export default function CreatePost() {
       else if (msg.includes('Not authenticated') || msg.includes('未ログイン')) userMsg = 'ログインし直してください。';
       else if (msg.includes('Network') || msg.includes('Failed to fetch')) userMsg = '通信エラー。電波を確認してください。';
       else if (msg.includes('速すぎ') || msg.includes('時間を置いて') || msg.includes('ペースが')) userMsg = msg;
+      else if (msg.includes('コミュニティには投稿できません')) userMsg = msg; // attach 失敗の文言を尊重
       show(userMsg, 'error');
+      // ★ v2 ロールバック: 楽観遷移済み(navigated)で attach/poll が throw した場合。
+      //   補償 delete は createPost 内部(posts.ts)で実施済 → ここで delete しない(二重delete回避)。
+      //   遷移はやり直さず feed を invalidate して「消えた post が残って見える」を最終整合で解消。
+      //   既知の限界: refetch が効くまで数百ms〜秒は「消える post」が見え得る(選択済みコミュ宛なのでレア)。
+      if (navigated) {
+        void qc.invalidateQueries({ queryKey: ['feed'] });
+        void qc.invalidateQueries({ queryKey: ['feed-page'] });
+        for (const cid of s.selectedCommunityIds) {
+          void qc.invalidateQueries({ queryKey: ['community', cid, 'feed'] });
+        }
+      }
     } finally {
+      setPostPhase('idle'); // ★ phase リセット (非楽観失敗時の「投稿中…」固着も解消)
       setPosting(false);
     }
   };
