@@ -36,12 +36,15 @@ import {
   useCommunityMembers,
   useCommunityBans,
   useModActionLogs,
+  useCommunityReports,
   useKickMember,
   useBanMember,
   useUnbanMember,
   usePromoteMember,
   useDemoteMember,
   useTransferOwnership,
+  useDeletePostAsMod,
+  useResolveCommunityReport,
 } from '../../../../hooks/useCommunityMods';
 import {
   useCommunityJoinRequests,
@@ -49,10 +52,13 @@ import {
   useRejectJoinRequest,
 } from '../../../../hooks/useCommunityJoinRequests';
 import { Avatar } from '../../../../components/ui/Avatar';
+import { ReasonPickerDialog } from '../../../../components/community/ReasonPickerDialog';
+import { MOD_REMOVAL_REASONS, MOD_BAN_REASONS } from '../../../../constants/modReasons';
 import type {
   MemberWithProfile,
   BanWithProfile,
   ModActionLog,
+  CommunityReport,
 } from '../../../../lib/api/communityMods';
 import { formatRelative } from '../../../../lib/utils/date';
 
@@ -64,6 +70,7 @@ type PendingAction =
   | { kind: 'promote'; member: MemberRowItem }
   | { kind: 'demote'; member: MemberRowItem }
   | { kind: 'transfer'; member: MemberRowItem }
+  | { kind: 'report_delete'; postId: string }
   | null;
 
 export default function CommunityAdminScreen() {
@@ -96,6 +103,7 @@ export default function CommunityAdminScreen() {
   const { members, isLoading: membersLoading } = useCommunityMembers(isMod ? id : undefined);
   const { bans, isLoading: bansLoading } = useCommunityBans(isMod ? id : undefined);
   const { logs, isLoading: logsLoading } = useModActionLogs(isMod ? id : undefined, 50);
+  const { reports, isLoading: reportsLoading } = useCommunityReports(isMod ? id : undefined);
 
   const kick = useKickMember(id);
   const ban = useBanMember(id);
@@ -103,6 +111,8 @@ export default function CommunityAdminScreen() {
   const promote = usePromoteMember(id);
   const demote = useDemoteMember(id);
   const transfer = useTransferOwnership(id);
+  const deletePost = useDeletePostAsMod(id);
+  const resolveReport = useResolveCommunityReport(id);
 
   // 参加申請 (owner / admin) — visibility が open のときは UI を隠す
   const showJoinRequests = isMod && !!community && community.visibility !== 'open';
@@ -168,67 +178,95 @@ export default function CommunityAdminScreen() {
     );
   }
 
-  // Confirm dialog の title/message を action から導出
-  const dialogTitle =
+  // 処置は 2 種のダイアログに分岐:
+  //   - 理由つき (kick / ban / 通報投稿削除) → ReasonPickerDialog
+  //   - 理由なし (unban / promote / demote / transfer) → ConfirmDialog
+  const isReasonAction =
+    pending?.kind === 'kick' ||
+    pending?.kind === 'ban' ||
+    pending?.kind === 'report_delete';
+  const isConfirmAction =
+    pending?.kind === 'unban' ||
+    pending?.kind === 'promote' ||
+    pending?.kind === 'demote' ||
+    pending?.kind === 'transfer';
+
+  // ===== 理由ダイアログ (kick / ban / report_delete) =====
+  const reasonTitle =
     pending?.kind === 'kick' ? 'メンバーをキック'
     : pending?.kind === 'ban' ? 'メンバーを BAN'
-    : pending?.kind === 'unban' ? 'BAN を解除'
+    : pending?.kind === 'report_delete' ? '通報された投稿を削除'
+    : '';
+  const reasonMessage =
+    pending?.kind === 'kick'
+      ? `「${pending.member.nickname}」をこのコミュニティから外します。再加入は本人の任意で可能です。`
+      : pending?.kind === 'ban'
+        ? `「${pending.member.nickname}」を BAN します。再加入できなくなります。`
+        : pending?.kind === 'report_delete'
+          ? 'この投稿を削除します。投稿者には理由つきで通知されます (あなたが誰かは伝わりません)。'
+          : '';
+  const reasonConfirmLabel =
+    pending?.kind === 'kick' ? 'キックする'
+    : pending?.kind === 'ban' ? 'BAN する'
+    : pending?.kind === 'report_delete' ? '削除する'
+    : '実行';
+  const reasonPresets =
+    pending?.kind === 'report_delete' ? MOD_REMOVAL_REASONS : MOD_BAN_REASONS;
+
+  // ===== 確認ダイアログ (unban / promote / demote / transfer) =====
+  const dialogTitle =
+    pending?.kind === 'unban' ? 'BAN を解除'
     : pending?.kind === 'promote' ? '管理人に昇格'
     : pending?.kind === 'demote' ? 'member に降格'
     : pending?.kind === 'transfer' ? 'オーナーを譲渡'
     : '';
   const dialogMessage = (() => {
-    if (!pending) return '';
-    if (pending.kind === 'kick') {
-      return `「${pending.member.nickname}」をこのコミュニティから外します。再加入は本人の任意で可能です。`;
-    }
-    if (pending.kind === 'ban') {
-      return `「${pending.member.nickname}」を BAN します。再加入できなくなります。`;
-    }
-    if (pending.kind === 'unban') {
+    if (pending?.kind === 'unban') {
       return `「${pending.ban.profile?.nickname ?? '匿名'}」の BAN を解除します。`;
     }
-    if (pending.kind === 'promote') {
+    if (pending?.kind === 'promote') {
       return `「${pending.member.nickname}」さんを管理人に昇格しますか?\n\n投稿削除 / キック / BAN の権限を持ちます。`;
     }
-    if (pending.kind === 'transfer') {
+    if (pending?.kind === 'transfer') {
       return `「${pending.member.nickname}」さんにこのコミュニティのオーナーを譲渡しますか?\n\nあなたは「管理者」になります。オーナー権限(コミュニティ削除・管理人の任命/解任など)は相手に移ります。元に戻すには新しいオーナーから譲り返してもらう必要があります。`;
     }
-    // demote
-    return `「${pending.member.nickname}」さんを member に降格しますか?\n\n管理権限はすべて失われます。`;
+    if (pending?.kind === 'demote') {
+      return `「${pending.member.nickname}」さんを member に降格しますか?\n\n管理権限はすべて失われます。`;
+    }
+    return '';
   })();
-
-  // Confirm 後の処理ボタンラベル
   const confirmLabel =
-    pending?.kind === 'kick' ? 'キックする'
-    : pending?.kind === 'ban' ? 'BAN する'
-    : pending?.kind === 'unban' ? '解除する'
+    pending?.kind === 'unban' ? '解除する'
     : pending?.kind === 'promote' ? '昇格する'
     : pending?.kind === 'demote' ? '降格する'
     : pending?.kind === 'transfer' ? '譲渡する'
     : '確認';
+  const isDestructive = pending?.kind === 'demote' || pending?.kind === 'transfer';
 
-  // destructive 表示 (赤系) は kick / ban / demote。
-  // promote / unban は positive (accent) として扱う。
-  const isDestructive =
-    pending?.kind === 'kick' ||
-    pending?.kind === 'ban' ||
-    pending?.kind === 'demote' ||
-    pending?.kind === 'transfer';
-
-  const onConfirm = () => {
+  // 理由つき処置の確定
+  const onConfirmReason = (reason: string) => {
     if (!pending) return;
+    const r = reason.length > 0 ? reason : undefined;
     if (pending.kind === 'kick') {
-      kick.mutate({ communityId: id, userId: pending.member.user_id });
+      kick.mutate({ communityId: id, userId: pending.member.user_id, reason: r });
     } else if (pending.kind === 'ban') {
-      ban.mutate({ communityId: id, userId: pending.member.user_id });
-    } else if (pending.kind === 'unban') {
+      ban.mutate({ communityId: id, userId: pending.member.user_id, reason: r });
+    } else if (pending.kind === 'report_delete') {
+      deletePost.mutate({ id: pending.postId, reason: r, communityId: id });
+    }
+    setPending(null);
+  };
+
+  // 理由なし処置の確定
+  const onConfirmSimple = () => {
+    if (!pending) return;
+    if (pending.kind === 'unban') {
       unban.mutate({ communityId: id, userId: pending.ban.user_id });
     } else if (pending.kind === 'promote') {
       promote.mutate({ communityId: id, userId: pending.member.user_id });
     } else if (pending.kind === 'transfer') {
       transfer.mutate({ communityId: id, userId: pending.member.user_id });
-    } else {
+    } else if (pending.kind === 'demote') {
       demote.mutate({ communityId: id, userId: pending.member.user_id });
     }
     setPending(null);
@@ -297,6 +335,11 @@ export default function CommunityAdminScreen() {
             />
           ) : null}
           <StatCard
+            label="通報"
+            value={reports.length}
+            tone={reports.length > 0 ? 'danger' : 'neutral'}
+          />
+          <StatCard
             label="BAN"
             value={bans.length}
             tone={bans.length > 0 ? 'danger' : 'neutral'}
@@ -332,6 +375,34 @@ export default function CommunityAdminScreen() {
             )}
           </SectionCard>
         )}
+
+        {/* ============= 通報キュー (Reddit 流 mod queue) ============= */}
+        <SectionCard
+          icon={Icon.flag}
+          color={C.red}
+          chipBg={C.redBg}
+          title="通報"
+          count={reports.length}
+          badge
+        >
+          {reportsLoading ? (
+            <SectionLoading />
+          ) : reports.length === 0 ? (
+            <EmptyState icon={Icon.check} text="未対応の通報はありません" />
+          ) : (
+            <View style={{ gap: SP['2'] }}>
+              {reports.map((r) => (
+                <ReportCard
+                  key={r.post_id}
+                  report={r}
+                  onOpen={() => router.push(`/post/${r.post_id}` as never)}
+                  onRemove={() => setPending({ kind: 'report_delete', postId: r.post_id })}
+                  onResolve={() => resolveReport.mutate({ communityId: id, postId: r.post_id })}
+                />
+              ))}
+            </View>
+          )}
+        </SectionCard>
 
         {/* ============= メンバー ============= */}
         <SectionCard
@@ -425,14 +496,25 @@ export default function CommunityAdminScreen() {
         </SectionCard>
       </ScrollView>
 
-      {/* destructive confirm */}
+      {/* 理由なし処置 (解除 / 昇格 / 降格 / 譲渡) */}
       <ConfirmDialog
-        visible={pending !== null}
+        visible={isConfirmAction}
         title={dialogTitle}
         message={dialogMessage}
         confirmLabel={confirmLabel}
         destructive={isDestructive}
-        onConfirm={onConfirm}
+        onConfirm={onConfirmSimple}
+        onCancel={() => setPending(null)}
+      />
+      {/* 理由つき処置 (キック / BAN / 通報投稿の削除) — 理由が本人へ通知される */}
+      <ReasonPickerDialog
+        visible={isReasonAction}
+        title={reasonTitle}
+        message={reasonMessage}
+        confirmLabel={reasonConfirmLabel}
+        destructive
+        presets={reasonPresets}
+        onConfirm={onConfirmReason}
         onCancel={() => setPending(null)}
       />
     </View>
@@ -651,6 +733,138 @@ function RequestCard({
         >
           <Icon.check size={14} color="#fff" strokeWidth={2.8} />
           <Text style={[T.smallB, { color: '#fff' }]}>承認</Text>
+        </PressableScale>
+      </View>
+    </View>
+  );
+}
+
+// 通報 1 件 — 本文プレビュー + 通報件数 + 理由チップ + (開く / 対応済み / 削除)。
+// ★author 情報は一切表示しない (匿名維持。get_community_reports は 0136 で author_id を返さない)。
+function ReportCard({
+  report,
+  onOpen,
+  onRemove,
+  onResolve,
+}: {
+  report: CommunityReport;
+  onOpen: () => void;
+  onRemove: () => void;
+  onResolve: () => void;
+}) {
+  const reasons = (report.reasons ?? []).filter(
+    (r): r is string => typeof r === 'string' && r.length > 0,
+  );
+  return (
+    <View
+      style={{
+        padding: SP['3'],
+        backgroundColor: C.bg,
+        borderRadius: R.md,
+        borderWidth: 1,
+        borderColor: C.red + '33',
+        gap: SP['2'],
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 4,
+            paddingHorizontal: SP['2'],
+            paddingVertical: 2,
+            backgroundColor: C.redBg,
+            borderRadius: R.full,
+            borderWidth: 1,
+            borderColor: C.red + '55',
+          }}
+        >
+          <Icon.flag size={11} color={C.red} strokeWidth={2.4} />
+          <Text style={{ color: C.red, fontSize: 10, fontWeight: '800' }}>
+            {report.report_count} 件の通報
+          </Text>
+        </View>
+        <Text style={[T.caption, { color: C.text3, flex: 1, textAlign: 'right' }]}>
+          {formatRelative(report.latest_reported_at)}
+        </Text>
+      </View>
+
+      {/* 投稿本文プレビュー (タップで投稿を開いて確認) */}
+      <PressableScale onPress={onOpen} haptic="tap" accessibilityLabel="通報された投稿を開く">
+        <Text style={[T.small, { color: C.text2 }]} numberOfLines={3}>
+          {report.content_preview && report.content_preview.length > 0
+            ? report.content_preview
+            : '(本文なし — 画像 / 動画のみの可能性)'}
+        </Text>
+      </PressableScale>
+
+      {/* 通報理由チップ */}
+      {reasons.length > 0 ? (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+          {reasons.slice(0, 4).map((r, i) => (
+            <View
+              key={`${r}-${i}`}
+              style={{
+                paddingHorizontal: SP['2'],
+                paddingVertical: 2,
+                backgroundColor: C.bg3,
+                borderRadius: R.sm,
+                borderWidth: 1,
+                borderColor: C.border,
+              }}
+            >
+              <Text
+                style={{ color: C.text3, fontSize: 10, fontWeight: '600' }}
+                numberOfLines={1}
+              >
+                {r}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {/* アクション: 対応済み / 投稿を削除 */}
+      <View style={{ flexDirection: 'row', gap: SP['2'] }}>
+        <PressableScale
+          onPress={onResolve}
+          haptic="tap"
+          accessibilityLabel="この通報を対応済みにする"
+          style={{
+            flex: 1,
+            flexDirection: 'row',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 4,
+            paddingVertical: SP['2'] + 2,
+            borderRadius: R.md,
+            borderWidth: 1,
+            borderColor: C.border2,
+          }}
+        >
+          <Icon.check size={13} color={C.text2} strokeWidth={2.6} />
+          <Text style={[T.smallB, { color: C.text2 }]}>対応済み</Text>
+        </PressableScale>
+        <PressableScale
+          onPress={onRemove}
+          haptic="warn"
+          accessibilityLabel="通報された投稿を削除"
+          style={{
+            flex: 1,
+            flexDirection: 'row',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 4,
+            paddingVertical: SP['2'] + 2,
+            borderRadius: R.md,
+            backgroundColor: C.redBg,
+            borderWidth: 1,
+            borderColor: C.red + '55',
+          }}
+        >
+          <Icon.trash size={13} color={C.red} strokeWidth={2.4} />
+          <Text style={[T.smallB, { color: C.red }]}>投稿を削除</Text>
         </PressableScale>
       </View>
     </View>

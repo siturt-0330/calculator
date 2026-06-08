@@ -161,7 +161,11 @@ export type Notification = {
     | 'join_request'
     // 'system' はアカウント状態変更通知 (警告 / 停止 / 解除 等、migration 0060 の
     // account_state_history AFTER INSERT トリガー由来)。
-    | 'system';
+    | 'system'
+    // 'mod_action' はコミュニティ管理人の処置通知 (投稿削除 / キック / BAN、
+    // migration 0136 の trigger / RPC 由来)。data.community_id / action / reason を持つ。
+    // ★mod の身元は含めない (匿名性)。
+    | 'mod_action';
   tag_name: string | null;
   message: string;
   read: boolean;
