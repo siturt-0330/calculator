@@ -343,6 +343,50 @@ export default function CreatePost() {
   };
 
   // -----------------------------------------------------------
+  // camera — その場で撮影 (★端末のカメラロールには保存しない)
+  // -----------------------------------------------------------
+  // launchCameraAsync は撮影画像を一時ファイルで返すだけで、iOS/Android とも
+  // カメラロールへ自動保存しない (web は <input capture> で同様)。これで「投稿用に
+  // 撮った写真が端末のフォルダに溜まる」問題を解消する。後処理は pickImage と同じ。
+  const takePhoto = async () => {
+    if (pickingImage || images.length >= 4) return;
+    setPickingImage(true);
+    try {
+      if (Platform.OS !== 'web') {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) {
+          show('カメラへのアクセス許可が必要です', 'warn');
+          return;
+        }
+      }
+      const r = await ImagePicker.launchCameraAsync({
+        mediaTypes: 'images',
+        quality: 0.85,
+      });
+      if (r.canceled || !r.assets[0]) return;
+      let uri = r.assets[0].uri;
+      if (Platform.OS === 'web') {
+        // 送信時フリーズ回避のため pickImage と同様にピック時 data URL 化
+        try {
+          uri = await makeWebPreviewDataUrl(uri, 1600, 0.85);
+        } catch (e) {
+          console.warn('[post/create] web camera pre-process failed:', e);
+          show('一部の画像の事前処理に失敗しました。そのまま投稿できます', 'warn');
+        }
+      }
+      const next = [...images, uri].slice(0, 4);
+      setImages(next);
+      kickImageUpload(uri); // 先行 upload
+      hap.tap();
+    } catch (e) {
+      console.warn('[post/create] take photo failed:', e);
+      show('写真の撮影に失敗しました', 'error');
+    } finally {
+      setPickingImage(false);
+    }
+  };
+
+  // -----------------------------------------------------------
   // video picker
   // -----------------------------------------------------------
   const pickVideo = async () => {
@@ -1111,6 +1155,8 @@ export default function CreatePost() {
         )}
         <ComposerBottomBar
           onPickImage={pickImage}
+          onCamera={takePhoto}
+          pickingCamera={pickingImage}
           onPickVideo={pickVideo}
           onTogglePoll={openPoll}
           onToggleFormat={() => {

@@ -20,7 +20,7 @@
 // ============================================================
 
 import { View } from 'react-native';
-import { BarChart3, Film, Type } from 'lucide-react-native';
+import { BarChart3, Camera, Film, Type } from 'lucide-react-native';
 import { useColors } from '../../../hooks/useColors';
 import { SP, SIZE } from '../../../design/tokens';
 import { Icon } from '../../../constants/icons';
@@ -39,6 +39,10 @@ const DIM_OPACITY = 0.4; // 無効時の減光
 // ============================================================
 export interface ComposerBottomBarProps {
   onPickImage: () => void;
+  /** その場でカメラ撮影 (= 端末ギャラリーに保存せず投稿用に撮る)。渡された時だけ表示。 */
+  onCamera?: () => void;
+  /** カメラ撮影中 → カメラボタンを loading/disabled に */
+  pickingCamera?: boolean;
   onPickVideo: () => void;
   onTogglePoll: () => void;
   onToggleFormat: () => void;
@@ -58,6 +62,8 @@ export interface ComposerBottomBarProps {
 // ============================================================
 export function ComposerBottomBar({
   onPickImage,
+  onCamera,
+  pickingCamera = false,
   onPickVideo,
   onTogglePoll,
   onToggleFormat,
@@ -102,6 +108,17 @@ export function ComposerBottomBar({
           dimmed={imagesFull}
           loading={pickingImage}
         />
+        {onCamera && (
+          <IconActionButton
+            C={C}
+            renderIcon={(color) => <Camera size={ICON_SIZE} color={color} strokeWidth={2} />}
+            accessibilityLabel="カメラで撮影 (端末に保存しません)"
+            onPress={onCamera}
+            disabled={imagesFull || pickingCamera}
+            dimmed={imagesFull}
+            loading={pickingCamera}
+          />
+        )}
         {!hideVideo && (
           <IconActionButton
             C={C}
