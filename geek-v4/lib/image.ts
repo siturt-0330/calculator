@@ -173,6 +173,9 @@ export async function makeWebPreviewDataUrl(
   if (outW < 1 || outH < 1) {
     throw new Error(`preview: 計算後サイズが無効 (${outW}x${outH})`);
   }
+  // ★UI ブロック緩和: 同期的な canvas 処理 (drawImage + toDataURL) の前に 1 回
+  //   マイクロタスクへ yield し、複数画像処理中も React に再描画の隙を与える。
+  await Promise.resolve();
   const canvas = document.createElement('canvas');
   canvas.width = outW;
   canvas.height = outH;

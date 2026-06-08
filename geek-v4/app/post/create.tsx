@@ -319,6 +319,9 @@ export default function CreatePost() {
                 return await makeWebPreviewDataUrl(u, 1600, 0.85);
               } catch (e) {
                 console.warn('[post/create] web image pre-process failed, fallback to raw uri:', e);
+                // 無音で生 URI にフォールバックすると「真っ黒/低品質」に気づけないので一応通知
+                // (投稿自体は続行可能。toast は dedup されるので複数失敗でも 1 回)
+                show('一部の画像の事前処理に失敗しました。そのまま投稿できます', 'warn');
                 return u;
               }
             }),
@@ -528,6 +531,8 @@ export default function CreatePost() {
       },
       (e) => {
         entry.errored = true;
+        // 先行 upload 失敗を可視化 (送信時に再試行される旨も伝える)
+        show('画像の先行アップロードに失敗しました（送信時に再試行します）', 'warn');
         throw e;
       },
     );
@@ -549,6 +554,8 @@ export default function CreatePost() {
       },
       (e) => {
         entry.errored = true;
+        // 先行 upload 失敗を可視化 (送信時に再試行される旨も伝える)
+        show('動画の先行アップロードに失敗しました（送信時に再試行します）', 'warn');
         throw e;
       },
     );
@@ -654,7 +661,11 @@ export default function CreatePost() {
         const check = await checkContent({ content: s.content, tags: s.tags });
         if (!check.ok) {
           hap.error();
-          show(check.reason ?? 'コンテンツポリシーに反する可能性があります', 'error');
+          // 「何をすればいいか」が分かる文言にする (機械的な理由 + 行動指示)
+          const userMsg = check.reason
+            ? `${check.reason}。内容を確認して修正してください。`
+            : '本文に不適切な表現が含まれている可能性があります。内容を確認してください。';
+          show(userMsg, 'error');
           return;
         }
         setPostPhase('uploading');
@@ -835,14 +846,23 @@ export default function CreatePost() {
         {/* spacer */}
         <View style={{ flex: 1 }} />
 
-        {/* 投稿 pill (1画面で完結) */}
+        {/* 投稿 pill (1画面で完結)。disabled にはせず「押せない理由」を toast で示す
+            (disabled だと onPress が発火せず "押しても無反応" になるため)。見た目は無効化。 */}
         <PressableScale
-          onPress={handlePost}
+          onPress={canPost ? handlePost : () => {
+            const s = usePostDraftStore.getState();
+            if (s.selectedCommunityIds.length === 0) {
+              show('投稿するコミュニティを選んでください。', 'warn');
+            } else if (
+              s.content.trim().length === 0 && s.images.length === 0 && !s.video && !editHasVideo
+            ) {
+              show('本文・画像・動画のいずれかを入力してください。', 'warn');
+            }
+          }}
           haptic="tap"
           accessibilityRole="button"
           accessibilityLabel={editId ? '更新' : '投稿'}
           accessibilityState={{ disabled: !canPost }}
-          disabled={!canPost}
           style={{
             paddingHorizontal: SP['4'],
             paddingVertical: SP['2'],
@@ -903,7 +923,7 @@ export default function CreatePost() {
                 style={[T.smallB, { color: selectedCommunity ? C.accent : C.text2, flexShrink: 1 }]}
                 numberOfLines={1}
               >
-                {selectedCommunity ? selectedCommunity.name : 'コミュニティを選択'}
+                {selectedCommunity ? selectedCommunity.name : 'コミュニティを選択 (必須)'}
               </Text>
               <Icon.chevronD size={16} color={selectedCommunity ? C.accent : C.text3} strokeWidth={2.2} />
             </PressableScale>
@@ -1053,8 +1073,27 @@ export default function CreatePost() {
                       placeholder="タグを追加 (任意)"
                       placeholderTextColor={C.text3}
                       returnKeyType="done"
+                      maxLength={30}
                       style={[T.small, { color: C.text, flex: 1, padding: 0 }]}
                     />
+                    {/* タップでも確定できるよう「追加」ボタンを併設 (return キーのみだと不便) */}
+                    <PressableScale
+                      onPress={addTag}
+                      haptic="tap"
+                      disabled={!tagInput.trim()}
+                      accessibilityLabel="タグを追加"
+                      accessibilityState={{ disabled: !tagInput.trim() }}
+                      style={{
+                        paddingHorizontal: SP['2'],
+                        paddingVertical: 4,
+                        borderRadius: R.sm,
+                        backgroundColor: tagInput.trim() ? C.accent : C.bg3,
+                      }}
+                    >
+                      <Text style={[T.small, { color: tagInput.trim() ? '#fff' : C.text3, fontWeight: '700' }]}>
+                        追加
+                      </Text>
+                    </PressableScale>
                   </View>
                 )}
               </View>

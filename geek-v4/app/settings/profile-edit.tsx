@@ -165,8 +165,17 @@ export default function ProfileEditScreen() {
       //   カバーのアップロードが無音失敗する (= 「選んでも反映されない」)。avatar は
       //   openCropper 経由で data: URL 化されるため起きていなかった。cover も先に canvas で
       //   data:URL 化し、prepareImageUpload の data: shortpath (revoke の影響を受けない) に乗せる。
-      const coverSrc =
-        Platform.OS === 'web' ? await makeWebPreviewDataUrl(asset.uri, 1600, 0.85) : asset.uri;
+      let coverSrc = asset.uri;
+      if (Platform.OS === 'web') {
+        try {
+          coverSrc = await makeWebPreviewDataUrl(asset.uri, 1600, 0.85);
+        } catch (canvasErr) {
+          // canvas 失敗 (HEIC/decode 失敗/tainted) を無音にせず通知。生 URI で続行。
+          const canvasMsg = canvasErr instanceof Error ? canvasErr.message : String(canvasErr);
+          console.warn('[profile-edit] cover preview canvas failed, using raw uri:', canvasMsg);
+          show('画像の処理に失敗しました。HEIC でないか確認してください（そのまま続行します）', 'warn');
+        }
+      }
       const prepared = await prepareImageUpload(coverSrc, {
         maxSizeBytes: 5 * 1024 * 1024,
         maxWidth: 1600,

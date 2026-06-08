@@ -552,6 +552,9 @@ export default function PostDetailScreen() {
       setComposerActive(false);
       composerRef.current?.blur();
       void qc.invalidateQueries({ queryKey: ['post-comments', id] });
+      // 送信後、新規コメントが見える位置まで自動スクロール (再フェッチ反映待ち 80ms)。
+      // 返信(ネスト)は末尾に出ないこともあるが、最低限「動いた」フィードバックになる。
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
     } catch (e: unknown) {
       hap.error();
       const msg = e instanceof Error ? e.message : String(e);
@@ -1176,24 +1179,24 @@ export default function PostDetailScreen() {
           {/* 入力行: 画像 / 動画 / テキスト / 送信(丸) */}
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: SP['2'] }}>
             <PressableScale
-              onPress={images.length >= 4 || pickingImage ? undefined : pickImage}
-              disabled={images.length >= 4 || pickingImage}
+              onPress={images.length >= 4 || pickingImage || posting ? undefined : pickImage}
+              disabled={images.length >= 4 || pickingImage || posting}
               haptic="select"
               hitSlop={6}
               accessibilityRole="button"
               accessibilityLabel="画像を追加"
-              style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', opacity: images.length >= 4 ? 0.4 : 1 }}
+              style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', opacity: images.length >= 4 || posting ? 0.4 : 1 }}
             >
               <Icon.image size={22} color={C.text2} strokeWidth={2} />
             </PressableScale>
             <PressableScale
-              onPress={!!video || pickingVideo ? undefined : pickVideo}
-              disabled={!!video || pickingVideo}
+              onPress={!!video || pickingVideo || posting ? undefined : pickVideo}
+              disabled={!!video || pickingVideo || posting}
               haptic="select"
               hitSlop={6}
               accessibilityRole="button"
               accessibilityLabel="動画を追加"
-              style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', opacity: video ? 0.4 : 1 }}
+              style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', opacity: video || posting ? 0.4 : 1 }}
             >
               <Film size={22} color={C.text2} strokeWidth={2} />
             </PressableScale>
@@ -1203,6 +1206,7 @@ export default function PostDetailScreen() {
                 value={commentText}
                 onChangeText={setCommentText}
                 onFocus={() => setComposerActive(true)}
+                editable={!posting}
                 placeholder={replyTarget ? '返信を入力…' : 'コメントを入力…'}
                 placeholderTextColor={C.text3}
                 multiline
@@ -1224,8 +1228,12 @@ export default function PostDetailScreen() {
               />
             </View>
             <PressableScale
-              onPress={canPost ? submitComment : undefined}
-              disabled={!canPost}
+              onPress={canPost ? submitComment : () => {
+                // disabled にせず「押せない理由」を提示 (無言の無反応を避ける)
+                if (!posting && commentText.trim().length === 0 && images.length === 0 && !video) {
+                  show('コメントを入力してください。', 'warn');
+                }
+              }}
               haptic="tap"
               accessibilityRole="button"
               accessibilityLabel={replyTarget ? '返信を送信' : 'コメントを送信'}
