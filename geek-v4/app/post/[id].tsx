@@ -1138,7 +1138,7 @@ export default function PostDetailScreen() {
                 {' さんに返信しています'}
               </Text>
               <PressableScale
-                onPress={() => { setReplyTarget(null); setCommentText(''); }}
+                onPress={() => setReplyTarget(null)}
                 hitSlop={8}
                 accessibilityRole="button"
                 accessibilityLabel="返信をやめる"
@@ -1154,7 +1154,7 @@ export default function PostDetailScreen() {
             <ComposerMediaGrid
               images={images}
               video={video ? { uri: video.uri, sizeMb: video.size / 1024 / 1024 } : null}
-              onRemoveImage={(uri) => setImages(images.filter((u) => u !== uri))}
+              onRemoveImage={(index) => setImages(images.filter((_, i) => i !== index))}
               onRemoveVideo={() => setVideo(null)}
               containerPaddingH={0}
             />
@@ -1187,7 +1187,7 @@ export default function PostDetailScreen() {
               hitSlop={6}
               accessibilityRole="button"
               accessibilityLabel="画像を追加"
-              style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', opacity: images.length >= 4 || posting ? 0.4 : 1 }}
+              style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', opacity: images.length >= 4 || pickingImage || posting ? 0.4 : 1 }}
             >
               <Icon.image size={22} color={C.text2} strokeWidth={2} />
             </PressableScale>

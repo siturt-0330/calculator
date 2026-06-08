@@ -194,7 +194,7 @@ export default function AppearanceSettingsScreen() {
           <Text style={[T.caption, { color: C.text2, lineHeight: 18 }]}>
             💡 一部の画面はまだダーク固定です。順次ライトモード対応を進めています。
             {'\n'}
-            違和感がある画面があれば設定 → 「フィードバックを送る」からご連絡ください。
+            違和感がある画面があれば設定 → 「運営にお問い合わせ」からご連絡ください。
           </Text>
         </View>
       </ScrollView>

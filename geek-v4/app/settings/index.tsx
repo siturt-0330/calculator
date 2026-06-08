@@ -214,7 +214,7 @@ export default function SettingsScreen() {
           <SettingsRow
             icon={Icon.sparkles}
             label="おすすめ・自動化"
-            sublabel="フィード並びと自動翻訳"
+            sublabel="タグの自動グループ化"
             onPress={() => router.push('/settings/recommendations' as never)}
           />
         </SectionCard>

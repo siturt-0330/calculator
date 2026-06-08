@@ -44,6 +44,7 @@ import { createPost, fetchPostById, updatePost } from '../../lib/api/posts';
 import { checkContent } from '../../lib/ai/checkContent';
 import { validateVideoSource, uploadPostImage, uploadPostVideo } from '../../lib/media';
 import { makeWebPreviewDataUrl } from '../../lib/image';
+import { openCropper } from '../../lib/imageCropper';
 import { sanitizeTag } from '../../lib/sanitize';
 import { peekRate, rateLimitMessage } from '../../lib/rateLimit';
 import { isOnline } from '../../lib/offline/networkMonitor';
@@ -119,6 +120,7 @@ export default function CreatePost() {
   // local state
   // -----------------------------------------------------------
   const [pickingImage, setPickingImage] = useState(false);
+  const [pickingCamera, setPickingCamera] = useState(false); // カメラ撮影中 (画像ピックとは独立)
   const [pickingVideo, setPickingVideo] = useState(false);
   const [formatActive, setFormatActive] = useState(false);
   const [showPollSheet, setShowPollSheet] = useState(false);
@@ -349,8 +351,8 @@ export default function CreatePost() {
   // カメラロールへ自動保存しない (web は <input capture> で同様)。これで「投稿用に
   // 撮った写真が端末のフォルダに溜まる」問題を解消する。後処理は pickImage と同じ。
   const takePhoto = async () => {
-    if (pickingImage || images.length >= 4) return;
-    setPickingImage(true);
+    if (pickingCamera || images.length >= 4) return;
+    setPickingCamera(true);
     try {
       if (Platform.OS !== 'web') {
         const perm = await ImagePicker.requestCameraPermissionsAsync();
@@ -382,7 +384,30 @@ export default function CreatePost() {
       console.warn('[post/create] take photo failed:', e);
       show('写真の撮影に失敗しました', 'error');
     } finally {
-      setPickingImage(false);
+      setPickingCamera(false);
+    }
+  };
+
+  // -----------------------------------------------------------
+  // 画像編集 — 添付済み画像を切り抜き/回転 (openCropper の rect モード)。opt-in。
+  // -----------------------------------------------------------
+  const editImage = async (index: number) => {
+    const uri = usePostDraftStore.getState().images[index];
+    if (!uri) return;
+    try {
+      const cropped = await openCropper(uri, { shape: 'rect', aspect: 'original', outMaxEdge: 1440 });
+      if (!cropped || cropped === uri) return; // キャンセル or 変更なし
+      const cur = usePostDraftStore.getState().images;
+      // 編集中に配列が変わった可能性 → 同 index が同 uri のときだけ差し替える (重複/並べ替え対策)
+      if (cur[index] !== uri) return;
+      const next = cur.slice();
+      next[index] = cropped;
+      setImages(next);
+      kickImageUpload(cropped); // 編集後の画像を先行 upload (旧 prefetch は破棄=無害)
+      hap.tap();
+    } catch (e) {
+      console.warn('[post/create] edit image failed:', e);
+      show('画像の編集に失敗しました', 'warn');
     }
   };
 
@@ -1060,8 +1085,9 @@ export default function CreatePost() {
                   <ComposerMediaGrid
                     images={images}
                     video={video ? { uri: video.uri, sizeMb: video.size / 1024 / 1024 } : null}
-                    onRemoveImage={(uri) => setImages(images.filter((u) => u !== uri))}
+                    onRemoveImage={(index) => setImages(images.filter((_, i) => i !== index))}
                     onRemoveVideo={() => setVideo(null)}
+                    onEditImage={editImage}
                     containerPaddingH={0}
                   />
                 </View>
@@ -1156,7 +1182,7 @@ export default function CreatePost() {
         <ComposerBottomBar
           onPickImage={pickImage}
           onCamera={takePhoto}
-          pickingCamera={pickingImage}
+          pickingCamera={pickingCamera}
           onPickVideo={pickVideo}
           onTogglePoll={openPoll}
           onToggleFormat={() => {
