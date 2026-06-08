@@ -361,7 +361,14 @@ export default function CreatePost() {
       });
       if (!v.ok) {
         hap.warn();
-        show(v.reason, 'warn');
+        // 検証エラー (サイズ/形式) は選択前に判断できない情報なので、ワンタップで
+        // picker を再起動できる「別の動画を選ぶ」アクションを toast に付ける。
+        show(v.reason, 'warn', {
+          undoLabel: '別の動画を選ぶ',
+          onUndo: () => {
+            void pickVideo();
+          },
+        });
         return;
       }
       setVideo({ uri: asset.uri, mime: v.mime, ext: v.ext, size: v.size });
@@ -482,7 +489,18 @@ export default function CreatePost() {
     setTagInput('');
     hap.tap();
   };
-  const removeTag = (t: string) => setTags(tags.filter((x) => x !== t));
+  const removeTag = (t: string) => {
+    setTags(tags.filter((x) => x !== t));
+    // 誤タップ対策: タグは再入力コストが高いので undo できる toast を出す。
+    // onUndo は実行時の最新 tags を store から読んで復元する (stale closure 回避)。
+    show(`タグ #${t} を削除しました`, 'info', {
+      undoLabel: '元に戻す',
+      onUndo: () => {
+        const cur = usePostDraftStore.getState().tags;
+        if (!cur.includes(t)) setTags([...cur, t].slice(0, MAX_TAGS));
+      },
+    });
+  };
 
   // -----------------------------------------------------------
   // 投稿 — 旧 Step2 (create-settings) の送信ロジックを 1 画面に統合
@@ -959,10 +977,13 @@ export default function CreatePost() {
               </View>
 
               {/* 本文 — タイトルと本文を分けない単一フィールド (X / Threads 風) */}
+              {/* autoFocus: 投稿画面を開いた瞬間にキーボードを出して即タイプ可能にする
+                  (これが無いと最初の数文字がキーボード起動待ちで取りこぼされる) */}
               <ComposerBodyField
                 value={content}
                 onChangeText={setContent}
                 placeholder={placeholder}
+                autoFocus
                 onSelectionChange={(sel) => {
                   selectionRef.current = sel;
                 }}

@@ -1206,6 +1206,20 @@ export default function PostDetailScreen() {
                 placeholder={replyTarget ? '返信を入力…' : 'コメントを入力…'}
                 placeholderTextColor={C.text3}
                 multiline
+                returnKeyType="send"
+                onKeyPress={
+                  Platform.OS === 'web'
+                    ? (e) => {
+                        // Web/Desktop: Enter で送信、Shift+Enter で改行 (チャット系の慣習)。
+                        // モバイルは multiline の改行挙動をそのまま維持 (この分岐に入らない)。
+                        const ne = e.nativeEvent as unknown as { key?: string; shiftKey?: boolean };
+                        if (ne.key === 'Enter' && !ne.shiftKey) {
+                          (e as unknown as { preventDefault?: () => void }).preventDefault?.();
+                          if (canPost) submitComment();
+                        }
+                      }
+                    : undefined
+                }
                 style={{ color: C.text, fontSize: 15, lineHeight: 20, paddingTop: Platform.OS === 'ios' ? 10 : 6, paddingBottom: Platform.OS === 'ios' ? 10 : 6, maxHeight: 120 }}
               />
             </View>

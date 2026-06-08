@@ -402,11 +402,11 @@ function MediaTile({
         </View>
       )}
 
-      {/* 右上の削除ボタン — 26px 円, 黒半透明 */}
+      {/* 右上の削除ボタン — 26px 円, 黒半透明。hitSlop を広げて誤タップ/隣接タイル誤削除を軽減 */}
       <PressableScale
         onPress={() => (isVideo ? onRemoveVideo() : onRemoveImage(tile.uri))}
         haptic="warn"
-        hitSlop={8}
+        hitSlop={14}
         accessibilityLabel={isVideo ? '動画を削除' : '画像を削除'}
         style={{
           position: 'absolute',
