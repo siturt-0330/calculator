@@ -163,19 +163,33 @@ export default function ImageCropperScreen() {
     return { fitW, fitH };
   }, [imageSize, rotation, cropDiameter]);
 
-  // gestures
+  // gesture の clamp 用に fit 寸法を取り出す (null 時は cropDiameter = 可動域 0)。
+  // handleNext の crop 計算と同じ「layout 寸法 (fitW/fitH)」基準にして整合させる。
+  const clampFitW = fitDims?.fitW ?? cropDiameter;
+  const clampFitH = fitDims?.fitH ?? cropDiameter;
+
+  // ★最小ズームは cover (=1)。scale<1 を許すと画像が円より小さくなり余白(黒)が
+  //   クロップに混入する (= 「範囲選択がうまくいかない」の主因の一つ)。
+  const MIN_SCALE = 1;
+  const MAX_SCALE = 4;
+
+  // gestures — pan/pinch とも「画像が常に円を覆う」範囲へ translate をクランプする。
   const panGesture = useMemo(
     () =>
       Gesture.Pan()
         .onUpdate((e) => {
-          translateX.value = savedTranslateX.value + e.translationX;
-          translateY.value = savedTranslateY.value + e.translationY;
+          const maxTX = Math.max(0, (clampFitW * scale.value - cropDiameter) / 2);
+          const maxTY = Math.max(0, (clampFitH * scale.value - cropDiameter) / 2);
+          const nx = savedTranslateX.value + e.translationX;
+          const ny = savedTranslateY.value + e.translationY;
+          translateX.value = Math.min(maxTX, Math.max(-maxTX, nx));
+          translateY.value = Math.min(maxTY, Math.max(-maxTY, ny));
         })
         .onEnd(() => {
           savedTranslateX.value = translateX.value;
           savedTranslateY.value = translateY.value;
         }),
-    [translateX, translateY, savedTranslateX, savedTranslateY],
+    [translateX, translateY, savedTranslateX, savedTranslateY, scale, clampFitW, clampFitH, cropDiameter],
   );
 
   const pinchGesture = useMemo(
@@ -183,18 +197,39 @@ export default function ImageCropperScreen() {
       Gesture.Pinch()
         .onUpdate((e) => {
           const next = savedScale.value * e.scale;
-          scale.value = Math.max(0.5, Math.min(4, next));
+          scale.value = Math.max(MIN_SCALE, Math.min(MAX_SCALE, next));
+          // ズームで可動域が変わるので translate を再クランプ (枠外余白の混入を防ぐ)。
+          const maxTX = Math.max(0, (clampFitW * scale.value - cropDiameter) / 2);
+          const maxTY = Math.max(0, (clampFitH * scale.value - cropDiameter) / 2);
+          translateX.value = Math.min(maxTX, Math.max(-maxTX, translateX.value));
+          translateY.value = Math.min(maxTY, Math.max(-maxTY, translateY.value));
         })
         .onEnd(() => {
           savedScale.value = scale.value;
+          savedTranslateX.value = translateX.value;
+          savedTranslateY.value = translateY.value;
         }),
-    [scale, savedScale],
+    [scale, savedScale, translateX, translateY, savedTranslateX, savedTranslateY, clampFitW, clampFitH, cropDiameter],
   );
 
   const composedGesture = useMemo(
     () => Gesture.Simultaneous(panGesture, pinchGesture),
     [panGesture, pinchGesture],
   );
+
+  // ボタン / ホイールからのズーム (web は pinch が不安定なため確実な代替手段)。
+  // scale を step 倍し、可動域に合わせて translate も再クランプする。
+  const zoomBy = (factor: number) => {
+    const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale.value * factor));
+    scale.value = next;
+    savedScale.value = next;
+    const maxTX = Math.max(0, (clampFitW * next - cropDiameter) / 2);
+    const maxTY = Math.max(0, (clampFitH * next - cropDiameter) / 2);
+    translateX.value = Math.min(maxTX, Math.max(-maxTX, translateX.value));
+    translateY.value = Math.min(maxTY, Math.max(-maxTY, translateY.value));
+    savedTranslateX.value = translateX.value;
+    savedTranslateY.value = translateY.value;
+  };
 
   // animated image transform
   const imgAnimStyle = useAnimatedStyle(() => ({
@@ -395,6 +430,16 @@ export default function ImageCropperScreen() {
             style={[
               StyleSheet.absoluteFill,
               { alignItems: 'center', justifyContent: 'center' },
+              // ★web: これらが無いとブラウザ既定のジェスチャ(ページズーム/スクロール/
+              //   弾性バウンド)と競合して pan/pinch が「カクつく/効かない」主因になる。
+              //   (過去 e0428b6 で入れたが 31adf21 で退行していた分を復元)
+              Platform.OS === 'web'
+                ? ({
+                    touchAction: 'none',
+                    userSelect: 'none',
+                    overscrollBehavior: 'none',
+                  } as object)
+                : null,
             ]}
           >
             {imageSize && fitDims ? (
@@ -552,8 +597,45 @@ export default function ImageCropperScreen() {
           paddingHorizontal: SP['6'],
         }}
       >
-        {/* spacer (左) — symmetry */}
-        <View style={{ width: 80 }} />
+        {/* 左: web 用ズーム ±ボタン (pinch が不安定なため確実な代替手段)。native は spacer。 */}
+        {Platform.OS === 'web' ? (
+          <View style={{ flexDirection: 'row', gap: SP['2'] }}>
+            <PressableScale
+              onPress={() => zoomBy(1 / 1.25)}
+              haptic="tap"
+              disabled={busy}
+              accessibilityLabel="縮小"
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: 'rgba(255,255,255,0.15)',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700', lineHeight: 24 }}>−</Text>
+            </PressableScale>
+            <PressableScale
+              onPress={() => zoomBy(1.25)}
+              haptic="tap"
+              disabled={busy}
+              accessibilityLabel="拡大"
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: 'rgba(255,255,255,0.15)',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text style={{ color: '#fff', fontSize: 20, fontWeight: '700', lineHeight: 22 }}>＋</Text>
+            </PressableScale>
+          </View>
+        ) : (
+          <View style={{ width: 80 }} />
+        )}
 
         {/* 90° 回転 */}
         <PressableScale
