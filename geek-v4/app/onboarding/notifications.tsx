@@ -8,6 +8,8 @@ import { Button } from '../../components/ui/Button';
 import { useAuthStore } from '../../stores/authStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useToastStore } from '../../stores/toastStore';
+import { useFeedStore } from '../../stores/feedStore';
+import { useTagFilterStore } from '../../stores/tagFilterStore';
 import { supabase } from '../../lib/supabase';
 import { registerNativePushToken } from '../../lib/api/push';
 import { StepProgress } from './_progress';
@@ -84,6 +86,13 @@ export default function NotificationsOnboarding() {
       }
     } finally {
       setSaving(false);
+      // ★ cold-start 解消 (flag gated / one-shot): 興味タグを選んだ新規ユーザーを
+      //   初回フィードだけ興味スコープ (closed) に着地させる。flag OFF / 興味 0 件なら
+      //   no-op で、feed.tsx の「好きタグ無しなら open へ強制」safety net が open を維持。
+      //   imperative な onboarding callback なので getState() で直接呼ぶ (CLAUDE.md §5 容認)。
+      useFeedStore
+        .getState()
+        .applyColdStartScopeIfFirstRun(useTagFilterStore.getState().likedTags.length);
       router.replace('/(tabs)/feed');
       if (dbCommitted) {
         console.log('[onboarding] complete — onboarded committed to DB');

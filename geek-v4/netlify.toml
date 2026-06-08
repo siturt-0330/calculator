@@ -44,6 +44,11 @@
   #   壊れはしないが「失敗RTT + fallback」で一時的に遅くなる。必ず 0114 適用後にデプロイする。
   #   既定 OFF (=== '1' のときだけ ON)。
   EXPO_PUBLIC_HOME_FEED_RPC     = "1"
+  # ★ cold-start 解消: 興味タグを選んで onboarding を終えた新規ユーザーを、初回だけ
+  #   興味スコープ (closed = overlaps(tag_names, likedTags) のサーバー側フィルタ) に
+  #   着地させる。one-shot (coldStartApplied sentinel) で後日のタグ追加では再発火しない。
+  #   既定 OFF (=== '1' のときだけ ON)。flag OFF / 興味 0 件のときは現行どおり open。
+  EXPO_PUBLIC_COLDSTART_INTEREST_FEED = "1"
 
 # ============================================================
 # SPA fallback: Expo Router の client-side routing に全 path を渡す
