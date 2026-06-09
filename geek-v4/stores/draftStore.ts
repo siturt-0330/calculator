@@ -119,6 +119,8 @@ interface DraftStoreState {
   deleteDraft: (id: string) => void;
   /** 単一 draft を返す。 */
   getDraft: (id: string) => Draft | undefined;
+  /** ログアウト時などに全下書きをローカルから消去する。 */
+  clearAllDrafts: () => void;
 }
 
 export const useDraftStore = create<DraftStoreState>((set, get) => ({
@@ -210,8 +212,12 @@ export const useDraftStore = create<DraftStoreState>((set, get) => ({
       updatedAt: Date.now(),
     };
 
-    // ローカル先行保存
-    const next: Draft[] = [draft, ...get().drafts]
+    // ローカル先行保存。上限超えは追加前に古い順から切り捨てる
+    const existing = get().drafts;
+    const trimmed = existing.length >= MAX_DRAFTS
+      ? existing.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_DRAFTS - 1)
+      : existing;
+    const next: Draft[] = [draft, ...trimmed]
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, MAX_DRAFTS);
     set({ drafts: next });
@@ -288,5 +294,13 @@ export const useDraftStore = create<DraftStoreState>((set, get) => ({
   // ------------------------------------------------------------------
   getDraft: (id) => {
     return get().drafts.find((d) => d.id === id);
+  },
+
+  // ------------------------------------------------------------------
+  // clearAllDrafts — ログアウト時にローカルを全消去 (サーバー削除は行わない)
+  // ------------------------------------------------------------------
+  clearAllDrafts: () => {
+    set({ drafts: [], hydrated: false });
+    remove(STORAGE_KEY);
   },
 }));

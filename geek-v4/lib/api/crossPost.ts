@@ -7,9 +7,17 @@
 
 import { supabase } from '../supabase';
 import { swallow } from '../swallow';
+import { withApiTimeout } from '../withApiTimeout';
 
 /** クロスポスト先コミュニティの参照型 */
 export type CommunityRef = {
+  id: string;
+  name: string;
+  icon_emoji: string | null;
+};
+
+// PostgREST のネスト select で返ってくるコミュニティ行の内部型
+type NestedCommunity = {
   id: string;
   name: string;
   icon_emoji: string | null;
@@ -22,6 +30,8 @@ export type CommunityRef = {
 /**
  * 既存投稿を指定コミュニティへクロスポストする。
  *
+ * @param postId クロスポスト元の投稿 ID
+ * @param communityId クロスポスト先のコミュニティ ID
  * @returns 成功時 true / 重複 or エラー時 false
  */
 export async function crossPostToCommunity(
@@ -29,9 +39,12 @@ export async function crossPostToCommunity(
   communityId: string,
 ): Promise<boolean> {
   try {
-    const { error } = await supabase
-      .from('post_communities')
-      .insert({ post_id: postId, community_id: communityId });
+    const { error } = await withApiTimeout(
+      supabase
+        .from('post_communities')
+        .insert({ post_id: postId, community_id: communityId }),
+      'crossPost.add',
+    );
 
     if (error) {
       // 一意制約違反 (code 23505) = 既に存在 → false を返すだけ
@@ -54,16 +67,20 @@ export async function crossPostToCommunity(
 /**
  * 指定投稿がクロスポストされているコミュニティの一覧を返す。
  *
+ * @param postId 対象の投稿 ID
  * @returns コミュニティの配列 (エラー時は空配列)
  */
 export async function getCrossPostCommunities(
   postId: string,
 ): Promise<CommunityRef[]> {
   try {
-    const { data, error } = await supabase
-      .from('post_communities')
-      .select('community_id, communities(id, name, icon_emoji)')
-      .eq('post_id', postId);
+    const { data, error } = await withApiTimeout(
+      supabase
+        .from('post_communities')
+        .select('community_id, communities(id, name, icon_emoji)')
+        .eq('post_id', postId),
+      'crossPost.getCommunities',
+    );
 
     if (error) {
       swallow('crossPost.getCommunities', error);
@@ -76,7 +93,7 @@ export async function getCrossPostCommunities(
     return data
       .map((row) => {
         const community = (row.communities as unknown) as
-          | { id: string; name: string; icon_emoji: string | null }
+          | NestedCommunity
           | null
           | undefined;
         if (!community) return null;
@@ -101,6 +118,8 @@ export async function getCrossPostCommunities(
  * 指定投稿のクロスポストを解除する。
  * RLS により、現在のユーザーが投稿の所有者でない場合は削除が無視される。
  *
+ * @param postId 対象の投稿 ID
+ * @param communityId クロスポストを解除するコミュニティ ID
  * @returns 成功時 true / エラー時 false
  */
 export async function removeCrossPost(
@@ -108,11 +127,14 @@ export async function removeCrossPost(
   communityId: string,
 ): Promise<boolean> {
   try {
-    const { error } = await supabase
-      .from('post_communities')
-      .delete()
-      .eq('post_id', postId)
-      .eq('community_id', communityId);
+    const { error } = await withApiTimeout(
+      supabase
+        .from('post_communities')
+        .delete()
+        .eq('post_id', postId)
+        .eq('community_id', communityId),
+      'crossPost.remove',
+    );
 
     if (error) {
       swallow('crossPost.remove', error);

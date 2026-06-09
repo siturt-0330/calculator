@@ -1,7 +1,3 @@
-import { create } from 'zustand';
-import { getJson, setJson } from '../lib/storage';
-import { supabase } from '../lib/supabase';
-
 // ============================================================
 // blockStore — 匿名ユーザーブロック管理
 // ============================================================
@@ -11,7 +7,14 @@ import { supabase } from '../lib/supabase';
 // - サーバー側の block_pseudonym / unblock_pseudonym / get_blocked_pseudonyms RPC
 //   を呼ぶが、通信失敗はローカル状態を巻き戻さず fail-silent で握りつぶす。
 //   (楽観更新: ローカルを先に変えてから RPC を fire-and-forget)
+// - get_blocked_pseudonyms RPC が未適用 (migration 未実行) の場合は
+//   PGRST202 / 42883 エラーが返る。その場合はローカル状態をそのまま維持する。
 // ============================================================
+
+import { create } from 'zustand';
+import { getJson, setJson } from '../lib/storage';
+import { supabase } from '../lib/supabase';
+import { swallow } from '../lib/swallow';
 
 const STORAGE_KEY = 'geek:blocks:v1';
 
@@ -24,14 +27,16 @@ type BlockState = {
   unblockUser: (pseudonymId: string) => void;
   loadBlocks: () => Promise<void>;
   isBlocked: (pseudonymId: string | null | undefined) => boolean;
+  /** ログアウト時などにローカルのブロックリストを全消去する。 */
+  clear: () => void;
 };
 
 // MMKV / localStorage に Set を保存するためのシリアライズヘルパ
 function saveToStorage(ids: Set<string>): void {
   try {
     setJson(STORAGE_KEY, [...ids]);
-  } catch {
-    /* swallow — 永続化失敗はセッション内ブロックには影響しない */
+  } catch (e) {
+    swallow('blockStore.saveToStorage', e);
   }
 }
 
@@ -41,8 +46,8 @@ function loadFromStorage(): Set<string> {
     if (Array.isArray(raw)) {
       return new Set(raw.filter((v): v is string => typeof v === 'string'));
     }
-  } catch {
-    /* swallow */
+  } catch (e) {
+    swallow('blockStore.loadFromStorage', e);
   }
   return new Set();
 }
@@ -63,9 +68,7 @@ export const useBlockStore = create<BlockState>((set, get) => ({
       p_pseudonym_id: pseudonymId,
       p_reason: reason ?? 'other',
     }).then(({ error }) => {
-      if (error) {
-        console.warn('[blockStore] block_pseudonym rpc failed:', error.message);
-      }
+      if (error) swallow('blockStore.blockUser', error);
     });
   },
 
@@ -80,9 +83,7 @@ export const useBlockStore = create<BlockState>((set, get) => ({
     void supabase.rpc('unblock_pseudonym', {
       p_pseudonym_id: pseudonymId,
     }).then(({ error }) => {
-      if (error) {
-        console.warn('[blockStore] unblock_pseudonym rpc failed:', error.message);
-      }
+      if (error) swallow('blockStore.unblockUser', error);
     });
   },
 
@@ -90,7 +91,14 @@ export const useBlockStore = create<BlockState>((set, get) => ({
     try {
       const { data, error } = await supabase.rpc('get_blocked_pseudonyms');
       if (error) {
-        console.warn('[blockStore] get_blocked_pseudonyms rpc failed:', error.message);
+        // PGRST202: RPC が存在しない (migration 未適用) — ローカル状態をそのまま維持
+        // 42883: PostgreSQL の undefined_function — 同様に silent skip
+        const code = (error as { code?: string }).code ?? '';
+        if (code === 'PGRST202' || code === '42883') {
+          set({ loaded: true });
+          return;
+        }
+        swallow('blockStore.loadBlocks.rpc', error);
         set({ loaded: true });
         return;
       }
@@ -111,7 +119,7 @@ export const useBlockStore = create<BlockState>((set, get) => ({
       set({ blockedPseudonymIds: next, loaded: true });
       saveToStorage(next);
     } catch (e) {
-      console.warn('[blockStore] loadBlocks exception:', e);
+      swallow('blockStore.loadBlocks', e);
       set({ loaded: true });
     }
   },
@@ -119,5 +127,10 @@ export const useBlockStore = create<BlockState>((set, get) => ({
   isBlocked: (pseudonymId) => {
     if (!pseudonymId) return false;
     return get().blockedPseudonymIds.has(pseudonymId);
+  },
+
+  clear: () => {
+    set({ blockedPseudonymIds: new Set<string>(), loaded: false });
+    saveToStorage(new Set<string>());
   },
 }));

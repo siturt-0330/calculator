@@ -64,6 +64,10 @@ const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(n, hi
 // タイトルと本文を分けない単一フィールドのプレースホルダ
 const PLACEHOLDER = '話したいトピックを書いてみよう';
 const MAX_TAGS = 5;
+// ローカル下書き自動保存のデバウンス間隔 (ms)
+const DRAFT_DEBOUNCE_MS = 1500;
+// 下書き保存インジケーターの表示保持時間 (ms)
+const DRAFT_INDICATOR_DURATION_MS = 2000;
 
 // ============================================================
 // CreatePost — Step 1
@@ -200,18 +204,19 @@ export default function CreatePost() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 下書き保存インジケーター — フェードイン→2s保持→フェードアウトのアニメ
+  // 下書き保存インジケーター — フェードイン→DRAFT_INDICATOR_DURATION_MS保持→フェードアウト
+  // useRef で安定した関数参照を保持し、useEffect の deps 警告を回避する。
   const draftSavedOpacity = useRef(new Animated.Value(0)).current;
   const draftSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showDraftSavedIndicator = () => {
+  const showDraftSavedIndicatorRef = useRef(() => {
     if (draftSavedTimerRef.current) clearTimeout(draftSavedTimerRef.current);
     draftSavedOpacity.setValue(0);
     Animated.timing(draftSavedOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start(() => {
       draftSavedTimerRef.current = setTimeout(() => {
         Animated.timing(draftSavedOpacity, { toValue: 0, duration: 400, useNativeDriver: true }).start();
-      }, 2000);
+      }, DRAFT_INDICATOR_DURATION_MS);
     });
-  };
+  });
 
   // draftStore (server-synced) の loadDrafts を mount 時に 1 回呼ぶ
   useEffect(() => {
@@ -219,7 +224,7 @@ export default function CreatePost() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // server-synced 下書き自動保存 (debounce 1.5s)
+  // server-synced 下書き自動保存 (debounce DRAFT_DEBOUNCE_MS)
   // 編集モードでは書かない。本文・タグ・メディアが空なら skip。
   useEffect(() => {
     if (editIdRef.current) return;
@@ -233,8 +238,8 @@ export default function CreatePost() {
         tagNames: s.tags,
         mediaUrls: s.images,
       });
-      showDraftSavedIndicator();
-    }, 1500);
+      showDraftSavedIndicatorRef.current();
+    }, DRAFT_DEBOUNCE_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content, tags, images, video]);
@@ -270,15 +275,22 @@ export default function CreatePost() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 下書き自動保存 (debounce 600ms)
+  // ローカル下書き自動保存 (debounce DRAFT_DEBOUNCE_MS)
   // 「一度でも何か入力したら」自動で下書き登録 → 以後は同一 draftId を更新。
-  // Step 1 の content フィールド (title/content/images/video) を契機に store 全体を snapshot する。
+  // 前回保存と内容が同じ場合はスキップして余分な write / indicator 表示を防ぐ。
+  const lastSavedSnapshotRef = useRef('');
+  const localDraftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (editIdRef.current) return; // 編集モードは下書きへ書き戻さない
     const meaningful = title.trim() || content.trim() || images.length > 0 || !!video;
     if (!meaningful) return;
-    const t = setTimeout(() => {
+    if (localDraftTimerRef.current) clearTimeout(localDraftTimerRef.current);
+    localDraftTimerRef.current = setTimeout(() => {
       const s = usePostDraftStore.getState();
+      // 変化がない場合は保存も indicator 表示もしない
+      const snapshot = JSON.stringify({ content: s.content, title: s.title, images: s.images, video: s.video, tags: s.tags });
+      if (snapshot === lastSavedSnapshotRef.current) return;
+      lastSavedSnapshotRef.current = snapshot;
       let id = s.draftId;
       if (!id) {
         id = newDraftId('post');
@@ -305,9 +317,12 @@ export default function CreatePost() {
         pollMulti: s.pollMulti,
         pollHours: s.pollHours,
       });
-      showDraftSavedIndicator();
-    }, 600);
-    return () => clearTimeout(t);
+      // インジケーターはローカル保存後に一度だけ表示 (server save は並走するが indicator は共有)
+      showDraftSavedIndicatorRef.current();
+    }, DRAFT_DEBOUNCE_MS);
+    return () => {
+      if (localDraftTimerRef.current) clearTimeout(localDraftTimerRef.current);
+    };
   }, [title, content, images, video, anonymous]);
 
   // deep link prefill — community_id / prefill_tag (mount 1 回)
@@ -685,21 +700,23 @@ export default function CreatePost() {
 
     // ---- 編集モード: 既存投稿を updatePost で更新 (コミュニティ/poll は変更しない) ----
     if (editId) {
+      // ★ userId / AI チェックは setPosting(true) の前に行う。
+      //   try 内で return すると finally が通らず posting が true のまま固着するため。
+      const userId = useAuthStore.getState().user?.id;
+      if (!userId) {
+        show('ログインし直してください', 'error');
+        return;
+      }
+      // 編集後の本文も AI チェック (UX ガード。※ fail-open + client のみなので
+      //   セキュリティ境界ではない — 真の防御は通報+事後モデレーション)。
+      const check = await checkContent({ content: s.content, tags: s.tags });
+      if (!check.ok) {
+        hap.error();
+        show(check.reason ?? 'コンテンツポリシーに反する可能性があります', 'error');
+        return;
+      }
       setPosting(true);
       try {
-        const userId = useAuthStore.getState().user?.id;
-        if (!userId) {
-          show('ログインし直してください', 'error');
-          return;
-        }
-        // 編集後の本文も AI チェック (UX ガード。※ fail-open + client のみなので
-        //   セキュリティ境界ではない — 真の防御は通報+事後モデレーション)。
-        const check = await checkContent({ content: s.content, tags: s.tags });
-        if (!check.ok) {
-          hap.error();
-          show(check.reason ?? 'コンテンツポリシーに反する可能性があります', 'error');
-          return;
-        }
         setPostPhase('uploading');
         // 既存の https 画像は温存、新規ローカル URI のみ upload。
         const finalImageUrls = await Promise.all(
@@ -750,22 +767,24 @@ export default function CreatePost() {
       show('投稿するコミュニティを選んでください。', 'warn');
       return;
     }
+    // ★ userId / レート制限チェックは setPosting(true) の前に行う。
+    //   try 内で return すると finally が通らず posting / postPhase が固着するため。
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) {
+      show('ログインし直してください', 'error');
+      return;
+    }
+    // レート制限は upload 前に先読み (createPost の checkRate は increment するので
+    //   ここは peekRate=非increment で判定。超過なら upload せず即 return → 孤児メディア防止)。
+    const rl = peekRate('post');
+    if (!rl.ok) {
+      hap.error();
+      show(rateLimitMessage('post', rl.retryAfterMs), 'error');
+      return;
+    }
     setPosting(true);
     let navigated = false; // ★ try/catch 両方から参照するため try の外で宣言 (楽観遷移の二重実行/ロールバック判定)
     try {
-      const userId = useAuthStore.getState().user?.id;
-      if (!userId) {
-        show('ログインし直してください', 'error');
-        return;
-      }
-      // ★ レート制限は upload 前に先読み (createPost の checkRate は increment するので
-      //   ここは peekRate=非increment で判定。超過なら upload せず即 return → 孤児メディア防止)。
-      const rl = peekRate('post');
-      if (!rl.ok) {
-        hap.error();
-        show(rateLimitMessage('post', rl.retryAfterMs), 'error');
-        return;
-      }
       let uploadedImageUrls: string[] = [];
       let uploadedVideoUrls: string[] = [];
       try {
@@ -778,7 +797,9 @@ export default function CreatePost() {
             ? `${check.reason}。内容を確認して修正してください。`
             : '本文に不適切な表現が含まれている可能性があります。内容を確認してください。';
           show(userMsg, 'error');
-          return;
+          // throw して外側の catch/finally を必ず通す (return だと finally がスキップされ
+          //   posting が true のまま固着する)。外側 catch では show 済みなので再表示しない。
+          throw new Error('__content_policy_abort__');
         }
         setPostPhase('uploading');
 
@@ -821,8 +842,18 @@ export default function CreatePost() {
             : Promise.resolve<string[]>([]),
         ]);
       } catch (e) {
-        show(e instanceof Error ? e.message : String(e), 'error');
-        return;
+        // ★ content_policy_abort はすでに toast 表示済み — 再表示しない。
+        //   それ以外はユーザー向けエラーメッセージに変換して表示する。
+        if (!(e instanceof Error && e.message === '__content_policy_abort__')) {
+          const msg = e instanceof Error ? e.message : String(e);
+          let uploadErrMsg = '画像・動画のアップロードに失敗しました。再度お試しください。';
+          if (msg.includes('Network') || msg.includes('Failed to fetch') || msg.includes('Load failed')) {
+            uploadErrMsg = '通信エラー。電波を確認してください。';
+          }
+          show(uploadErrMsg, 'error');
+        }
+        // throw して外側の finally (setPosting/setPostPhase リセット) を必ず通す。
+        throw e;
       }
 
       const validOptions = s.pollOptions.filter((o) => o.trim());
@@ -891,15 +922,21 @@ export default function CreatePost() {
       // 非楽観 (offline / poll あり) はここで初めて実行 = 従来どおり全 await 後に遷移。
       finishPostSuccess();
     } catch (e: unknown) {
-      hap.error();
-      const msg = e instanceof Error ? e.message : String(e);
-      let userMsg = '投稿に失敗しました。再度お試しください。';
-      if (msg.includes('row-level security') || msg.includes('RLS')) userMsg = '権限エラー。ログインし直してください。';
-      else if (msg.includes('Not authenticated') || msg.includes('未ログイン')) userMsg = 'ログインし直してください。';
-      else if (msg.includes('Network') || msg.includes('Failed to fetch')) userMsg = '通信エラー。電波を確認してください。';
-      else if (msg.includes('速すぎ') || msg.includes('時間を置いて') || msg.includes('ペースが')) userMsg = msg;
-      else if (msg.includes('コミュニティには投稿できません')) userMsg = msg; // attach 失敗の文言を尊重
-      show(userMsg, 'error');
+      // content_policy_abort / upload error はすでに toast 表示済み — 再表示しない。
+      const isAlreadyShown =
+        e instanceof Error &&
+        (e.message === '__content_policy_abort__' || e.message.startsWith('__upload_abort__'));
+      if (!isAlreadyShown) {
+        hap.error();
+        const msg = e instanceof Error ? e.message : String(e);
+        let userMsg = '投稿に失敗しました。再度お試しください。';
+        if (msg.includes('row-level security') || msg.includes('RLS')) userMsg = '権限エラー。ログインし直してください。';
+        else if (msg.includes('Not authenticated') || msg.includes('未ログイン')) userMsg = 'ログインし直してください。';
+        else if (msg.includes('Network') || msg.includes('Failed to fetch')) userMsg = '通信エラー。電波を確認してください。';
+        else if (msg.includes('速すぎ') || msg.includes('時間を置いて') || msg.includes('ペースが')) userMsg = msg;
+        else if (msg.includes('コミュニティには投稿できません')) userMsg = msg; // attach 失敗の文言を尊重
+        show(userMsg, 'error');
+      }
       // ★ v2 ロールバック: 楽観遷移済み(navigated)で attach/poll が throw した場合。
       //   補償 delete は createPost 内部(posts.ts)で実施済 → ここで delete しない(二重delete回避)。
       //   遷移はやり直さず feed を invalidate して「消えた post が残って見える」を最終整合で解消。
@@ -959,15 +996,18 @@ export default function CreatePost() {
         <View style={{ flex: 1 }} />
 
         {/* 投稿 pill (1画面で完結)。disabled にはせず「押せない理由」を toast で示す
-            (disabled だと onPress が発火せず "押しても無反応" になるため)。見た目は無効化。 */}
+            (disabled だと onPress が発火せず "押しても無反応" になるため)。見た目は無効化。
+            両方欠けている場合は 1 回の toast に集約してユーザーの往復タップを防ぐ。 */}
         <PressableScale
           onPress={canPost ? handlePost : () => {
             const s = usePostDraftStore.getState();
-            if (s.selectedCommunityIds.length === 0) {
+            const noContent = s.content.trim().length === 0 && s.images.length === 0 && !s.video && !editHasVideo;
+            const noCommunity = s.selectedCommunityIds.length === 0 && !editId;
+            if (noCommunity && noContent) {
+              show('コミュニティを選んで、本文・画像・動画のいずれかを入力してください。', 'warn');
+            } else if (noCommunity) {
               show('投稿するコミュニティを選んでください。', 'warn');
-            } else if (
-              s.content.trim().length === 0 && s.images.length === 0 && !s.video && !editHasVideo
-            ) {
+            } else if (noContent) {
               show('本文・画像・動画のいずれかを入力してください。', 'warn');
             }
           }}
