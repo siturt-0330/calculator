@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react-native';
-import { View, Text, Platform, useWindowDimensions, Image as RNImage, StyleSheet, Pressable, type TextStyle, type ViewStyle } from 'react-native';
+import { View, Text, Platform, useWindowDimensions, Image as RNImage, StyleSheet, Pressable, type TextStyle } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -31,6 +31,7 @@ import { hap } from '../../design/haptics';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { ProgressiveImage } from '../ui/ProgressiveImage';
 import { FeedMediaGrid } from './FeedMediaGrid';
+import { mediaItemAspect } from './feedMediaLayout';
 import { VideoPlayer } from '../ui/VideoPlayer';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { extractFirstUrl, stripPreviewUrl } from '../../lib/utils/extractUrl';
@@ -382,22 +383,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 //   - base 側 (StyleSheet ID) は安定なので reconciliation コストは差分分のみ
 // ────────────────────────────────────────────────────────────────────
 
-// 投稿画像の表示アスペクト比を Instagram と同じ 4:5〜1.91:1 にクランプする。
-// aspectRatio = width/height (小さいほど縦長)。
-//  - 下限 0.8 (4:5): 極端な縦長がフィードを画面いっぱいに占有するのを防ぐ。
-//  - 上限 1.91 (≈1.91:1): 超横長パノラマが「細い帯」になり見にくくなるのを防ぐ。
-// クランプ外は ProgressiveImage の contentFit='cover' でセンタークロップ表示し、
-// 画像全体はタップ→ライトボックスで確認できる (X/IG/Reddit 共通の方式)。
-const MEDIA_MAX_ASPECT = 1.91; // ≈1.91:1 (最も横長の上限)
-function mediaItemAspect(aspect: number, portraitMaxH?: number): ViewStyle {
-  if (aspect < 1 && portraitMaxH && portraitMaxH > 0) {
-    // 縦長: 高さを portraitMaxH で固定し 幅=高さ×(真の比) の中央寄せ「細い box」。
-    // box=画像比なので左右 letterbox 無しで写真全体が見える。下限 0.5 (1:2) で細すぎ防止。
-    return { height: portraitMaxH, aspectRatio: Math.max(0.5, aspect), alignSelf: 'center', maxWidth: '100%' };
-  }
-  // 横長 / 正方: 全幅・比で高さ決定 (box=画像比で letterbox 無し)。超横長のみ 1.91 上限。
-  return { width: '100%', aspectRatio: Math.min(MEDIA_MAX_ASPECT, Math.max(1, aspect)) };
-}
+// 単一画像の表示 box スタイルは components/feed/feedMediaLayout.ts に集約 (詳細/マイページと共有)。
 
 function reactionPillColors(C: ColorPalette, mine: boolean): { backgroundColor: string; borderColor: string } {
   return {
