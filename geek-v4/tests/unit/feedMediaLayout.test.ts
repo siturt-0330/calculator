@@ -1,10 +1,9 @@
 // 単一画像 box レイアウトの回帰テスト。
-// 不具合(謎の余白/灰色帯/異常に細い/高さ0潰れ)が二度と出ないよう、純関数の不変条件を固定する。
+// 不具合(縦に大きすぎ/謎の余白/灰色帯/真ん中だけ/高さ0潰れ)が二度と出ないよう不変条件を固定。
 import {
   mediaItemAspect,
   mediaContainerWidth,
   mediaIsCropped,
-  MEDIA_MIN_ASPECT,
 } from '../../components/feed/feedMediaLayout';
 
 describe('mediaContainerWidth', () => {
@@ -16,53 +15,54 @@ describe('mediaContainerWidth', () => {
 });
 
 describe('mediaIsCropped', () => {
-  it('9:16 より縦長だけ crop 対象', () => {
-    expect(mediaIsCropped(0.8)).toBe(false); // 4:5
-    expect(mediaIsCropped(0.75)).toBe(false); // 3:4
-    expect(mediaIsCropped(MEDIA_MIN_ASPECT)).toBe(false); // 9:16 ちょうどは全体表示
-    expect(mediaIsCropped(0.4)).toBe(true); // 縦コラージュ等 = crop
-    expect(mediaIsCropped(1.5)).toBe(false); // 横長
+  const CW = 358;
+  const MAXH = 320;
+  it('全幅の自然高さ(幅/比)が maxH を超える縦長だけ crop', () => {
+    expect(mediaIsCropped(0.5, CW, MAXH)).toBe(true); // 716 > 320
+    expect(mediaIsCropped(0.8, CW, MAXH)).toBe(true); // 447 > 320 (4:5 も頭打ち)
+    expect(mediaIsCropped(1.0, CW, MAXH)).toBe(true); // 358 > 320
+    expect(mediaIsCropped(1.71, CW, MAXH)).toBe(false); // 209 < 320 = 全体表示
+  });
+  it('maxH 無指定なら crop しない', () => {
+    expect(mediaIsCropped(0.4, CW)).toBe(false);
   });
 });
 
-describe('mediaItemAspect (全幅・大きく)', () => {
+describe('mediaItemAspect (全幅 + 高さ上限)', () => {
   const CW = 358;
-  const aspects = [0.4, 0.5625, 0.667, 0.75, 0.8, 1.0, 1.333, 1.71, 2.67];
+  const MAXH = 320;
 
-  for (const ar of aspects) {
-    it(`aspect=${ar}: 幅いっぱい(余白なし) / box比=画像比(crop時は9:16) / 0潰れ無し`, () => {
-      const s = mediaItemAspect(ar, CW) as { width: number; height: number };
+  for (const ar of [0.4, 0.5625, 0.667, 0.75, 0.8, 1.0, 1.333, 1.71, 2.67]) {
+    it(`aspect=${ar}: 幅いっぱい(余白なし) / 高さ<=maxH / 0潰れ無し`, () => {
+      const s = mediaItemAspect(ar, CW, MAXH) as { width: number; height: number };
       expect(s.width).toBe(CW); // 常に幅いっぱい = 謎の余白なし
       expect(s.height).toBeGreaterThanOrEqual(1); // 0潰れ無し
-      // crop されない (ar>=9:16) なら box比=画像比、crop されるなら 9:16 で頭打ち
-      const effAr = Math.max(ar, MEDIA_MIN_ASPECT);
-      expect(Math.abs(s.height - s.width / effAr)).toBeLessThanOrEqual(0.6);
+      expect(s.height).toBeLessThanOrEqual(MAXH); // 縦に大きすぎない (頭打ち)
     });
   }
 
-  it('普通の縦長(4:5)は全幅で全体表示 (height = 幅/比)', () => {
-    const s = mediaItemAspect(0.8, 358) as { width: number; height: number };
+  it('短い画像(横長)は自然高さ = 写真全体 (crop 無し)', () => {
+    const s = mediaItemAspect(1.71, 358, 320) as { width: number; height: number };
     expect(s.width).toBe(358);
-    expect(s.height).toBe(Math.round(358 / 0.8)); // 448
+    expect(s.height).toBe(Math.round(358 / 1.71)); // 209
   });
 
-  it('超縦長(0.4)は 9:16 で頭打ち (それ以上は縦に伸びない)', () => {
-    const s = mediaItemAspect(0.4, 358) as { width: number; height: number };
+  it('縦長は maxH で頭打ち (cover+上端で見せる)', () => {
+    const s = mediaItemAspect(0.5, 358, 320) as { width: number; height: number };
     expect(s.width).toBe(358);
-    expect(s.height).toBe(Math.round(358 / MEDIA_MIN_ASPECT)); // 636
+    expect(s.height).toBe(320);
   });
 
-  it('横長は全幅で自然に低くなる', () => {
-    const s = mediaItemAspect(2.0, 358) as { width: number; height: number };
-    expect(s.width).toBe(358);
-    expect(s.height).toBe(179); // 358 / 2.0
+  it('maxH 無指定は自然高さ (頭打ちなし)', () => {
+    const s = mediaItemAspect(0.5, 358) as { width: number; height: number };
+    expect(s.height).toBe(Math.round(358 / 0.5)); // 716
   });
 
-  it('不正な aspect は 1 (正方) 扱い', () => {
+  it('不正な aspect は 1 (正方) 扱い → maxH で頭打ち', () => {
     for (const bad of [0, -1, NaN, Infinity]) {
-      const s = mediaItemAspect(bad as number, 358) as { width: number; height: number };
+      const s = mediaItemAspect(bad as number, 358, 320) as { width: number; height: number };
       expect(s.width).toBe(358);
-      expect(s.height).toBe(358);
+      expect(s.height).toBe(320); // 正方 358 > 320 → 頭打ち
     }
   });
 

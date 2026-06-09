@@ -269,9 +269,10 @@ export default function PostDetailScreen() {
   // 無ければ本文中の最初の URL を拾って OG カード化する (フィードカードと同方針)。
   const useOgPreview = useFeatureFlag('og_preview');
 
-  // 単一画像はカード幅いっぱいで大きく表示 (フィードと同方針)。winW から内幅を算出。
-  const { width: winW } = useWindowDimensions();
+  // 単一画像はカード幅いっぱい + 高さ上限 (詳細は1投稿フォーカスなので画面の ~70% まで許容)。
+  const { width: winW, height: winH } = useWindowDimensions();
   const mediaW = mediaContainerWidth(winW);
+  const mediaMaxH = Math.round(winH * 0.7);
   const previewUrl = useMemo(
     () => post?.source_url || extractFirstUrl(post?.content),
     [post?.source_url, post?.content],
@@ -768,7 +769,7 @@ export default function PostDetailScreen() {
                         key={url}
                         style={[
                           { borderRadius: R.md, overflow: 'hidden', backgroundColor: C.bg3 },
-                          mediaItemAspect(aspect, mediaW),
+                          mediaItemAspect(aspect, mediaW, mediaMaxH),
                         ]}
                       >
                         <MediaWithCWGuard cwCategory={post.cw_category} blurhash={blurhash}>
@@ -785,7 +786,7 @@ export default function PostDetailScreen() {
                               height="100%"
                               radius={R.md}
                               contentFit="cover"
-                              contentPosition={mediaIsCropped(aspect) ? 'top' : undefined}
+                              contentPosition={mediaIsCropped(aspect, mediaW, mediaMaxH) ? 'top' : undefined}
                               thumbWidth={720}
                             />
                           </Pressable>

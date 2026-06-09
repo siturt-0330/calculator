@@ -890,9 +890,12 @@ function AnonPostCardInner({
   const useOgPreview = useFeatureFlag('og_preview');
   const useQuickReaction = useFeatureFlag('quick_reaction');
 
-  // 単一画像はカード幅いっぱいで大きく表示する (X/Threads 流)。winW から card 内幅を算出。
-  const { width: winW } = useWindowDimensions();
+  // 単一画像はカード幅いっぱい + 高さ上限でコンパクトに (X/Threads 流: 1画面に複数投稿が見える)。
+  const { width: winW, height: winH } = useWindowDimensions();
   const mediaW = mediaContainerWidth(winW);
+  // 高さ上限 = 画面高の ~36%。縦長でも頭打ちして「最低2投稿/画面」を満たす
+  // (縦に大きすぎて次の投稿が見えない、を防ぐ)。横長など短い画像は自然高さで全体表示。
+  const mediaMaxH = Math.round(winH * 0.36);
 
   // OG カード対象 URL: 明示的な source_url を優先し、無ければ本文中の最初の URL を拾う。
   const previewUrl = useMemo(
@@ -1423,7 +1426,7 @@ function AnonPostCardInner({
                 return (
                   <View
                     key={url}
-                    style={[STYLES.mediaItemBase, mediaItemAspect(aspect, mediaW)]}
+                    style={[STYLES.mediaItemBase, mediaItemAspect(aspect, mediaW, mediaMaxH)]}
                   >
                     <MediaWithCWGuard cwCategory={cwCategory} blurhash={blurhash}>
                       {/* single-tap でライトボックス。DoubleTapHeart(numberOfTaps 2) は通過。 */}
@@ -1439,10 +1442,10 @@ function AnonPostCardInner({
                           width="100%"
                           height="100%"
                           radius={16}
-                          // ★ 幅いっぱい表示。box比=画像比なので cover でもクロップ無し=写真全体。
-                          //   超縦長(<9:16)だけ box を 9:16 で頭打ち→cover(上端)で大きく見せる。タップで全体。
+                          // ★ 幅いっぱい + 高さ maxH で頭打ち。短い画像は box=画像比で全体表示、
+                          //   縦長は cover + 上端 で「コンパクト&真ん中だけにならない」。タップで全体。
                           contentFit="cover"
-                          contentPosition={mediaIsCropped(aspect) ? 'top' : undefined}
+                          contentPosition={mediaIsCropped(aspect, mediaW, mediaMaxH) ? 'top' : undefined}
                           lazy
                           thumbWidth={480}
                           priority="high"
@@ -1457,7 +1460,7 @@ function AnonPostCardInner({
             {videoUrls.map((vurl, i) => (
               <View
                 key={`v-${vurl}`}
-                style={[STYLES.mediaItemBase, mediaItemAspect(16 / 9, mediaW)]}
+                style={[STYLES.mediaItemBase, mediaItemAspect(16 / 9, mediaW, mediaMaxH)]}
               >
                 <MediaWithCWGuard cwCategory={cwCategory}>
                   <VideoPlayer uri={vurl} poster={videoPosters[i]} />
