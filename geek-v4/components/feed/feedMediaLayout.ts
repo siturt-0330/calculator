@@ -8,17 +8,23 @@
 
 import type { ViewStyle } from 'react-native';
 
-export const MEDIA_MAX_ASPECT = 1.91; // ≈1.91:1 (最も横長の上限)
-
 /**
  * 単一画像 box のスタイル。aspect = width/height。
- *  - 縦長 (aspect<1): 高さを portraitMaxH で固定し 幅=高さ×真の比 の中央寄せ細box。
- *    box=画像比なので左右レターボックス無しで全体表示。下限 0.5 (1:2) で細すぎ防止。
- *  - 横長/正方: 全幅・比で高さ決定。超横長のみ 1.91 で上限。
+ * ★ box は常に「画像の真のアスペクト」にする → contentFit='contain' が box を隙間なく
+ *   埋める = 左右/上下のレターボックス(灰色帯)が一切出ない。写真は全体表示。
+ *  - 縦長 (aspect<1): 高さを portraitMaxH で固定し 幅=高さ×比 の中央寄せ box (画面占有を抑制)。
+ *  - 横長/正方: 全幅・比で高さ決定 (横長は自然に低くなる)。
+ *  クランプしない理由: box≠画像比 になった瞬間に contain で灰色帯が出るため (今回の不具合)。
+ *  極端比はそのぶん細く/低くなるが「灰色の箱」より自然で、タップで全画面確認できる。
  */
 export function mediaItemAspect(aspect: number, portraitMaxH?: number): ViewStyle {
-  if (aspect < 1 && portraitMaxH && portraitMaxH > 0) {
-    return { height: portraitMaxH, aspectRatio: Math.max(0.5, aspect), alignSelf: 'center', maxWidth: '100%' };
+  const ar = aspect > 0 && Number.isFinite(aspect) ? aspect : 1;
+  if (ar < 1 && portraitMaxH && portraitMaxH > 0) {
+    // 縦長: 幅を「高さ上限×比」で固定し、高さは aspectRatio から算出 (height は明示しない)。
+    // こうすると maxWidth:'100%' が効いて幅が縮んでも height が比に追従して再計算されるため、
+    // box の比は常に画像比と一致 → contentFit='contain' が隙間なく埋まる = 灰色帯ゼロ。
+    // (height を明示固定すると幅クランプ時に比が壊れて灰色帯が出る = 旧不具合の原因)
+    return { width: portraitMaxH * ar, aspectRatio: ar, maxWidth: '100%', alignSelf: 'center' };
   }
-  return { width: '100%', aspectRatio: Math.min(MEDIA_MAX_ASPECT, Math.max(1, aspect)) };
+  return { width: '100%', aspectRatio: ar };
 }
