@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react-native';
-import { View, Text, Platform, useWindowDimensions, Image as RNImage, StyleSheet, Pressable, type TextStyle } from 'react-native';
+import { View, Text, Platform, useWindowDimensions, Image as RNImage, StyleSheet, Pressable, type TextStyle, type ViewStyle } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -291,7 +291,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // メディア — iOS-native: 角 12px (card 14px の内側に少し小さい round で nested 階層感)
   mediaWrap: { gap: 2, marginTop: SP['3'] },
   mediaItemBase: {
-    width: '100%',
+    // width は mediaItemAspect 側で決める (縦長は中央寄せの細box、横長は全幅)
     backgroundColor: C.bg2,
     borderRadius: 16,
     overflow: 'hidden',
@@ -388,20 +388,15 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 //  - 上限 1.91 (≈1.91:1): 超横長パノラマが「細い帯」になり見にくくなるのを防ぐ。
 // クランプ外は ProgressiveImage の contentFit='cover' でセンタークロップ表示し、
 // 画像全体はタップ→ライトボックスで確認できる (X/IG/Reddit 共通の方式)。
-const MEDIA_MIN_ASPECT = 0.8; // 4:5 (最も縦長)
-const MEDIA_MAX_ASPECT = 1.91; // ≈1.91:1 (最も横長)
-function mediaItemAspect(
-  aspect: number,
-  portraitMaxH?: number,
-): { aspectRatio: number; maxHeight?: number } {
-  const aspectRatio = Math.min(MEDIA_MAX_ASPECT, Math.max(MEDIA_MIN_ASPECT, aspect));
-  // 縦長 (aspect < 1) のみ絶対高さでクランプ。aspectRatio は「形」を抑えるだけなので、
-  // これが無いと web の広いカラム(最大720)で全幅×1.25 ≈ 860px と画面を占有する。
-  // クランプ時は overflow:hidden + contentFit='cover' でクロップ表示 (全体はライトボックス)。
+const MEDIA_MAX_ASPECT = 1.91; // ≈1.91:1 (最も横長の上限)
+function mediaItemAspect(aspect: number, portraitMaxH?: number): ViewStyle {
   if (aspect < 1 && portraitMaxH && portraitMaxH > 0) {
-    return { aspectRatio, maxHeight: portraitMaxH };
+    // 縦長: 高さを portraitMaxH で固定し 幅=高さ×(真の比) の中央寄せ「細い box」。
+    // box=画像比なので左右 letterbox 無しで写真全体が見える。下限 0.5 (1:2) で細すぎ防止。
+    return { height: portraitMaxH, aspectRatio: Math.max(0.5, aspect), alignSelf: 'center', maxWidth: '100%' };
   }
-  return { aspectRatio };
+  // 横長 / 正方: 全幅・比で高さ決定 (box=画像比で letterbox 無し)。超横長のみ 1.91 上限。
+  return { width: '100%', aspectRatio: Math.min(MEDIA_MAX_ASPECT, Math.max(1, aspect)) };
 }
 
 function reactionPillColors(C: ColorPalette, mine: boolean): { backgroundColor: string; borderColor: string } {
@@ -910,10 +905,10 @@ function AnonPostCardInner({
   const useQuickReaction = useFeatureFlag('quick_reaction');
 
   // 縦長写真がフィードを占有しないための絶対最大高さ (mediaItemAspect に渡す)。
-  // 「デカすぎる」フィードバックを受けて縮小: web 440px / モバイルは画面高の 50%。
-  // contain 表示なので、この box 内に写真全体が収まる (はみ出しは letterbox)。
+  // 「デカすぎる」フィードバックを受けてさらに縮小 (Threads 体感に寄せる):
+  // web 340px / モバイルは画面高の 42%。contain 表示なので box 内に写真全体が収まる。
   const { height: winH } = useWindowDimensions();
-  const portraitMaxH = Platform.OS === 'web' ? 440 : Math.round(winH * 0.5);
+  const portraitMaxH = Platform.OS === 'web' ? 340 : Math.round(winH * 0.42);
 
   // OG カード対象 URL: 明示的な source_url を優先し、無ければ本文中の最初の URL を拾う。
   const previewUrl = useMemo(
@@ -1432,7 +1427,7 @@ function AnonPostCardInner({
             {mediaUrls.length >= 2 ? (
               <MediaWithCWGuard cwCategory={cwCategory} blurhash={mediaBlurhashes[0]}>
                 <FeedMediaGrid
-                  items={mediaUrls.map((u, i) => ({ uri: u, blurhash: mediaBlurhashes[i] }))}
+                  items={mediaUrls.map((u, i) => ({ uri: u, blurhash: mediaBlurhashes[i], aspect: imgAspects[u] }))}
                   onPress={(idx) => openLightbox(mediaUrls[idx]!)}
                 />
               </MediaWithCWGuard>
@@ -1460,10 +1455,10 @@ function AnonPostCardInner({
                           width="100%"
                           height="100%"
                           radius={16}
-                          // ★ cover: 4:5 にクランプした枠を埋めて X/IG 風のコンパクト表示。
-                          //   縦長 (aspect<0.8) は上下センタークロップ、全体はタップ→ライトボックス。
-                          //   landscape/square (aspect>=0.8) は枠=画像比なのでクロップ無し=全体表示。
-                          contentFit="cover"
+                          // ★ contain: 写真全体を必ず表示する (cover はズームに見えて不評だった)。
+                          //   枠は 4:5〜1.91 にクランプ。範囲内は枠=画像比で letterbox 無し、
+                          //   範囲外 (極端な縦長/横長) のみ bg2 で letterbox。全体はタップ→ライトボックス。
+                          contentFit="contain"
                           lazy
                           thumbWidth={480}
                           priority="high"
