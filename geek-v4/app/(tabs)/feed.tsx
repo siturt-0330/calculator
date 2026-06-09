@@ -405,7 +405,8 @@ export default function FeedScreen() {
   // ID リストの中身が変わらない限り再計算したくないので、id を join したハッシュで
   // 安定化する。これで下流の useQuery/useMemo が ID 集合が同じ render では
   // 再評価されない。
-  const postIdsHash = posts.map((p) => p.id).join('|');
+  // ★ perf: postIdsHash も useMemo 内で計算 — render body で毎回 map+join が走るのを防ぐ
+  const postIdsHash = useMemo(() => posts.map((p) => p.id).join('|'), [posts]);
   const postIds = useMemo(() => posts.map((p) => p.id), [postIdsHash]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- RPC 経路: get_feed_page で周辺データを 1 RTT で取得 ---
@@ -469,37 +470,46 @@ export default function FeedScreen() {
     router.push(`/community/${communityId}` as never);
   }, [router]);
 
-  // Per-post handler cache. Rebuilds when `posts` (or upstream callbacks) change,
-  // but NOT when toggles like myLikes/mySaves/reactions update — so cards whose
-  // observable props didn't change skip re-render thanks to the AnonPostCard memo.
+  // ★ perf: postsRef で「最新の posts 配列」をクロージャ外から読む。
+  //   handlersByPostId の deps を posts → postIds に変えることで、同じ ID セットを
+  //   持つ background refetch (参照は変わるが内容は同じ) で全ハンドラが再生成される
+  //   のを防ぐ。ハンドラ内で tag_names などの最新データが必要な場合は postsRef.current
+  //   から逆引きする。
+  const postsRef = useRef(posts);
+  postsRef.current = posts;
+
+  // Per-post handler cache. Rebuilds when `postIds` (stable ID set) or upstream callbacks
+  // change, but NOT when posts array reference changes due to background refetch with same IDs.
+  // This prevents every AnonPostCard from receiving new handler refs on each background refetch.
   //
   // onConcern は「現在の concerned 状態」を引数に取る — RPC fullPosts を最優先で
   // 参照、無ければ legacy の myConcerns map を見る。両方とも空でも問題なし
   // (toggleConcern は false を受けて INSERT 試行 → unique violation で安全に冪等)。
   const handlersByPostId = useMemo((): Record<string, PostHandlers> => {
     const dict: Record<string, PostHandlers> = {};
-    for (const p of posts) {
-      const id = p.id;
-      const tagNames = p.tag_names ?? [];
+    for (const id of postIds) {
+      // クロージャが postsRef.current を毎回読むので、background refetch 後も
+      // 最新の tag_names を参照できる (stale closure にならない)。
+      const getTagNames = () => postsRef.current.find((p) => p.id === id)?.tag_names ?? [];
       dict[id] = {
         onLike: () => {
-          void logEvent({ kind: 'post_like', tags: tagNames, post_id: id });
+          void logEvent({ kind: 'post_like', tags: getTagNames(), post_id: id });
           toggleLike(id);
         },
         onConcern: () => {
-          void logEvent({ kind: 'post_concern', tags: tagNames, post_id: id });
+          void logEvent({ kind: 'post_concern', tags: getTagNames(), post_id: id });
           // current は useConcern 内部で cache から判定 (smart-queue + race-safe)
           toggleConcern(id);
         },
         onComment: () => {
-          void logEvent({ kind: 'post_view', tags: tagNames, post_id: id, dwell_ms: 0 });
+          void logEvent({ kind: 'post_view', tags: getTagNames(), post_id: id, dwell_ms: 0 });
           router.push(`/post/${id}` as never);
         },
         onSave: () => {
-          void logEvent({ kind: 'post_save', tags: tagNames, post_id: id });
+          void logEvent({ kind: 'post_save', tags: getTagNames(), post_id: id });
           toggleSave(id);
         },
-        onShare: () => share(`Geek の投稿 #${tagNames[0] ?? '雑談'}`, `/post/${id}`),
+        onShare: () => share(`Geek の投稿 #${getTagNames()[0] ?? '雑談'}`, `/post/${id}`),
         onTagPress: (name: string) => {
           void logEvent({ kind: 'tag_click', tags: [name] });
           router.push(`/tag/${encodeURIComponent(name)}` as never);
@@ -511,7 +521,7 @@ export default function FeedScreen() {
       };
     }
     return dict;
-  }, [posts, toggleLike, toggleConcern, toggleSave, toggleReact, share, router, handleAddTag, handleCommunityPress]);
+  }, [postIds, toggleLike, toggleConcern, toggleSave, toggleReact, share, router, handleAddTag, handleCommunityPress]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // -------------------------------------------------------------------
   // posts + ads を 1 つの混在配列にマージ
@@ -598,7 +608,12 @@ export default function FeedScreen() {
         }
       }
 
-      const lastIdx = Math.max(...viewableItems.map((v) => v.index ?? 0));
+      // ★ perf: spread + map を for-of ループに置換 — 中間配列アロケーションを排除
+      let lastIdx = 0;
+      for (const v of viewableItems) {
+        const idx = v.index ?? 0;
+        if (idx > lastIdx) lastIdx = idx;
+      }
       const absV = Math.abs(scrollVelocityRef.current);
       const lookahead =
         absV > PREFETCH_VELOCITY_FLING
@@ -727,13 +742,37 @@ export default function FeedScreen() {
     ],
   );
 
+  // ★ perf: static base style と Reanimated worklet style を useMemo で結合 —
+  //   毎 render で新しい配列リテラルが生成されるのを防ぐ。C.bg はテーマ切替時のみ変化。
+  const animatedViewStyle = useMemo(
+    () => [{ flex: 1, backgroundColor: C.bg }, feedContentStyle],
+    [C.bg, feedContentStyle],
+  );
+
+  // ★ perf: contentContainerStyle はインライン object だと毎 render で新参照が生成される。
+  //   insets.bottom が変わる場合のみ再計算。
+  const listContentStyle = useMemo(
+    () => ({
+      paddingTop: 0,
+      paddingHorizontal: 0,
+      paddingBottom: TABBAR.height + insets.bottom + SP['10'],
+    }),
+    [insets.bottom],
+  );
+
+  // ★ perf: FeedEmptyState の onAction / ReportSheet の onClose を useCallback で安定化
+  //   FeedEmptyState と ReportSheet は React.memo のため、新しい関数参照が渡ると
+  //   memo 比較が false になり不要な再 render が走る。
+  const handleCreatePost = useCallback(() => router.push('/post/create' as never), [router]);
+  const handleCloseReport = useCallback(() => setReportPostId(null), []);
+
   const Bell = Icon.bell;
   const Search = Icon.search;
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <GestureDetector gesture={openGesture}>
-        <Animated.View style={[{ flex: 1, backgroundColor: C.bg }, feedContentStyle]}>
+        <Animated.View style={animatedViewStyle}>
       {/* 上部 hero エリア — bg は flat だと無機質なので、ごく弱い紫 → 透明のグラデを
           被せてブランド色のニュアンスを忍ばせる。コンテンツ自体は読みやすさ重視で
           subtle に留める (opacity も低め)。 */}
@@ -916,7 +955,11 @@ export default function FeedScreen() {
         extraData={fullPosts}
         keyExtractor={(item) => (isAdItem(item) ? item.key : item.id)}
         getItemType={(item) => (isAdItem(item) ? 'ad' : 'post')}
-        estimatedItemSize={520}
+        // ★ perf: estimatedItemSize を実測 P75 に近い値に調整。
+        // 520 は text-only post の下限に近く、メディア付き post では 650-700px になる。
+        // 過小見積もりだと FlashList の overscan バッファが小さくなり fast scroll で blank が出る。
+        // 640 は mixed feed (text+media) の P50/P75 に近い経験値。
+        estimatedItemSize={640}
         ListHeaderComponent={LIST_HEADER_ELEMENT}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.accent} />
@@ -930,20 +973,13 @@ export default function FeedScreen() {
             </View>
           ) : null
         }
-        contentContainerStyle={{
-          // フラット: 投稿は全幅・隙間なし。横余白は投稿側 (paddingHorizontal:16) に
-          // 一元化し、下罫線 (hairline) を中央 720 列の端まで延ばす。先頭の上余白も
-          // 作らない (上境界は直前の hairline が担う)。
-          paddingTop: 0,
-          paddingHorizontal: 0,
-          paddingBottom: TABBAR.height + insets.bottom + SP['10'],
-        }}
+        contentContainerStyle={listContentStyle}
         ListEmptyComponent={
           <FeedEmptyState
             loading={loading}
             showSkeleton={showSkeleton}
             scope={scope}
-            onAction={() => router.push('/post/create' as never)}
+            onAction={handleCreatePost}
           />
         }
       />
@@ -952,7 +988,7 @@ export default function FeedScreen() {
       <ReportSheet
         visible={!!reportPostId}
         postId={reportPostId}
-        onClose={() => setReportPostId(null)}
+        onClose={handleCloseReport}
       />
         </Animated.View>
       </GestureDetector>

@@ -93,8 +93,7 @@ export function VideoPlayer({
 // Web 経路 — <video> + IntersectionObserver
 // ============================================================
 function WebVideo({ uri, poster, style, shouldPlay, autoplay = true, expandable = true, initialMuted = true }: Props) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const videoRef = useRef<any>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const mutedRef = useRef(initialMuted);
   // 同時再生スロットを保持中か / いま画面内で再生したいか(IO 判定の最新値)。
   const hasSlotRef = useRef(false);
@@ -114,11 +113,10 @@ function WebVideo({ uri, poster, style, shouldPlay, autoplay = true, expandable 
   }, []);
 
   // ref は安定化 (毎 render で detach/attach されると再生が一瞬途切れる)
-  const setVideoRef = useCallback((n: unknown) => {
+  const setVideoRef = useCallback((n: HTMLVideoElement | null) => {
     videoRef.current = n;
     if (!n) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const el = n as any;
+    const el = n;
     el.muted = mutedRef.current;
     // iOS Safari のインライン muted 自動再生を確実にするための保険:
     //  - React は <video muted> の muted を「属性」に反映しない既知バグがあり、
@@ -249,16 +247,15 @@ function WebVideo({ uri, poster, style, shouldPlay, autoplay = true, expandable 
 // Native 経路 — expo-av Video + measureInWindow 可視判定
 // ============================================================
 function NativeVideo({ uri, poster, style, shouldPlay, autoplay = true, expandable = true, initialMuted = true }: Props) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const containerRef = useRef<any>(null);
+  const containerRef = useRef<View | null>(null);
   const [muted, setMuted] = useState(initialMuted);
   const [error, setError] = useState<string | null>(null);
 
   // expo-av は native のみ。Web bundle に乗らないよう lazy require。
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let VideoCmp: any = null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let ResizeMode: any = null;
+  // VideoComponent / ResizeMode の型は expo-av から取得するが、
+  // dynamic require のため unknown として受け取り、使用箇所でキャストする。
+  let VideoCmp: typeof import('expo-av').Video | null = null;
+  let ResizeMode: typeof import('expo-av').ResizeMode | null = null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     const av = require('expo-av') as typeof import('expo-av');
@@ -290,7 +287,7 @@ function NativeVideo({ uri, poster, style, shouldPlay, autoplay = true, expandab
         shouldPlay={playing}
         isMuted={muted}
         isLooping
-        resizeMode={ResizeMode?.CONTAIN ?? 'contain'}
+        resizeMode={ResizeMode?.CONTAIN ?? ('contain' as import('expo-av').ResizeMode)}
         style={{ width: '100%', height: '100%' }}
         onError={(e: unknown) => {
           setError(typeof e === 'string' ? e : '動画を読み込めませんでした');
@@ -313,8 +310,7 @@ function NativeVideo({ uri, poster, style, shouldPlay, autoplay = true, expandab
 
 // 親 View を定期計測して「画面内に 50% 以上あるか」を返す自己完結フック (native)
 function useNativeInView(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ref: React.MutableRefObject<any>,
+  ref: React.MutableRefObject<View | null>,
   enabled: boolean,
 ): boolean {
   const [inView, setInView] = useState(false);

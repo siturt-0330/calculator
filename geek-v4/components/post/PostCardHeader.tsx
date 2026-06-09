@@ -43,22 +43,43 @@ const HIT_SLOP_6 = 6;
 const HIT_SLOP_10 = 10;
 
 // ────────────────────────────────────────────────────────────────────
-// Props
+// Props (Interface Segregation Principle 適用)
 // ────────────────────────────────────────────────────────────────────
-export type PostCardHeaderProps = {
+
+/** 投稿本体データ */
+export type PostHeaderPostData = {
   post: Post;
-  viewContext: 'home' | 'community';
+};
+
+/** コミュニティ表示に必要なデータ */
+export type PostHeaderCommunityData = {
   communities: PostCommunityRef[];
   primaryCommunity: PostCommunityRef | undefined;
+  /** 表示コンテキスト: home=コミュニティ主役 / community=投稿者主役 */
+  viewContext: 'home' | 'community';
+};
+
+/** 投稿者アイデンティティ / 権限コンテキスト */
+export type PostHeaderAuthorContext = {
   pseudonymId: string | null;
   isOwnPost: boolean;
   isMod: boolean;
-  // 安定化済みのハンドラ (useCallback で固定化すること)
+};
+
+/** ヘッダー行の安定化済みハンドラ群 */
+export type PostHeaderCallbacks = {
   onPrimaryCommunityPress: () => void;
   goToPseudoProfile: () => void;
   handleMoreMenu: () => void;
   onModActionComplete: () => void;
 };
+
+/** PostCardHeader が受け取るすべての props を合成した型 */
+export type PostCardHeaderProps =
+  PostHeaderPostData &
+  PostHeaderCommunityData &
+  PostHeaderAuthorContext &
+  PostHeaderCallbacks;
 
 // ────────────────────────────────────────────────────────────────────
 // CommunityInlineIndicator — header 内 1 行に統合した community chip
@@ -259,6 +280,12 @@ function PostCardHeaderInner({
     [post.id],
   );
 
+  // "+N" マルチコミュニティバッジのテキストスタイル — C.text3 が変わる時のみ新規
+  const extraCommunitiesTextStyle = useMemo(
+    () => [T.caption, { color: C.text3 }],
+    [C.text3],
+  );
+
   return (
     <View style={STYLES.headerRow}>
       {/* ===== アバター ===== */}
@@ -359,7 +386,7 @@ function PostCardHeaderInner({
             {communities.length > 1 && (
               <>
                 <Text style={STYLES.anonMetaDot}>·</Text>
-                <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
+                <Text style={extraCommunitiesTextStyle} numberOfLines={1}>
                   +{communities.length - 1}
                 </Text>
               </>

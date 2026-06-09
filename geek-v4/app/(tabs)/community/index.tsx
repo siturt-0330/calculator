@@ -66,8 +66,7 @@ export default function CommunityScreen() {
   // /community/<id>/admin 等の sub-route から /community に戻る。
   // FlashList は generics が tight なので useScrollToTop に渡す ref は
   // 型キャストで「scrollToOffset を持つもの」相当に緩める。
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const listRef = useRef<FlashList<any>>(null);
+  const listRef = useRef<FlashList<CommunityFeedItem>>(null);
   useScrollToTop(listRef as unknown as React.RefObject<{ scrollToOffset: (p: { offset: number; animated?: boolean }) => void }>);
 
   // YouTube 登録チャンネル風 UX — avatar 行で community を tap すると

@@ -31,13 +31,20 @@ export async function withApiTimeout<T>(
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<T> {
   // PostgrestBuilder は thenable なので Promise.race に直接渡せる。
-  return Promise.race<T>([
-    Promise.resolve(promise),
-    new Promise<T>((_, reject) => {
-      setTimeout(
-        () => reject(new Error(`[${label}] timeout after ${timeoutMs}ms`)),
-        timeoutMs,
-      );
-    }),
-  ]);
+  // setTimeout は Promise.race が解決した後も生き残るため、
+  // finally で必ず clearTimeout して Jest open-handle リークを防ぐ。
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error(`[${label}] timeout after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+  });
+
+  try {
+    return await Promise.race<T>([Promise.resolve(promise), timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }

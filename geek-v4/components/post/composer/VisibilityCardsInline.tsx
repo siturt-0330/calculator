@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { CheckCircle2, Globe, Lock, Megaphone, Users } from 'lucide-react-native';
+import type { LucideIcon } from 'lucide-react-native';
 
 import { SP, R } from '../../../design/tokens';
 import { T } from '../../../design/typography';
@@ -21,8 +22,7 @@ export interface VisibilityCardsInlineProps {
 
 type OptionDef = {
   key: PostVisibility;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  Icon: React.ComponentType<any>;
+  Icon: LucideIcon;
   title: string;
   desc: string;
 };

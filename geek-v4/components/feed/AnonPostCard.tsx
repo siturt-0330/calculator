@@ -8,10 +8,10 @@ import Animated, {
   Easing,
   interpolateColor,
 } from 'react-native-reanimated';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { safeOpenUrl } from '../../lib/openUrl';
-import type { Post } from '../../types/models';
+import type { Post, CWCategory } from '../../types/models';
 import { useLanguageStore } from '../../stores/languageStore';
 import { useAuthStore } from '../../stores/authStore';
 import { useBlockStore } from '../../stores/blockStore';
@@ -39,7 +39,7 @@ import { DoubleTapHeart } from '../ui/DoubleTapHeart';
 // TagPill / AddTagInline import は使わなくなったので削除。
 import { MarkdownText } from '../ui/MarkdownText';
 import { QuotePostMini } from '../post/QuotePostMini';
-import { fetchQuotedPost, type QuotedPostPreview } from '../../lib/api/quotePosts';
+import { fetchQuotedPost } from '../../lib/api/quotePosts';
 import { LinkPreviewCard } from './LinkPreviewCard';
 import { PollCard } from './PollCard';
 import { useFeatureFlag } from '../../hooks/useFeatureFlag';
@@ -256,29 +256,122 @@ function reactionPillCount(C: ColorPalette, mine: boolean): { fontSize: number; 
 }
 
 // ============================================================
+// SingleMediaItem — 単一画像の Pressable ラッパ (memo 化で onPress の anonymous arrow を排除)
+// ------------------------------------------------------------
+// AnonPostCard の single-image `.map()` 内で `onPress={() => openLightbox(url)}` を
+// 毎 render 生成すると、Pressable の reconciliation コストが増える。
+// url + onOpenLightbox を props で受け取り内部で bind することで安定化する。
+// ============================================================
+type SingleMediaItemProps = {
+  url: string;
+  blurhash?: string;
+  aspect: number;
+  mediaW: number;
+  mediaMaxH: number;
+  cwCategory: CWCategory;
+  mediaItemBaseStyle: object;
+  onOpenLightbox: (url: string) => void;
+};
+function SingleMediaItemInner({
+  url,
+  blurhash,
+  aspect,
+  mediaW,
+  mediaMaxH,
+  cwCategory,
+  mediaItemBaseStyle,
+  onOpenLightbox,
+}: SingleMediaItemProps) {
+  const handlePress = useCallback(() => onOpenLightbox(url), [onOpenLightbox, url]);
+  const pressableStyle = useMemo(() => ({ flex: 1 }), []);
+  return (
+    <View style={[mediaItemBaseStyle, mediaItemAspect(aspect, mediaW, mediaMaxH)]}>
+      <MediaWithCWGuard cwCategory={cwCategory} blurhash={blurhash}>
+        <Pressable
+          onPress={handlePress}
+          style={pressableStyle}
+          accessibilityRole="imagebutton"
+          accessibilityLabel="画像を拡大表示"
+        >
+          <ProgressiveImage
+            uri={url}
+            blurhash={blurhash}
+            width="100%"
+            height="100%"
+            radius={16}
+            contentFit="contain"
+            lazy
+            thumbWidth={480}
+            priority="high"
+          />
+        </Pressable>
+      </MediaWithCWGuard>
+    </View>
+  );
+}
+const SingleMediaItem = memo(SingleMediaItemInner);
+
+// ============================================================
+// ReactionPill — リアクション行の 1 pill を memo 化したコンポーネント
+// ------------------------------------------------------------
+// AnonPostCard の reactions.map() 内で reactionPillColors/Label/Count を
+// 毎 render 呼ぶと、各 pill が毎 render 新しい style オブジェクトを受け取り
+// reconciliation コストが増える。pill を memo 化して onPress も useCallback で
+// 安定化することで r.count/r.mine が変わった時のみ再 render させる。
+// ============================================================
+type ReactionPillProps = {
+  meme: string;
+  count: number;
+  mine: boolean;
+  onReact: (meme: string) => void;
+};
+function ReactionPillInner({ meme, count, mine, onReact }: ReactionPillProps) {
+  const C = useColors();
+  const STYLES = useMemo(() => makeStyles(C), [C]);
+  const pillColorStyle = useMemo(() => reactionPillColors(C, mine), [C, mine]);
+  const labelStyle = useMemo(() => reactionPillLabel(C, mine), [C, mine]);
+  const countStyle = useMemo(() => reactionPillCount(C, mine), [C, mine]);
+  const handlePress = useCallback(() => onReact(meme), [onReact, meme]);
+  return (
+    <PressableScale
+      onPress={handlePress}
+      haptic="tap"
+      hitSlop={10}
+      accessibilityLabel={`${meme} ${count} 件 ${mine ? '(押下済み)' : ''}`}
+      style={[STYLES.reactionPillBase, pillColorStyle]}
+    >
+      <Text style={labelStyle}>{meme}</Text>
+      <Text style={countStyle}>{count}</Text>
+    </PressableScale>
+  );
+}
+const ReactionPill = memo(ReactionPillInner);
+
+// ============================================================
 // QuotePostMiniLoader — quote_post_id から引用先を fetch して表示
 // ------------------------------------------------------------
-// AnonPostCard 内専用の小ローダ。postId を受け取り、useEffect で
+// AnonPostCard 内専用の小ローダ。postId を受け取り、useQuery で
 // fetchQuotedPost を呼び出し、結果を QuotePostMini に渡す。
-// - ロード中は何も表示しない (スペース変動を防ぐ)
+// ★ perf: TanStack Query を使うことで同 postId への並列 fetch が自動 dedup され、
+//   FlashList の cell recycle でも staleTime:60s の cache から即時表示できる。
+//   旧 useEffect/useState パターンでは同一 postId が複数カードに出現すると N 回
+//   fetch が走り、recycle のたびにも再 fetch していた。
+// - ロード中はスケルトンプレースホルダーを表示してレイアウトシフトを防ぐ
 // - 削除済み/エラー時は null を QuotePostMini に渡してプレースホルダ表示
 // - router.push で詳細画面へ遷移
 // ============================================================
 function QuotePostMiniLoaderInner({ postId, onPress }: { postId: string; onPress: () => void }) {
-  const [quotedPost, setQuotedPost] = useState<QuotedPostPreview | null | undefined>(undefined);
   const C = useColors();
 
-  useEffect(() => {
-    let alive = true;
-    void fetchQuotedPost(postId).then((result) => {
-      if (alive) setQuotedPost(result); // null = deleted, QuotedPostPreview = found
-    });
-    return () => { alive = false; };
-  }, [postId]);
+  const { data: quotedPost, isLoading } = useQuery({
+    queryKey: ['quoted-post', postId],
+    queryFn: () => fetchQuotedPost(postId),
+    staleTime: 60_000,
+    enabled: !!postId,
+  });
 
-  // undefined = ロード中 → スケルトンプレースホルダーを表示してレイアウトシフトを防ぐ
-  // (null を返すと fetch 完了時にコンテンツが pop-in して下方のアクション行がずれる)
-  if (quotedPost === undefined) {
+  // ロード中 → スケルトンプレースホルダーを表示してレイアウトシフトを防ぐ
+  if (isLoading) {
     return (
       <View
         style={{
@@ -292,7 +385,8 @@ function QuotePostMiniLoaderInner({ postId, onPress }: { postId: string; onPress
 
   // QuotePostMini は content?: string / title?: string (undefined) を期待するが
   // QuotedPostPreview.content / title は string | null — null → undefined に正規化する。
-  const mini = quotedPost === null ? null : {
+  // quotedPost が undefined (fetch 前 or エラー) または null (削除済み) の場合は null を渡す。
+  const mini = quotedPost == null ? null : {
     id: quotedPost.id,
     content: quotedPost.content ?? undefined,
     title: quotedPost.title ?? undefined,
@@ -303,34 +397,61 @@ function QuotePostMiniLoaderInner({ postId, onPress }: { postId: string; onPress
 }
 const QuotePostMiniLoader = memo(QuotePostMiniLoaderInner);
 
-type AnonPostCardProps = {
+// ────────────────────────────────────────────────────────────────────
+// AnonPostCardProps の分割定義 (Interface Segregation Principle)
+// ────────────────────────────────────────────────────────────────────
+
+/** 投稿カードの主データ (post 本体 + フィード付帯データ) */
+export type AnonPostCardData = {
   post: Post;
-  liked?: boolean;
-  concerned?: boolean;
-  saved?: boolean;
-  // de-anon Phase2: 「自分の投稿か」を server 供給の boolean で受け取る (author_id 非依存)。
-  isOwn?: boolean;
   reactions?: ReactionAgg[];
   addedTags?: string[];
   poll?: Poll;
   reason?: { text: string; kind: string };
   communities?: PostCommunityRef[];
-  // Reddit スタイル表示の切り替え。
-  //   'home'      (既定): コミュニティ icon + 名前を主役に表示 (ホーム / コミュニティタブ / 検索 / タグページ等)
-  //   'community' : 投稿者本人のアバター + 擬似ハンドル(id)を主役に表示 (コミュニティ詳細ページのみ・de-anon Phase2)
+};
+
+/** 閲覧者の投稿に対するインタラクション状態 */
+export type AnonPostViewerState = {
+  liked?: boolean;
+  concerned?: boolean;
+  saved?: boolean;
+  /** de-anon Phase2: server 供給の「自分の投稿か」フラグ (author_id 非依存) */
+  isOwn?: boolean;
+};
+
+/** AnonPostCard の表示コンテキスト */
+export type AnonPostDisplayContext = {
+  /**
+   * Reddit スタイル表示の切り替え。
+   *   'home'      (既定): コミュニティ icon + 名前を主役に表示
+   *   'community' : 投稿者本人のアバター + 擬似ハンドル(id)を主役に表示
+   */
   viewContext?: 'home' | 'community';
+};
+
+/** AnonPostCard の安定化済みインタラクションハンドラ群 */
+export type AnonPostInteractionCallbacks = {
   onLike: () => void;
   onConcern: () => void;
   onComment: () => void;
   onSave: () => void;
   onShare: () => void;
-  onQuote?: () => void;
-  onTagPress: (name: string) => void;
-  onMore: () => void;
   onReact: (meme: string) => void;
+  onMore: () => void;
+  onTagPress: (name: string) => void;
+  /** 引用投稿ボタン — 未指定時はボタン非表示 */
+  onQuote?: () => void;
   onAddTag?: (tag: string) => Promise<void> | void;
   onCommunityPress?: (id: string) => void;
 };
+
+/** AnonPostCard が受け取るすべての props を合成した型 */
+type AnonPostCardProps =
+  AnonPostCardData &
+  AnonPostViewerState &
+  AnonPostDisplayContext &
+  AnonPostInteractionCallbacks;
 
 function AnonPostCardInner({
   post,
@@ -467,20 +588,21 @@ function AnonPostCardInner({
   const [translating, setTranslating] = useState(false);
   const canTranslate = lang !== 'ja' && post.content;
 
-  const doTranslate = async () => {
+  // ★ perf: useCallback で安定化 — render ごとに async 関数が再定義されるのを防ぐ。
+  //   deps に translating を含めて二重発火を防ぐ (effect 側の !translating ガードと対)。
+  const doTranslate = useCallback(async () => {
     if (!post.content || translating) return;
     setTranslating(true);
     const result = await translateDynamic(post.content, lang);
     setTranslated(result);
     setTranslating(false);
-  };
+  }, [post.content, translating, lang]);
 
   useEffect(() => {
     if (autoTranslate && canTranslate && !translated && !translating) {
       void doTranslate();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoTranslate, canTranslate, translated, translating]);
+  }, [autoTranslate, canTranslate, translated, translating, doTranslate]);
   // リンクカードを出すときは本文から対象 URL/「[リンク]」を隠す (URLはカードに置き換え)
   const displayContent = stripPreviewUrl(
     (autoTranslate && translated) ? translated : post.content,
@@ -810,6 +932,38 @@ function AnonPostCardInner({
   // 呼ばないよう useMemo で安定化 (post が変わる時のみ再計算)。
   const obsidianNote = useMemo(() => postToObsidianNote(post), [post]);
 
+  // リアクション表示行の「もっと見る」ハンドラ — PressableScale (memo済) に渡す anonymous arrow を避ける
+  const openReactionsDetail = useCallback(() => setReactionsDetailOpen(true), []);
+  const closeReactionsDetail = useCallback(() => setReactionsDetailOpen(false), []);
+
+  // 引用プレビューラッパの inline style — post.quote_post_id が変わる時のみ新規オブジェクト
+  // (SP['2'] は定数なのでほぼ常に同 ref だが、JSX inline では毎 render 新規になるため memoize)
+  const quoteMiniWrapStyle = useMemo(
+    () => ({ marginTop: SP['2'], marginBottom: SP['2'] }),
+    // SP は module-level 定数なので deps なし
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  // BBS タイトル行の inline style — post.content 有無で paddingBottom が変わる
+  const bbsTitleWrapStyle = useMemo(
+    () => ({ paddingTop: SP['3'], paddingBottom: post.content ? SP['1'] : SP['3'] }),
+    [post.content],
+  );
+
+  // FeedMediaGrid onPress — mediaUrls が変わる時のみ新 ref。
+  // 複数画像グリッド用。openLightbox は useCallback 済み。
+  const onMediaGridPress = useCallback(
+    (idx: number) => openLightbox(mediaUrls[idx]!),
+    [openLightbox, mediaUrls],
+  );
+
+  // FeedMediaGrid items — imgAspects / mediaUrls / mediaBlurhashes のいずれかが変わった時のみ再計算
+  const mediaGridItems = useMemo(
+    () => mediaUrls.map((u, i) => ({ uri: u, blurhash: mediaBlurhashes[i], aspect: imgAspects[u] })),
+    [mediaUrls, mediaBlurhashes, imgAspects],
+  );
+
   // Twitter/Threads-style full-width row: no outer rounded card, just a
   // hairline divider between posts. Looks more "premium feed" than a
   // floating-card grid on tall screens.
@@ -859,7 +1013,7 @@ function AnonPostCardInner({
           スレ形式 post (旧 BBS thread) は title が main contentで、 content は ''。
           tap で post detail へ遷移 (本文 PressableScale と同じ behavior)。 */}
       {post.title && !isCwHidden ? (
-        <View style={{ paddingTop: SP['3'], paddingBottom: post.content ? SP['1'] : SP['3'] }}>
+        <View style={bbsTitleWrapStyle}>
           <PressableScale onPress={handleOpenDetail} haptic="tap" scaleValue={1}>
             <Text style={bbsTitleStyle} numberOfLines={3}>
               {post.title}
@@ -920,44 +1074,27 @@ function AnonPostCardInner({
             {mediaUrls.length >= 2 ? (
               <MediaWithCWGuard cwCategory={cwCategory} blurhash={mediaBlurhashes[0]}>
                 <FeedMediaGrid
-                  items={mediaUrls.map((u, i) => ({ uri: u, blurhash: mediaBlurhashes[i], aspect: imgAspects[u] }))}
-                  onPress={(idx) => openLightbox(mediaUrls[idx]!)}
+                  items={mediaGridItems}
+                  onPress={onMediaGridPress}
                 />
               </MediaWithCWGuard>
             ) : (
-              mediaUrls.map((url, i) => {
-                // ロード中は 4:3 (1.333) で仮置き → 解決後に真のアスペクト比へ差し替え
-                const aspect = imgAspects[url] ?? 1.333;
-                const blurhash = mediaBlurhashes[i];
-                return (
-                  <View
-                    key={url}
-                    style={[STYLES.mediaItemBase, mediaItemAspect(aspect, mediaW, mediaMaxH)]}
-                  >
-                    <MediaWithCWGuard cwCategory={cwCategory} blurhash={blurhash}>
-                      {/* single-tap でライトボックス。DoubleTapHeart(numberOfTaps 2) は通過。 */}
-                      <Pressable
-                        onPress={() => openLightbox(url)}
-                        style={{ flex: 1 }}
-                        accessibilityRole="imagebutton"
-                        accessibilityLabel="画像を拡大表示"
-                      >
-                        <ProgressiveImage
-                          uri={url}
-                          blurhash={blurhash}
-                          width="100%"
-                          height="100%"
-                          radius={16}
-                          contentFit="contain"
-                          lazy
-                          thumbWidth={480}
-                          priority="high"
-                        />
-                      </Pressable>
-                    </MediaWithCWGuard>
-                  </View>
-                );
-              })
+              /* single-tap でライトボックス。DoubleTapHeart(numberOfTaps 2) は通過。
+                 SingleMediaItem は memo 化済み — url / aspect が変わる時のみ再 render。
+                 ロード中は 4:3 (1.333) で仮置き → 解決後に真のアスペクト比へ差し替え。 */
+              mediaUrls.map((url, i) => (
+                <SingleMediaItem
+                  key={url}
+                  url={url}
+                  blurhash={mediaBlurhashes[i]}
+                  aspect={imgAspects[url] ?? 1.333}
+                  mediaW={mediaW}
+                  mediaMaxH={mediaMaxH}
+                  cwCategory={cwCategory}
+                  mediaItemBaseStyle={STYLES.mediaItemBase}
+                  onOpenLightbox={openLightbox}
+                />
+              ))
             )}
             {/* 動画 (1 件まで前提だが、配列をループして将来複数対応) */}
             {videoUrls.map((vurl, i) => (
@@ -996,7 +1133,7 @@ function AnonPostCardInner({
       {/* 引用投稿プレビュー — quote_post_id がある場合のみ表示
           marginTop/Bottom SP['2']=8px でコンテンツとの間隔を統一 */}
       {!!post.quote_post_id && (
-        <View style={{ marginTop: SP['2'], marginBottom: SP['2'] }}>
+        <View style={quoteMiniWrapStyle}>
           <QuotePostMiniLoader postId={post.quote_post_id} onPress={handleOpenQuoteDetail} />
         </View>
       )}
@@ -1028,25 +1165,17 @@ function AnonPostCardInner({
       {reactionsList.length > 0 && (
         <View style={STYLES.reactionsRow}>
           {reactionsList.slice(0, 5).map((r) => (
-            <PressableScale
+            <ReactionPill
               key={r.meme}
-              onPress={() => onReact(r.meme)}
-              haptic="tap"
-              hitSlop={10}
-              accessibilityLabel={`${r.meme} ${r.count} 件 ${r.mine ? '(押下済み)' : ''}`}
-              style={[STYLES.reactionPillBase, reactionPillColors(C, r.mine)]}
-            >
-              <Text style={reactionPillLabel(C, r.mine)}>
-                {r.meme}
-              </Text>
-              <Text style={reactionPillCount(C, r.mine)}>
-                {r.count}
-              </Text>
-            </PressableScale>
+              meme={r.meme}
+              count={r.count}
+              mine={r.mine}
+              onReact={onReact}
+            />
           ))}
           {reactionsList.length > 5 && (
             <PressableScale
-              onPress={() => setReactionsDetailOpen(true)}
+              onPress={openReactionsDetail}
               haptic="tap"
               hitSlop={10}
               accessibilityLabel="押された全スタンプを見る"
@@ -1061,7 +1190,7 @@ function AnonPostCardInner({
       {/* 「…」から開く: 押された全スタンプの一覧 (閲覧 + タップでトグル) */}
       <ReactionListSheet
         visible={reactionsDetailOpen}
-        onClose={() => setReactionsDetailOpen(false)}
+        onClose={closeReactionsDetail}
         reactions={reactionsList}
         onReact={onReact}
       />

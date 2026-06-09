@@ -137,10 +137,25 @@ export function useFeed() {
   const communitiesByPost = communitiesQ.data ?? {};
 
   // Smart Rank: 全 sort モードで個人化スコアを適用 (mode により primary 軸の重みを切替)
-  // ★ aggregate() を selector の中で呼ぶことで store state が変化するたびに再計算される。
-  //   useMemo(() => aggregate(), [aggregate]) では aggregate が stable ref のため signals が
-  //   mount 後に更新されない (audit 指摘: stale search signals)。
-  const signals = useSearchSignalsStore((s) => s.aggregate());
+  // ★ perf: aggregate() をセレクタ内で呼ぶと毎 render 新しいオブジェクトが生成され、
+  //   Zustand の shallow equality が常に「変化した」と判断して不要な re-render が起きる。
+  //   代わりに signals 配列そのものを購読し、useMemo で集計する。
+  //   signals が変わった時だけ再計算されるので、他の store フィールド変化に反応しない。
+  const rawSignals = useSearchSignalsStore((s) => s.signals);
+  const signals = useMemo(() => {
+    const now = Date.now();
+    const tagFreq: Record<string, number> = {};
+    const recentTagsSet = new Set<string>();
+    for (const s of rawSignals) {
+      const ageH = (now - s.ts) / 3600000;
+      const w = Math.exp(-ageH / 168); // 168h = 7日で 1/e
+      for (const t of s.tags) {
+        tagFreq[t] = (tagFreq[t] ?? 0) + w;
+        if (ageH < 168) recentTagsSet.add(t);
+      }
+    }
+    return { tagFreq, recentTags: [...recentTagsSet].slice(0, 20) };
+  }, [rawSignals]);
   // CTR タグ集計: 全ての過去クエリのタグクリック数を合計
   const queryToTagCount = useSearchClickStore((s) => s.queryToTagCount);
   const ctrBoosts = useMemo(() => {

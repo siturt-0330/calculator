@@ -393,25 +393,51 @@ const makeStyles = (text2: string, text3: string) =>
 /* eslint-enable react-native/no-unused-styles */
 
 // ────────────────────────────────────────────────────────────────────
-// Props
+// Props (Interface Segregation Principle 適用)
 // ────────────────────────────────────────────────────────────────────
-export type PostCardActionsProps = {
+
+/** いいね / 保存の on/off 状態 */
+export type PostReactionState = {
   liked: boolean;
   saved: boolean;
+};
+
+/** 表示用カウントのスナップショット */
+export type PostCountsSnapshot = {
   displayLikesCount: number;
   commentsCount: number;
+};
+
+/** ミームリアクション関連のデータ */
+export type PostMemeReactionData = {
   reactionsList: ReactionAgg[];
   myReactionsForPost: string[];
   hasMyReaction: boolean;
-  onQuote?: () => void;
-  obsidianNote: ObsidianNote | null;
-  // 安定化済みハンドラ
+};
+
+/** アクション行の安定化済みハンドラ群 */
+export type PostActionCallbacks = {
   onLike: () => void;
   onSave: () => void;
   onComment: () => void;
   onShare: () => void;
   onReact: (meme: string) => void;
+  /** 引用投稿ボタン — 未指定時はボタン非表示 */
+  onQuote?: () => void;
 };
+
+/** オプション機能のコンテキスト */
+export type PostActionExtras = {
+  obsidianNote: ObsidianNote | null;
+};
+
+/** PostCardActions が受け取るすべての props を合成した型 */
+export type PostCardActionsProps =
+  PostReactionState &
+  PostCountsSnapshot &
+  PostMemeReactionData &
+  PostActionCallbacks &
+  PostActionExtras;
 
 // ────────────────────────────────────────────────────────────────────
 // PostCardActions
@@ -460,6 +486,12 @@ function PostCardActionsInner({
     [reactionsList],
   );
 
+  // コメントカウントのテキストスタイル配列 — STYLES.commentCount が変わる時のみ新規
+  const commentCountTextStyle = useMemo(
+    () => [T.smallM, STYLES.commentCount],
+    [STYLES.commentCount],
+  );
+
   return (
     <>
       <View style={STYLES.actionsRow}>
@@ -485,7 +517,7 @@ function PostCardActionsInner({
         >
           <CommentIcon size={20} color={C.text2} strokeWidth={2.2} />
           {commentsCount > 0 && (
-            <Text style={[T.smallM, STYLES.commentCount]}>{commentsCount}</Text>
+            <Text style={commentCountTextStyle}>{commentsCount}</Text>
           )}
         </PressableScale>
 
