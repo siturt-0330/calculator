@@ -31,7 +31,7 @@ import { hap } from '../../design/haptics';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { ProgressiveImage } from '../ui/ProgressiveImage';
 import { FeedMediaGrid } from './FeedMediaGrid';
-import { mediaItemAspect, mediaContainerWidth } from './feedMediaLayout';
+import { mediaItemAspect, mediaContainerWidth, mediaIsCropped } from './feedMediaLayout';
 import { VideoPlayer } from '../ui/VideoPlayer';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { extractFirstUrl, stripPreviewUrl } from '../../lib/utils/extractUrl';
@@ -890,12 +890,8 @@ function AnonPostCardInner({
   const useOgPreview = useFeatureFlag('og_preview');
   const useQuickReaction = useFeatureFlag('quick_reaction');
 
-  // 縦長写真がフィードを占有しないための絶対最大高さ (mediaItemAspect に渡す)。
-  // 「デカすぎる」フィードバックを受けてさらに縮小 (Threads 体感に寄せる):
-  // web 340px / モバイルは画面高の 42%。contain 表示なので box 内に写真全体が収まる。
-  const { width: winW, height: winH } = useWindowDimensions();
-  const portraitMaxH = Platform.OS === 'web' ? 340 : Math.round(winH * 0.42);
-  // 単一画像 box の明示ピクセル寸法を計算するためのコンテナ内幅 (card 内幅)。
+  // 単一画像はカード幅いっぱいで大きく表示する (X/Threads 流)。winW から card 内幅を算出。
+  const { width: winW } = useWindowDimensions();
   const mediaW = mediaContainerWidth(winW);
 
   // OG カード対象 URL: 明示的な source_url を優先し、無ければ本文中の最初の URL を拾う。
@@ -1427,7 +1423,7 @@ function AnonPostCardInner({
                 return (
                   <View
                     key={url}
-                    style={[STYLES.mediaItemBase, mediaItemAspect(aspect, { maxH: portraitMaxH, containerW: mediaW })]}
+                    style={[STYLES.mediaItemBase, mediaItemAspect(aspect, mediaW)]}
                   >
                     <MediaWithCWGuard cwCategory={cwCategory} blurhash={blurhash}>
                       {/* single-tap でライトボックス。DoubleTapHeart(numberOfTaps 2) は通過。 */}
@@ -1443,10 +1439,10 @@ function AnonPostCardInner({
                           width="100%"
                           height="100%"
                           radius={16}
-                          // ★ contain: 写真全体を必ず表示する (cover はズームに見えて不評だった)。
-                          //   枠は 4:5〜1.91 にクランプ。範囲内は枠=画像比で letterbox 無し、
-                          //   範囲外 (極端な縦長/横長) のみ bg2 で letterbox。全体はタップ→ライトボックス。
-                          contentFit="contain"
+                          // ★ 幅いっぱい表示。box比=画像比なので cover でもクロップ無し=写真全体。
+                          //   超縦長(<9:16)だけ box を 9:16 で頭打ち→cover(上端)で大きく見せる。タップで全体。
+                          contentFit="cover"
+                          contentPosition={mediaIsCropped(aspect) ? 'top' : undefined}
                           lazy
                           thumbWidth={480}
                           priority="high"
@@ -1461,7 +1457,7 @@ function AnonPostCardInner({
             {videoUrls.map((vurl, i) => (
               <View
                 key={`v-${vurl}`}
-                style={[STYLES.mediaItemBase, mediaItemAspect(16 / 9, { maxH: portraitMaxH, containerW: mediaW })]}
+                style={[STYLES.mediaItemBase, mediaItemAspect(16 / 9, mediaW)]}
               >
                 <MediaWithCWGuard cwCategory={cwCategory}>
                   <VideoPlayer uri={vurl} poster={videoPosters[i]} />

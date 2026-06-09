@@ -1,4 +1,4 @@
-import { Image, type ImageContentFit } from 'expo-image';
+import { Image, type ImageContentFit, type ImageContentPosition } from 'expo-image';
 import { View, StyleProp, ViewStyle, Platform } from 'react-native';
 import { useEffect, useRef, useState } from 'react';
 import Animated, {
@@ -60,6 +60,9 @@ export function ProgressiveImage({
   height,
   radius = R.lg,
   contentFit = 'cover',
+  // cover で頭打ち(crop)されるときに「どこを残すか」。tall 写真は 'top' で上端
+  // (顔/見出しが上に来ることが多い) を残すと中途半端な中央切れを避けられる。
+  contentPosition,
   style,
   lazy = false,
   // ロード時のサムネサイズ (Supabase render endpoint 経由)。
@@ -78,6 +81,7 @@ export function ProgressiveImage({
   height: number | `${number}%` | 'auto';
   radius?: number;
   contentFit?: ImageContentFit;
+  contentPosition?: ImageContentPosition;
   style?: StyleProp<ViewStyle>;
   // Web のみ: viewport に入るまで読み込みを遅延 (IntersectionObserver)
   // モバイルでは無視 (FlatList が virtualization で代替)
@@ -221,6 +225,7 @@ export function ProgressiveImage({
             placeholderContentFit={contentFit}
             style={{ width: '100%', height: '100%' }}
             contentFit={contentFit}
+            contentPosition={contentPosition}
             // expo-image 内蔵 transition は使わない (二重 fade 回避)
             transition={0}
             cachePolicy="memory-disk"
