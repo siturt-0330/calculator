@@ -31,7 +31,7 @@ import { hap } from '../../design/haptics';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { ProgressiveImage } from '../ui/ProgressiveImage';
 import { FeedMediaGrid } from './FeedMediaGrid';
-import { mediaItemAspect } from './feedMediaLayout';
+import { mediaItemAspect, mediaContainerWidth } from './feedMediaLayout';
 import { VideoPlayer } from '../ui/VideoPlayer';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { extractFirstUrl, stripPreviewUrl } from '../../lib/utils/extractUrl';
@@ -292,12 +292,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // メディア — iOS-native: 角 12px (card 14px の内側に少し小さい round で nested 階層感)
   mediaWrap: { gap: 2, marginTop: SP['3'] },
   mediaItemBase: {
-    // width は mediaItemAspect 側で決める (縦長は中央寄せの細box、横長は全幅)
+    // width/height は mediaItemAspect 側で明示ピクセル決定する (縦長=中央寄せの細box / 横長=幅上限)。
+    // ★ 明示数値高さなので「aspectRatio 解決前に高さ0へ潰れる」現象が起きず、旧 minHeight:200
+    //   保険は不要になった (minHeight は横長/パノラマで灰色帯を生む元だったため撤去)。
     backgroundColor: C.bg2,
     borderRadius: 16,
     overflow: 'hidden',
-    // web の recycled FlashList セルで aspectRatio 解決前に高さ 0 へ潰れるのを防ぐ floor
-    minHeight: 200,
   },
 
   // 本文 — Apple News 寄り: fontSize 15 / lineHeight 22 (1.47, iOS 標準 1.4-1.5 域)
@@ -893,8 +893,10 @@ function AnonPostCardInner({
   // 縦長写真がフィードを占有しないための絶対最大高さ (mediaItemAspect に渡す)。
   // 「デカすぎる」フィードバックを受けてさらに縮小 (Threads 体感に寄せる):
   // web 340px / モバイルは画面高の 42%。contain 表示なので box 内に写真全体が収まる。
-  const { height: winH } = useWindowDimensions();
+  const { width: winW, height: winH } = useWindowDimensions();
   const portraitMaxH = Platform.OS === 'web' ? 340 : Math.round(winH * 0.42);
+  // 単一画像 box の明示ピクセル寸法を計算するためのコンテナ内幅 (card 内幅)。
+  const mediaW = mediaContainerWidth(winW);
 
   // OG カード対象 URL: 明示的な source_url を優先し、無ければ本文中の最初の URL を拾う。
   const previewUrl = useMemo(
@@ -1425,7 +1427,7 @@ function AnonPostCardInner({
                 return (
                   <View
                     key={url}
-                    style={[STYLES.mediaItemBase, mediaItemAspect(aspect, portraitMaxH)]}
+                    style={[STYLES.mediaItemBase, mediaItemAspect(aspect, { maxH: portraitMaxH, containerW: mediaW })]}
                   >
                     <MediaWithCWGuard cwCategory={cwCategory} blurhash={blurhash}>
                       {/* single-tap でライトボックス。DoubleTapHeart(numberOfTaps 2) は通過。 */}
@@ -1459,7 +1461,7 @@ function AnonPostCardInner({
             {videoUrls.map((vurl, i) => (
               <View
                 key={`v-${vurl}`}
-                style={[STYLES.mediaItemBase, mediaItemAspect(16 / 9)]}
+                style={[STYLES.mediaItemBase, mediaItemAspect(16 / 9, { maxH: portraitMaxH, containerW: mediaW })]}
               >
                 <MediaWithCWGuard cwCategory={cwCategory}>
                   <VideoPlayer uri={vurl} poster={videoPosters[i]} />

@@ -28,7 +28,7 @@ import { ReactionListSheet } from '../../components/feed/ReactionListSheet';
 import { getCachedAspect } from '../../components/feed/AnonPostCard';
 import { LinkPreviewCard } from '../../components/feed/LinkPreviewCard';
 import { FeedMediaGrid } from '../../components/feed/FeedMediaGrid';
-import { mediaItemAspect } from '../../components/feed/feedMediaLayout';
+import { mediaItemAspect, mediaContainerWidth } from '../../components/feed/feedMediaLayout';
 import { SP, R } from '../../design/tokens';
 import { useColors } from '../../hooks/useColors';
 import { T } from '../../design/typography';
@@ -271,8 +271,10 @@ export default function PostDetailScreen() {
 
   // 縦長写真が詳細画面を占有しないための絶対最大高さ (フィードカードと同方針)。
   // web は固定 600px、モバイルは画面高の 65%。
-  const { height: winH } = useWindowDimensions();
+  const { width: winW, height: winH } = useWindowDimensions();
   const portraitMaxH = Platform.OS === 'web' ? 600 : Math.round(winH * 0.65);
+  // 単一画像 box の明示ピクセル寸法用のコンテナ内幅 (詳細も maxWidth:720 + padding16)。
+  const mediaW = mediaContainerWidth(winW);
   const previewUrl = useMemo(
     () => post?.source_url || extractFirstUrl(post?.content),
     [post?.source_url, post?.content],
@@ -769,7 +771,7 @@ export default function PostDetailScreen() {
                         key={url}
                         style={[
                           { borderRadius: R.md, overflow: 'hidden', backgroundColor: C.bg3 },
-                          mediaItemAspect(aspect, portraitMaxH),
+                          mediaItemAspect(aspect, { maxH: portraitMaxH, containerW: mediaW }),
                         ]}
                       >
                         <MediaWithCWGuard cwCategory={post.cw_category} blurhash={blurhash}>
