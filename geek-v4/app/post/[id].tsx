@@ -27,6 +27,8 @@ import { MemeReactionPicker } from '../../components/feed/MemeReactionPicker';
 import { ReactionListSheet } from '../../components/feed/ReactionListSheet';
 import { getCachedAspect } from '../../components/feed/AnonPostCard';
 import { LinkPreviewCard } from '../../components/feed/LinkPreviewCard';
+import { FeedMediaGrid } from '../../components/feed/FeedMediaGrid';
+import { mediaItemAspect } from '../../components/feed/feedMediaLayout';
 import { SP, R } from '../../design/tokens';
 import { useColors } from '../../hooks/useColors';
 import { T } from '../../design/typography';
@@ -750,46 +752,48 @@ export default function PostDetailScreen() {
                 ============================================================ */}
             {hasMedia && (
               <View style={{ gap: SP['2'] }}>
-                {mediaUrls.map((url, i) => {
-                  const aspect = imgAspects[url] ?? 1.333;
-                  const blurhash = mediaBlurhashes[i];
-                  return (
-                    <View
-                      key={url}
-                      style={{
-                        width: '100%',
-                        // 縦長は 4:5 を上限にクロップ表示 (フィードカードと同方針)。
-                        // 画像全体はタップ→ライトボックスで確認できる。
-                        aspectRatio: Math.max(0.8, aspect),
-                        // 縦長 (aspect < 1) は絶対高さでもクランプ — 画面占有を防ぐ。
-                        maxHeight: aspect < 1 ? portraitMaxH : undefined,
-                        borderRadius: R.md,
-                        overflow: 'hidden',
-                        backgroundColor: C.bg3,
-                      }}
-                    >
-                      <MediaWithCWGuard cwCategory={post.cw_category} blurhash={blurhash}>
-                        <Pressable
-                          onPress={() => setLightboxUri(thumbedUrl(url, 1280))}
-                          style={{ flex: 1 }}
-                          accessibilityRole="imagebutton"
-                          accessibilityLabel="画像を拡大表示"
-                        >
-                          <ProgressiveImage
-                            uri={url}
-                            blurhash={blurhash ?? undefined}
-                            width="100%"
-                            height="100%"
-                            radius={R.md}
-                            // ★ contain: 写真全体を表示 (cover だとクロップ拡大される)
-                            contentFit="contain"
-                            thumbWidth={720}
-                          />
-                        </Pressable>
-                      </MediaWithCWGuard>
-                    </View>
-                  );
-                })}
+                {/* 複数画像 = フィードと同じ横カルーセル / 単一 = 中央寄せの全体表示 box */}
+                {mediaUrls.length >= 2 ? (
+                  <MediaWithCWGuard cwCategory={post.cw_category} blurhash={mediaBlurhashes[0]}>
+                    <FeedMediaGrid
+                      items={mediaUrls.map((u, i) => ({ uri: u, blurhash: mediaBlurhashes[i], aspect: imgAspects[u] }))}
+                      onPress={(idx) => setLightboxUri(thumbedUrl(mediaUrls[idx]!, 1280))}
+                    />
+                  </MediaWithCWGuard>
+                ) : (
+                  mediaUrls.map((url, i) => {
+                    const aspect = imgAspects[url] ?? 1.333;
+                    const blurhash = mediaBlurhashes[i];
+                    return (
+                      <View
+                        key={url}
+                        style={[
+                          { borderRadius: R.md, overflow: 'hidden', backgroundColor: C.bg3 },
+                          mediaItemAspect(aspect, portraitMaxH),
+                        ]}
+                      >
+                        <MediaWithCWGuard cwCategory={post.cw_category} blurhash={blurhash}>
+                          <Pressable
+                            onPress={() => setLightboxUri(thumbedUrl(url, 1280))}
+                            style={{ flex: 1 }}
+                            accessibilityRole="imagebutton"
+                            accessibilityLabel="画像を拡大表示"
+                          >
+                            <ProgressiveImage
+                              uri={url}
+                              blurhash={blurhash ?? undefined}
+                              width="100%"
+                              height="100%"
+                              radius={R.md}
+                              contentFit="contain"
+                              thumbWidth={720}
+                            />
+                          </Pressable>
+                        </MediaWithCWGuard>
+                      </View>
+                    );
+                  })
+                )}
                 {videoUrls.map((vurl, i) => (
                   <View
                     key={`v-${vurl}`}

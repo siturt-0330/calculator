@@ -30,6 +30,8 @@ import { SPRING_BOUNCY, SPRING_SNAPPY, EASE_OUT, PRESS_SCALE } from '../../desig
 import { hap } from '../../design/haptics';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { ProgressiveImage } from '../ui/ProgressiveImage';
+import { FeedMediaGrid } from './FeedMediaGrid';
+import { mediaItemAspect } from './feedMediaLayout';
 import { VideoPlayer } from '../ui/VideoPlayer';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { extractFirstUrl, stripPreviewUrl } from '../../lib/utils/extractUrl';
@@ -290,7 +292,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // メディア — iOS-native: 角 12px (card 14px の内側に少し小さい round で nested 階層感)
   mediaWrap: { gap: 2, marginTop: SP['3'] },
   mediaItemBase: {
-    width: '100%',
+    // width は mediaItemAspect 側で決める (縦長は中央寄せの細box、横長は全幅)
     backgroundColor: C.bg2,
     borderRadius: 16,
     overflow: 'hidden',
@@ -381,25 +383,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 //   - base 側 (StyleSheet ID) は安定なので reconciliation コストは差分分のみ
 // ────────────────────────────────────────────────────────────────────
 
-// 投稿画像の表示アスペクト比の下限 (= 許容する最も縦長の比)。aspectRatio = width/height
-// なので、値が小さいほど縦長。極端に縦長の写真はフィードを画面いっぱいに占有して
-// しまうため、4:5 (0.8) でクランプし、それより縦長は ProgressiveImage の
-// contentFit='cover' でクロップ表示する。画像全体はタップ→ライトボックス
-// (contentFit='contain') で確認できる。横長 (>1) はそのまま全体表示。
-const MEDIA_MIN_ASPECT = 0.8; // 4:5
-function mediaItemAspect(
-  aspect: number,
-  portraitMaxH?: number,
-): { aspectRatio: number; maxHeight?: number } {
-  const aspectRatio = Math.max(MEDIA_MIN_ASPECT, aspect);
-  // 縦長 (aspect < 1) のみ絶対高さでクランプ。aspectRatio は「形」を抑えるだけなので、
-  // これが無いと web の広いカラム(最大720)で全幅×1.25 ≈ 860px と画面を占有する。
-  // クランプ時は overflow:hidden + contentFit='cover' でクロップ表示 (全体はライトボックス)。
-  if (aspect < 1 && portraitMaxH && portraitMaxH > 0) {
-    return { aspectRatio, maxHeight: portraitMaxH };
-  }
-  return { aspectRatio };
-}
+// 単一画像の表示 box スタイルは components/feed/feedMediaLayout.ts に集約 (詳細/マイページと共有)。
 
 function reactionPillColors(C: ColorPalette, mine: boolean): { backgroundColor: string; borderColor: string } {
   return {
@@ -907,10 +891,10 @@ function AnonPostCardInner({
   const useQuickReaction = useFeatureFlag('quick_reaction');
 
   // 縦長写真がフィードを占有しないための絶対最大高さ (mediaItemAspect に渡す)。
-  // 「デカすぎる」フィードバックを受けて縮小: web 440px / モバイルは画面高の 50%。
-  // contain 表示なので、この box 内に写真全体が収まる (はみ出しは letterbox)。
+  // 「デカすぎる」フィードバックを受けてさらに縮小 (Threads 体感に寄せる):
+  // web 340px / モバイルは画面高の 42%。contain 表示なので box 内に写真全体が収まる。
   const { height: winH } = useWindowDimensions();
-  const portraitMaxH = Platform.OS === 'web' ? 440 : Math.round(winH * 0.5);
+  const portraitMaxH = Platform.OS === 'web' ? 340 : Math.round(winH * 0.42);
 
   // OG カード対象 URL: 明示的な source_url を優先し、無ければ本文中の最初の URL を拾う。
   const previewUrl = useMemo(
@@ -1424,51 +1408,53 @@ function AnonPostCardInner({
       {hasMedia && (
         <DoubleTapHeart onDoubleTap={onLike}>
           <View style={STYLES.mediaWrap}>
-            {mediaUrls.map((url, i) => {
-              // ロード中は 4:3 (1.333) で仮置き → 解決後に真のアスペクト比へ差し替え
-              // (1:1 だとレイアウトが大きく跳ねるので 4:3 が無難)
-              const aspect = imgAspects[url] ?? 1.333;
-              const blurhash = mediaBlurhashes[i];
-              return (
-                <View
-                  key={url}
-                  style={[STYLES.mediaItemBase, mediaItemAspect(aspect, portraitMaxH)]}
-                >
-                  <MediaWithCWGuard cwCategory={cwCategory} blurhash={blurhash}>
-                    {/* Pressable で wrap — single-tap で全画面ライトボックスを開く。
-                        DoubleTapHeart は numberOfTaps(2) なので single-tap は
-                        ここを通過する。長押し / scroll は React Native の
-                        Pressable が自前で gesture system と協調するので無問題。 */}
-                    <Pressable
-                      onPress={() => openLightbox(url)}
-                      style={{ flex: 1 }}
-                      accessibilityRole="imagebutton"
-                      accessibilityLabel="画像を拡大表示"
-                    >
-                      <ProgressiveImage
-                        uri={url}
-                        blurhash={blurhash}
-                        width="100%"
-                        height="100%"
-                        radius={16}
-                        // ★ contain: 写真の「全体」を必ず表示する (cover だと縦長/比率
-                        //   未解決時に大きくクロップ拡大され「全体が写らない」事故になる)。
-                        //   余白は box 背景 (C.bg3) のレターボックスで埋まる。
-                        contentFit="contain"
-                        lazy
-                        // フィード 1 列幅 (max 720) の 1x DPR で 480 が綺麗 + 軽い。
-                        // 旧 720 default は retina 換算でも過剰だった (1 枚 ~120KB 多い)。
-                        thumbWidth={480}
-                        // フィード本体画像は「上にスクロールしてある」前提で
-                        // 並行 fetch queue 内で優先される。avatars/community icons 等
-                        // (priority='normal') よりネット slot を先取り。
-                        priority="high"
-                      />
-                    </Pressable>
-                  </MediaWithCWGuard>
-                </View>
-              );
-            })}
+            {/* 複数画像 = X/IG/Reddit 流のグリッド (cover でセンタークロップ)。
+                縦積みは縦長で「コンパクトでない」ため 2〜4 枚をグリッド化。 */}
+            {mediaUrls.length >= 2 ? (
+              <MediaWithCWGuard cwCategory={cwCategory} blurhash={mediaBlurhashes[0]}>
+                <FeedMediaGrid
+                  items={mediaUrls.map((u, i) => ({ uri: u, blurhash: mediaBlurhashes[i], aspect: imgAspects[u] }))}
+                  onPress={(idx) => openLightbox(mediaUrls[idx]!)}
+                />
+              </MediaWithCWGuard>
+            ) : (
+              mediaUrls.map((url, i) => {
+                // ロード中は 4:3 (1.333) で仮置き → 解決後に真のアスペクト比へ差し替え
+                const aspect = imgAspects[url] ?? 1.333;
+                const blurhash = mediaBlurhashes[i];
+                return (
+                  <View
+                    key={url}
+                    style={[STYLES.mediaItemBase, mediaItemAspect(aspect, portraitMaxH)]}
+                  >
+                    <MediaWithCWGuard cwCategory={cwCategory} blurhash={blurhash}>
+                      {/* single-tap でライトボックス。DoubleTapHeart(numberOfTaps 2) は通過。 */}
+                      <Pressable
+                        onPress={() => openLightbox(url)}
+                        style={{ flex: 1 }}
+                        accessibilityRole="imagebutton"
+                        accessibilityLabel="画像を拡大表示"
+                      >
+                        <ProgressiveImage
+                          uri={url}
+                          blurhash={blurhash}
+                          width="100%"
+                          height="100%"
+                          radius={16}
+                          // ★ contain: 写真全体を必ず表示する (cover はズームに見えて不評だった)。
+                          //   枠は 4:5〜1.91 にクランプ。範囲内は枠=画像比で letterbox 無し、
+                          //   範囲外 (極端な縦長/横長) のみ bg2 で letterbox。全体はタップ→ライトボックス。
+                          contentFit="contain"
+                          lazy
+                          thumbWidth={480}
+                          priority="high"
+                        />
+                      </Pressable>
+                    </MediaWithCWGuard>
+                  </View>
+                );
+              })
+            )}
             {/* 動画 (1 件まで前提だが、配列をループして将来複数対応) */}
             {videoUrls.map((vurl, i) => (
               <View

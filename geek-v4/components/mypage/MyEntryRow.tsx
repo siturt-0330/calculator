@@ -1,27 +1,24 @@
 // ============================================================
 // MyEntryRow — マイページの 投稿 / コメント / 保存 カード
 // ------------------------------------------------------------
-// X(Twitter) 風: メディア(画像/動画)は「タップで開く」ではなく
-// 常時インラインで写真のように見せる。1〜4枚は X と同じグリッド配置、
-// 5枚以上は 4枚目に「+N」。画像タップで全画面(onOpenImage→ImageLightbox)、
-// 動画ポスターはタップで投稿詳細へ(そこで再生)。
+// メディア(画像/動画)は常時インライン表示。画像はフィード/詳細と同じ
+// 【横スクロール・カルーセル】(FeedMediaGrid) で「写真全体」を見せ、タップで
+// 全画面 (onOpenImage→ImageLightbox)。動画は VideoPlayer (ミュート自動再生 +
+// タップで全画面)。これで X/IG/Threads 流のコンパクト表示にアプリ全体で統一する。
 //
-// レイアウト(縦組み): [タイトル?] → [本文] → [メディアグリッド] → [メタ]
-//   - 箱は bg2 + 1px divider の極薄カード(影なし・同心角丸)。
-//   - comment は左に accent 引用罫 + 本文 + メディア + 出典行。
+// レイアウト(縦組み): [コミュニティchip?] → [タイトル?] → [本文] → [メディア] → [メタ]
 // ============================================================
 
 import type { ReactNode } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
-import { Heart, MessageCircle, Play } from 'lucide-react-native';
+import { Heart, MessageCircle } from 'lucide-react-native';
 
 import { PressableScale } from '../ui/PressableScale';
 import { Icon } from '../../constants/icons';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
-import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { VideoPlayer } from '../ui/VideoPlayer';
+import { FeedMediaGrid } from '../feed/FeedMediaGrid';
 
 export type MyEntryVariant = 'post' | 'comment' | 'saved';
 
@@ -72,109 +69,10 @@ export function MetaNum({ Icon: I, value }: { Icon: typeof Heart; value: number 
   );
 }
 
-// 動画/+N オーバーレイの静的スタイル (毎 render のオブジェクト生成を避け、
-// スクロール中の style 差分=再描画圧を減らす。色は literal でテーマ非依存)。
-const mediaStyles = StyleSheet.create({
-  fillCenter: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  playCircle: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-  },
-  scrim: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
-
 // ------------------------------------------------------------
-// MediaCell — グリッドの 1 マス。画像 or 動画ポスター + (動画は ▶)。
+// MediaBlock — 画像は横カルーセル / 動画は VideoPlayer (フィード/詳細と統一)
 // ------------------------------------------------------------
-function MediaCell({
-  item,
-  flex,
-  aspectRatio,
-  height,
-  extra,
-  contentFit = 'cover',
-  onOpenImage,
-  onPressVideo,
-}: {
-  item: MyMediaItem;
-  flex?: number;
-  aspectRatio?: number;
-  height?: number;
-  extra?: number;
-  /** 単一画像は 'contain' で全体表示、グリッドは 'cover' でタイル充填 */
-  contentFit?: 'cover' | 'contain';
-  onOpenImage?: (url: string) => void;
-  onPressVideo: () => void;
-}) {
-  const isVideo = item.type === 'video';
-  const src = isVideo ? item.poster ?? item.url : item.url;
-  return (
-    <Pressable
-      onPress={() => (isVideo ? onPressVideo() : onOpenImage ? onOpenImage(item.url) : onPressVideo())}
-      accessibilityRole="imagebutton"
-      accessibilityLabel={isVideo ? '動画を再生' : '画像を拡大'}
-      style={{
-        flex,
-        aspectRatio,
-        height,
-        backgroundColor: C.bg3,
-        overflow: 'hidden',
-      }}
-    >
-      <ExpoImage
-        source={{ uri: thumbedUrl(src, 720) }}
-        placeholder={item.blurhash ? { blurhash: item.blurhash } : undefined}
-        style={{ width: '100%', height: '100%' }}
-        contentFit={contentFit}
-        transition={160}
-        cachePolicy="memory-disk"
-        recyclingKey={src}
-      />
-      {isVideo ? (
-        <View pointerEvents="none" style={mediaStyles.fillCenter}>
-          <View style={mediaStyles.playCircle}>
-            <Play size={22} color="#fff" fill="#fff" strokeWidth={0} />
-          </View>
-        </View>
-      ) : null}
-      {extra && extra > 0 ? (
-        <View pointerEvents="none" style={mediaStyles.scrim}>
-          <Text style={[T.h3, { color: '#fff', fontWeight: '800' }]}>{`+${extra}`}</Text>
-        </View>
-      ) : null}
-    </Pressable>
-  );
-}
-
-// ------------------------------------------------------------
-// MediaGrid — X 風 1〜4(+N) グリッド。常時インライン。
-// ------------------------------------------------------------
-const GAP = 3;
-
-function MediaGrid({
+function MediaBlock({
   media,
   onOpenImage,
   onPressVideo,
@@ -184,76 +82,25 @@ function MediaGrid({
   onPressVideo: () => void;
 }) {
   if (media.length === 0) return null;
-  const items = media.slice(0, 4);
-  const extra = media.length - 4;
-  const wrap = {
-    marginTop: SP['3'],
-    borderRadius: R.lg,
-    overflow: 'hidden' as const,
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.bg3,
-  };
-  const cellProps = { onOpenImage, onPressVideo };
-
-  if (items.length === 1 && items[0]) {
-    const single = items[0];
-    if (single.type === 'video') {
-      // 動画は VideoPlayer で「フレーム常時表示 + ビューポート内で muted 自動再生」
-      // (X/Instagram 風)。poster が無くても <video preload=metadata> が先頭フレームを出す。
-      // タップで全画面 VideoLightbox。16:9・角丸・#000 は VideoPlayer 内蔵。
-      return (
-        <View style={{ marginTop: SP['3'] }}>
-          <VideoPlayer uri={single.url} poster={single.poster ?? undefined} />
-        </View>
-      );
-    }
-    // 1枚画像: 写真「全体」を見せる (contain)。縦長/横長どちらも収まるよう正方 box +
-    // 最大高さでクランプ。旧版は 4:3 の横長 box に cover だったため、縦長写真が
-    // 激しくクロップ拡大され「全体が写らない/デカすぎる」事故になっていた。
-    return (
-      <View style={[wrap, { aspectRatio: 1, maxHeight: 420 }]}>
-        <MediaCell item={single} flex={1} contentFit="contain" {...cellProps} />
-      </View>
-    );
-  }
-
-  if (items.length === 2) {
-    return (
-      <View style={[wrap, { flexDirection: 'row', aspectRatio: 16 / 9, gap: GAP }]}>
-        {items.map((it, i) => (
-          <MediaCell key={i} item={it} flex={1} {...cellProps} />
-        ))}
-      </View>
-    );
-  }
-
-  if (items.length === 3) {
-    const [a, b, c] = items;
-    return (
-      <View style={[wrap, { flexDirection: 'row', aspectRatio: 16 / 9, gap: GAP }]}>
-        {a ? <MediaCell item={a} flex={1} {...cellProps} /> : null}
-        <View style={{ flex: 1, gap: GAP }}>
-          {b ? <MediaCell item={b} flex={1} {...cellProps} /> : null}
-          {c ? <MediaCell item={c} flex={1} {...cellProps} /> : null}
-        </View>
-      </View>
-    );
-  }
-
-  // 4枚以上: 2x2。最後のマスに +N。
+  const images = media.filter((m) => m.type === 'image');
+  const videos = media.filter((m) => m.type === 'video');
   return (
-    <View style={[wrap, { aspectRatio: 1, gap: GAP }]}>
-      <View style={{ flex: 1, flexDirection: 'row', gap: GAP }}>
-        {items[0] ? <MediaCell item={items[0]} flex={1} {...cellProps} /> : null}
-        {items[1] ? <MediaCell item={items[1]} flex={1} {...cellProps} /> : null}
-      </View>
-      <View style={{ flex: 1, flexDirection: 'row', gap: GAP }}>
-        {items[2] ? <MediaCell item={items[2]} flex={1} {...cellProps} /> : null}
-        {items[3] ? (
-          <MediaCell item={items[3]} flex={1} extra={extra > 0 ? extra : undefined} {...cellProps} />
-        ) : null}
-      </View>
+    <View style={{ marginTop: SP['3'], gap: SP['2'] }}>
+      {images.length > 0 ? (
+        <FeedMediaGrid
+          // aspect は MyMediaItem に無いので FeedMediaGrid 側で自前計測 (横並び・全体表示)。
+          items={images.map((m) => ({ uri: m.url, blurhash: m.blurhash }))}
+          onPress={(idx) => {
+            const u = images[idx]?.url;
+            if (!u) return;
+            if (onOpenImage) onOpenImage(u);
+            else onPressVideo();
+          }}
+        />
+      ) : null}
+      {videos.map((v, i) => (
+        <VideoPlayer key={`v-${v.url}-${i}`} uri={v.url} poster={v.poster ?? undefined} />
+      ))}
     </View>
   );
 }
@@ -309,7 +156,7 @@ export function MyEntryRow({
         </Text>
       ) : null}
       {media.length > 0 ? (
-        <MediaGrid media={media} onOpenImage={onOpenImage} onPressVideo={onPress} />
+        <MediaBlock media={media} onOpenImage={onOpenImage} onPressVideo={onPress} />
       ) : null}
       {!isComment && metaNode ? (
         <View
@@ -338,7 +185,6 @@ export function MyEntryRow({
         accessibilityLabel={accessibilityLabel}
         style={{
           // ★ カード(箱)をやめ、全幅 + 下端 hairline 区切りの X/Twitter 風に。
-          //   投稿ごとの「枠」を無くし、地続きのタイムラインにする。
           paddingHorizontal: SP['4'],
           paddingVertical: SP['4'],
           backgroundColor: C.bg,
@@ -361,8 +207,7 @@ export function MyEntryRow({
         )}
       </PressableScale>
 
-      {/* 右上「…」メニュー。カード PressableScale の「兄弟」として上に重ねるので、
-          ここをタップしてもカード本体の onPress(投稿を開く)は発火しない。 */}
+      {/* 右上「…」メニュー。カード PressableScale の「兄弟」として上に重ねる。 */}
       {onMore ? (
         <Pressable
           onPress={onMore}
