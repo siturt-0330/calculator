@@ -1,8 +1,98 @@
 import { supabase } from '../supabase';
 import { withApiTimeout } from '../withApiTimeout';
+import { sanitizeContent, sanitizeTag, sanitizeUrl } from '../sanitize';
+import { checkRate, rateLimitMessage } from '../rateLimit';
+import { swallow } from '../swallow';
 import type { Post, PostVisibility } from '../../types/models';
 
 export type { PostVisibility } from '../../types/models';
+
+// ============================================================
+// モジュールレベル定数
+// ============================================================
+/** デフォルトのAPIタイムアウト (ms) */
+const POSTS_TIMEOUT_MS = 8000;
+/** 1ページあたりのデフォルト取得件数 */
+const POSTS_PAGE_SIZE = 20;
+/** コミュニティフィードの1ページ取得件数 */
+const COMMUNITY_PAGE_SIZE = 30;
+/** rising モード: client 再ランク前に取得するバッファ件数 */
+const RISING_FETCH_LIMIT = 100;
+/** blockedTags をサーバー側フィルタに渡す上限 (URL 長さ制限対策) */
+const BLOCKED_TAGS_SERVER_LIMIT = 80;
+/** INT4 最大値 (likes_count cursor 検証用) */
+const INT4_MAX = 2147483647;
+
+// ============================================================
+// モジュールレベル正規表現 (関数内で重複宣言しない)
+// ============================================================
+/** ISO 8601 タイムスタンプ検証 */
+const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+/** UUID v4 形式検証 */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// ============================================================
+// cursor パーサ — モジュールスコープに置いて重複を排除
+// ============================================================
+
+/**
+ * new ソート用 cursor: ISO タイムスタンプ単体 (後方互換)
+ * 不正な場合は null を返す (DoS 防止 — throw だと無限リロードが起きる)
+ */
+function parseTimestampCursor(c: string): string | null {
+  return ISO_RE.test(c) ? c : null;
+}
+
+/**
+ * new ソート用 composite cursor: `<ISO timestamp>|<uuid>`
+ * 同一 created_at の境界で post が重複/欠落しないよう id で tie-break する (Audit D #6)。
+ */
+function parseNewCompositeCursor(c: string): { ts: string; id: string } | null {
+  const parts = c.split('|');
+  if (parts.length !== 2) return null;
+  const ts = parts[0];
+  const id = parts[1];
+  if (!ts || !id) return null;
+  if (!ISO_RE.test(ts)) return null;
+  if (!UUID_RE.test(id)) return null;
+  return { ts, id };
+}
+
+/**
+ * top ソート用 composite cursor: `<likes_count>|<ISO timestamp>`
+ * likes_count は INT4 範囲の正整数のみ許可。
+ */
+function parseCompositeCursor(c: string): { likes: number; ts: string } | null {
+  const parts = c.split('|');
+  if (parts.length !== 2) return null;
+  const likesStr = parts[0];
+  const ts = parts[1];
+  if (!likesStr || !ts) return null;
+  if (!/^\d{1,10}$/.test(likesStr)) return null;
+  const likes = Number(likesStr);
+  if (!Number.isFinite(likes) || likes < 0 || likes > INT4_MAX) return null;
+  if (!ISO_RE.test(ts)) return null;
+  return { likes, ts };
+}
+
+/**
+ * hot ソート用 cursor: `<hot_score>|<ISO timestamp>`
+ * hot_score は double precision (負値あり) なので浮動小数記法を許可する。
+ */
+function parseHotCursor(c: string): { hot: number; ts: string } | null {
+  const parts = c.split('|');
+  if (parts.length !== 2) return null;
+  const hotStr = parts[0];
+  const ts = parts[1];
+  if (!hotStr || !ts) return null;
+  // -123.456 / 0 / 7.89e-3 / -1.5e+10 など。NaN/Infinity は弾く。
+  if (!/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(hotStr)) return null;
+  const hot = Number(hotStr);
+  if (!Number.isFinite(hot)) return null;
+  if (!ISO_RE.test(ts)) return null;
+  return { hot, ts };
+}
+
 // 'rising' = Reddit 風 "急上昇" — 直近 3h 内で likes/min が高い post を上位に。
 //   server 側は実質 'new' (created_at desc limit 100) で取得し、
 //   client 側 (hooks/useFeed) で lib/utils/risingScore.ts により再ランクする。
@@ -46,11 +136,16 @@ type PostWithEmbeddedComm = Post & {
 // ★ `.select('id')` で実際に削除された行を確認する。RLS で 0 行 delete は
 //   error にならないため、これが無いと「権限なし」を success と誤報してしまう。
 // ============================================================
+/**
+ * 自分の投稿を削除する (author 本人のみ)。
+ * RLS により本人以外の削除は 0 行 delete として扱われ、エラーとして明示される。
+ * @throws 権限なし / 既に削除済みの場合
+ */
 export async function deleteOwnPost(postId: string): Promise<void> {
   const { data, error } = await withApiTimeout(
     supabase.from('posts').delete().eq('id', postId).select('id'),
     'posts.deleteOwn',
-    8000,
+    POSTS_TIMEOUT_MS,
   );
   if (error) throw error;
   if (!data || data.length === 0) {
@@ -87,9 +182,6 @@ function isEmbedFailure(err: unknown): boolean {
   return false;
 }
 
-// UUID 形式チェック (壊れた URL や古い ID 対策) — fetchPostById と fetchCommunityPosts で使う
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 type FetchPostsOpts = {
   sort?: SortMode;
   likedTags: string[];
@@ -102,21 +194,22 @@ type FetchPostsOpts = {
   home?: boolean;
 };
 
+/**
+ * ホームフィード / タブ切替用の投稿一覧を cursor pagination で取得する。
+ * - sort='for-you': 内部的に 'hot' と同じプールを 1.5x 件取得しクライアント側でパーソナライズ再ランク。
+ * - sort='rising': 直近 100 件を新着順で取得し、クライアント側で likes/分 速度で再ランク。
+ * - hot_score 列が未 apply の環境は自動的に likes_count フォールバックへ切替。
+ */
 export async function fetchPosts({
   sort = 'hot',
   blockedTags,
   cursor,
-  limit = 20,
+  limit = POSTS_PAGE_SIZE,
   filterTags,
   home = true,
 }: FetchPostsOpts): Promise<{ posts: Post[]; nextCursor: string | null }> {
-  // 'for-you' は内部的に 'hot' と同じ広い候補プールを取りつつ、クライアント側で
-  // パーソナライズ再ランクするので、候補数を 1.5x にしてランカー側に余白を与える。
-  // 'rising' は 'new' の created_at desc を引数 100 件で取得し、client 側で
-  // likes/分 速度で再ランク → 上位 30 を表示。ページングはせず 1 ページのみ。
   const isForYou = sort === 'for-you';
   const isRising = sort === 'rising';
-  const RISING_FETCH_LIMIT = 100;
   const effectiveLimit = isForYou
     ? Math.ceil(limit * 1.5)
     : isRising
@@ -127,154 +220,104 @@ export async function fetchPosts({
     : isRising
       ? 'new'
       : sort;
-
-  // 1 RTT で post + 公式コミュ管理者情報を取得するため、post_communities embed を含む
-  // SELECT を使う。embed 失敗時のみ legacy パス (POSTS_SELECT_COLS + attachOfficialAuthor)
-  // にフォールバック。
-  let query = supabase
-    .from('posts')
-    .select(POSTS_SELECT_COLS_WITH_COMM)
-    .eq('is_anonymous', true)
-    .eq('is_public', true)
-    .limit(effectiveLimit);
-
-  // ホームフィード: visibility が public / community_public のもののみ
-  // (private は本人専用、community_only はコミュニティ詳細でしか出さない)
-  // 既存 posts (visibility カラムが NULL の可能性ゼロ — default 'public' で backfill 済)
-  if (home) {
-    query = query.in('visibility', ['public', 'community_public']);
-  }
-
-  // PostgREST の URL 長さ制限 (≒8KB) 対策:
-  // サーバー側で除外できるのは先頭 80 個まで。残りはクライアント側で smartSort
-  // 経由で弾いている (lib/feed/smartRank.ts の blockedSet 判定)。
-  // これで 92+ blocked tags でも URL が肥大化して 414 にならない。
-  if (blockedTags.length > 0) {
-    const SERVER_LIMIT = 80;
-    const serverSide = blockedTags.length > SERVER_LIMIT
-      ? blockedTags.slice(0, SERVER_LIMIT)
-      : blockedTags;
-    query = query.not('tag_names', 'cs', `{${serverSide.join(',')}}`);
-  }
-
-  if (filterTags && filterTags.length > 0) {
-    query = query.overlaps('tag_names', filterTags);
-  }
-
-  // cursor 検証ヘルパ — 不正な cursor で偽 pagination が動くのを防ぐ
-  // 期待フォーマット:
-  //   new mode:        ISO timestamp (e.g. '2026-05-19T12:34:56.789Z')
-  //   top mode:        '<integer>|<ISO timestamp>'   e.g. '42|2026-05-19T12:34:56.789Z'
-  //   hot mode:        '<float>|<ISO timestamp>'     e.g. '4.213|2026-05-19T12:34:56.789Z'
-  //                    (hot は hot_score = double precision なので浮動小数を受け付ける)
-  const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  function parseTimestampCursor(c: string): string | null {
-    return ISO_RE.test(c) ? c : null;
-  }
-  // new sort 用 composite cursor: '<ISO timestamp>|<uuid>'
-  // 同じ created_at の post が複数存在する場合 (高頻度投稿環境で発生) に
-  // 1 ページ目と 2 ページ目で同じ post が出る/欠落する境界バグを防ぐ (Audit D #6)。
-  // 旧 cursor (ISO timestamp 単体) は parseTimestampCursor で fallback 受付。
-  function parseNewCompositeCursor(c: string): { ts: string; id: string } | null {
-    const parts = c.split('|');
-    if (parts.length !== 2) return null;
-    const ts = parts[0];
-    const id = parts[1];
-    if (!ts || !id) return null;
-    if (!ISO_RE.test(ts)) return null;
-    if (!UUID_RE.test(id)) return null;
-    return { ts, id };
-  }
-  function parseCompositeCursor(c: string): { likes: number; ts: string } | null {
-    const parts = c.split('|');
-    if (parts.length !== 2) return null;
-    const likesStr = parts[0];
-    const ts = parts[1];
-    if (!likesStr || !ts) return null;
-    // likes_count は正整数 (0 以上、INT4 上限以下)
-    if (!/^\d{1,10}$/.test(likesStr)) return null;
-    const likes = Number(likesStr);
-    if (!Number.isFinite(likes) || likes < 0 || likes > 2147483647) return null;
-    if (!ISO_RE.test(ts)) return null;
-    return { likes, ts };
-  }
-  // hot 用 cursor: hot_score (double precision, 負値あり) + ISO timestamp
-  // 値域は double precision そのものなので、数値表記を緩めに許可しつつ
-  // Number.isFinite で最終チェック。
-  function parseHotCursor(c: string): { hot: number; ts: string } | null {
-    const parts = c.split('|');
-    if (parts.length !== 2) return null;
-    const hotStr = parts[0];
-    const ts = parts[1];
-    if (!hotStr || !ts) return null;
-    // -123.456 / 0 / 7.89e-3 / -1.5e+10 など。NaN/Infinity は弾く。
-    if (!/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(hotStr)) return null;
-    const hot = Number(hotStr);
-    if (!Number.isFinite(hot)) return null;
-    if (!ISO_RE.test(ts)) return null;
-    return { hot, ts };
-  }
-
-  // ----------------------------------------------------------------
-  // hot は hot_score (generated column, 0058_hot_score.sql) で並べる。
-  // 環境によっては migration 未 apply で column が無いケースがあるので
-  // legacy fallback (likes_count desc, created_at desc) を用意し、
-  // 「column does not exist」エラーで自動切替する。
-  // ----------------------------------------------------------------
   const isHot = effectiveSort === 'hot';
 
-  if (effectiveSort === 'new') {
-    // 同 created_at の post の境界バグ防止: secondary key として id desc を入れる。
-    // PostgreSQL の order は決定的になるので、cursor の境界で post の重複/欠落が起きない。
-    query = query
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false });
-    if (cursor) {
-      // 1) 新形式 composite '<ts>|<id>': created_at の同値境界を id で tie-break
-      const parsedComposite = parseNewCompositeCursor(cursor);
-      if (parsedComposite) {
-        query = query.or(
-          `created_at.lt.${parsedComposite.ts},and(created_at.eq.${parsedComposite.ts},id.lt.${parsedComposite.id})`,
-        );
-      } else {
-        // 2) 旧形式 (ISO timestamp 単体) — 後方互換のため受け付ける
-        const validTs = parseTimestampCursor(cursor);
-        if (validTs) query = query.lt('created_at', validTs);
-        // 不正なら cursor を無視して先頭から (DoS 防止 — error throw だと無限リロード起こす)
-      }
+  // ----------------------------------------------------------------
+  // ベースクエリを構築するローカルヘルパ (cols 引数で embed あり/なしを切替)
+  // PostgREST TS 型は SELECT 文字列リテラルをリテラルで解析するため、
+  // 動的文字列を渡すと型推論が崩れる。unknown 経由で一度エスケープし、
+  // フィルタ適用後に withApiTimeout へ渡す。
+  // ----------------------------------------------------------------
+  function buildBase(cols: string): unknown {
+    // PostgREST の TS 型は SELECT 文字列リテラルを型パラメータとして解析するため、
+    // 動的文字列を渡すと型推論が崩れる。ここでは any 経由で chaining し、
+    // 最終的に unknown として返すことで型エラーを回避する。
+    // (buildBase の戻り値は applySort / withApiTimeout で any として扱う)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let q: any = supabase
+      .from('posts')
+      .select(cols)
+      .eq('is_anonymous', true)
+      .eq('is_public', true)
+      .limit(effectiveLimit);
+    // ホームフィード: public / community_public のみ
+    if (home) {
+      q = q.in('visibility', ['public', 'community_public']);
     }
-  } else if (effectiveSort === 'top') {
-    query = query.order('likes_count', { ascending: false }).order('created_at', { ascending: false });
-    if (cursor) {
-      const parsed = parseCompositeCursor(cursor);
-      if (parsed) {
-        query = query.or(`likes_count.lt.${parsed.likes},and(likes_count.eq.${parsed.likes},created_at.lt.${parsed.ts})`);
-      }
+    // PostgREST の URL 長さ制限 (≒8KB) 対策: サーバー側は先頭 BLOCKED_TAGS_SERVER_LIMIT 個まで。
+    if (blockedTags.length > 0) {
+      const serverSide = blockedTags.length > BLOCKED_TAGS_SERVER_LIMIT
+        ? blockedTags.slice(0, BLOCKED_TAGS_SERVER_LIMIT)
+        : blockedTags;
+      q = q.not('tag_names', 'cs', `{${serverSide.join(',')}}`);
     }
-  } else {
-    // hot: Reddit 風 hot_score (= log10(|s|) + sign(s)*t/28800) で並べる。
-    // generated column が未 apply な環境 (= 旧 schema) では下のエラー検知 → fallback。
-    query = query
-      .order('hot_score', { ascending: false })
-      .order('created_at', { ascending: false });
-    if (cursor) {
-      const parsed = parseHotCursor(cursor);
-      if (parsed) {
-        // hot_score < parsed.hot OR (hot_score = parsed.hot AND created_at < parsed.ts)
-        query = query.or(
-          `hot_score.lt.${parsed.hot},and(hot_score.eq.${parsed.hot},created_at.lt.${parsed.ts})`,
-        );
-      }
+    if (filterTags && filterTags.length > 0) {
+      q = q.overlaps('tag_names', filterTags);
     }
+    return q;
   }
 
-  let { data, error } = await withApiTimeout(query, 'posts.fetchPosts', 8000);
+  // ----------------------------------------------------------------
+  // ソート & cursor を適用するローカルヘルパ
+  // ----------------------------------------------------------------
+  function applySort(
+    base: unknown,
+    sortKey: 'hot' | 'new' | 'top',
+    cur: string | undefined,
+  ): unknown {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let q: any = base;
+    if (sortKey === 'new') {
+      q = q.order('created_at', { ascending: false }).order('id', { ascending: false });
+      if (cur) {
+        const parsedComposite = parseNewCompositeCursor(cur);
+        if (parsedComposite) {
+          q = q.or(
+            `created_at.lt.${parsedComposite.ts},and(created_at.eq.${parsedComposite.ts},id.lt.${parsedComposite.id})`,
+          );
+        } else {
+          // 旧形式 (ISO timestamp 単体) — 後方互換
+          const validTs = parseTimestampCursor(cur);
+          if (validTs) q = q.lt('created_at', validTs);
+          // 不正 cursor は無視して先頭から (DoS 防止 — throw だと無限リロード)
+        }
+      }
+    } else if (sortKey === 'top') {
+      q = q.order('likes_count', { ascending: false }).order('created_at', { ascending: false });
+      if (cur) {
+        const parsed = parseCompositeCursor(cur);
+        if (parsed) {
+          q = q.or(`likes_count.lt.${parsed.likes},and(likes_count.eq.${parsed.likes},created_at.lt.${parsed.ts})`);
+        }
+      }
+    } else {
+      // hot: Reddit 風 hot_score。generated column 未 apply 環境では hot fallback へ。
+      q = q.order('hot_score', { ascending: false }).order('created_at', { ascending: false });
+      if (cur) {
+        const parsed = parseHotCursor(cur);
+        if (parsed) {
+          q = q.or(
+            `hot_score.lt.${parsed.hot},and(hot_score.eq.${parsed.hot},created_at.lt.${parsed.ts})`,
+          );
+        }
+      }
+    }
+    return q;
+  }
+
+  // ----------------------------------------------------------------
+  // プライマリクエリ実行
+  // ----------------------------------------------------------------
+  type QueryResult = { data: unknown; error: unknown };
+  let { data, error } = await withApiTimeout<QueryResult>(
+    applySort(buildBase(POSTS_SELECT_COLS_WITH_COMM), effectiveSort, cursor) as Promise<QueryResult>,
+    'posts.fetchPosts',
+    POSTS_TIMEOUT_MS,
+  );
 
   // ----------------------------------------------------------------
   // embed fallback: post_communities embed が PostgREST schema cache 上で
-  // 解決できなかった場合 (古い Supabase / 権限不足) は POSTS_SELECT_COLS 単独で
-  // 再 fetch して、後段の attachOfficialAuthor を別 RTT で呼ぶ。
+  // 解決できなかった場合は POSTS_SELECT_COLS 単独で再 fetch する。
   // ----------------------------------------------------------------
   let usedEmbedFallback = false;
   if (error && isEmbedFailure(error)) {
@@ -282,67 +325,19 @@ export async function fetchPosts({
       '[posts] post_communities embed failed — falling back to legacy 2-RTT path:',
       (error as { message?: string }).message,
     );
-    // 同じクエリを embed 抜きで組み直す
-    let fb = supabase
-      .from('posts')
-      .select(POSTS_SELECT_COLS)
-      .eq('is_anonymous', true)
-      .eq('is_public', true)
-      .limit(effectiveLimit);
-    if (home) fb = fb.in('visibility', ['public', 'community_public']);
-    if (blockedTags.length > 0) {
-      const SERVER_LIMIT = 80;
-      const serverSide = blockedTags.length > SERVER_LIMIT
-        ? blockedTags.slice(0, SERVER_LIMIT)
-        : blockedTags;
-      fb = fb.not('tag_names', 'cs', `{${serverSide.join(',')}}`);
-    }
-    if (filterTags && filterTags.length > 0) {
-      fb = fb.overlaps('tag_names', filterTags);
-    }
-    if (effectiveSort === 'new') {
-      fb = fb.order('created_at', { ascending: false }).order('id', { ascending: false });
-      if (cursor) {
-        const parsedComposite = parseNewCompositeCursor(cursor);
-        if (parsedComposite) {
-          fb = fb.or(
-            `created_at.lt.${parsedComposite.ts},and(created_at.eq.${parsedComposite.ts},id.lt.${parsedComposite.id})`,
-          );
-        } else {
-          const v = parseTimestampCursor(cursor);
-          if (v) fb = fb.lt('created_at', v);
-        }
-      }
-    } else if (effectiveSort === 'top') {
-      fb = fb.order('likes_count', { ascending: false }).order('created_at', { ascending: false });
-      if (cursor) {
-        const p = parseCompositeCursor(cursor);
-        if (p) {
-          fb = fb.or(`likes_count.lt.${p.likes},and(likes_count.eq.${p.likes},created_at.lt.${p.ts})`);
-        }
-      }
-    } else {
-      fb = fb.order('hot_score', { ascending: false }).order('created_at', { ascending: false });
-      if (cursor) {
-        const p = parseHotCursor(cursor);
-        if (p) {
-          fb = fb.or(`hot_score.lt.${p.hot},and(hot_score.eq.${p.hot},created_at.lt.${p.ts})`);
-        }
-      }
-    }
-    const r = await withApiTimeout(fb, 'posts.fetchPosts.embedFallback', 8000);
-    // legacy SELECT 結果を embed 型に注入する (post_communities 列が無いだけで
-    // 後段の usedEmbedFallback 分岐で素通しされるので安全)
-    data = r.data as unknown as typeof data;
+    const r = await withApiTimeout<QueryResult>(
+      applySort(buildBase(POSTS_SELECT_COLS), effectiveSort, cursor) as Promise<QueryResult>,
+      'posts.fetchPosts.embedFallback',
+      POSTS_TIMEOUT_MS,
+    );
+    data = r.data;
     error = r.error;
     usedEmbedFallback = true;
   }
 
   // ----------------------------------------------------------------
-  // hot fallback: hot_score column が無い環境 (PG: 42703 undefined_column)
-  // の場合、旧 likes_count desc に戻して再 fetch する。
-  // PostgREST は code='42703' を返してくる (Supabase JS で error.code が
-  // 露出する)。message でも "hot_score" を含むので二重チェック。
+  // hot fallback: hot_score column が無い環境 (PG: 42703) では
+  // likes_count desc にフォールバックする。
   // ----------------------------------------------------------------
   let usedHotFallback = false;
   if (isHot && error) {
@@ -353,45 +348,14 @@ export async function fetchPosts({
       /hot_score/i.test(msg) ||
       /does not exist/i.test(msg);
     if (isMissingColumn) {
-      // 旧 query を組み直して再実行 (likes_count desc, created_at desc)
-      // embed が動く環境なら fallback でも embed 経路を維持する。
-      // PostgREST の TS 型は SELECT 文字列をリテラルで型解析するため、
-      // 共通フィルタの適用には any 経由で型再帰を回避する (結果は unknown cast で揃える)。
-      const baseFb = usedEmbedFallback
-        ? supabase.from('posts').select(POSTS_SELECT_COLS)
-        : supabase.from('posts').select(POSTS_SELECT_COLS_WITH_COMM);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let q: any = baseFb;
-      q = q.eq('is_anonymous', true).eq('is_public', true).limit(effectiveLimit);
-      if (home) q = q.in('visibility', ['public', 'community_public']);
-      if (blockedTags.length > 0) {
-        const SERVER_LIMIT = 80;
-        const serverSide = blockedTags.length > SERVER_LIMIT
-          ? blockedTags.slice(0, SERVER_LIMIT)
-          : blockedTags;
-        q = q.not('tag_names', 'cs', `{${serverSide.join(',')}}`);
-      }
-      if (filterTags && filterTags.length > 0) {
-        q = q.overlaps('tag_names', filterTags);
-      }
-      q = q
-        .order('likes_count', { ascending: false })
-        .order('created_at', { ascending: false });
-      if (cursor) {
-        const parsed = parseCompositeCursor(cursor);
-        if (parsed) {
-          q = q.or(
-            `likes_count.lt.${parsed.likes},and(likes_count.eq.${parsed.likes},created_at.lt.${parsed.ts})`,
-          );
-        }
-      }
-      const fbResult = await withApiTimeout<{ data: unknown; error: unknown }>(
-        q,
+      const cols = usedEmbedFallback ? POSTS_SELECT_COLS : POSTS_SELECT_COLS_WITH_COMM;
+      const fbResult = await withApiTimeout<QueryResult>(
+        applySort(buildBase(cols), 'top', cursor) as Promise<QueryResult>,
         'posts.fetchPosts.hotFallback',
-        8000,
+        POSTS_TIMEOUT_MS,
       );
-      data = fbResult.data as unknown as typeof data;
-      error = fbResult.error as typeof error;
+      data = fbResult.data;
+      error = fbResult.error;
       usedHotFallback = true;
       if (!error) {
         console.warn('[posts] hot_score column missing — using legacy likes_count fallback');
@@ -401,41 +365,32 @@ export async function fetchPosts({
 
   if (error) throw error;
 
-  // embed 経路 → 純粋関数で official_author を attach (RTT ゼロ)
-  // legacy 経路 (embed 失敗) → 別 RTT で attachOfficialAuthor を呼ぶ
   const rawPosts = (data ?? []) as PostWithEmbeddedComm[];
   const posts = usedEmbedFallback
     ? (rawPosts as Post[])
     : attachOfficialAuthorFromEmbed<Post>(rawPosts);
+
+  // rising モードはクライアント側再ランクで上位 30 件しか出さないためページング不要。
   let nextCursor: string | null = null;
-  // rising モードは client side 再ランクで上位 30 件しか出さないため、
-  // ページングしても意味がない (= 31 件目以下を server 側で fetch しても
-  // 速度上位は前ページに既に含まれている)。常に nextCursor=null で打ち切る。
   if (!isRising && posts.length === effectiveLimit) {
     const last = posts[posts.length - 1];
     if (last) {
       if (effectiveSort === 'new') {
-        // composite cursor: created_at + id で tie-break (Audit D #6)
         nextCursor = `${last.created_at}|${last.id}`;
       } else if (isHot && !usedHotFallback) {
-        // hot 通常経路: hot_score|created_at の合成 cursor
         const hotVal = (last as { hot_score?: number | null }).hot_score;
         const hotStr = typeof hotVal === 'number' && Number.isFinite(hotVal) ? String(hotVal) : '0';
         nextCursor = `${hotStr}|${last.created_at}`;
       } else {
-        // top / hot fallback: likes_count|created_at
         nextCursor = `${last.likes_count}|${last.created_at}`;
       }
     }
   }
-  // embed 経路で attach 済 → 2nd RTT を skip。
-  // legacy 経路 (embed 失敗時) のみ attachOfficialAuthor を呼ぶ。
+
+  // embed 経路で attach 済 → 2nd RTT を skip。legacy 経路のみ attachOfficialAuthor を呼ぶ。
   const decorated = usedEmbedFallback ? await attachOfficialAuthor(posts) : posts;
   return { posts: decorated, nextCursor };
 }
-
-import { sanitizeContent, sanitizeTag, sanitizeUrl } from '../sanitize';
-import { checkRate, rateLimitMessage } from '../rateLimit';
 
 // ============================================================
 // Discover — 検索タブの Instagram 風グリッド用
@@ -454,16 +409,18 @@ export type DiscoverMediaPost = {
   created_at: string;
 };
 
+/**
+ * Discover グリッド (検索タブ) 用: media_urls が 1 件以上の公開投稿を新着順で取得する。
+ * PostgREST に text[] 長さフィルタが無いため overfetch + クライアント側で空 media を除外する。
+ * @param opts.limit 取得件数 (6〜60、デフォルト 36)
+ * @param opts.beforeCreatedAt 無限スクロール用 ISO timestamp cursor
+ */
 export async function fetchDiscoverMediaPosts(opts: {
   limit?: number;
   /** ISO 文字列。これより古い created_at で絞る (無限スクロール) */
   beforeCreatedAt?: string;
 } = {}): Promise<DiscoverMediaPost[]> {
   const limit = Math.max(6, Math.min(opts.limit ?? 36, 60));
-  // not-empty array filter: Supabase で `media_urls != '{}'` は使えないので
-  // PostgREST の cs (contains) を使う代替で「1 件以上」を表現できないため、
-  // overfetch + client filter で対応。
-  // 監査指摘: text[] の長さフィルタは PostgREST に無いので client 側で削るしかない。
   let query = supabase
     .from('posts')
     .select('id, content, media_urls, media_blurhashes, likes_count, comments_count, created_at')
@@ -476,7 +433,7 @@ export async function fetchDiscoverMediaPosts(opts: {
     query = query.lt('created_at', opts.beforeCreatedAt);
   }
 
-  const { data, error } = await withApiTimeout(query, 'posts.fetchDiscoverMediaPosts', 8000);
+  const { data, error } = await withApiTimeout(query, 'posts.fetchDiscoverMediaPosts', POSTS_TIMEOUT_MS);
   if (error) {
     console.warn('[posts] fetchDiscoverMediaPosts failed:', error.message);
     return [];
@@ -488,6 +445,14 @@ export async function fetchDiscoverMediaPosts(opts: {
     .slice(0, limit);
 }
 
+/**
+ * 新規投稿を作成する。
+ * - client-side レート制限 + 入力サニタイズを実施してから INSERT する。
+ * - `onInserted` を渡すと INSERT 成功直後 (postId 確定後) に呼ばれ、呼出側が
+ *   コミュニティ attach / poll の完了を待たずに画面遷移できる (v2 楽観的即遷移)。
+ * - コミュニティ attach 失敗時は補償 DELETE で孤児 post を除去して throw する。
+ * @throws レート超過 / 未認証 / ローカル URI 混入 / attach 失敗 / DB エラー
+ */
 export async function createPost({
   content,
   title = null,
@@ -575,36 +540,40 @@ export async function createPost({
   // title は 80 字 cap + trim、 空文字なら null
   const safeTitle = title ? (sanitizeContent(title, { maxLength: 80 }).trim() || null) : null;
 
-  const { data: post, error } = await supabase.from('posts').insert({
-    content: safeContent,
-    title: safeTitle,
-    media_urls: mediaUris,
-    media_blurhashes: [],
-    video_urls: videoUris,
-    video_durations: videoDurations,
-    video_posters: videoPosters,
-    tag_names: safeTags,
-    is_anonymous: isAnonymous,
-    author_id: user.id,
-    kind,
-    source_url: safeSourceUrl,
-    is_public: isPublic,
-    content_warning: safeContentWarning,
-    cw_category: cwCategory,
-    visibility,
-  }).select('id').single();
+  const { data: post, error } = await withApiTimeout(
+    supabase.from('posts').insert({
+      content: safeContent,
+      title: safeTitle,
+      media_urls: mediaUris,
+      media_blurhashes: [],
+      video_urls: videoUris,
+      video_durations: videoDurations,
+      video_posters: videoPosters,
+      tag_names: safeTags,
+      is_anonymous: isAnonymous,
+      author_id: user.id,
+      kind,
+      source_url: safeSourceUrl,
+      is_public: isPublic,
+      content_warning: safeContentWarning,
+      cw_category: cwCategory,
+      visibility,
+    }).select('id').single(),
+    'posts.createPost',
+    POSTS_TIMEOUT_MS,
+  );
   if (error) throw error;
 
   const postId = (post as { id: string }).id;
 
   // ★ v2 楽観的即遷移: INSERT 成功 = postId 確定。ここで呼出側に navigate を許す。
   //   attach (post_communities) / poll はこの後 await で続行する (=呼出側から見ると背後)。
-  //   onInserted が throw すると attach/poll に到達できず孤児 post が残るため try/catch でガード。
+  //   onInserted が throw すると attach/poll に到達できず孤児 post が残るため swallow でガード。
   if (onInserted) {
     try {
       onInserted(postId);
     } catch (e) {
-      console.warn('[createPost] onInserted callback threw (ignored):', e);
+      swallow('createPost.onInserted', e);
     }
   }
 
@@ -616,13 +585,24 @@ export async function createPost({
   ) {
     const uniqueIds = Array.from(new Set(community_ids.filter((c) => c && c.length > 0)));
     if (uniqueIds.length > 0) {
-      const rows = uniqueIds.map((community_id) => ({ post_id: postId, community_id }));
-      const { error: attachErr } = await supabase.from('post_communities').insert(rows);
+      const attachRows = uniqueIds.map((community_id) => ({ post_id: postId, community_id }));
+      const { error: attachErr } = await withApiTimeout(
+        supabase.from('post_communities').insert(attachRows),
+        'posts.createPost.communityAttach',
+        POSTS_TIMEOUT_MS,
+      );
       if (attachErr) {
         console.warn('[createPost] community attach failed:', attachErr.message);
         // ★ 補償: コミュ紐付け失敗時は作りかけの post を削除して孤児を残さない
         //   (非会員のディープリンク投稿等で RLS が attach を拒否するケース)。
-        await supabase.from('posts').delete().eq('id', postId);
+        const { error: deleteErr } = await withApiTimeout(
+          supabase.from('posts').delete().eq('id', postId).select('id'),
+          'posts.createPost.compensatingDelete',
+          POSTS_TIMEOUT_MS,
+        );
+        if (deleteErr) {
+          swallow('posts.createPost.orphanCleanup', deleteErr);
+        }
         throw new Error('このコミュニティには投稿できませんでした(参加が必要かもしれません)');
       }
     }
@@ -633,18 +613,26 @@ export async function createPost({
     const expiresAt = poll.expiresInHours
       ? new Date(Date.now() + poll.expiresInHours * 3600 * 1000).toISOString()
       : null;
-    const { data: pollRow, error: pollErr } = await supabase.from('polls').insert({
-      post_id: postId,
-      question: poll.question.trim(),
-      expires_at: expiresAt,
-      multi_select: !!poll.multiSelect,
-    }).select('id').single();
+    const { data: pollRow, error: pollErr } = await withApiTimeout(
+      supabase.from('polls').insert({
+        post_id: postId,
+        question: poll.question.trim(),
+        expires_at: expiresAt,
+        multi_select: !!poll.multiSelect,
+      }).select('id').single(),
+      'posts.createPost.poll',
+      POSTS_TIMEOUT_MS,
+    );
     if (pollErr) throw pollErr;
-    const opts = poll.options
+    const pollOpts = poll.options
       .map((label, i) => ({ poll_id: (pollRow as { id: string }).id, label: label.trim(), ordinal: i }))
       .filter((o) => o.label.length > 0);
-    if (opts.length > 0) {
-      await supabase.from('poll_options').insert(opts);
+    if (pollOpts.length > 0) {
+      await withApiTimeout(
+        supabase.from('poll_options').insert(pollOpts),
+        'posts.createPost.pollOptions',
+        POSTS_TIMEOUT_MS,
+      );
     }
   }
 }
@@ -653,11 +641,16 @@ export async function createPost({
 // 指定コミュニティの posts (visibility=community_only/community_public で attach されているもの)
 // post_communities → posts の join + cursor pagination
 // ============================================================
+/**
+ * 指定コミュニティに属する投稿を cursor pagination で取得する。
+ * post_communities junction テーブルを経由して 2 クエリで取得する (N+1 なし)。
+ * @returns posts 配列と次ページ cursor (new ソート時のみ)
+ */
 export async function fetchCommunityPosts({
   community_id,
   sort = 'new',
   cursor,
-  limit = 30,
+  limit = COMMUNITY_PAGE_SIZE,
 }: {
   community_id: string;
   sort?: SortMode;
@@ -669,7 +662,6 @@ export async function fetchCommunityPosts({
   }
 
   // post_communities から post_id 一覧を取得 (新しい attach 順)
-  // limit は 1 ページ分 — sort=hot/top の場合は post 側で並び替えるので余分に取らない
   let pcQuery = supabase
     .from('post_communities')
     .select('post_id, created_at')
@@ -677,8 +669,7 @@ export async function fetchCommunityPosts({
     .order('created_at', { ascending: false })
     .limit(limit);
 
-  // cursor (new sort 時のみ意味あり — attach 時刻)
-  const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+  // cursor (new sort 時のみ意味あり — attach 時刻ベース)。ISO_RE はモジュールスコープのものを使う。
   if (sort === 'new' && cursor && ISO_RE.test(cursor)) {
     pcQuery = pcQuery.lt('created_at', cursor);
   }
@@ -686,7 +677,7 @@ export async function fetchCommunityPosts({
   const { data: pcRows, error: pcErr } = await withApiTimeout(
     pcQuery,
     'posts.fetchCommunityPosts.junction',
-    8000,
+    POSTS_TIMEOUT_MS,
   );
   if (pcErr) {
     console.warn('[fetchCommunityPosts] junction fetch failed:', pcErr.message);
@@ -716,7 +707,7 @@ export async function fetchCommunityPosts({
     postsQuery = postsQuery.order('created_at', { ascending: false });
   }
 
-  let { data, error } = await withApiTimeout(postsQuery, 'posts.fetchCommunityPosts', 8000);
+  let { data, error } = await withApiTimeout(postsQuery, 'posts.fetchCommunityPosts', POSTS_TIMEOUT_MS);
   let usedFallback = false;
   if (error && isEmbedFailure(error)) {
     console.warn(
@@ -729,7 +720,7 @@ export async function fetchCommunityPosts({
     } else {
       fb = fb.order('created_at', { ascending: false });
     }
-    const r = await withApiTimeout(fb, 'posts.fetchCommunityPosts.embedFallback', 8000);
+    const r = await withApiTimeout(fb, 'posts.fetchCommunityPosts.embedFallback', POSTS_TIMEOUT_MS);
     // legacy SELECT 結果を embed 型に注入する (後段 usedFallback=true で素通し)
     data = r.data as unknown as typeof data;
     error = r.error;
@@ -763,10 +754,13 @@ export async function fetchCommunityPosts({
   return { posts: decorated, nextCursor };
 }
 
+/**
+ * 単一投稿を ID で取得する。
+ * embed 失敗時は POSTS_SELECT_COLS のみで再取得する (legacy fallback)。
+ * RLS で読めない場合や存在しない場合は null を返す (throw しない)。
+ */
 export async function fetchPostById(id: string): Promise<Post | null> {
   if (!id || !UUID_RE.test(id)) return null;
-  // 1 RTT で post + 公式コミュ管理者情報を取得 (post_communities embed)。
-  // embed 失敗時は legacy 2-RTT に fallback。
   const { data, error } = await withApiTimeout(
     supabase
       .from('posts')
@@ -774,7 +768,7 @@ export async function fetchPostById(id: string): Promise<Post | null> {
       .eq('id', id)
       .maybeSingle(),
     'posts.fetchPostById',
-    8000,
+    POSTS_TIMEOUT_MS,
   );
   if (error && isEmbedFailure(error)) {
     console.warn(
@@ -788,7 +782,7 @@ export async function fetchPostById(id: string): Promise<Post | null> {
         .eq('id', id)
         .maybeSingle(),
       'posts.fetchPostById.fallback',
-      8000,
+      POSTS_TIMEOUT_MS,
     );
     if (fb.error) {
       console.warn('[fetchPostById] error:', fb.error.message);
@@ -816,37 +810,45 @@ export async function fetchPostById(id: string): Promise<Post | null> {
 //   これにより POSTS_SELECT_COLS に edited_at を入れずに済み、全 post 取得経路を
 //   migration の適用順から切り離せる (deploy-ordering 結合の解消)。
 // ============================================================
+/**
+ * 「編集済み」バッジ用に edited_at だけを耐性付きで取得する。
+ * 0133 (edited_at 列追加) 未適用の環境でも壊れないよう、列欠落 / エラーは null を返す。
+ * バッジが出ないだけで他機能に無影響 (deploy-ordering 結合の解消)。
+ */
 export async function fetchPostEditedAt(postId: string): Promise<string | null> {
   if (!postId || !UUID_RE.test(postId)) return null;
   try {
     const { data, error } = await withApiTimeout(
       supabase.from('posts').select('edited_at').eq('id', postId).maybeSingle(),
       'posts.fetchEditedAt',
-      8000,
+      POSTS_TIMEOUT_MS,
     );
     if (error || !data) return null; // 列欠落(0133未適用)/RLS/通信失敗 → 「未編集」扱い
     return (data as { edited_at?: string | null }).edited_at ?? null;
-  } catch {
+  } catch (e) {
+    swallow('posts.fetchPostEditedAt', e);
     return null;
   }
 }
 
-// 複数 post id をまとめて 1 RTT で取得 (検索結果の hydrate 用)。順不同で返るので
-// 呼び出し側でランキング順に並べ直す。embed 失敗時は legacy SELECT に fallback。
-// (旧: 検索が 1 件ずつ最大 30 RTT のウォーターフォールだったのを 1 RTT に畳む)
+/**
+ * 複数の投稿 ID をまとめて 1 RTT で取得する (検索結果 hydrate 用)。
+ * 返り順は不定なので、呼出側でランキング順に並べ直すこと。
+ * embed 失敗時は POSTS_SELECT_COLS のみで fallback する。
+ */
 export async function fetchPostsByIds(ids: string[]): Promise<Post[]> {
   const valid = ids.filter((id) => id && UUID_RE.test(id));
   if (valid.length === 0) return [];
   const { data, error } = await withApiTimeout(
     supabase.from('posts').select(POSTS_SELECT_COLS_WITH_COMM).in('id', valid),
     'posts.fetchPostsByIds',
-    8000,
+    POSTS_TIMEOUT_MS,
   );
   if (error && isEmbedFailure(error)) {
     const fb = await withApiTimeout(
       supabase.from('posts').select(POSTS_SELECT_COLS).in('id', valid),
       'posts.fetchPostsByIds.fallback',
-      8000,
+      POSTS_TIMEOUT_MS,
     );
     if (fb.error) {
       console.warn('[fetchPostsByIds] error:', fb.error.message);
@@ -891,13 +893,14 @@ export type PostCommunityRef = {
   is_official?: boolean;
 };
 
-// post id 配列 → 各 post に紐付いた community のメタ情報を返す
-// 1 リクエストで集約 (FlashList 上の大量 post でも軽い)
+/**
+ * post id 配列に紐付いた community メタ情報を 1 リクエストで取得する。
+ * FlashList 上の大量 post でも N+1 にならないよう .in() で集約する。
+ * 非 UUID や存在しない post_id は無視される (PostgREST 22P02 防止)。
+ */
 export async function fetchCommunitiesForPosts(
   postIds: string[],
 ): Promise<Record<string, PostCommunityRef[]>> {
-  // ★ UUID ガード: 非UUID (壊れた deep-link id / 文字列 "undefined" 等) が混じると PostgREST が
-  //   22P02 で 400 を返し配列全体が落ちる。他の fetch 関数 (fetchPostById/ByIds) と同様に弾く。
   const validIds = postIds.filter((id) => id && UUID_RE.test(id));
   if (validIds.length === 0) return {};
   const { data, error } = await withApiTimeout(
@@ -906,7 +909,7 @@ export async function fetchCommunitiesForPosts(
       .select('post_id, community:communities(id, name, icon_emoji, icon_color, icon_url, is_official)')
       .in('post_id', validIds),
     'posts.fetchCommunitiesForPosts',
-    8000,
+    POSTS_TIMEOUT_MS,
   );
   if (error) {
     console.warn('[fetchCommunitiesForPosts] error:', error.message);
@@ -952,6 +955,11 @@ export async function fetchCommunitiesForPosts(
 // - 並び替えは server で再計算せず client side (lib/utils/qaSort.ts) に置く
 //   → 既存 comments fetch / publication / cache key を一切いじらない契約。
 // ============================================================
+/**
+ * Q&A モードの有効/無効を切り替える (author 本人のみ)。
+ * RLS により本人以外の UPDATE は 0 行として扱われ、エラーとして明示される。
+ * @throws 未認証 / 権限なし / 不正 post id
+ */
 export async function togglePostQAMode(
   postId: string,
   enabled: boolean,
@@ -961,14 +969,17 @@ export async function togglePostQAMode(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  const { data, error } = await supabase
-    .from('posts')
-    .update({ qa_mode: enabled })
-    .eq('id', postId)
-    .select('id');
+  const { data, error } = await withApiTimeout(
+    supabase
+      .from('posts')
+      .update({ qa_mode: enabled })
+      .eq('id', postId)
+      .select('id'),
+    'posts.toggleQAMode',
+    POSTS_TIMEOUT_MS,
+  );
   if (error) throw error;
   if (!data || data.length === 0) {
-    // RLS で 0 行 update = 本人でない or post が存在しない
     throw new Error('Q&A モードは投稿者のみが切替可能です');
   }
 }
@@ -999,6 +1010,13 @@ function assertOwnMediaUrl(u: string): void {
   }
 }
 
+/**
+ * 自分の投稿を後から編集する (author 本人のみ)。
+ * - 指定したフィールドのみ部分更新する (undefined は触らない)。
+ * - RLS により本人以外の UPDATE は 0 行として扱われ、エラーとして明示される。
+ * - media/video は自分の Supabase posts-media バケットの HTTPS URL のみ許可。
+ * @throws 未認証 / 権限なし / 不正 URL / DB エラー
+ */
 export async function updatePost(
   postId: string,
   fields: {
@@ -1056,7 +1074,7 @@ export async function updatePost(
   const { data, error } = await withApiTimeout(
     supabase.from('posts').update(patch).eq('id', postId).select('id'),
     'posts.update',
-    8000,
+    POSTS_TIMEOUT_MS,
   );
   if (error) throw error;
   if (!data || data.length === 0) {

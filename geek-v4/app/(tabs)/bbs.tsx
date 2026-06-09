@@ -4,7 +4,7 @@ import { FlashList, type ListRenderItem } from '@shopify/flash-list';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -15,9 +15,10 @@ import Animated, {
   withRepeat,
   Easing,
 } from 'react-native-reanimated';
-import { useBBS, useMyCommunityBBS } from '../../hooks/useBBS';
+import { useBbsThreads } from '../../hooks/useBbsThreads';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import type { BBSThread } from '../../types/models';
+import type { CommunityMeta } from '../../lib/api/communities';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { HighlightedText } from '../../components/ui/HighlightedText';
 import { ThreadCardSkeleton } from '../../components/ui/Skeleton';
@@ -37,16 +38,15 @@ import { textRelevance } from '../../lib/utils/searchAlgo';
 import { useSearchClickStore } from '../../stores/searchClickStore';
 import { useT } from '../../hooks/useT';
 import { logEvent } from '../../lib/personalize';
-import { supabase } from '../../lib/supabase';
 import { fetchPostById } from '../../lib/api/posts';
 import { fetchComments } from '../../lib/api/comments';
 
 type SortMode = 'recent' | 'popular';
-// 掲示板タブのスコープ — LINE のトーク/友だち と同じ感覚で 2 択切替
-type Scope = 'community' | 'all';
 
+/** BBS カテゴリ一覧 (先頭が「すべて」= 全件表示) */
 const CATEGORIES = ['すべて', '雑談', 'アニメ', 'ゲーム', 'マンガ', '音楽', 'アイドル', 'Vtuber', '推し活', 'グルメ', 'コスプレ', 'ニュース'];
 
+/** カテゴリ名 → アクセントカラー。グラデに使うため 2 色目は常に C.accent (紫) に倒す */
 const CATEGORY_COLORS: Record<string, string> = {
   '雑談': '#22D3A4', 'アニメ': '#FF6B7A', 'ゲーム': '#7CB1FF',
   'マンガ': '#F472B6', '音楽': '#FCD34D', 'アイドル': '#FF8C30',
@@ -54,15 +54,39 @@ const CATEGORY_COLORS: Record<string, string> = {
   'コスプレ': '#06B6D4', 'ニュース': '#94A3B8',
 };
 
+/** back-to-top FAB を表示し始める scroll 量 (px) */
+const BACK_TO_TOP_THRESHOLD = 400;
+/** FlashList の viewport 外先読み距離 (px) — スクロール中の白セル防止 */
+const FLASH_DRAW_DISTANCE = 320;
+/** FlashList の推定行高 (px) — タイトル 2 行 + メタ + 余白 + community badge の目安 */
+const ESTIMATED_ITEM_SIZE = 132;
+/** スクロールイベントの throttle (ms) — 60fps 想定で 16ms */
+const SCROLL_THROTTLE_MS = 16;
+/** 検索 debounce: 短いクエリ (≤2 文字) は autocomplete のテンポを上げるため短め */
+const DEBOUNCE_SHORT_MS = 100;
+/** 検索 debounce: 3 文字以上は少し長めにして過剰 refetch を防ぐ */
+const DEBOUNCE_LONG_MS = 150;
+/** 検索クエリの文字数上限 (memory DoS 対策) */
+const SEARCH_MAX_LENGTH = 200;
+
 export default function BBSScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { width } = useWindowDimensions();
-  // 「すべて」スコープ用 — 全 public スレッド
-  const allBbs = useBBS();
-  // 「コミュニティ」スコープ用 — 自分の参加コミュ横断
-  const myBbs = useMyCommunityBBS();
   const qc = useQueryClient();
+
+  // useBbsThreads がスコープ管理 + スレッド取得 + コミュニティメタ fetch を一元担当。
+  // component はレイアウトと入力ハンドラのみに集中できる。
+  const {
+    threads,
+    loading,
+    refreshing,
+    refresh,
+    effectiveScope,
+    setScope,
+    hasJoinedCommunities,
+    communityMeta,
+  } = useBbsThreads();
 
   // ★ Prefetch-on-press: スレタップ先 (/bbs/{id} → /post/{id} redirect) が実際に読む
   //   cache key を温める。これにより遷移完了時には ['post', id] / ['post-comments', id] が
@@ -98,20 +122,6 @@ export default function BBSScreen() {
     }, [qc]),
   );
 
-  // scope: ユーザーが明示的に切り替えるまでは「動的 default」=
-  //   参加コミュあり → 'community' / なし → 'all'
-  // 切替後は scopeRaw に固定される (ユーザーの意思を尊重)
-  const [scopeRaw, setScopeRaw] = useState<Scope | null>(null);
-  // myBbs の loading が終わるまでは表示しない (initial flash 防止)
-  const effectiveScope: Scope =
-    scopeRaw ?? (myBbs.loading ? 'community' : myBbs.hasJoinedCommunities ? 'community' : 'all');
-
-  const setScope = (s: Scope) => setScopeRaw(s);
-  const scopedSource = effectiveScope === 'community' ? myBbs : allBbs;
-  const threads = scopedSource.threads;
-  const loading = scopedSource.loading;
-  const refreshing = scopedSource.refreshing;
-  const refresh = scopedSource.refresh;
   // Smart skeleton timing — skeleton only after 200ms of continuous loading.
   // <200ms loads (cache hits) skip skeleton entirely to avoid flash.
   const showSkeleton = useDelayedLoading(loading, 200);
@@ -135,12 +145,13 @@ export default function BBSScreen() {
   useEffect(() => {
     // 短いクエリは早く応答 (autocomplete のテンポを上げる)
     const trimmed = search.trim();
-    const delay = trimmed.length <= 2 ? 100 : 150;
+    const delay = trimmed.length <= 2 ? DEBOUNCE_SHORT_MS : DEBOUNCE_LONG_MS;
     const t = setTimeout(() => setDebounced(trimmed), delay);
     return () => clearTimeout(t);
   }, [search]);
 
   const isDesktop = width > 720;
+  // デスクトップでも 720px 以上には広げない (可読性 + FlashList の estimatedItemSize と整合)
   const containerMaxWidth = 720;
 
   const parsedQuery = useMemo(() => parseQuery(debounced), [debounced]);
@@ -155,38 +166,6 @@ export default function BBSScreen() {
   const getCtrBoosts = useSearchClickStore((s) => s.getBoosts);
   const recordCtr = useSearchClickStore((s) => s.record);
   const ctrBoosts = useMemo(() => getCtrBoosts(debounced), [debounced, getCtrBoosts]);
-
-  // コミュニティ紐付け済みスレッドのために、表示中スレッドの community_id 一覧を集めて
-  // 名前/アイコンを一括 lookup する (大量にあっても 1 リクエスト)
-  const communityIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const t of threads) {
-      if (t.community_id) ids.add(t.community_id);
-    }
-    return Array.from(ids).sort();
-  }, [threads]);
-  const communityMetaQ = useQuery({
-    queryKey: ['bbs-thread-communities', communityIds],
-    queryFn: async () => {
-      if (communityIds.length === 0) return {} as Record<string, { name: string; icon_emoji: string }>;
-      const { data, error } = await supabase
-        .from('communities')
-        .select('id, name, icon_emoji')
-        .in('id', communityIds);
-      if (error) {
-        console.warn('[bbs] community meta fetch failed:', error.message);
-        return {} as Record<string, { name: string; icon_emoji: string }>;
-      }
-      const map: Record<string, { name: string; icon_emoji: string }> = {};
-      for (const c of (data ?? []) as Array<{ id: string; name: string; icon_emoji: string }>) {
-        map[c.id] = { name: c.name, icon_emoji: c.icon_emoji };
-      }
-      return map;
-    },
-    enabled: communityIds.length > 0,
-    staleTime: 5 * 60 * 1000,
-  });
-  const communityMeta = communityMetaQ.data ?? {};
 
   // スレッドごとの normalize 済みハイスタック / カテゴリを一度だけ計算してキャッシュ。
   // 以前は filter() / score() の中で各 thread × 各 variant ごとに deepNormalize を回しており
@@ -290,13 +269,13 @@ export default function BBSScreen() {
       { translateY: (1 - backToTopOpacity.value) * 16 }, // 下から ふわっ
     ],
   }));
-  // 400px 超で表示。pull-to-refresh の負値域では出さない。
+  // BACK_TO_TOP_THRESHOLD px 超で表示。pull-to-refresh の負値域では出さない。
   // worklet 内で前回値と比較し、変化したときだけ withTiming を発火する。
   const handleScroll = useAnimatedScrollHandler({
     onScroll: (e) => {
       'worklet';
       const y = e.contentOffset.y;
-      const target = y > 400 ? 1 : 0;
+      const target = y > BACK_TO_TOP_THRESHOLD ? 1 : 0;
       if (backToTopOpacity.value !== target) {
         backToTopOpacity.value = withTiming(target, {
           duration: 180,
@@ -403,14 +382,18 @@ export default function BBSScreen() {
           </View>
 
           {/* 検索バー */}
-          <View style={{
-            flexDirection: 'row', alignItems: 'center', gap: SP['2'],
-            paddingHorizontal: SP['3'], paddingVertical: SP['2'],
-            backgroundColor: C.bg2,
-            borderRadius: R.full,
-            borderWidth: 1, borderColor: C.border,
-            marginBottom: SP['2'],
-          }}>
+          {/* accessibilityRole="search": スクリーンリーダーがこれを検索フィールドと認識できるようにする */}
+          <View
+            accessibilityRole="search"
+            style={{
+              flexDirection: 'row', alignItems: 'center', gap: SP['2'],
+              paddingHorizontal: SP['3'], paddingVertical: SP['2'],
+              backgroundColor: C.bg2,
+              borderRadius: R.full,
+              borderWidth: 1, borderColor: C.border,
+              marginBottom: SP['2'],
+            }}
+          >
             <Icon.search size={18} color={C.text3} strokeWidth={2.2} />
             <TextInput
               value={search}
@@ -423,11 +406,12 @@ export default function BBSScreen() {
               autoCorrect={false}
               autoCapitalize="none"
               returnKeyType="search"
+              accessibilityLabel={tr('bbs.search_placeholder')}
               onSubmitEditing={() => setDebounced(search.trim())}
               // 検索バーは常に focusable に — focus が即外れる/連続入力で消える bug を防ぐ
               blurOnSubmit={false}
-              // memory DoS 対策: 検索クエリは 200 文字 cap
-              maxLength={200}
+              // memory DoS 対策: 検索クエリは SEARCH_MAX_LENGTH 文字 cap
+              maxLength={SEARCH_MAX_LENGTH}
             />
             {search.length > 0 && (
               <PressableScale
@@ -555,15 +539,15 @@ export default function BBSScreen() {
         // 検索中に keyboard を表示したままスレッドをタップ → 1 タップで遷移したい
         // ('handled': タップが処理されたら keyboard を閉じる)
         keyboardShouldPersistTaps="handled"
-        // viewport 外で +320px 先読み — スクロール中の白セル防止
-        drawDistance={320}
+        // viewport 外で +FLASH_DRAW_DISTANCE px 先読み — スクロール中の白セル防止
+        drawDistance={FLASH_DRAW_DISTANCE}
         // 大量にあるスレッドカードを virtualization で省メモリ化
         removeClippedSubviews
-        // 「上に戻る」ボタン用: 16ms throttle で過剰 re-render 防止 (60fps 想定)
+        // 「上に戻る」ボタン用: SCROLL_THROTTLE_MS throttle で過剰 re-render 防止 (60fps 想定)
         onScroll={handleScroll}
-        scrollEventThrottle={16}
-        // タイトル 2 行 + メタ情報 1 行 + 余白 + (community badge) で大体 132px くらい
-        estimatedItemSize={132}
+        scrollEventThrottle={SCROLL_THROTTLE_MS}
+        // タイトル 2 行 + メタ情報 1 行 + 余白 + (community badge) で大体 ESTIMATED_ITEM_SIZE px
+        estimatedItemSize={ESTIMATED_ITEM_SIZE}
         // フリック時の慣性減速を速める
         decelerationRate="fast"
         // ★ extraData: communityMeta は遅延 fetch なので、初回 render 後に
@@ -651,7 +635,7 @@ export default function BBSScreen() {
                     </Text>
                   </PressableScale>
                 </View>
-              ) : effectiveScope === 'community' && !myBbs.hasJoinedCommunities ? (
+              ) : effectiveScope === 'community' && !hasJoinedCommunities ? (
                 // コミュニティスコープで参加コミュ 0 件 → コミュニティ参加への導線
                 <>
                   <View style={{
@@ -751,6 +735,10 @@ export default function BBSScreen() {
 // mypage hero と同じ GRAD.primary を使った emoji 円 + CTA pill。
 // 既存 EmptyState (icon + Button) より hero っぽさを出すための内部 component。
 // BBS タブ専用 (community タブにも同等 component を別途用意).
+//
+// ★ design: useColors() を component 内で呼ぶことで、
+//   ダーク/ライトモード切替に正しく追従する (旧実装は module scope の静的 C を
+//   参照していたため、テーマ変更がリアルタイムに反映されなかった)。
 function PolishedEmpty({
   emoji,
   title,
@@ -764,6 +752,8 @@ function PolishedEmpty({
   actionLabel?: string;
   onAction?: () => void;
 }) {
+  // ★ theme-aware: BBSScreen の C ではなくこの component 内で useColors() を呼ぶ
+  const themeC = useColors();
   return (
     <View style={{ padding: SP['8'], alignItems: 'center', gap: SP['4'] }}>
       <View
@@ -780,15 +770,22 @@ function PolishedEmpty({
           end={{ x: 1, y: 1 }}
           style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
         />
-        <Text style={{ fontSize: 44 }} accessibilityLabel="">{emoji}</Text>
+        {/* 装飾絵文字: スクリーンリーダーから非表示にする (iOS/Android 両対応) */}
+        <Text
+          style={{ fontSize: 44 }}
+          accessibilityElementsHidden={true}
+          importantForAccessibility="no-hide-descendants"
+        >
+          {emoji}
+        </Text>
       </View>
       <Text
-        style={[T.h3, { color: C.text, textAlign: 'center', letterSpacing: -0.3 }]}
+        style={[T.h3, { color: themeC.text, textAlign: 'center', letterSpacing: -0.3 }]}
       >
         {title}
       </Text>
       {message && (
-        <Text style={[T.body, { color: C.text2, textAlign: 'center', maxWidth: 320 }]}>
+        <Text style={[T.body, { color: themeC.text2, textAlign: 'center', maxWidth: 320 }]}>
           {message}
         </Text>
       )}
@@ -820,6 +817,95 @@ function PolishedEmpty({
 }
 
 // ============================================================
+// ThreadRow アニメーションフック群
+// ------------------------------------------------------------
+// 3 つのアニメーションをそれぞれ独立したフックに分離:
+//   useEntranceAnimation   — 初回 mount 時の opacity+translateY fade-in
+//   useCountBumpAnimation  — replies_count 増加時の scale bump
+//   useHotPulseAnimation   — hot スレッドの scale loop pulse
+//
+// 各フックは reduceMotion を受け取り、true のときは即座に最終状態を設定し
+// アニメーションを一切走らせない。
+// ============================================================
+
+/**
+ * 初回マウント時に opacity 0→1 + translateY 8→0 の fade-in を行うフック。
+ * FlashList で recycle されても isFirstMount ref により 2 回目以降は no-op。
+ */
+function useEntranceAnimation(reduceMotion: boolean) {
+  const isFirstMount = useRef(true);
+  const opacity = useSharedValue(reduceMotion ? 1 : 0);
+  const translateY = useSharedValue(reduceMotion ? 0 : 8);
+  useEffect(() => {
+    if (!isFirstMount.current) return;
+    isFirstMount.current = false;
+    if (reduceMotion) {
+      opacity.value = 1;
+      translateY.value = 0;
+      return;
+    }
+    opacity.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.quad) });
+    translateY.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.quad) });
+  }, [reduceMotion, opacity, translateY]);
+  const style = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: translateY.value }],
+  }));
+  return { style };
+}
+
+/**
+ * replies_count が増加したときに scale 1 → 1.15 → spring back するフック。
+ * コメントアイコンに適用することで「新着返信」を視覚的に強調する。
+ */
+function useCountBumpAnimation(count: number, reduceMotion: boolean) {
+  const prev = useRef(count);
+  const scale = useSharedValue(1);
+  useEffect(() => {
+    if (prev.current !== count) {
+      const grew = count > prev.current;
+      prev.current = count;
+      if (grew && !reduceMotion) {
+        scale.value = withSequence(
+          withTiming(1.15, { duration: 140, easing: Easing.out(Easing.quad) }),
+          withSpring(1, SPRING_SNAPPY),
+        );
+      }
+    }
+  }, [count, reduceMotion, scale]);
+  const style = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+  return { style };
+}
+
+/**
+ * hot スレッドに適用する scale 1→1.05→1 のループパルスフック (1400ms サイクル)。
+ * isHot=false または reduceMotion=true のときは scale=1 で停止する。
+ */
+function useHotPulseAnimation(isHot: boolean, reduceMotion: boolean) {
+  const pulse = useSharedValue(1);
+  useEffect(() => {
+    if (!isHot || reduceMotion) {
+      pulse.value = 1;
+      return;
+    }
+    pulse.value = withRepeat(
+      withSequence(
+        withTiming(1.05, { duration: 700, easing: Easing.inOut(Easing.quad) }),
+        withTiming(1, { duration: 700, easing: Easing.inOut(Easing.quad) }),
+      ),
+      -1,
+      false,
+    );
+  }, [isHot, reduceMotion, pulse]);
+  const style = useAnimatedStyle(() => ({
+    transform: [{ scale: pulse.value }],
+  }));
+  return { style };
+}
+
+// ============================================================
 // ThreadRow — FlashList の 1 行 (animation state-per-row 用に分離)
 // ------------------------------------------------------------
 // 設計:
@@ -828,10 +914,12 @@ function PolishedEmpty({
 //     entrance / hot pulse / comment-count bump アニメを持たせられる
 //   - useReducedMotion() を尊重 — true のとき shared value を最終状態に
 //     固定し、loop / sequence を一切走らせない (worklet 側でも判定)
+//   - 3 つのアニメーションロジックは上の独立フックに分離
 // ============================================================
 type ThreadRowProps = {
   item: BBSThread;
-  community: { name: string; icon_emoji: string } | undefined;
+  /** community_id に紐付く表示用メタ。コミュバッジ表示に使う。未紐付きは undefined */
+  community: CommunityMeta | undefined;
   isDesktop: boolean;
   containerMaxWidth: number;
   showResults: boolean;
@@ -862,64 +950,10 @@ function ThreadRowBase({
   const recentH = (Date.now() - lastReplyMs) / 3600000;
   const isHot = item.replies_count > 20 || (item.replies_count > 10 && recentH < 24);
 
-  // --- entrance: opacity 0 → 1 + translateY 8 → 0 over 220ms (初回 mount のみ) ---
-  const isFirstMount = useRef(true);
-  const entranceOpacity = useSharedValue(reduceMotion ? 1 : 0);
-  const entranceTranslateY = useSharedValue(reduceMotion ? 0 : 8);
-  useEffect(() => {
-    if (!isFirstMount.current) return;
-    isFirstMount.current = false;
-    if (reduceMotion) {
-      entranceOpacity.value = 1;
-      entranceTranslateY.value = 0;
-      return;
-    }
-    entranceOpacity.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.quad) });
-    entranceTranslateY.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.quad) });
-  }, [reduceMotion, entranceOpacity, entranceTranslateY]);
-  const entranceStyle = useAnimatedStyle(() => ({
-    opacity: entranceOpacity.value,
-    transform: [{ translateY: entranceTranslateY.value }],
-  }));
-
-  // --- comment count bump: replies_count が増えた時に icon を 1 → 1.15 → spring back ---
-  const prevCommentCount = useRef(item.replies_count);
-  const commentScale = useSharedValue(1);
-  useEffect(() => {
-    if (prevCommentCount.current !== item.replies_count) {
-      const grew = item.replies_count > prevCommentCount.current;
-      prevCommentCount.current = item.replies_count;
-      if (grew && !reduceMotion) {
-        commentScale.value = withSequence(
-          withTiming(1.15, { duration: 140, easing: Easing.out(Easing.quad) }),
-          withSpring(1, SPRING_SNAPPY),
-        );
-      }
-    }
-  }, [item.replies_count, reduceMotion, commentScale]);
-  const commentScaleStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: commentScale.value }],
-  }));
-
-  // --- hot indicator pulse: 1 → 1.05 → 1 loop, 1400ms (is_hot のときだけ) ---
-  const hotPulse = useSharedValue(1);
-  useEffect(() => {
-    if (!isHot || reduceMotion) {
-      hotPulse.value = 1;
-      return;
-    }
-    hotPulse.value = withRepeat(
-      withSequence(
-        withTiming(1.05, { duration: 700, easing: Easing.inOut(Easing.quad) }),
-        withTiming(1, { duration: 700, easing: Easing.inOut(Easing.quad) }),
-      ),
-      -1,
-      false,
-    );
-  }, [isHot, reduceMotion, hotPulse]);
-  const hotPulseStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: hotPulse.value }],
-  }));
+  // アニメーションロジックは専用フックに分離 — ThreadRowBase は JSX のみ担当
+  const { style: entranceStyle } = useEntranceAnimation(reduceMotion);
+  const { style: commentScaleStyle } = useCountBumpAnimation(item.replies_count, reduceMotion);
+  const { style: hotPulseStyle } = useHotPulseAnimation(isHot, reduceMotion);
 
   return (
     <Animated.View

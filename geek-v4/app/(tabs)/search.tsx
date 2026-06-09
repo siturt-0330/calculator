@@ -26,7 +26,7 @@
 //   - components/search/* (C3 が拡張)
 //   - lib/api/* (C2 が拡張) — 本ファイルは hook 経由でのみ参照
 // ============================================================
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -276,17 +276,6 @@ export default function SearchScreen() {
     position: number;
     startedAt: number;
   } | null>(null);
-
-  useFocusEffect(
-    useCallback(() => {
-      // focus 戻り時に未送信 dwell があれば送る
-      return () => {
-        // cleanup (= unfocus 時) ではなく、focus 時に判定したい — useFocusEffect は
-        // setup 関数が focus 時に呼ばれるので、ここに来た瞬間に「直前まで unfocus」だった
-        // ことを意味する。ただし初回 mount でも呼ばれるので dwellRef が null なら no-op。
-      };
-    }, []),
-  );
 
   useFocusEffect(
     useCallback(() => {
@@ -753,7 +742,7 @@ export default function SearchScreen() {
 // 各 row は内側で paddingHorizontal: SP['4'] を持つ前提で並べる
 // (= 親 ScrollView は左右 padding を持たない)。
 // ============================================================
-function DiscoveryView() {
+const DiscoveryView = memo(function DiscoveryView() {
   // 参加ボタン / カードタップの共通ハンドラ (二重タップは joiningIds Set でガード)
   const { joiningIds, onJoin, onPressCommunity } = useJoinCommunity();
 
@@ -828,7 +817,7 @@ function DiscoveryView() {
       <InterestCategories />
     </View>
   );
-}
+});
 
 // ============================================================
 // TrendingTopicsRow — useTrendingTopics で server-side ランキング
@@ -837,7 +826,7 @@ function DiscoveryView() {
 // 本 row は v2 (server BM25 + recency window) の topic を chip 列で表示。
 // search 画面に「今 Geek で何が話題か」を一目で見せる入口になる。
 // ============================================================
-function TrendingTopicsRow() {
+const TrendingTopicsRow = memo(function TrendingTopicsRow() {
   const router = useRouter();
   const { data: topics } = useTrendingTopics(24, 12);
   const items = topics ?? [];
@@ -915,7 +904,7 @@ function TrendingTopicsRow() {
       </ScrollView>
     </View>
   );
-}
+});
 
 // ============================================================
 // ResultSection — 検索結果のセクションフレーム
@@ -923,7 +912,7 @@ function TrendingTopicsRow() {
 // SF Pro semibold 17pt 相当のヘッダー (T.h4 = 16 / 700 を流用)。
 // preview limit を超えたら「もっと見る (+N)」を下に出す。
 // ============================================================
-function ResultSection({
+const ResultSection = memo(function ResultSection({
   title,
   icon,
   total,
@@ -1000,4 +989,4 @@ function ResultSection({
       )}
     </View>
   );
-}
+});

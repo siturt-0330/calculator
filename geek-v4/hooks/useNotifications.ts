@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchNotifications, markAllRead, markRead as markReadApi } from '../lib/api/notifications';
 import { fetchMyNotificationPreferences } from '../lib/api/notificationPreferences';
@@ -59,58 +60,57 @@ export function useNotifications() {
   );
   const unreadCount = notifications.filter((n) => !n.read).length;
 
+  // ============================================================
+  // markAllRead — 楽観 update + snapshot/revert
+  // ============================================================
+  // useCallback で参照を安定化 (毎 render に新関数を作らない)。
+  // NOTIF_KEY は userId から派生し、userId が変わる (= ユーザー切替) まで stable。
+  // ============================================================
+  const handleMarkAllRead = useCallback(async () => {
+    const prev = qc.getQueryData<Notification[]>(NOTIF_KEY);
+    // 1) optimistic: 即時に全件 read=true 化
+    qc.setQueryData<Notification[]>(NOTIF_KEY, (old) =>
+      (old ?? []).map((n) => ({ ...n, read: true })),
+    );
+    try {
+      await markAllRead();
+    } catch (e) {
+      // 2) revert
+      if (prev !== undefined) qc.setQueryData<Notification[]>(NOTIF_KEY, prev);
+      const msg = e instanceof Error ? e.message : '';
+      useToastStore.getState().show(
+        msg ? `既読化に失敗しました: ${msg}` : '既読化に失敗しました',
+        'error',
+      );
+      throw e;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qc, NOTIF_KEY]);
+
+  // ============================================================
+  // markRead — 単一通知の既読化 (タップ時)。optimistic + 静かに revert。
+  // ============================================================
+  // 失敗時は toast を出さない: タップは遷移を伴うので、軽微な既読同期失敗で
+  // ユーザーの導線を邪魔しない (次回 fetch / realtime で server-truth に収束)。
+  const handleMarkRead = useCallback(async (id: string) => {
+    const prev = qc.getQueryData<Notification[]>(NOTIF_KEY);
+    qc.setQueryData<Notification[]>(NOTIF_KEY, (old) =>
+      (old ?? []).map((n) => (n.id === id ? { ...n, read: true } : n)),
+    );
+    try {
+      await markReadApi(id);
+    } catch {
+      if (prev !== undefined) qc.setQueryData<Notification[]>(NOTIF_KEY, prev);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qc, NOTIF_KEY]);
+
   return {
     notifications,
     unreadCount,
     loading: q.isLoading,
-    // ============================================================
-    // markAllRead — 楽観 update + snapshot/revert
-    // ============================================================
-    // 改訂理由 (2026-05-28):
-    //   旧版は server RTT 完了 (await markAllRead()) 後に setQueryData → UI 反映に
-    //   数百 ms〜数秒のラグがあった。さらに失敗時の revert がないため、ネットワーク
-    //   エラーで「既読化したつもりが未読のまま」という状態の食い違いが残っていた。
-    //   pattern を useReactionToggle 等に合わせる:
-    //     1) 即時 optimistic update (UI 反映 0ms)
-    //     2) snapshot を保持
-    //     3) server 失敗時は snapshot で revert + toast
-    //     4) realtime UPDATE で server-truth 確定
-    // ============================================================
-    markAllRead: async () => {
-      const prev = qc.getQueryData<Notification[]>(NOTIF_KEY);
-      // 1) optimistic: 即時に全件 read=true 化
-      qc.setQueryData<Notification[]>(NOTIF_KEY, (old) =>
-        (old ?? []).map((n) => ({ ...n, read: true })),
-      );
-      try {
-        await markAllRead();
-      } catch (e) {
-        // 2) revert
-        if (prev !== undefined) qc.setQueryData<Notification[]>(NOTIF_KEY, prev);
-        const msg = e instanceof Error ? e.message : '';
-        useToastStore.getState().show(
-          msg ? `既読化に失敗しました: ${msg}` : '既読化に失敗しました',
-          'error',
-        );
-        throw e;
-      }
-    },
-    // ============================================================
-    // markRead — 単一通知の既読化 (タップ時)。optimistic + 静かに revert。
-    // ============================================================
-    // 失敗時は toast を出さない: タップは遷移を伴うので、軽微な既読同期失敗で
-    // ユーザーの導線を邪魔しない (次回 fetch / realtime で server-truth に収束)。
-    markRead: async (id: string) => {
-      const prev = qc.getQueryData<Notification[]>(NOTIF_KEY);
-      qc.setQueryData<Notification[]>(NOTIF_KEY, (old) =>
-        (old ?? []).map((n) => (n.id === id ? { ...n, read: true } : n)),
-      );
-      try {
-        await markReadApi(id);
-      } catch {
-        if (prev !== undefined) qc.setQueryData<Notification[]>(NOTIF_KEY, prev);
-      }
-    },
+    markAllRead: handleMarkAllRead,
+    markRead: handleMarkRead,
   };
 }
 

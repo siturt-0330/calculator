@@ -2,7 +2,7 @@ import { memo, useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useColors } from '../../hooks/useColors';
 import type { ColorPalette } from '../../lib/theme/palettes';
-import { R, SP } from '../../design/tokens';
+import { SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 
 // ============================================================

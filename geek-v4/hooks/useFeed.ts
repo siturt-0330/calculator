@@ -121,8 +121,10 @@ export function useFeed() {
   // 各 post に紐付いた community のメタを 1 リクエストで取得 (FlashList N+1 回避)
   // postIds が空のうちは fetch しない (enabled で抑止)
   // ID リストの中身が変わらない render では同じ参照を保つ (hash で安定化)
-  const postIdsHash = rawPosts.map((p) => p.id).join('|');
-  const postIds = useMemo(() => rawPosts.map((p) => p.id), [postIdsHash]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ★ postIdsHash を useMemo で安定化: rawPosts が変わらない render で hash が再計算されるのを防ぐ。
+  //   postIds の useMemo 依存を rawPosts に直接置くことで eslint-disable hack が不要になる。
+  const postIdsHash = useMemo(() => rawPosts.map((p) => p.id).join('|'), [rawPosts]);
+  const postIds = useMemo(() => rawPosts.map((p) => p.id), [rawPosts]);
   const communitiesQ = useReactQuery({
     queryKey: ['feed-post-communities', postIdsHash],
     queryFn: () => fetchCommunitiesForPosts(postIds),
@@ -135,8 +137,10 @@ export function useFeed() {
   const communitiesByPost = communitiesQ.data ?? {};
 
   // Smart Rank: 全 sort モードで個人化スコアを適用 (mode により primary 軸の重みを切替)
-  const aggregate = useSearchSignalsStore((s) => s.aggregate);
-  const signals = useMemo(() => aggregate(), [aggregate]);
+  // ★ aggregate() を selector の中で呼ぶことで store state が変化するたびに再計算される。
+  //   useMemo(() => aggregate(), [aggregate]) では aggregate が stable ref のため signals が
+  //   mount 後に更新されない (audit 指摘: stale search signals)。
+  const signals = useSearchSignalsStore((s) => s.aggregate());
   // CTR タグ集計: 全ての過去クエリのタグクリック数を合計
   const queryToTagCount = useSearchClickStore((s) => s.queryToTagCount);
   const ctrBoosts = useMemo(() => {
@@ -173,11 +177,14 @@ export function useFeed() {
   const cooccur = useTagCooccurStore((s) => s.cooccur);
   const cooccurHydrate = useTagCooccurStore((s) => s.hydrate);
   const cooccurEnsureFresh = useTagCooccurStore((s) => s.ensureFresh);
-  const cooccurHydrated = useTagCooccurStore((s) => s.hydrated);
-  useEffect(() => { void cooccurHydrate(); }, [cooccurHydrate]);
+  // ★ 2 つの独立 effect を 1 つに統合: hydrate → (for-you 時のみ) ensureFresh の
+  //   順序を then() で明示することで、cooccurHydrated という中間 state への依存を排除。
+  //   cooccurHydrate / cooccurEnsureFresh は Zustand action selector で stable ref。
   useEffect(() => {
-    if (cooccurHydrated && sort === 'for-you') void cooccurEnsureFresh();
-  }, [cooccurHydrated, cooccurEnsureFresh, sort]);
+    void cooccurHydrate().then(() => {
+      if (sort === 'for-you') void cooccurEnsureFresh();
+    });
+  }, [cooccurHydrate, cooccurEnsureFresh, sort]);
 
   const interestTagsNorm = useMemo(() => {
     const s = new Set<string>();

@@ -17,7 +17,7 @@
 // 公開範囲: 投稿/コメントは他人も見られる(公開された姿) / 保存は自分だけ(RLS + Lock notice)。
 // =============================================================================
 
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   View,
   Text,
@@ -69,6 +69,14 @@ import { ActionSheet } from '../../components/ui/ActionSheet';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useToastStore } from '../../stores/toastStore';
 import { CommunityIcon } from '../../components/ui/CommunityIcon';
+
+// -----------------------------------------------------------------------------
+// 定数
+// -----------------------------------------------------------------------------
+/** MypageStickyBar の実高(insets.top + この値 = sticky タブの top 位置) */
+const STICKY_BAR_H = 52;
+/** 擬似 sticky タブ複製のフェードイン開始オフセット(ヒーロー末から何px手前で始まるか) */
+const STICKY_FADE_OFFSET = 40;
 
 // -----------------------------------------------------------------------------
 // データ型 + 取得(旧 UserPostsList / SavedPostsList の fetch を本画面に集約)
@@ -234,7 +242,7 @@ export default function MypageScreen() {
   // ---- スクロール駆動値(全 collapse / parallax / ミニバーの単一ソース)----
   const scrollY = useSharedValue(0);
   // 擬似 sticky タブ複製の出現しきい値(ヒーロー実高 − ミニバー高)。
-  const stickyThreshold = HERO_H - (insets.top + 52) - 20;
+  const stickyThreshold = HERO_H - (insets.top + STICKY_BAR_H) - 20;
   // ★ Web 対応: useAnimatedScrollHandler を plain FlashList の onScroll に渡すと
   //   react-native-web の ScrollView が `_b.call is not a function` で落ちる
   //   (reanimated の worklet ハンドラは Animated コンポーネント専用)。通常の JS
@@ -252,8 +260,8 @@ export default function MypageScreen() {
 
   // 擬似 sticky タブ複製の opacity(ヒーロー末で 0→1)。
   const stickyTabStyle = useAnimatedStyle(() => {
-    const start = HERO_H - (insets.top + 52) - 40;
-    const end = HERO_H - (insets.top + 52);
+    const end = HERO_H - (insets.top + STICKY_BAR_H);
+    const start = end - STICKY_FADE_OFFSET;
     return { opacity: interpolate(scrollY.value, [start, end], [0, 1], Extrapolation.CLAMP) };
   });
 
@@ -339,10 +347,12 @@ export default function MypageScreen() {
         qc.invalidateQueries({ queryKey: ['user-comments'] }),
         qc.invalidateQueries({ queryKey: ['saved-posts'] }),
       ]);
+    } catch {
+      showToast('更新に失敗しました', 'error');
     } finally {
       setRefreshing(false);
     }
-  }, [qc, refreshing]);
+  }, [qc, refreshing, showToast]);
 
   // ---- タブ操作: 同じタブ再タップで先頭へ、別タブは切替 ----
   const onSelectTab = useCallback(
@@ -442,7 +452,13 @@ export default function MypageScreen() {
         case 'lock':
           return <LockNotice />;
         case 'empty':
-          return <EmptyForTab tab={item.tab} router={router} />;
+          return (
+            <EmptyForTab
+              tab={item.tab}
+              onPostAction={() => router.push('/post/create' as never)}
+              onFeedAction={() => router.push('/(tabs)/feed' as never)}
+            />
+          );
         case 'post':
           return (
             <PostRow
@@ -521,7 +537,7 @@ export default function MypageScreen() {
             position: 'absolute',
             left: 0,
             right: 0,
-            top: insets.top + 52,
+            top: insets.top + STICKY_BAR_H,
             backgroundColor: C.bg, // blur ネスト回避(ミニバーが既に blur 面)= solid
             zIndex: 4,
           },
@@ -620,7 +636,7 @@ function keyExtractor(item: Row): string {
 // -----------------------------------------------------------------------------
 // 行ラッパ(MyEntryRow に metaNode/badgeNode/quoteNode を組んで渡す)
 // -----------------------------------------------------------------------------
-function PostMeta({ likes, comments, at }: { likes: number; comments: number; at: string }): ReactNode {
+const PostMeta = memo(function PostMeta({ likes, comments, at }: { likes: number; comments: number; at: string }): ReactNode {
   return (
     <>
       <MetaNum Icon={MetaHeartIcon} value={likes} />
@@ -628,11 +644,11 @@ function PostMeta({ likes, comments, at }: { likes: number; comments: number; at
       <Text style={[T.caption, { color: C.text4 }]}>· {formatRelative(at)}</Text>
     </>
   );
-}
+});
 
 // 投稿が「どのコミュニティに投稿されているか」を示す小型 chip(アイコン + 名前)。
 // カード本体タップ(投稿を開く)と衝突しないよう stopPropagation で握る。
-function CommunityChip({ community, onPress }: { community: PostCommunityRef; onPress: () => void }) {
+const CommunityChip = memo(function CommunityChip({ community, onPress }: { community: PostCommunityRef; onPress: () => void }): ReactNode {
   return (
     <Pressable
       onPress={(e) => {
@@ -670,9 +686,9 @@ function CommunityChip({ community, onPress }: { community: PostCommunityRef; on
       </Text>
     </Pressable>
   );
-}
+});
 
-function PostRow({
+const PostRow = memo(function PostRow({
   post,
   community,
   onPress,
@@ -686,7 +702,7 @@ function PostRow({
   onOpenImage: (url: string) => void;
   onOpenCommunity: (id: string) => void;
   onMore: () => void;
-}) {
+}): ReactNode {
   const title = post.title?.trim() || null;
   const badge = !post.is_public ? (
     <Text
@@ -723,9 +739,9 @@ function PostRow({
       accessibilityLabel="投稿を開く"
     />
   );
-}
+});
 
-function SavedRow({
+const SavedRow = memo(function SavedRow({
   post,
   community,
   onPress,
@@ -737,7 +753,7 @@ function SavedRow({
   onPress: () => void;
   onOpenImage: (url: string) => void;
   onOpenCommunity: (id: string) => void;
-}) {
+}): ReactNode {
   const title = post.title?.trim() || null;
   return (
     <MyEntryRow
@@ -756,9 +772,9 @@ function SavedRow({
       accessibilityLabel="保存した投稿を開く"
     />
   );
-}
+});
 
-function CommentRow({
+const CommentRow = memo(function CommentRow({
   comment,
   onPress,
   onOpenImage,
@@ -768,7 +784,7 @@ function CommentRow({
   onPress: () => void;
   onOpenImage: (url: string) => void;
   onMore: () => void;
-}) {
+}): ReactNode {
   const body = comment.content?.trim() || '';
   const post = comment.post;
   const source = post ? post.title?.trim() || post.content?.trim().slice(0, 40) || '投稿' : null;
@@ -804,12 +820,12 @@ function CommentRow({
       accessibilityLabel="コメントした投稿を開く"
     />
   );
-}
+});
 
 // -----------------------------------------------------------------------------
 // Lock notice(保存タブ専用「自分だけ」宣言)— 安心はグレーで語る(1画面1アクセント)
 // -----------------------------------------------------------------------------
-function LockNotice() {
+const LockNotice = memo(function LockNotice(): ReactNode {
   return (
     <View
       style={{
@@ -830,21 +846,31 @@ function LockNotice() {
       <Text style={[T.caption, { color: C.text3, flex: 1 }]}>保存済みはあなただけが見られます</Text>
     </View>
   );
-}
+});
 
 // -----------------------------------------------------------------------------
 // 空状態(「欠落」でなく「これから」)— EmptyState の circle は常に紫(仕様既知)
 // -----------------------------------------------------------------------------
-function EmptyForTab({ tab, router }: { tab: ProfileTabKey; router: ReturnType<typeof useRouter> }) {
+function EmptyForTab({
+  tab,
+  onPostAction,
+  onFeedAction,
+}: {
+  tab: ProfileTabKey;
+  /** 「投稿する」ボタン押下時(posts タブ専用) */
+  onPostAction: () => void;
+  /** 「フィードを見る」ボタン押下時(comments / saved タブ) */
+  onFeedAction: () => void;
+}): ReactNode {
   if (tab === 'posts') {
     return (
       <EmptyState
         emoji="✍️"
         tone="accent"
         title="まだ、最初の一編を書いていません"
-        message={'“好き”を、匿名で気軽に。最初の記録がここに綴じられます。'}
+        message={'"好き"を、匿名で気軽に。最初の記録がここに綴じられます。'}
         actionLabel="投稿する"
-        onAction={() => router.push('/post/create' as never)}
+        onAction={onPostAction}
       />
     );
   }
@@ -856,7 +882,7 @@ function EmptyForTab({ tab, router }: { tab: ProfileTabKey; router: ReturnType<t
         title="まだ声を残していません"
         message="気になる記事に、あなたの言葉を。残したコメントはここに集まります。"
         actionLabel="フィードを見る"
-        onAction={() => router.push('/(tabs)/feed' as never)}
+        onAction={onFeedAction}
       />
     );
   }
@@ -867,7 +893,7 @@ function EmptyForTab({ tab, router }: { tab: ProfileTabKey; router: ReturnType<t
       title="切り抜きはまだ空っぽです"
       message="あとで読み返したい投稿は ブックマーク を。保存はあなただけが見られます。"
       actionLabel="フィードを見る"
-      onAction={() => router.push('/(tabs)/feed' as never)}
+      onAction={onFeedAction}
     />
   );
 }

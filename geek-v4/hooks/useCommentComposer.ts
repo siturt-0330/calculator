@@ -1,0 +1,305 @@
+// ============================================================
+// useCommentComposer — インラインコメント/返信コンポーザーの状態と操作
+// ============================================================
+// PostDetailScreen から抽出した状態:
+//   - replyTarget, commentText, images, video
+//   - posting, pickingImage, pickingVideo, composerActive
+//   - composerRef, canPost
+// 操作:
+//   - handleReply(comment)   返信モードにしてフォーカス
+//   - pickImage()            画像ライブラリを開いて選択
+//   - pickVideo()            動画ライブラリを開いて選択
+//   - submitComment()        コメント/返信を送信
+// ============================================================
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform, TextInput } from 'react-native';
+import { useQueryClient } from '@tanstack/react-query';
+import * as ImagePicker from 'expo-image-picker';
+import { createComment } from '../lib/api/comments';
+import { uploadPostImage, uploadPostVideo, validateVideoSource } from '../lib/media';
+import { makeWebPreviewDataUrl } from '../lib/image';
+import { peekRate, rateLimitMessage } from '../lib/rateLimit';
+import { pseudonymFor } from '../lib/utils/pseudonym';
+import { hap } from '../design/haptics';
+import { useToastStore } from '../stores/toastStore';
+import { useAuthStore } from '../stores/authStore';
+import type { Comment } from '../types/models';
+
+// インラインコンポーザーで扱うローカル動画 (アップロード前)
+export type LocalVideo = { uri: string; mime: string; ext: string; size: number };
+
+export interface CommentComposerState {
+  replyTarget: Comment | null;
+  commentText: string;
+  images: string[];
+  video: LocalVideo | null;
+  posting: boolean;
+  pickingImage: boolean;
+  pickingVideo: boolean;
+  composerActive: boolean;
+  canPost: boolean;
+}
+
+export interface CommentComposerHandlers {
+  handleReply: (c: Comment) => void;
+  setReplyTarget: (c: Comment | null) => void;
+  setCommentText: (t: string) => void;
+  setComposerActive: (v: boolean) => void;
+  setImages: React.Dispatch<React.SetStateAction<string[]>>;
+  setVideo: (v: LocalVideo | null) => void;
+  pickImage: () => Promise<void>;
+  pickVideo: () => Promise<void>;
+  submitComment: () => Promise<void>;
+}
+
+export interface UseCommentComposerResult {
+  composerState: CommentComposerState;
+  handlers: CommentComposerHandlers;
+  composerRef: React.RefObject<TextInput>;
+  scrollToEnd: () => void;
+}
+
+/**
+ * インラインコメント/返信コンポーザーの状態と操作を束ねる Hook。
+ *
+ * @param postId      投稿 ID
+ * @param scrollRef   送信後の自動スクロール用 ScrollView ref
+ */
+export function useCommentComposer(
+  postId: string,
+  scrollRef: React.RefObject<{ scrollToEnd: (opts?: { animated?: boolean }) => void }>,
+): UseCommentComposerResult {
+  const qc = useQueryClient();
+  const show = useToastStore((s) => s.show);
+  const composerRef = useRef<TextInput>(null);
+
+  // アンマウント後に setState を呼ばないためのフラグ
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  const [replyTarget, setReplyTarget] = useState<Comment | null>(null);
+  const [commentText, setCommentText] = useState('');
+  const [images, setImages] = useState<string[]>([]);
+  const [video, setVideo] = useState<LocalVideo | null>(null);
+  const [posting, setPosting] = useState(false);
+  const [pickingImage, setPickingImage] = useState(false);
+  const [pickingVideo, setPickingVideo] = useState(false);
+  const [composerActive, setComposerActive] = useState(false);
+
+  const canPost =
+    (commentText.trim().length > 0 || images.length > 0 || !!video) && !posting;
+
+  // ----------------------------------------------------------------
+  // handleReply — 返信モード起動
+  // ----------------------------------------------------------------
+  const handleReply = useCallback((c: Comment) => {
+    setReplyTarget(c);
+    setComposerActive(true);
+    const handle = pseudonymFor(c.pseudonym_id).handle;
+    setCommentText((prev) => (prev.trim().length === 0 ? `@${handle} ` : prev));
+    setTimeout(() => composerRef.current?.focus(), 50);
+  }, []);
+
+  // ----------------------------------------------------------------
+  // pickImage — Web は data URL 前処理で blob 地雷回避 (lib/image.ts と同方針)
+  // ----------------------------------------------------------------
+  const pickImage = useCallback(async () => {
+    if (pickingImage) return;
+    setPickingImage(true);
+    try {
+      const r = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: 'images',
+        allowsMultipleSelection: true,
+        quality: 0.85,
+        selectionLimit: 4,
+      });
+      if (!r.canceled) {
+        const uris = r.assets.map((a) => a.uri).slice(0, 4);
+        if (Platform.OS === 'web') {
+          const processed = await Promise.all(
+            uris.map(async (u) => {
+              try {
+                return await makeWebPreviewDataUrl(u, 1600, 0.85);
+              } catch (e) {
+                console.warn('[comment-composer] web image pre-process failed:', e);
+                return u;
+              }
+            }),
+          );
+          setImages(processed.slice(0, 4));
+        } else {
+          setImages(uris);
+        }
+        hap.tap();
+      }
+    } catch (e) {
+      console.warn('[comment-composer] pick image failed:', e);
+      show('画像の取得に失敗しました', 'error');
+    } finally {
+      if (mounted.current) setPickingImage(false);
+    }
+  }, [pickingImage, show]);
+
+  // ----------------------------------------------------------------
+  // pickVideo
+  // ----------------------------------------------------------------
+  const pickVideo = useCallback(async () => {
+    if (pickingVideo) return;
+    setPickingVideo(true);
+    try {
+      const r = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: 'videos',
+        allowsMultipleSelection: false,
+        quality: 1,
+      });
+      if (r.canceled || r.assets.length === 0) return;
+      const asset = r.assets[0];
+      if (!asset) return;
+      const v = await validateVideoSource({
+        uri: asset.uri,
+        fileSize: asset.fileSize,
+        mimeType: asset.mimeType,
+      });
+      if (!v.ok) {
+        hap.warn();
+        show(v.reason, 'warn');
+        return;
+      }
+      setVideo({ uri: asset.uri, mime: v.mime, ext: v.ext, size: v.size });
+      hap.confirm();
+    } catch (e) {
+      console.warn('[comment-composer] pick video failed:', e);
+      show('動画の取得に失敗しました', 'error');
+    } finally {
+      if (mounted.current) setPickingVideo(false);
+    }
+  }, [pickingVideo, show]);
+
+  // ----------------------------------------------------------------
+  // submitComment
+  // ----------------------------------------------------------------
+  const submitComment = useCallback(async () => {
+    if (posting) return;
+    if (!commentText.trim() && images.length === 0 && !video) {
+      show('本文・画像・動画のいずれかを入力してください。', 'warn');
+      return;
+    }
+    // userId を async ギャップの前に確定 (stale-closure 防止)
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) {
+      show('ログインし直してください', 'error');
+      return;
+    }
+    // レート制限を upload 前に先読み (超過なら upload せず即 return → 孤児メディア防止)
+    const rl = peekRate('comment');
+    if (!rl.ok) {
+      show(rateLimitMessage('comment', rl.retryAfterMs), 'error');
+      return;
+    }
+    setPosting(true);
+    try {
+      let uploadedMediaUrls: string[] = [];
+      try {
+        const [imageUrls, vidUrls] = await Promise.all([
+          images.length > 0
+            ? Promise.all(images.map((uri) => uploadPostImage(uri, userId)))
+            : Promise.resolve<string[]>([]),
+          video
+            ? uploadPostVideo(video.uri, userId, { mime: video.mime, ext: video.ext }).then(
+                (url) => [url],
+              )
+            : Promise.resolve<string[]>([]),
+        ]);
+        uploadedMediaUrls = [...imageUrls, ...vidUrls];
+      } catch (e) {
+        show(e instanceof Error ? e.message : String(e), 'error');
+        return;
+      }
+
+      await createComment(postId, commentText, {
+        parentId: replyTarget?.id ?? null,
+        replyToId: replyTarget?.id ?? null,
+        mediaUrls: uploadedMediaUrls,
+      });
+
+      hap.success();
+      show(replyTarget ? '返信しました' : 'コメントしました', 'success');
+      if (mounted.current) {
+        setCommentText('');
+        setImages([]);
+        setVideo(null);
+        setReplyTarget(null);
+        setComposerActive(false);
+        composerRef.current?.blur();
+      }
+      void qc.invalidateQueries({ queryKey: ['post-comments', postId] });
+      // 送信後、新規コメントが見える位置まで自動スクロール (再フェッチ反映待ち 80ms)
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    } catch (e: unknown) {
+      hap.error();
+      const msg = e instanceof Error ? e.message : String(e);
+      let userMsg = '送信に失敗しました。再度お試しください。';
+      if (msg.includes('row-level security') || msg.includes('RLS')) {
+        userMsg = '権限エラー。ログインし直してください。';
+      } else if (msg.includes('Not authenticated') || msg.includes('未ログイン')) {
+        userMsg = 'ログインし直してください。';
+      } else if (msg.includes('Network') || msg.includes('Failed to fetch')) {
+        userMsg = '通信エラー。電波を確認してください。';
+      } else if (
+        msg.includes('速すぎ') ||
+        msg.includes('時間を置いて') ||
+        msg.includes('ペースが')
+      ) {
+        userMsg = msg;
+      }
+      show(userMsg, 'error');
+    } finally {
+      if (mounted.current) setPosting(false);
+    }
+  }, [
+    posting,
+    commentText,
+    images,
+    video,
+    replyTarget,
+    postId,
+    qc,
+    show,
+    scrollRef,
+  ]);
+
+  const scrollToEnd = useCallback(() => {
+    scrollRef.current?.scrollToEnd({ animated: true });
+  }, [scrollRef]);
+
+  return {
+    composerState: {
+      replyTarget,
+      commentText,
+      images,
+      video,
+      posting,
+      pickingImage,
+      pickingVideo,
+      composerActive,
+      canPost,
+    },
+    handlers: {
+      handleReply,
+      setReplyTarget,
+      setCommentText,
+      setComposerActive,
+      setImages,
+      setVideo,
+      pickImage,
+      pickVideo,
+      submitComment,
+    },
+    composerRef,
+    scrollToEnd,
+  };
+}

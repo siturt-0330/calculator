@@ -9,6 +9,8 @@ import { swallow } from '../lib/swallow';
 import { getBool, setBool, remove as storageRemove, contains as storageContains } from '../lib/storage';
 import { checkRate, rateLimitMessage } from '../lib/rateLimit';
 import { useOfflineQueueStore } from './offlineQueueStore';
+import { useDraftStore } from './draftStore';
+import { useBlockStore } from './blockStore';
 
 // onboarded 状態のローカルキャッシュ — プロフィール取得失敗時のフォールバック
 //
@@ -61,12 +63,50 @@ type SignInResult = {
 
 type AuthState = {
   user: AppUser | null;
+  /** true になったら auth の初期化 (session 復元 / 有効期限確認) が完了している。 */
   hydrated: boolean;
+
+  /**
+   * アプリ起動時に 1 回だけ呼ぶ初期化アクション。
+   * - auth listener / storage listener を登録する
+   * - 401 → refreshSession → signOut の自動ハンドラを設定する
+   * - 永続化 session を復元し、有効期限が切れていれば refreshSession を試みる
+   * - 完了後に `hydrated: true` を set する (最悪 13s のタイムアウトで強制完了)
+   */
   hydrate: () => Promise<void>;
+
+  /**
+   * メール/パスワードでサインインする。
+   * @returns `next: 'feed'` = onboarded ユーザー / `next: 'onboarding'` = 初回セットアップが必要
+   */
   signIn: (email: string, password: string) => Promise<SignInResult>;
+
+  /**
+   * 新規アカウントを作成する。
+   * Supabase の email confirmation 設定に応じて 3 通りの結果を返す:
+   * - `autoLoggedIn: true` — confirmation 不要ですぐにログイン済
+   * - `needsConfirmEmail: true` — confirmation メールを送信済
+   * - `error` — 登録失敗
+   */
   signUp: (email: string, password: string, phone?: string) => Promise<{ error: string | null; autoLoggedIn: boolean; needsConfirmEmail: boolean }>;
+
+  /**
+   * ログアウトする。シングルフライト lock で二重実行を防ぐ。
+   * - Supabase session を破棄し、全 realtime channel を detach する
+   * - オフラインキュー / 下書き / ブロックリスト / onboarded キャッシュをクリアする
+   */
   signOut: () => Promise<void>;
+
+  /**
+   * user を直接セットする (onboarding 完了時など)。
+   * `onboarded: true` の場合は MMKV / localStorage にも同期キャッシュを書く。
+   */
   setUser: (user: AppUser | null) => void;
+
+  /**
+   * プロフィールを再取得して user state に merge する。
+   * セッション中にアカウント状態が変化した場合 (suspended) は signOut を呼ぶ。
+   */
   refreshProfile: () => Promise<void>;
 };
 
@@ -79,10 +119,21 @@ async function fetchProfile(userId: string) {
   return data as { nickname?: string; onboarded?: boolean; phone?: string; account_state?: 'healthy' | 'caution' | 'restricted' | 'warned' | 'suspended' } | null;
 }
 
-// 任意の Promise に timeout を付ける (timeout 時は null を返す)
+// 任意の Promise に timeout を付ける (timeout または rejection 時は null を返す)
+// ★ 注意: rejection と timeout は区別されず両方 null を返す。
+//   呼び出し元は「null = タイムアウト or ネットワークエラー」として扱い、
+//   いずれも安全側 (session 喪失とみなしてリカバリを試みる) に倒す設計。
+//   rejection の詳細を知りたい場合は p 側で catch して Sentry に送ること。
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([
-    p.catch(() => null),
+    p.catch((err: unknown) => {
+      // rejection をログに残して Sentry が拾えるようにする (timeout との区別は
+      // できないが、エラー内容は breadcrumb として残る)
+      if (err instanceof Error) {
+        console.warn('[withTimeout] promise rejected:', err.message);
+      }
+      return null;
+    }),
     new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
   ]);
 }
@@ -106,28 +157,45 @@ async function buildUser(authUser: User): Promise<AppUser> {
 }
 
 // アカウント状態が問題なら強制 signOut してエラーを返す
-// 戻り値: null = OK, string = エラーメッセージ
+// 戻り値: null = OK (ログイン続行), string = エラーメッセージ (強制 signOut)
 //
-// 重要 policy: ログインを完全にブロックするのは 'suspended' (運営が手動凍結) のみ。
-// 'restricted' / 'warned' (concern/post 比率による自動算出) は誤発火が多いため
-// ログインは通し、UI 側で警告バナーを出す方針 (将来実装)。
-//   - 新規 1 投稿のみのユーザーが 1 通報を受けただけで ratio=1.0 → restricted となり
-//     ログイン不能になっていた。これは「制限してる」エラーで詰まる根本原因。
-//   - サーバ側トリガー (refresh_account_state) が ratio>=1.0 でフラグするので、
-//     クライアント側は厳格な凍結のみに反応するよう緩和する。
-function checkAccountState(user: AppUser): string | null {
-  // 方針 (2026-06): ハードブロックは廃止。suspended でもログインは許可し、
-  // アプリ内の AccountStateBanner で「停止中・異議申し立て」を表示する方針に変更。
-  // (誤発火による締め出しを避ける。実際の書き込み等の機能制限はサーバ側 RLS/トリガで担保)。
-  // 将来「確実にログイン拒否」したい state (法的 ban 等) が出たらここで文字列を返す。
-  void user;
+// 重要 policy (2026-06): ハードブロックは廃止。suspended でもログインは許可し、
+// アプリ内の AccountStateBanner で「停止中・異議申し立て」を表示する方針に変更。
+// (誤発火による締め出しを避ける。書き込み等の機能制限はサーバ側 RLS/トリガで担保)
+//
+// ★ dead-code 注意: この関数は常に null を返す。下記 3 箇所のコールサイト
+//   (tryRecoverSession / signIn / refreshProfile) の if (stateError) ブランチは
+//   現在デッドコードだが、将来「法的 ban」等で復活させる可能性があるため残す。
+//   ブランチを除去するのではなく、本体を差し替えるだけで機能する構造にしておく。
+function checkAccountState(_user: AppUser): string | null {
+  // suspended ユーザーは AccountStateBanner で in-app 通知 → ここでは拒否しない。
+  // 将来 legal_ban 等の新 state が必要になったら: return 'アカウントが停止されました。';
   return null;
 }
 
+// ============================================================
+// module-scope mutable locks
+// ------------------------------------------------------------
+// ★ 設計上の注意: これらは module スコープの `let` 変数。
+//   Zustand の create() が複数回呼ばれる状況 (テスト / hot-reload) では
+//   すべての store インスタンスが同じ変数を共有する。
+//   テストでは afterEach に `_resetAuthLocks()` を呼ぶこと。
+//   hot-reload 後に `listenerRegistered=true` のまま残ると新 store インスタンスが
+//   auth listener を再登録しなくなる (既知の tradeoff — 開発中は要注意)。
+// ============================================================
 let listenerRegistered = false;
 let storageListenerRegistered = false;
 // 二重 signOut を防ぐ — module-scope lock
 let signOutInFlight = false;
+
+/** テスト用リセット: afterEach で呼ぶことで module-scope lock を初期化する。 */
+export function _resetAuthLocks(): void {
+  listenerRegistered = false;
+  storageListenerRegistered = false;
+  signOutInFlight = false;
+  recoverInFlight = false;
+  lastKnownTokens = null;
+}
 
 // ============================================================
 // F1/F5: 「投稿中・タブ/アプリ復帰時に急に login に戻る」対策の session 復活
@@ -256,6 +324,24 @@ function registerStorageListener(set: (partial: Partial<AuthState>) => void) {
   });
 }
 
+// ============================================================
+// ログアウト時の全ユーザーデータクリア
+// ------------------------------------------------------------
+// signOut から呼ばれる。store を直接 import して getState() 経由で
+// 各 store をリセットする (hook の外でも安全に呼べる getState パターン)。
+// ★ 新しいユーザー固有 store が増えたらここにも追加すること。
+// ============================================================
+function clearAllUserData(userId: string | undefined): void {
+  // 下書き: ローカルキャッシュを全消去 (サーバー側は削除しない)
+  try { useDraftStore.getState().clearAllDrafts(); } catch (e) { swallow('signOut.clearDrafts', e); }
+  // ブロックリスト: ローカルキャッシュを全消去
+  try { useBlockStore.getState().clear(); } catch (e) { swallow('signOut.clearBlocks', e); }
+  // onboarded キャッシュ
+  try {
+    if (userId) storageRemove(onboardedKey(userId));
+  } catch (e) { swallow('signOut.clearOnboarded', e); }
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   hydrated: false,
@@ -361,6 +447,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         set({ user, hydrated: true });
       }
     } catch (e) {
+      // ★ hydrate 全体の catch — ここに到達するのは上記 try 内の予期しない例外のみ
+      //   (各 withTimeout / supabase 呼び出しは個別に catch している)。
+      //   user: null にして hydrated: true を必ずセットし、起動を継続する。
       console.warn('auth hydrate failed:', e);
       if (!hydrationDone) {
         hydrationDone = true;
@@ -553,30 +642,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ user: null });
       // 復活用に控えた token も破棄 (明示 logout なので setSession 復活させない)
       lastKnownTokens = null;
-      // Supabase 側
+      // Supabase 側 — supabase.auth.signOut() が内部 storage adapter 経由で
+      // auth key ('geek-v4-auth') を消してくれる。手動 removeItem は不要かつ
+      // key 名が変わった場合に no-op になるリスクがあるため撤去 (audit 指摘)。
       try { await supabase.auth.signOut(); } catch (e) { console.warn('signOut error:', e); }
       // 全 realtime channel を強制 detach
       try { detachAllChannels(); } catch (e) { console.warn('detachAllChannels error:', e); }
       // オフラインキューをクリア — 別ユーザーでログイン時に前ユーザーのキューが実行されないように
       try { useOfflineQueueStore.getState().clear(); } catch (e) { console.warn('offlineQueue clear error:', e); }
-      // onboarded キャッシュ + supabase auth キーを掃除
-      // - onboarded は MMKV / localStorage 経由 (同期)
-      // - supabase auth の storage 自体は supabase.auth.signOut() が
-      //   storage.removeItem('geek-v4-auth') を呼んでくれるが、念のため
-      //   旧 AsyncStorage 残骸も両方掃除して移行漏れを防ぐ。
-      try {
-        if (u) storageRemove(onboardedKey(u.id));
-      } catch (e) { swallow('storage.onboarded.remove', e); }
-      try {
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          window.localStorage.removeItem('geek-v4-auth');
-        } else {
-          // 旧 AsyncStorage に残骸があるかもしれないので削除
-          // (新規 session は SecureStore に保存される — そちらは
-          //  supabase.auth.signOut() が storage adapter 経由で削除済み)
-          await AsyncStorage.removeItem('geek-v4-auth');
-        }
-      } catch (e) { swallow('storage.auth-key.remove', e); }
+      // ユーザー固有データを全クリア (下書き / ブロックリスト / onboarded キャッシュ)
+      clearAllUserData(u?.id);
+      // 旧 AsyncStorage 残骸も掃除 (native のみ。web は supabase.auth.signOut() が処理済)
+      if (Platform.OS !== 'web') {
+        try { await AsyncStorage.removeItem('geek-v4-auth'); } catch (e) { swallow('storage.auth-key.remove', e); }
+      }
     } finally {
       signOutInFlight = false;
     }

@@ -14,6 +14,7 @@
 //   - 成功時は invalidate でサーバー真値に同期
 // ============================================================
 
+import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   kickMember,
@@ -120,14 +121,19 @@ export function useCommunityReports(communityId: string | undefined): {
 // ============================================================
 // 共通: invalidate ヘルパ + toast
 // ============================================================
+/**
+ * コミュニティ mod 関連の全 query を invalidate するコールバックを返す。
+ * `useCallback` で参照を安定化し、依存する `useMutation` の `onSettled` クロージャが
+ * render ごとに新関数を掴まないようにする。
+ */
 function useInvalidateMods(communityId: string | undefined) {
   const qc = useQueryClient();
-  return () => {
+  return useCallback(() => {
     if (!communityId) return;
     qc.invalidateQueries({ queryKey: ['community-mods', 'members', communityId] });
     qc.invalidateQueries({ queryKey: ['community-mods', 'bans', communityId] });
     qc.invalidateQueries({ queryKey: ['community-mods', 'logs', communityId] });
-  };
+  }, [qc, communityId]);
 }
 
 function showErrorToast(message: string): void {

@@ -12,10 +12,10 @@ import {
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Image as ExpoImage } from 'expo-image';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
-import { supabase } from '../../lib/supabase';
 import { fetchNotifications } from '../../lib/api/notifications';
+import { fetchProfileStatsFull } from '../../lib/api/profile';
 import Animated, {
   Extrapolation,
   interpolate,
@@ -44,7 +44,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useFeed } from '../../hooks/useFeed';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
-// useTagFilter は BlockedTagBanner と一緒に削除済み (banner をホームから外した)
+// BlockedTagBanner はホームから削除済。useTagFilterStore は scope 判定 (hasLikedTags) で引き続き使用
 import { useTagFilterStore } from '../../stores/tagFilterStore';
 import { useLike, useLikes } from '../../hooks/useLike';
 import { useConcern, useConcerns } from '../../hooks/useConcern';
@@ -70,12 +70,7 @@ type AdItem = { __ad: true; ad: Ad; position: number; matchedTags: string[]; key
 type FeedItem = Post | AdItem;
 const isAdItem = (it: FeedItem): it is AdItem => (it as AdItem).__ad === true;
 
-// ヘッダー左上アバター用の最小プロフィール型 (mypage-stats cache の subset)
-type MeProfileLite = {
-  nickname: string | null;
-  avatar_emoji: string | null;
-  avatar_url: string | null;
-};
+// MeProfileLite は lib/api/profile.ts の ProfileStats に統合済み
 
 // パフォーマンス監査: renderItem で `??[]` を使うと毎回新 array が生成され
 // AnonPostCard memo が壊れる (props 比較で false 判定 → 全カード re-render)。
@@ -88,6 +83,20 @@ const EMPTY_COMMUNITIES: PostCommunityRef[] = [];
 // RPC が有効な時、legacy hook 群へ渡す「空 ids」 — 配列参照を共有して
 // useQuery が enabled=false で fetch しないように。
 const EMPTY_LEGACY_IDS: string[] = [];
+
+// handlersByPostId の値型 — 明示的な型アノテーションで安全性を向上
+interface PostHandlers {
+  onLike: () => void;
+  onConcern: () => void;
+  onComment: () => void;
+  onSave: () => void;
+  onShare: () => void;
+  onTagPress: (tag: string) => void;
+  onMore: () => void;
+  onReact: (meme: string) => void;
+  onAddTag: (tag: string) => Promise<void> | void;
+  onCommunityPress: (id: string) => void;
+}
 // legacy hook 群が disabled (postIds=[]) のときの空マップ — 参照安定化
 const EMPTY_BOOL_MAP: Record<string, boolean> = {};
 const VIEWABILITY_CONFIG = { viewAreaCoveragePercentThreshold: 30 } as const;
@@ -117,17 +126,18 @@ const FeedRowEnter = memo(function FeedRowEnter({
   const reduceMotion = useReducedMotion();
   const opacity = useSharedValue(reduceMotion ? 1 : 0);
   const translateY = useSharedValue(reduceMotion ? 0 : 12);
-  const firstRender = useRef(true);
 
-  if (firstRender.current) {
-    firstRender.current = false;
-    if (!reduceMotion) {
-      const delay = Math.min(index, ROW_ENTER_STAGGER_CAP) * ROW_ENTER_STAGGER_MS;
-      const cfg = { duration: ROW_ENTER_DURATION, easing: EASE_OUT_QUART };
-      opacity.value = withDelay(delay, withTiming(1, cfg));
-      translateY.value = withDelay(delay, withTiming(0, cfg));
-    }
-  }
+  // アニメ開始は mount 後の effect で行う。render 中に shared value を書くと
+  // React 並行モードの二重 invocation でアニメが走らない問題が起きる。
+  useEffect(() => {
+    if (reduceMotion) return;
+    const delay = Math.min(index, ROW_ENTER_STAGGER_CAP) * ROW_ENTER_STAGGER_MS;
+    const cfg = { duration: ROW_ENTER_DURATION, easing: EASE_OUT_QUART };
+    opacity.value = withDelay(delay, withTiming(1, cfg));
+    translateY.value = withDelay(delay, withTiming(0, cfg));
+  // mount once のみ — index/opacity/translateY は初回アニメ専用で再実行不要
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -138,8 +148,8 @@ const FeedRowEnter = memo(function FeedRowEnter({
 });
 
 import { ScopeToggle } from '../../components/feed/ScopeToggle';
-// BlockedTagBanner はホームから非表示にした (フィルタ画面 /filter で確認可能)
 import { logEvent } from '../../lib/personalize';
+import { recordImpression } from '../../lib/personalize/impressions';
 import { PostCardSkeleton } from '../../components/feed/PostCardSkeleton';
 import { TrendingRow } from '../../components/feed/TrendingRow';
 import { PressableScale } from '../../components/ui/PressableScale';
@@ -152,6 +162,31 @@ import { LOGO_FONT, LOGO_FONT_WEIGHT } from '../../design/typography';
 import { TABBAR } from '../../design/tabbar';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { Post } from '../../types/models';
+
+// フィードヘッダー — 依存なし・毎 render で新しい JSX を作ると TrendingRow が
+// remount されるため、モジュールスコープの定数として安定化する。
+const LIST_HEADER_ELEMENT = (
+  <View>
+    <AccountStateBanner />
+    <TrendingRow />
+  </View>
+);
+
+// ============================================================
+// モジュールスコープ定数 — viewport + scroll velocity 画像 prewarm 設定
+// ============================================================
+/** 静止〜緩やか scroll: 3 セル先まで prefetch */
+const PREFETCH_BASE_LOOKAHEAD = 3;
+/** |v| > PREFETCH_VELOCITY_FAST: 6 セル先 */
+const PREFETCH_FAST_LOOKAHEAD = 6;
+/** |v| > PREFETCH_VELOCITY_FLING: 10 セル先 (フリック) */
+const PREFETCH_FLING_LOOKAHEAD = 10;
+/** fast scroll 閾値 (px/s) */
+const PREFETCH_VELOCITY_FAST = 800;
+/** fling scroll 閾値 (px/s) */
+const PREFETCH_VELOCITY_FLING = 1600;
+/** 同時 prefetch 最大数 — browser は host あたり 6 で詰まるので 4 に絞る */
+const PREFETCH_CONCURRENCY_CAP = 4;
 
 // 右スワイプ中の `progress` 更新を worklet で行うためのヘルパー。
 // dx (右方向への絶対距離) と drawer 幅から 0..1 へ写像してクランプ。
@@ -288,23 +323,8 @@ export default function FeedScreen() {
   const qc = useQueryClient();
   const userId = useAuthStore((s) => s.user?.id);
 
-  // mypage / HomeDrawer 用プロフィールの cache 温め (queryKey 共有)。
-  // 左上が hamburger アイコンに変わってアバター表示が不要になった後も、
-  // ドロワー / マイページの初回 mount を待たせないため、ここで warm up は継続する。
-  useQuery<MeProfileLite | null>({
-    queryKey: ['mypage-stats', userId],
-    queryFn: async () => {
-      if (!userId) return null;
-      const { data } = await supabase
-        .from('profiles')
-        .select('post_count, like_received_count, comment_count, concern_received_count, created_at, nickname, avatar_emoji, avatar_url')
-        .eq('id', userId)
-        .single();
-      return data as MeProfileLite | null;
-    },
-    enabled: !!userId,
-    staleTime: 60_000,
-  });
+  // mypage-stats のキャッシュ温めは下の idle prefetch effect (setTimeout 1500ms) で
+  // fetchProfileStatsFull を使って一元化済み。ここで重複 useQuery は不要。
 
   // 好きなタグが無いときに closed scope に居たら open へ強制
   useEffect(() => {
@@ -355,16 +375,10 @@ export default function FeedScreen() {
       // マイページ Hero — profiles 1 行だけなので軽量。
       // queryKey / queryFn / staleTime は app/(tabs)/mypage.tsx の useQuery と完全一致させる
       // (mount 時に refetchOnMount=false で cache hit させるため key の形が合っていないと無意味)。
+      // fetchProfileStatsFull は mypage.tsx の fetchProfileStats と同一 SELECT を持つ共通関数。
       void qc.prefetchQuery({
         queryKey: ['mypage-stats', userId],
-        queryFn: async () => {
-          const { data } = await supabase
-            .from('profiles')
-            .select('post_count, like_received_count, comment_count, concern_received_count, created_at, nickname, avatar_emoji, avatar_url')
-            .eq('id', userId)
-            .single();
-          return data;
-        },
+        queryFn: () => fetchProfileStatsFull(userId),
         staleTime: 60_000,
       });
     }, 1500);
@@ -449,6 +463,12 @@ export default function FeedScreen() {
     }
   }, [addTag, showToast]);
 
+  // コミュニティページへの遷移 — post に依存しないので単一の安定コールバックとして定義。
+  // per-post dict の中で毎回 arrow を作ると posts 変化時に全カードが新 handler を受け取る。
+  const handleCommunityPress = useCallback((communityId: string) => {
+    router.push(`/community/${communityId}` as never);
+  }, [router]);
+
   // Per-post handler cache. Rebuilds when `posts` (or upstream callbacks) change,
   // but NOT when toggles like myLikes/mySaves/reactions update — so cards whose
   // observable props didn't change skip re-render thanks to the AnonPostCard memo.
@@ -456,19 +476,8 @@ export default function FeedScreen() {
   // onConcern は「現在の concerned 状態」を引数に取る — RPC fullPosts を最優先で
   // 参照、無ければ legacy の myConcerns map を見る。両方とも空でも問題なし
   // (toggleConcern は false を受けて INSERT 試行 → unique violation で安全に冪等)。
-  const handlersByPostId = useMemo(() => {
-    const dict: Record<string, {
-      onLike: () => void;
-      onConcern: () => void;
-      onComment: () => void;
-      onSave: () => void;
-      onShare: () => void;
-      onTagPress: (tag: string) => void;
-      onMore: () => void;
-      onReact: (meme: string) => void;
-      onAddTag: (tag: string) => Promise<void> | void;
-      onCommunityPress: (id: string) => void;
-    }> = {};
+  const handlersByPostId = useMemo((): Record<string, PostHandlers> => {
+    const dict: Record<string, PostHandlers> = {};
     for (const p of posts) {
       const id = p.id;
       const tagNames = p.tag_names ?? [];
@@ -498,13 +507,11 @@ export default function FeedScreen() {
         onMore: () => setReportPostId(id),
         onReact: (meme: string) => toggleReact(id, meme),
         onAddTag: (tag: string) => handleAddTag(id, tag),
-        onCommunityPress: (communityId: string) => {
-          router.push(`/community/${communityId}` as never);
-        },
+        onCommunityPress: handleCommunityPress,
       };
     }
     return dict;
-  }, [posts, toggleLike, toggleConcern, toggleSave, toggleReact, share, router, handleAddTag]);
+  }, [posts, toggleLike, toggleConcern, toggleSave, toggleReact, share, router, handleAddTag, handleCommunityPress]);
 
   // -------------------------------------------------------------------
   // posts + ads を 1 つの混在配列にマージ
@@ -544,20 +551,12 @@ export default function FeedScreen() {
   //   1) **基本 lookahead = 3 セル** — 半分以上見えてる viewableItem の
   //      最後の index から 3 つ先まで prefetch (静止 / 緩やか scroll 用)。
   //   2) **velocity-aware**: scroll px/s に応じて lookahead を 3 → 最大 10 に拡張。
-  //      閾値: |v| > 800 px/s で 6、|v| > 1600 px/s で 10。
-  //   3) **concurrency cap = 4**: 同時 prefetch を 4 まで。browser は host あたり
-  //      6 で詰まるので 4 に絞ると CPU / JS スレッドを食わない。
+  //      閾値: |v| > PREFETCH_VELOCITY_FAST で 6、|v| > PREFETCH_VELOCITY_FLING で 10。
+  //   3) **concurrency cap = PREFETCH_CONCURRENCY_CAP**: 同時 prefetch を 4 まで。
   //   4) **dedup**: 既に prefetch 試行した URL は Set でスキップ。
   //
-  //   思想: 「次に見える 1-3 枚は絶対欲しい (UX 直結) / 速く scroll してる時だけ
-  //          先読み深くする (帯域とトレードオフ)」
+  //   定数はモジュールスコープ (PREFETCH_BASE_LOOKAHEAD 等) で宣言済み。
   // ============================================================
-  const PREFETCH_BASE_LOOKAHEAD = 3;       // 静止〜緩や scroll: 3 セル先
-  const PREFETCH_FAST_LOOKAHEAD = 6;       // |v| > 800: 6 セル先
-  const PREFETCH_FLING_LOOKAHEAD = 10;     // |v| > 1600: 10 セル先 (フリック)
-  const PREFETCH_VELOCITY_FAST = 800;      // px/s
-  const PREFETCH_VELOCITY_FLING = 1600;    // px/s
-  const PREFETCH_CONCURRENCY_CAP = 4;      // 同時 prefetch 最大数
 
   // 速度トラッキング — render に影響を与えたくないので ref で管理 (state にすると
   // 毎 scroll で feed 全体が re-render してしまう)
@@ -587,8 +586,18 @@ export default function FeedScreen() {
 
   // feedItems の宣言後に定義する必要がある (依存している)
   const handleViewableItemsChanged = useCallback(
-    ({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
+    ({ viewableItems }: { viewableItems: Array<{ item: FeedItem; index: number | null }> }) => {
       if (viewableItems.length === 0) return;
+
+      // ★ インプレッション記録 — For You フィードの再閲覧抑制と個人化フィードの改善に使う。
+      //   viewableItems (30%以上表示) の各 post に対して recordImpression を呼ぶ。
+      //   広告アイテムはスキップ。flushImpressions はアプリ終了/BG 時に呼ぶ想定。
+      for (const v of viewableItems) {
+        if (!isAdItem(v.item)) {
+          recordImpression(v.item.id);
+        }
+      }
+
       const lastIdx = Math.max(...viewableItems.map((v) => v.index ?? 0));
       const absV = Math.abs(scrollVelocityRef.current);
       const lookahead =
@@ -717,16 +726,6 @@ export default function FeedScreen() {
       communitiesByPost,
     ],
   );
-
-  // Stable header element — recreating the inline <View> each parent render
-  // would break header memoization and force TrendingRow to remount visuals.
-  // ★ BlockedTagBanner はユーザー要望でホームから削除済み (フィルタ画面 /filter で確認可能)
-  const ListHeader = useMemo(() => (
-    <View>
-      <AccountStateBanner />
-      <TrendingRow />
-    </View>
-  ), []);
 
   const Bell = Icon.bell;
   const Search = Icon.search;
@@ -918,7 +917,7 @@ export default function FeedScreen() {
         keyExtractor={(item) => (isAdItem(item) ? item.key : item.id)}
         getItemType={(item) => (isAdItem(item) ? 'ad' : 'post')}
         estimatedItemSize={520}
-        ListHeaderComponent={ListHeader}
+        ListHeaderComponent={LIST_HEADER_ELEMENT}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.accent} />
         }
@@ -940,18 +939,12 @@ export default function FeedScreen() {
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
         }}
         ListEmptyComponent={
-          loading ? (
-            showSkeleton ? <FeedSkeleton /> : null
-          ) : (
-            <EmptyState
-              icon={Icon.sparkles}
-              title={scope === 'closed' ? '好きなタグの投稿がまだありません' : 'まだ投稿がありません'}
-              message={scope === 'closed' ? '「All」に切り替えるか、好きなタグを増やしてみよう' : 'フィルター設定を確認するか、最初の投稿をしてみよう'}
-              actionLabel="投稿する"
-              onAction={() => router.push('/post/create' as never)}
-              tone="accent"
-            />
-          )
+          <FeedEmptyState
+            loading={loading}
+            showSkeleton={showSkeleton}
+            scope={scope}
+            onAction={() => router.push('/post/create' as never)}
+          />
         }
       />
 
@@ -975,6 +968,7 @@ export default function FeedScreen() {
   );
 }
 
+/** スケルトンカード 3 枚を縦に並べる — loading 中に表示 */
 function FeedSkeleton() {
   return (
     <View>
@@ -984,3 +978,34 @@ function FeedSkeleton() {
     </View>
   );
 }
+
+/** フィードが空のときに表示するコンポーネント。loading 中は skeleton を優先 */
+const FeedEmptyState = memo(function FeedEmptyState({
+  loading,
+  showSkeleton,
+  scope,
+  onAction,
+}: {
+  loading: boolean;
+  showSkeleton: boolean;
+  scope: string;
+  onAction: () => void;
+}) {
+  if (loading) {
+    return showSkeleton ? <FeedSkeleton /> : null;
+  }
+  return (
+    <EmptyState
+      icon={Icon.sparkles}
+      title={scope === 'closed' ? '好きなタグの投稿がまだありません' : '投稿がありません'}
+      message={
+        scope === 'closed'
+          ? '「All」に切り替えるか、好きなタグを増やしてみよう'
+          : 'タグをフォローして興味のある投稿を見つけるか、最初の投稿をしてみよう'
+      }
+      actionLabel="投稿する"
+      onAction={onAction}
+      tone="accent"
+    />
+  );
+});

@@ -86,15 +86,16 @@ export function useLike() {
   const mutation = useMutation<void, Error, Vars, Ctx>({
     mutationFn: toggleLikeApi,
     onMutate: async ({ postId, wasLiked }) => {
-      // ★ await でレース防止 (in-flight refetch が optimistic を上書きする現象の修正)
-      await Promise.all([
-        qc.cancelQueries({ queryKey: ['my-likes'] }).catch(() => {}),
-        qc.cancelQueries({ queryKey: ['feed'] }).catch(() => {}),
-        qc.cancelQueries({ queryKey: ['feed-page'] }).catch(() => {}),
-        qc.cancelQueries({ queryKey: ['community'] }).catch(() => {}),
-      ]);
+      // ★ useReactionToggle と同じ順序:
+      //   1) snapshot を取る (in-flight query が flush する前の値)
+      //   2) optimistic patch を同期で適用
+      //   3) cancelQueries で in-flight refetch をキャンセル (patch が上書きされるのを防ぐ)
+      //
+      //   以前は cancelQueries を await してから snapshot → patch していたため、
+      //   cancelQueries が RQ 内部で同期 cache 書き込みをトリガする場合に
+      //   snapshot が「cancelQueries 後の値」を掴むことがあった (audit 指摘)。
 
-      // snapshot は patch 前 (= mutation 適用前の真の値) で取る
+      // 1) snapshot — patch 前の真の値
       const prevLikes = qc.getQueriesData<Record<string, boolean> | undefined>({
         queryKey: ['my-likes'],
       });
@@ -102,7 +103,8 @@ export function useLike() {
       const prevFeedPage = snapshotFeedPage(qc);
       const prevCommunity = qc.getQueriesData({ queryKey: ['community'] });
 
-      // 1) legacy my-likes cache — exact-key 書き戻し (partial-match 廃止)
+      // 2) optimistic patch (同期)
+      // legacy my-likes cache — exact-key 書き戻し (partial-match 廃止)
       const likesEntries = qc.getQueriesData<Record<string, boolean> | undefined>({
         queryKey: ['my-likes'],
       });
@@ -158,6 +160,15 @@ export function useLike() {
         my_like: !wasLiked,
         likes_count: Math.max(0, (p.likes_count ?? 0) + (wasLiked ? -1 : 1)),
       }));
+
+      // 3) cancelQueries — optimistic patch 適用後に in-flight refetch をキャンセルする。
+      //   patch 前に await すると RQ が flush して snapshot が汚染されるため、必ず patch 後。
+      await Promise.all([
+        qc.cancelQueries({ queryKey: ['my-likes'] }).catch(() => {}),
+        qc.cancelQueries({ queryKey: ['feed'] }).catch(() => {}),
+        qc.cancelQueries({ queryKey: ['feed-page'] }).catch(() => {}),
+        qc.cancelQueries({ queryKey: ['community'] }).catch(() => {}),
+      ]);
 
       return { prevLikes, prevFeed, prevFeedPage, prevCommunity };
     },

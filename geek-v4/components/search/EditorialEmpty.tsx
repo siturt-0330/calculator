@@ -57,8 +57,8 @@ export function EditorialEmpty({
 
       {/* 本文 — query 部分のみ C.text2 で軽く強調 (HighlightedText 不使用) */}
       <Text style={[T.body, { color: C.text3 }]}>
-        <Text style={{ color: C.text2 }}>{`『${query}』`}</Text>
-        の特集はまだありません。
+        <Text style={{ color: C.text2 }}>{`「${query}」`}</Text>
+        に一致する結果がありません。
       </Text>
 
       {/* もしかして補正 — didYouMean が非 null のときだけ。null なら誤誘導回避で非表示 */}
