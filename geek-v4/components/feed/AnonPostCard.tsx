@@ -382,17 +382,19 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
 //   - base 側 (StyleSheet ID) は安定なので reconciliation コストは差分分のみ
 // ────────────────────────────────────────────────────────────────────
 
-// 投稿画像の表示アスペクト比の下限 (= 許容する最も縦長の比)。aspectRatio = width/height
-// なので、値が小さいほど縦長。極端に縦長の写真はフィードを画面いっぱいに占有して
-// しまうため、4:5 (0.8) でクランプし、それより縦長は ProgressiveImage の
-// contentFit='cover' でクロップ表示する。画像全体はタップ→ライトボックス
-// (contentFit='contain') で確認できる。横長 (>1) はそのまま全体表示。
-const MEDIA_MIN_ASPECT = 0.8; // 4:5
+// 投稿画像の表示アスペクト比を Instagram と同じ 4:5〜1.91:1 にクランプする。
+// aspectRatio = width/height (小さいほど縦長)。
+//  - 下限 0.8 (4:5): 極端な縦長がフィードを画面いっぱいに占有するのを防ぐ。
+//  - 上限 1.91 (≈1.91:1): 超横長パノラマが「細い帯」になり見にくくなるのを防ぐ。
+// クランプ外は ProgressiveImage の contentFit='cover' でセンタークロップ表示し、
+// 画像全体はタップ→ライトボックスで確認できる (X/IG/Reddit 共通の方式)。
+const MEDIA_MIN_ASPECT = 0.8; // 4:5 (最も縦長)
+const MEDIA_MAX_ASPECT = 1.91; // ≈1.91:1 (最も横長)
 function mediaItemAspect(
   aspect: number,
   portraitMaxH?: number,
 ): { aspectRatio: number; maxHeight?: number } {
-  const aspectRatio = Math.max(MEDIA_MIN_ASPECT, aspect);
+  const aspectRatio = Math.min(MEDIA_MAX_ASPECT, Math.max(MEDIA_MIN_ASPECT, aspect));
   // 縦長 (aspect < 1) のみ絶対高さでクランプ。aspectRatio は「形」を抑えるだけなので、
   // これが無いと web の広いカラム(最大720)で全幅×1.25 ≈ 860px と画面を占有する。
   // クランプ時は overflow:hidden + contentFit='cover' でクロップ表示 (全体はライトボックス)。
