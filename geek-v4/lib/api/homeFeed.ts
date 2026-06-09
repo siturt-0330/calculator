@@ -32,6 +32,11 @@ import type { PostCommunityRef } from './posts';
 // ★ '1' のとき「だけ」有効 (既定 OFF)。'' / undefined / '0' / 'true' は全て OFF に倒れる。
 export const HOME_FEED_RPC_ENABLED = process.env.EXPO_PUBLIC_HOME_FEED_RPC === '1';
 
+// Value Model 個人化フィード RPC (0141_get_for_you_feed)。
+// get_home_feed より優先して呼ばれ、タグ親和性・既読除外・コールドスタートを適用する。
+// 独立フラグで段階的ロールアウトが可能。
+export const FOR_YOU_FEED_RPC_ENABLED = process.env.EXPO_PUBLIC_FOR_YOU_FEED_RPC === '1';
+
 // cold start 初速優先: 初回ページを 12 件に絞る (旧 30)。get_home_feed の応答 JSON は
 // 周辺データ + (現状のシードでは base64 画像) を含み、30 件で ~3.8MB と重く、モバイル
 // 初回表示の主ボトルネックだった。12 件で初回 payload を ~⅓ に圧縮する。2 ページ目以降は
@@ -87,6 +92,44 @@ export async function fetchHomeFeedFirstPage(
   } catch (e) {
     console.warn(
       '[homeFeed] get_home_feed threw, falling back:',
+      e instanceof Error ? e.message : String(e),
+    );
+    return null;
+  }
+}
+
+/**
+ * for-you フィード 1ページ目を get_for_you_feed RPC で取得 (Value Model 個人化版)。
+ * get_home_feed の上位互換として同一 JSON 形式を返す。
+ * @returns 成功時 HomeFeedFirstPage、flag OFF / 失敗 / 0件 は null (呼び出し側が fallback)。
+ */
+export async function fetchForYouFeedFirstPage(
+  userId: string | null,
+): Promise<HomeFeedFirstPage | null> {
+  if (!FOR_YOU_FEED_RPC_ENABLED) return null;
+  try {
+    const { data, error } = await withApiTimeout(
+      supabase.rpc('get_for_you_feed', {
+        p_user_id: userId,
+        p_limit: HOME_FEED_FIRST_PAGE_LIMIT,
+      }),
+      'homeFeed.get_for_you_feed',
+      HOME_FEED_RPC_TIMEOUT_MS,
+    );
+    if (error) {
+      console.warn('[homeFeed] get_for_you_feed rpc error, falling back:', error.message);
+      return null;
+    }
+    const payload = (data ?? {}) as HomeFeedRpcShape;
+    const rows = Array.isArray(payload.posts) ? payload.posts : [];
+    if (rows.length === 0) return null;
+    return {
+      posts: rows.map(normalizeFeedPageRow),
+      nextCursor: payload.nextCursor ?? null,
+    };
+  } catch (e) {
+    console.warn(
+      '[homeFeed] get_for_you_feed threw, falling back:',
       e instanceof Error ? e.message : String(e),
     );
     return null;

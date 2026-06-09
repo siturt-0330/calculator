@@ -19,12 +19,10 @@ import { ProgressiveImage } from '../ui/ProgressiveImage';
 const GAP = 6;
 const RADIUS = 14;
 
-// 1 枚あたりの許容アスペクト (幅/高さ)。極端比で 1 枚が画面を食う/細すぎるのを防ぐガード。
-const MIN_A = 0.6;
-const MAX_A = 1.9;
-function clampAspect(a: number): number {
-  if (!a || !Number.isFinite(a) || a <= 0) return 1;
-  return Math.min(MAX_A, Math.max(MIN_A, a));
+// セル幅は「画像の真のアスペクト」で決める (クランプしない)。これで cell=画像比となり
+// contentFit='contain' が隙間なく埋まる = 灰色帯が出ない・写真は全体表示。
+function safeAspect(a: number): number {
+  return a > 0 && Number.isFinite(a) ? a : 1;
 }
 
 export interface FeedMediaItem {
@@ -74,7 +72,7 @@ export function FeedMediaGrid({
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: GAP, paddingRight: SP['1'] }}>
       {items.map((it, i) => {
         const a = it.aspect ?? measured[it.uri] ?? 1;
-        const w = Math.round(H * clampAspect(a));
+        const w = Math.round(H * safeAspect(a));
         return (
           <Pressable
             key={`${it.uri}-${i}`}

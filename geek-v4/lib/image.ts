@@ -147,21 +147,50 @@ export async function makeWebPreviewDataUrl(
   maxEdge = 1024,
   quality = 0.8,
 ): Promise<string> {
-  // Canvas で同サイズに drawImage して JPEG 化
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const el = new Image();
-    if (!sourceUri.startsWith('blob:') && !sourceUri.startsWith('data:')) {
-      el.crossOrigin = 'anonymous';
+  // ★ EXIF orientation 焼き込み:
+  //   「横で撮った写真が縦で投稿される」不具合の根治。<img> + canvas.drawImage は
+  //   EXIF orientation を適用しない (生ピクセルのまま描く)。一方
+  //   createImageBitmap(blob,{imageOrientation:'from-image'}) は orientation を適用した
+  //   bitmap を返し、width/height も適用後の値になる。これを drawImage すれば、出力 JPEG
+  //   は「正しい向きが焼き込まれ EXIF は無い」状態になる (= 後段で向きが化けない)。
+  //   未対応エンジン (古い Safari/WebView) では従来の <img> 経路へフォールバック (無回帰)。
+  let src: CanvasImageSource | null = null;
+  let bitmap: ImageBitmap | null = null;
+  let natW = 0;
+  let natH = 0;
+  try {
+    if (typeof createImageBitmap === 'function') {
+      const blob = await fetch(sourceUri).then((r) => r.blob());
+      bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+      natW = bitmap.width;
+      natH = bitmap.height;
+      src = bitmap;
+    } else {
+      throw new Error('createImageBitmap unavailable');
     }
-    el.onload = () => resolve(el);
-    el.onerror = () => reject(new Error('Image load failed (preview)'));
-    el.src = sourceUri;
-  });
-  // ★ HEIC silent-onload ガード: naturalWidth/Height が 0 でも onload が
-  //   発火する WebView があるので明示的に検出する.
-  const natW = img.naturalWidth || img.width;
-  const natH = img.naturalHeight || img.height;
-  if (!natW || !natH || natW < 1 || natH < 1) {
+  } catch {
+    // フォールバック: 従来の <img> 経路 (EXIF 未適用だが decode は通る環境向け)。
+    if (bitmap) {
+      bitmap.close?.();
+      bitmap = null;
+    }
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      if (!sourceUri.startsWith('blob:') && !sourceUri.startsWith('data:')) {
+        el.crossOrigin = 'anonymous';
+      }
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('Image load failed (preview)'));
+      el.src = sourceUri;
+    });
+    natW = img.naturalWidth || img.width;
+    natH = img.naturalHeight || img.height;
+    src = img;
+  }
+  // ★ HEIC silent-onload / decode 失敗ガード: naturalWidth/Height が 0 でも
+  //   onload が発火する WebView があるので明示的に検出する.
+  if (!src || !natW || !natH || natW < 1 || natH < 1) {
+    if (bitmap) bitmap.close?.();
     throw new Error(`preview: naturalWidth/Height が無効 (${natW}x${natH}) — HEIC または decode 失敗の可能性`);
   }
   const aspect = natW / natH;
@@ -175,6 +204,7 @@ export async function makeWebPreviewDataUrl(
     outW = Math.round(outH * aspect);
   }
   if (outW < 1 || outH < 1) {
+    if (bitmap) bitmap.close?.();
     throw new Error(`preview: 計算後サイズが無効 (${outW}x${outH})`);
   }
   // ★UI ブロック緩和: 同期的な canvas 処理 (drawImage + toDataURL) の前に 1 回
@@ -184,10 +214,14 @@ export async function makeWebPreviewDataUrl(
   canvas.width = outW;
   canvas.height = outH;
   const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('preview canvas 2d context unavailable');
+  if (!ctx) {
+    if (bitmap) bitmap.close?.();
+    throw new Error('preview canvas 2d context unavailable');
+  }
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'medium'; // preview なので medium で十分
-  ctx.drawImage(img, 0, 0, outW, outH);
+  ctx.drawImage(src, 0, 0, outW, outH);
+  if (bitmap) bitmap.close?.(); // ImageBitmap は明示 close で GPU/メモリを早期解放
   const out = canvas.toDataURL('image/jpeg', quality);
   // ★ toDataURL 無音失敗ガード: WebView Canvas memory 不足や tainted canvas で
   //   'data:,' / 極端に短い data URL が返る事故を検出する.

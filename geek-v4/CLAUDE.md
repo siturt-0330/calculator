@@ -139,7 +139,7 @@ lib/
   cacheUpdates/         feedPagePatcher.ts ← React Query cache patch helper
   ai/                   AI 関連 (proposal / suggest)
   search/               全文検索エンジン (variants, similarity, parseQuery, BM25)
-  personalize/          For You ランキング
+  personalize/          For You ランキング (score.ts/events.ts/profile.ts + syncAffinity.ts/impressions.ts → サーバー同期)
   tagClustering/        Algo Phase 1-4 (hub-based cluster + co-occurrence)
   feed/                 (空 or feed 専用 utils)
   trust/                信用スコア計算
@@ -358,6 +358,7 @@ deploy: `supabase functions deploy <name>`。秘密は `supabase secrets set KEY
 | `EXPO_PUBLIC_SENTRY_DSN` | 任意 | 空なら Sentry init を早期 return |
 | `EXPO_PUBLIC_FEED_PAGE_RPC` | 任意 | `'0'` でフィード周辺データ RPC (get_feed_page) を kill-switch |
 | `EXPO_PUBLIC_HOME_FEED_RPC` | 任意 | `'1'` で home feed 1ページ目集約 RPC (get_home_feed/0114) を有効化 (★既定 OFF) |
+| `EXPO_PUBLIC_FOR_YOU_FEED_RPC` | 任意 | `'1'` で Value Model 個人化フィード RPC (get_for_you_feed/0141) を有効化 (★既定 OFF)。0139+0140+0141 migration 適用 + pg_cron 登録後に有効化すること |
 
 ### 絶対にクライアントに置かない
 
@@ -438,6 +439,7 @@ Native module を触ったら必ず通常 build & submit。
 | search の variants が `===` で組合せ爆発 | 変換軸が増えるたびに掛け算 | `MAX_VARIANTS = 24` cap |
 | 「戻るボタンが効かない」事故 | アニメ中の race + ディープリンクで back stack 空 | 200ms in-flight lock + `router.canGoBack()` false なら `/(tabs)/feed` fallback |
 | 起動 5 秒「黒画面」 | Splash + intro 合算で 8 秒 | intro 5.5s → 3.0s + skip タップ + sessionStorage で 2 回目以降 skip + `forceReady` 500ms safety |
+| フィード画像が一部しか映らない / 横が映らない | ProgressiveImage の ken-burns (scale 1.04→1.0) + overflow:hidden が `contain` 表示時に左右をクリップしていた | `ProgressiveImage.tsx`: `contentFit="contain"` 時は `useKenBurns=false` → scale を 1.0 固定でアニメなし。`feedMediaLayout.ts` の `mediaItemAspect`: 横長/適度な縦長は `{w:containerW, h:naturalH}`、縦長 `naturalH>cap` は `{w:cap×ar, h:cap}` (比例縮小 + `alignSelf:'center'`)。`mediaMaxH = winH × 0.58`・`contentFit="contain"`。cap を上げると画面外 → **0.58 以上には上げない** |
 
 ---
 

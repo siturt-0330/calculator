@@ -20,8 +20,10 @@ import type { FeedScope } from '../../stores/feedStore';
 import { fetchPosts } from '../api/posts';
 import {
   fetchHomeFeedFirstPage,
+  fetchForYouFeedFirstPage,
   seedHomeFeedSurroundingCaches,
   HOME_FEED_RPC_ENABLED,
+  FOR_YOU_FEED_RPC_ENABLED,
 } from '../api/homeFeed';
 
 export type FeedPageResult = { posts: Post[]; nextCursor: string | null };
@@ -54,12 +56,22 @@ export async function fetchFeedFirstPage(opts: {
   const { sort, scope, likedTags, blockedTags, userId, qc } = opts;
   const filterTags = scope === 'closed' && likedTags.length > 0 ? likedTags : undefined;
 
-  if (sort === 'for-you' && scope === 'open' && HOME_FEED_RPC_ENABLED) {
-    const home = await fetchHomeFeedFirstPage(userId);
-    if (home) {
-      seedHomeFeedSurroundingCaches(qc, userId, home.posts);
-      // FeedPagePost は Post の superset なので ['feed'] page1 にそのまま入れて良い。
-      return { posts: home.posts as Post[], nextCursor: home.nextCursor };
+  if (sort === 'for-you' && scope === 'open') {
+    // Value Model 個人化フィード (0141): タグ親和性・既読除外・コールドスタートを適用
+    if (FOR_YOU_FEED_RPC_ENABLED) {
+      const forYou = await fetchForYouFeedFirstPage(userId);
+      if (forYou) {
+        seedHomeFeedSurroundingCaches(qc, userId, forYou.posts);
+        return { posts: forYou.posts as Post[], nextCursor: forYou.nextCursor };
+      }
+    }
+    // hot プール集約 fallback (0114)
+    if (HOME_FEED_RPC_ENABLED) {
+      const home = await fetchHomeFeedFirstPage(userId);
+      if (home) {
+        seedHomeFeedSurroundingCaches(qc, userId, home.posts);
+        return { posts: home.posts as Post[], nextCursor: home.nextCursor };
+      }
     }
   }
   return fetchPosts({ sort, likedTags, blockedTags, filterTags, cursor: undefined, home: true });

@@ -13,6 +13,7 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { deepNormalize } from '../search/tokenize';
+import { pushAffinityDelta, AFFINITY_DELTA } from './syncAffinity';
 
 export type EventKind =
   | 'post_view'
@@ -240,6 +241,17 @@ export async function logEvent(e: Omit<FeedEvent, 'id' | 'ts'>): Promise<void> {
 
     pendingWrites.push(ev);
     scheduleFlush();
+
+    // サーバー側タグ親和性を即時更新 (Value Model シグナル)
+    // fire-and-forget: 失敗は pushAffinityDelta 内で握り潰す
+    if (tags.length > 0) {
+      if (e.kind === 'post_like')    void pushAffinityDelta(tags, AFFINITY_DELTA.post_like);
+      if (e.kind === 'post_save')    void pushAffinityDelta(tags, AFFINITY_DELTA.post_save);
+      if (e.kind === 'post_unlike')  void pushAffinityDelta(tags, AFFINITY_DELTA.post_unlike);
+      if (e.kind === 'post_concern') void pushAffinityDelta(tags, AFFINITY_DELTA.post_concern);
+      if (e.kind === 'post_hide')    void pushAffinityDelta(tags, AFFINITY_DELTA.post_hide);
+      if (e.kind === 'tag_click')    void pushAffinityDelta(tags, AFFINITY_DELTA.tag_click);
+    }
   } catch (err) {
     console.warn('[personalize/events] logEvent failed:', err);
   }

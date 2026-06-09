@@ -68,6 +68,9 @@ export type Post = {
   // post.author_id === community.official_admin_user_id の時のみセットされる。
   // セット時は「匿」の代わりに実名 · 所属を表示する。
   official_author?: { name: string; organization: string } | null;
+  // 引用投稿 (migration 0142)。この投稿が他の投稿を引用しているとき、
+  // 引用先の post id が入る。null/undefined = 引用なし。
+  quote_post_id?: string | null;
 };
 
 export type Comment = {

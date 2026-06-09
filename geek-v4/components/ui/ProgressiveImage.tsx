@@ -1,4 +1,4 @@
-import { Image, type ImageContentFit } from 'expo-image';
+import { Image, type ImageContentFit, type ImageContentPosition } from 'expo-image';
 import { View, StyleProp, ViewStyle, Platform } from 'react-native';
 import { useEffect, useRef, useState } from 'react';
 import Animated, {
@@ -60,6 +60,9 @@ export function ProgressiveImage({
   height,
   radius = R.lg,
   contentFit = 'cover',
+  // cover で頭打ち(crop)されるときに「どこを残すか」。tall 写真は 'top' で上端
+  // (顔/見出しが上に来ることが多い) を残すと中途半端な中央切れを避けられる。
+  contentPosition,
   style,
   lazy = false,
   // ロード時のサムネサイズ (Supabase render endpoint 経由)。
@@ -78,6 +81,7 @@ export function ProgressiveImage({
   height: number | `${number}%` | 'auto';
   radius?: number;
   contentFit?: ImageContentFit;
+  contentPosition?: ImageContentPosition;
   style?: StyleProp<ViewStyle>;
   // Web のみ: viewport に入るまで読み込みを遅延 (IntersectionObserver)
   // モバイルでは無視 (FlatList が virtualization で代替)
@@ -93,10 +97,13 @@ export function ProgressiveImage({
   // Animated values
   //   sharpOp  — 本画像 opacity (0 → 1)
   //   blurOp   — blurhash opacity (1 → 0、ただし error 時は据え置き)
-  //   sharpSc  — 本画像 scale (1.04 → 1.0)
+  //   sharpSc  — 本画像 scale (cover: 1.04→1.0 ken-burns / contain: 1.0固定)
+  // contain モードでは画像がコンテナ端まで広がるため、scale>1.0 + overflow:hidden で
+  // 左右がクリップされる。cover はもともとクロップあり (端が隠れる前提) なので問題ない。
+  const useKenBurns = contentFit !== 'contain';
   const sharpOp = useSharedValue(0);
   const blurOp = useSharedValue(hasBlurhash ? 1 : 0);
-  const sharpSc = useSharedValue(SCALE_FROM);
+  const sharpSc = useSharedValue(useKenBurns ? SCALE_FROM : SCALE_TO);
 
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
@@ -154,11 +161,13 @@ export function ProgressiveImage({
     }
     // 本画像: 0 → 1 を easeOutQuart で 480ms
     sharpOp.value = withTiming(1, { duration: SHARP_FADE_MS, easing: EASE_OUT_QUART });
-    // scale: 1.04 → 1.0 を 600ms ease-out (静かな ken-burns)
-    sharpSc.value = withTiming(SCALE_TO, {
-      duration: SHARP_SCALE_MS,
-      easing: Easing.out(Easing.cubic),
-    });
+    // scale: cover のみ 1.04→1.0 の ken-burns。contain は 1.0 固定 (overflow:hidden でクリップされるため)
+    if (useKenBurns) {
+      sharpSc.value = withTiming(SCALE_TO, {
+        duration: SHARP_SCALE_MS,
+        easing: Easing.out(Easing.cubic),
+      });
+    }
     // blurhash: 0.8 で 200ms hold → 240ms で 0 へ
     //   = 本画像が乗ったあとに溶ける = flicker 0
     if (hasBlurhash) {
@@ -221,6 +230,7 @@ export function ProgressiveImage({
             placeholderContentFit={contentFit}
             style={{ width: '100%', height: '100%' }}
             contentFit={contentFit}
+            contentPosition={contentPosition}
             // expo-image 内蔵 transition は使わない (二重 fade 回避)
             transition={0}
             cachePolicy="memory-disk"
