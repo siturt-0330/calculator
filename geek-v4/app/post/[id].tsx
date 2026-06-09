@@ -28,7 +28,7 @@ import { ReactionListSheet } from '../../components/feed/ReactionListSheet';
 import { getCachedAspect } from '../../components/feed/AnonPostCard';
 import { LinkPreviewCard } from '../../components/feed/LinkPreviewCard';
 import { FeedMediaGrid } from '../../components/feed/FeedMediaGrid';
-import { mediaItemAspect, mediaContainerWidth, mediaIsCropped } from '../../components/feed/feedMediaLayout';
+import { mediaItemAspect, mediaContainerWidth } from '../../components/feed/feedMediaLayout';
 import { SP, R } from '../../design/tokens';
 import { useColors } from '../../hooks/useColors';
 import { T } from '../../design/typography';
@@ -768,7 +768,7 @@ export default function PostDetailScreen() {
                       <View
                         key={url}
                         style={[
-                          { borderRadius: R.md, overflow: 'hidden', backgroundColor: C.bg3 },
+                          { borderRadius: R.md, overflow: 'hidden', backgroundColor: C.bg3, alignSelf: 'center' },
                           mediaItemAspect(aspect, mediaW, mediaMaxH),
                         ]}
                       >
@@ -785,8 +785,7 @@ export default function PostDetailScreen() {
                               width="100%"
                               height="100%"
                               radius={R.md}
-                              contentFit="cover"
-                              contentPosition={mediaIsCropped(aspect, mediaW, mediaMaxH) ? 'top' : undefined}
+                              contentFit="contain"
                               thumbWidth={720}
                             />
                           </Pressable>

@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react-native';
-import { View, Text, Platform, useWindowDimensions, Image as RNImage, StyleSheet, Pressable, type TextStyle } from 'react-native';
+import { View, Text, Platform, useWindowDimensions, Image as RNImage, StyleSheet, Pressable, Alert, type TextStyle } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -17,6 +17,7 @@ import { Icon } from '../../constants/icons';
 import type { Post } from '../../types/models';
 import { useLanguageStore } from '../../stores/languageStore';
 import { useAuthStore } from '../../stores/authStore';
+import { useBlockStore } from '../../stores/blockStore';
 import { translateDynamic, useT } from '../../lib/i18n';
 import { MemeReactionPicker } from './MemeReactionPicker';
 import { ReactionListSheet } from './ReactionListSheet';
@@ -31,7 +32,7 @@ import { hap } from '../../design/haptics';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { ProgressiveImage } from '../ui/ProgressiveImage';
 import { FeedMediaGrid } from './FeedMediaGrid';
-import { mediaItemAspect, mediaContainerWidth, mediaIsCropped } from './feedMediaLayout';
+import { mediaItemAspect, mediaContainerWidth } from './feedMediaLayout';
 import { VideoPlayer } from '../ui/VideoPlayer';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { extractFirstUrl, stripPreviewUrl } from '../../lib/utils/extractUrl';
@@ -41,6 +42,8 @@ import { DoubleTapHeart } from '../ui/DoubleTapHeart';
 // DB 側の tag_names / added_tags は検索 index 用に残るが、ここでは render しない。
 // TagPill / AddTagInline import は使わなくなったので削除。
 import { MarkdownText } from '../ui/MarkdownText';
+import { QuotePostMini } from '../post/QuotePostMini';
+import { fetchQuotedPost, type QuotedPostPreview } from '../../lib/api/quotePosts';
 import { LinkPreviewCard } from './LinkPreviewCard';
 import { PollCard } from './PollCard';
 import { useFeatureFlag } from '../../hooks/useFeatureFlag';
@@ -61,6 +64,10 @@ import { ModActionMenu } from '../community/ModActionMenu';
 import { MediaWithCWGuard } from '../post/MediaWithCWGuard';
 import { getDisplayLikesForViewer } from '../../lib/utils/voteFuzz';
 import { ImageLightbox } from '../ui/ImageLightbox';
+import { sharePost, shareToX, copyPostLink, getEmbedCode } from '../../lib/utils/sharePost';
+import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
+import { useToastStore } from '../../stores/toastStore';
 
 // 画像アスペクト比のモジュールレベルキャッシュ。
 // パフォーマンス監査: 旧版は無制限キャッシュで長時間スクロール後にメモリ蓄積。
@@ -166,7 +173,10 @@ const REACTION_BUTTON_PRESSABLE_STYLE = {
   flexDirection: 'row' as const,
   alignItems: 'center' as const,
   gap: 6,
-  minHeight: 28,
+  // Apple HIG 最小タップ領域 44pt を確保 (icon 20 + padding 12*2 = 44)
+  minHeight: 44,
+  minWidth: 44,
+  justifyContent: 'center' as const,
 };
 const PARTICLE_DOT_STYLE = {
   position: 'absolute' as const,
@@ -228,7 +238,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // letterSpacing は iOS の SF Pro Text に倣う (size 13: 約 -0.08, size 12: 0)
   anonLabel: { color: C.text, fontWeight: '800', letterSpacing: -0.08 },
   anonRelative: { color: C.text3, fontSize: 12, lineHeight: 16 },
-  morePress: { padding: 4 },
+  // Apple HIG 44pt 最小タップ領域を確保 (icon 20 + padding 12*2 = 44)
+  morePress: { padding: 12 },
 
   // ヘッダー 2 行目に inline 配置する community 表示。
   // 旧: header の下に独立した chip row。
@@ -292,12 +303,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // メディア — iOS-native: 角 12px (card 14px の内側に少し小さい round で nested 階層感)
   mediaWrap: { gap: 2, marginTop: SP['3'] },
   mediaItemBase: {
-    // width/height は mediaItemAspect 側で明示ピクセル決定する (縦長=中央寄せの細box / 横長=幅上限)。
-    // ★ 明示数値高さなので「aspectRatio 解決前に高さ0へ潰れる」現象が起きず、旧 minHeight:200
-    //   保険は不要になった (minHeight は横長/パノラマで灰色帯を生む元だったため撤去)。
+    // width/height は mediaItemAspect 側で明示ピクセル決定する。
+    // 縦長で幅縮小した際にカード中央に寄せるため alignSelf:'center'。
     backgroundColor: C.bg2,
     borderRadius: 16,
     overflow: 'hidden',
+    alignSelf: 'center' as const,
   },
 
   // 本文 — Apple News 寄り: fontSize 15 / lineHeight 22 (1.47, iOS 標準 1.4-1.5 域)
@@ -332,17 +343,18 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     paddingBottom: 0,
     gap: SP['5'],
   },
-  // 各 action は icon + count を gap:6 で詰める. tap target は hitSlop で確保 (44pt)
+  // 各 action は icon + count を gap:6 で詰める. Apple HIG 44pt 最小タップ領域を確保
   actionPress: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    minHeight: 28,
+    minHeight: 44,
   },
   commentCount: { color: C.text3, fontSize: 13, fontWeight: '600' },
   reactionEmoji: { fontSize: 20 },
   spacer: { flex: 1 },
-  iconBtn: { padding: 4 },
+  // Apple HIG 44pt 最小タップ領域を確保 (icon 18 + padding 13*2 = 44)
+  iconBtn: { padding: 13, minWidth: 44, minHeight: 44, justifyContent: 'center' as const, alignItems: 'center' as const },
 
   // リアクション表示行
   reactionsRow: {
@@ -769,7 +781,53 @@ function CommunityInlineIndicatorInner({
 //   現実には community 同一 + extraCount 同一でほぼ常に skip される。
 const CommunityInlineIndicator = memo(CommunityInlineIndicatorInner);
 
+// ============================================================
+// QuotePostMiniLoader — quote_post_id から引用先を fetch して表示
+// ------------------------------------------------------------
+// AnonPostCard 内専用の小ローダ。postId を受け取り、useEffect で
+// fetchQuotedPost を呼び出し、結果を QuotePostMini に渡す。
+// - ロード中は何も表示しない (スペース変動を防ぐ)
+// - 削除済み/エラー時は null を QuotePostMini に渡してプレースホルダ表示
+// - router.push で詳細画面へ遷移
+// ============================================================
+function QuotePostMiniLoaderInner({ postId, onPress }: { postId: string; onPress: () => void }) {
+  const [quotedPost, setQuotedPost] = useState<QuotedPostPreview | null | undefined>(undefined);
+  const C = useColors();
 
+  useEffect(() => {
+    let alive = true;
+    void fetchQuotedPost(postId).then((result) => {
+      if (alive) setQuotedPost(result); // null = deleted, QuotedPostPreview = found
+    });
+    return () => { alive = false; };
+  }, [postId]);
+
+  // undefined = ロード中 → スケルトンプレースホルダーを表示してレイアウトシフトを防ぐ
+  // (null を返すと fetch 完了時にコンテンツが pop-in して下方のアクション行がずれる)
+  if (quotedPost === undefined) {
+    return (
+      <View
+        style={{
+          height: 72,
+          backgroundColor: C.bg3,
+          borderRadius: R.lg,
+        }}
+      />
+    );
+  }
+
+  // QuotePostMini は content?: string / title?: string (undefined) を期待するが
+  // QuotedPostPreview.content / title は string | null — null → undefined に正規化する。
+  const mini = quotedPost === null ? null : {
+    id: quotedPost.id,
+    content: quotedPost.content ?? undefined,
+    title: quotedPost.title ?? undefined,
+    tag_names: quotedPost.tag_names,
+    created_at: quotedPost.created_at,
+  };
+  return <QuotePostMini post={mini} onPress={onPress} />;
+}
+const QuotePostMiniLoader = memo(QuotePostMiniLoaderInner);
 
 type AnonPostCardProps = {
   post: Post;
@@ -792,6 +850,7 @@ type AnonPostCardProps = {
   onComment: () => void;
   onSave: () => void;
   onShare: () => void;
+  onQuote?: () => void;
   onTagPress: (name: string) => void;
   onMore: () => void;
   onReact: (meme: string) => void;
@@ -814,6 +873,7 @@ function AnonPostCardInner({
   onComment,
   onSave,
   onShare,
+  onQuote,
   onTagPress: _onTagPress,
   onMore,
   onReact,
@@ -826,6 +886,7 @@ function AnonPostCardInner({
   const Save = Icon.save;
   const Share = Icon.share;
   const More = Icon.more;
+  const QuoteIcon = Icon.quote;
   const t = useT();
   const qc = useQueryClient();
   // ★ テーマ購読 — light/dark で全 style が再評価される。
@@ -855,6 +916,36 @@ function AnonPostCardInner({
   // de-anon Phase2: server 供給の is_own を優先 (author_id 非依存)。is_own 未配線の経路
   //   (周辺データ未ロード中など) では従来の author_id 比較に fallback (2b で author_id 除去後は false)。
   const isOwnPost = isOwn ?? (!!post.author_id && post.author_id === currentUserId);
+
+  // ユーザーブロック — ... メニューの「ユーザーをブロック」から実行
+  const blockUser = useBlockStore((s) => s.blockUser);
+  const unblockUser = useBlockStore((s) => s.unblockUser);
+  const show = useToastStore((s) => s.show);
+  const handleBlockUser = useCallback(() => {
+    const pid = post.pseudonym_id;
+    if (!pid) return;
+    Alert.alert(
+      'ユーザーをブロック',
+      'このユーザーの投稿を非表示にしますか？',
+      [
+        { text: 'キャンセル', style: 'cancel' },
+        {
+          text: 'ブロック',
+          style: 'destructive',
+          onPress: () => {
+            // Warning haptic は iOS の破壊的アクション標準 (NotificationFeedback.Warning)
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            blockUser(pid, 'harassment');
+            // ネストした Alert はやめ、undo 付き toast に変更 (Android での nested Alert 問題も回避)
+            show('ブロックしました', 'info', {
+              undoLabel: '元に戻す',
+              onUndo: () => unblockUser(pid),
+            });
+          },
+        },
+      ],
+    );
+  }, [post.pseudonym_id, blockUser, unblockUser, show]);
 
   // ミームリアクション (props 経由で DB から取得済み)
   const [memePickerOpen, setMemePickerOpen] = useState(false);
@@ -890,12 +981,13 @@ function AnonPostCardInner({
   const useOgPreview = useFeatureFlag('og_preview');
   const useQuickReaction = useFeatureFlag('quick_reaction');
 
-  // 単一画像はカード幅いっぱい + 高さ上限でコンパクトに (X/Threads 流: 1画面に複数投稿が見える)。
   const { width: winW, height: winH } = useWindowDimensions();
   const mediaW = mediaContainerWidth(winW);
-  // 高さ上限 = 画面高の ~36%。縦長でも頭打ちして「最低2投稿/画面」を満たす
-  // (縦に大きすぎて次の投稿が見えない、を防ぐ)。横長など短い画像は自然高さで全体表示。
-  const mediaMaxH = Math.round(winH * 0.36);
+  // 高さ上限: 画面高の ~58%。
+  // 投稿ヘッダー(~130px) + 画像 + リアクション(~50px) が 1 画面に収まる上限。
+  // iPhone 3:4 は自然高さ(≈winW/0.75)が 58% 未満になりやすく全幅表示になる。
+  // 9:16 などの超縦長は比例縮小して全体を表示 (クロップしない)。
+  const mediaMaxH = Math.round(winH * 0.58);
 
   // OG カード対象 URL: 明示的な source_url を優先し、無ければ本文中の最初の URL を拾う。
   const previewUrl = useMemo(
@@ -997,6 +1089,67 @@ function AnonPostCardInner({
   const commentsCount = post.comments_count ?? 0;
   const hasMedia = mediaUrls.length > 0 || videoUrls.length > 0;
 
+  // シェアボタン: タップ→ 共有オプションシート (X/Threads 流)
+  // 長押しは廃止し、シングルタップでシートを開いて全オプションを表示する。
+  // OS ネイティブシェアは選択肢の 1 つとしてシート内に収める。
+  const handleShare = useCallback(() => {
+    hap.tap();
+    // 親 onShare も呼ぶ (親側の副作用がある場合に備える)
+    onShare();
+    Alert.alert(
+      '共有オプション',
+      undefined,
+      [
+        {
+          text: 'シェア (OS標準)',
+          onPress: () => {
+            void sharePost(post).catch(() => {
+              show('シェアに失敗しました', 'error');
+            });
+          },
+        },
+        {
+          text: 'X でシェア',
+          onPress: () => {
+            void shareToX(post).catch(() => {
+              show('X のシェアに失敗しました', 'error');
+            });
+          },
+        },
+        {
+          text: 'リンクをコピー',
+          onPress: () => {
+            const copied = copyPostLink(post);
+            // copyPostLink は @react-native-clipboard を試みるが、プロジェクトでは
+            // expo-clipboard を使っているため直接フォールバックする
+            const url = `https://geek-app.netlify.app/post/${post.id}`;
+            const copyPromise = copied
+              ? Promise.resolve()
+              : Clipboard.setStringAsync(url);
+            void copyPromise.then(() => {
+              show('リンクをコピーしました', 'success');
+            }).catch(() => {
+              show('コピーに失敗しました', 'error');
+            });
+          },
+        },
+        {
+          text: '埋め込みコードをコピー',
+          onPress: () => {
+            const embedHtml = getEmbedCode(post);
+            void Clipboard.setStringAsync(embedHtml).then(() => {
+              show('埋め込みコードをコピーしました', 'success');
+            }).catch(() => {
+              show('コピーに失敗しました', 'error');
+            });
+          },
+        },
+        { text: 'キャンセル', style: 'cancel' },
+      ],
+      { cancelable: true },
+    );
+  }, [post, onShare, show]);
+
   const openSource = useCallback(() => {
     if (!previewUrl) return;
     // sanitizeUrl は http/https 以外を null にする — javascript:/data:/vbscript: XSS 防止
@@ -1024,6 +1177,27 @@ function AnonPostCardInner({
     qc.invalidateQueries({ queryKey: ['feed'] });
     qc.invalidateQueries({ queryKey: ['community-feed'] });
   }, [qc]);
+  // ... ボタン — タップでブロック/報告オプションを含むシートを表示
+  // 旧: onLongPress で handleBlockUser を呼ぶ (不可視の affordance)
+  // 新: タップでシートを開き「ユーザーをブロック」「投稿を報告」を明示的に表示
+  const handleMoreMenu = useCallback(() => {
+    const canBlock = !isOwnPost && !!post.pseudonym_id;
+    const options: Array<{ text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }> = [];
+    if (canBlock) {
+      options.push({
+        text: 'ユーザーをブロック',
+        style: 'destructive',
+        onPress: handleBlockUser,
+      });
+    }
+    options.push({
+      text: '投稿を報告',
+      onPress: onMore,
+    });
+    options.push({ text: 'キャンセル', style: 'cancel' });
+    Alert.alert('その他のオプション', undefined, options, { cancelable: true });
+  }, [isOwnPost, post.pseudonym_id, handleBlockUser, onMore]);
+
   // MemeReactionPicker の onPick は JSX で直接インライン化
   // ModActionMenu の target は post 変化時のみ
   const modActionTarget = useMemo(
@@ -1088,6 +1262,13 @@ function AnonPostCardInner({
     isOwnPost,
   ]);
 
+  // 引用先投稿の詳細画面へ遷移 — quote_post_id が変わる時のみ新 ref。
+  const handleOpenQuoteDetail = useCallback(() => {
+    if (post.quote_post_id) {
+      router.push(`/post/${post.quote_post_id}` as never);
+    }
+  }, [router, post.quote_post_id]);
+
   // ── 動的 style: props/state に依存するもののみ useMemo 化 ──
   // ルート Container — X(旧Twitter)/Threads 風の「フラットな全幅行」。
   //   - 背景: transparent (カード面 bg2 を撤廃。地 (C.bg) に溶ける。light でも正)
@@ -1123,6 +1304,18 @@ function AnonPostCardInner({
   // ============================================================
   const reduceMotionForCard = useReducedMotion();
   const pressLift = useSharedValue(0);
+
+  // 本文の press feedback ハンドラを useCallback で安定化
+  // (inline arrow だと毎 render 新 ref → 子 Pressable の reconciliation コストが増える)
+  const handleBodyPressIn = useCallback(() => {
+    if (reduceMotionForCard) return;
+    pressLift.value = withTiming(1, { duration: 120, easing: Easing.out(Easing.cubic) });
+  }, [reduceMotionForCard, pressLift]);
+  const handleBodyPressOut = useCallback(() => {
+    if (reduceMotionForCard) return;
+    pressLift.value = withSpring(0, SPRING_SNAPPY);
+  }, [reduceMotionForCard, pressLift]);
+
   const animatedShadowStyle = useAnimatedStyle(() => {
     if (reduceMotionForCard) {
       return { backgroundColor: 'transparent' };
@@ -1303,7 +1496,13 @@ function AnonPostCardInner({
           </View>
         )}
 
-        <PressableScale onPress={onMore} hitSlop={HIT_SLOP_10} style={STYLES.morePress}>
+        <PressableScale
+          onPress={handleMoreMenu}
+          hitSlop={HIT_SLOP_10}
+          style={STYLES.morePress}
+          accessibilityLabel="その他のオプション"
+          accessibilityRole="button"
+        >
           <More size={20} color={C.text3} strokeWidth={2.2} />
         </PressableScale>
         {/* mod 専用 3-dot menu — mod でない / 自分の投稿のときは null render。
@@ -1325,6 +1524,8 @@ function AnonPostCardInner({
         <PressableScale
           onPress={revealCw}
           haptic="tap"
+          accessibilityRole="button"
+          accessibilityLabel={`${cwCategory === 'spoiler' ? 'ネタバレ' : cwCategory === 'nsfw' ? 'センシティブな内容' : cwCategory === 'violence' ? '暴力的描写' : '注意'} — タップして表示`}
           style={STYLES.cwBox}
         >
           <Text style={STYLES.cwEmoji}>
@@ -1365,17 +1566,10 @@ function AnonPostCardInner({
         <View>
           <PressableScale
             onPress={handleOpenDetail}
-            onLongPress={useQuickReaction ? () => setMemePickerOpen(true) : undefined}
             haptic="tap"
             scaleValue={1}
-            onPressIn={() => {
-              if (reduceMotionForCard) return;
-              pressLift.value = withTiming(1, { duration: 120, easing: Easing.out(Easing.cubic) });
-            }}
-            onPressOut={() => {
-              if (reduceMotionForCard) return;
-              pressLift.value = withSpring(0, SPRING_SNAPPY);
-            }}
+            onPressIn={handleBodyPressIn}
+            onPressOut={handleBodyPressOut}
           >
             <View style={STYLES.bodyInner}>
               {useMarkdown ? (
@@ -1442,10 +1636,7 @@ function AnonPostCardInner({
                           width="100%"
                           height="100%"
                           radius={16}
-                          // ★ 幅いっぱい + 高さ maxH で頭打ち。短い画像は box=画像比で全体表示、
-                          //   縦長は cover + 上端 で「コンパクト&真ん中だけにならない」。タップで全体。
-                          contentFit="cover"
-                          contentPosition={mediaIsCropped(aspect, mediaW, mediaMaxH) ? 'top' : undefined}
+                          contentFit="contain"
                           lazy
                           thumbWidth={480}
                           priority="high"
@@ -1490,6 +1681,14 @@ function AnonPostCardInner({
       {/* 投票 */}
       {poll && !isCwHidden && <PollCard poll={poll} />}
 
+      {/* 引用投稿プレビュー — quote_post_id がある場合のみ表示
+          marginTop/Bottom SP['2']=8px でコンテンツとの間隔を統一 */}
+      {!!post.quote_post_id && (
+        <View style={{ marginTop: SP['2'], marginBottom: SP['2'] }}>
+          <QuotePostMiniLoader postId={post.quote_post_id} onPress={handleOpenQuoteDetail} />
+        </View>
+      )}
+
       {/* タグ群は feed カードでは非表示
           - ハッシュタグは見せない方針 (UI 雑音 + 押し付け感を排除)
           - 「+ タグ追加」UI も削除 (周りの人が他人投稿に tag を付与できないようにする)
@@ -1522,6 +1721,20 @@ function AnonPostCardInner({
             <Text style={[T.smallM, STYLES.commentCount]}>{commentsCount}</Text>
           )}
         </PressableScale>
+        {/* 引用ボタン — onQuote が渡された時のみ表示 */}
+        {onQuote != null && (
+          <PressableScale
+            onPress={onQuote}
+            haptic="tap"
+            hitSlop={HIT_SLOP_10}
+            accessibilityLabel="引用投稿"
+            accessibilityHint="引用投稿を作成します"
+            accessibilityRole="button"
+            style={STYLES.actionPress}
+          >
+            <QuoteIcon size={18} color={C.text2} strokeWidth={2.2} />
+          </PressableScale>
+        )}
         <PressableScale
           onPress={() => setMemePickerOpen(true)}
           haptic="tap"
@@ -1537,12 +1750,14 @@ function AnonPostCardInner({
           )}
         </PressableScale>
         <View style={STYLES.spacer} />
-        <ObsidianSaveButton note={postToObsidianNote(post)} />
+        {/* size=18 / color=text3 で右側のセカンダリアクションクラスタに視覚的に統一する */}
+        <ObsidianSaveButton note={postToObsidianNote(post)} size={18} color={C.text3} />
         <PressableScale
-          onPress={onShare}
+          onPress={handleShare}
           haptic="tap"
-          hitSlop={10}
-          accessibilityLabel="共有"
+          hitSlop={HIT_SLOP_10}
+          accessibilityLabel="シェア"
+          accessibilityRole="button"
           style={STYLES.iconBtn}
         >
           <Share size={18} color={C.text2} strokeWidth={2.2} />
@@ -1638,6 +1853,7 @@ export const AnonPostCard = memo(AnonPostCardInner, (prev, next) => {
   if (prev.onComment !== next.onComment) return false;
   if (prev.onSave !== next.onSave) return false;
   if (prev.onShare !== next.onShare) return false;
+  if (prev.onQuote !== next.onQuote) return false;
   if (prev.onTagPress !== next.onTagPress) return false;
   if (prev.onMore !== next.onMore) return false;
   if (prev.onReact !== next.onReact) return false;

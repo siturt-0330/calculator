@@ -27,6 +27,7 @@ import {
   Play, Pause, TrendingUp,
   Volume2, VolumeX,
   Instagram, Facebook,
+  MessageSquareQuote,
 } from 'lucide-react-native';
 
 export const Icon = {
@@ -50,6 +51,7 @@ export const Icon = {
   instagram: Instagram, facebook: Facebook,
   // TabIcon.tsx の TabKey 'game' から参照されている (dead route だが型に存在)
   game: Gamepad2,
+  quote: MessageSquareQuote,
 } as const;
 
 export type IconName = keyof typeof Icon;

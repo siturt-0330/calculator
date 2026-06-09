@@ -2,7 +2,7 @@
 // components/feed/feedMediaLayout.ts
 // ============================================================
 // 単一画像の表示 box スタイルを feed / 投稿詳細 / マイページ で共有する小ユーティリティ。
-// 「写真全体を見せる (contain) + コンパクト + 縦写真は中央寄せの細box (レターボックス無し)」を
+// 「写真全体を見せる (クロップなし) + コンパクト + 灰色帯なし」を
 // 1 箇所に集約し、画面ごとにブレないようにする。
 // ============================================================
 
@@ -22,30 +22,26 @@ export function mediaContainerWidth(winW: number): number {
 }
 
 /**
- * 単一画像が「高さ上限で切り取られる(=cover crop)」か。
- * 全幅にしたときの自然高さ (containerW/比) が maxH を超えるとき true。
- * true のとき呼び出し側は contentPosition='top' で「上端」を見せる
- * (中央 crop だと真ん中しか写らず文脈が消えるため)。タップで全体表示できる。
+ * @deprecated mediaItemAspect が box=画像アスペクトを保証するため常に false。
+ * 後方互換のため残すが、呼び出し側で contentPosition を設定する必要はない。
  */
-export function mediaIsCropped(aspect: number, containerW?: number, maxH?: number): boolean {
-  if (!maxH || maxH <= 0 || !Number.isFinite(maxH)) return false;
-  const ar = aspect > 0 && Number.isFinite(aspect) ? aspect : 1;
-  const cw = containerW && containerW > 0 && Number.isFinite(containerW) ? containerW : 0;
-  if (!cw) return false;
-  return cw / ar > maxH + 0.5;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function mediaIsCropped(_aspect: number, _containerW?: number, _maxH?: number): boolean {
+  return false;
 }
 
 /**
  * 単一画像 box のスタイル。aspect = width/height。
- * ★ 「カード幅いっぱい(謎の余白なし) + 高さは maxH で頭打ち(コンパクト)」が基本:
- *     width  = containerW                         … 常に幅いっぱい → 左右の余白が出ない
- *     height = min(containerW / 比, maxH)          … 自然高さを maxH で頭打ち(縦に伸びすぎない)
- *   - 横長/短い画像 (自然高さ <= maxH): box=画像比 → cover でも全体表示 (クロップ無し・灰色帯無し)
- *   - 縦長 (自然高さ > maxH): maxH で頭打ち → cover + contentPosition='top' で上端を大きく表示。
- *     これで「縦に大きすぎて次の投稿が見えない」を解消しつつ、中央 crop の「真ん中しか写らない」も回避。
- *   明示ピクセル数値なので FlashList recycled cell の高さ0潰れも起きない。
- *  containerW 不明時のみ従来の比率方式にフォールバック (保険の minHeight 付き)。
- *  画面回転/リサイズ時は呼び出し側が useWindowDimensions で再 render → 寸法が追従する。
+ * ★ 「全体表示 + コンパクト + 灰色帯なし」の両立方針:
+ *   1. 横長/適度な縦長 (自然高さ <= maxH):
+ *      width = containerW / height = naturalH → カード幅いっぱい × 自然高さ
+ *      → クロップなし・灰色帯なし ✓
+ *   2. 縦長 (自然高さ > maxH):
+ *      height = maxH / width = maxH × aspect → 高さ cap + 幅を比例縮小
+ *      → box が画像アスペクトと一致 → contentFit="contain" で全体表示
+ *      → クロップなし・灰色帯なし ✓ (画像は縮小されるが全体が見える)
+ *   ★ 縦長で幅縮小した際はカード中央に寄せるため alignSelf:'center' を mediaItemBase に付与推奨。
+ *   containerW 不明時のみ従来の比率方式にフォールバック (FlashList 起動直後の保険)。
  */
 export function mediaItemAspect(aspect: number, containerW?: number, maxH?: number): ViewStyle {
   const ar = aspect > 0 && Number.isFinite(aspect) ? aspect : 1;
@@ -56,7 +52,14 @@ export function mediaItemAspect(aspect: number, containerW?: number, maxH?: numb
   }
   const naturalH = cw / ar;
   const cap = maxH && maxH > 0 && Number.isFinite(maxH) ? maxH : naturalH;
-  const w = Math.max(1, Math.round(cw));
-  const h = Math.max(1, Math.round(Math.min(naturalH, cap)));
+
+  if (naturalH <= cap + 0.5) {
+    // 自然高さが上限以下: カード幅いっぱい × 自然高さ (クロップなし・灰色帯なし)
+    return { width: Math.max(1, Math.round(cw)), height: Math.max(1, Math.round(naturalH)) };
+  }
+  // 自然高さが上限超: 高さを cap、幅を cap × ar で比例縮小
+  // → box が画像アスペクトと一致するためクロップなし・灰色帯なし (画像は縮小表示)
+  const h = Math.max(1, Math.round(cap));
+  const w = Math.max(1, Math.round(cap * ar));
   return { width: w, height: h };
 }

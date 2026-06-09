@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
+  Animated,
   ScrollView,
   Platform,
   KeyboardAvoidingView,
@@ -38,6 +39,7 @@ import { useToastStore } from '../../stores/toastStore';
 import { useAuthStore } from '../../stores/authStore';
 import { usePostDraftStore } from '../../stores/postDraftStore';
 import { useDraftsStore, newDraftId } from '../../stores/draftsStore';
+import { useDraftStore } from '../../stores/draftStore';
 import { hap } from '../../design/haptics';
 import { fetchCommunity, fetchMyCommunities, type Community } from '../../lib/api/communities';
 import { createPost, fetchPostById, updatePost } from '../../lib/api/posts';
@@ -198,6 +200,45 @@ export default function CreatePost() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 下書き保存インジケーター — フェードイン→2s保持→フェードアウトのアニメ
+  const draftSavedOpacity = useRef(new Animated.Value(0)).current;
+  const draftSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showDraftSavedIndicator = () => {
+    if (draftSavedTimerRef.current) clearTimeout(draftSavedTimerRef.current);
+    draftSavedOpacity.setValue(0);
+    Animated.timing(draftSavedOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start(() => {
+      draftSavedTimerRef.current = setTimeout(() => {
+        Animated.timing(draftSavedOpacity, { toValue: 0, duration: 400, useNativeDriver: true }).start();
+      }, 2000);
+    });
+  };
+
+  // draftStore (server-synced) の loadDrafts を mount 時に 1 回呼ぶ
+  useEffect(() => {
+    useDraftStore.getState().loadDrafts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // server-synced 下書き自動保存 (debounce 1.5s)
+  // 編集モードでは書かない。本文・タグ・メディアが空なら skip。
+  useEffect(() => {
+    if (editIdRef.current) return;
+    const meaningful = content.trim() || tags.length > 0 || images.length > 0 || !!video;
+    if (!meaningful) return;
+    const t = setTimeout(() => {
+      const s = usePostDraftStore.getState();
+      useDraftStore.getState().saveDraft({
+        content: s.content,
+        title: s.title || undefined,
+        tagNames: s.tags,
+        mediaUrls: s.images,
+      });
+      showDraftSavedIndicator();
+    }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content, tags, images, video]);
+
   // ?editId=xxx — 既存投稿を編集モードで開く (mount 1 回)。fetchPostById で取得して
   // store に prefill。コミュニティ/poll/タイトルは編集対象外なので prefill しない。
   useEffect(() => {
@@ -264,6 +305,7 @@ export default function CreatePost() {
         pollMulti: s.pollMulti,
         pollHours: s.pollHours,
       });
+      showDraftSavedIndicator();
     }, 600);
     return () => clearTimeout(t);
   }, [title, content, images, video, anonymous]);
@@ -947,6 +989,22 @@ export default function CreatePost() {
         </PressableScale>
       </View>
 
+      {/* 下書き保存インジケーター — フェードイン/アウトで控えめに表示 */}
+      {!editId && (
+        <Animated.Text
+          style={{
+            opacity: draftSavedOpacity,
+            fontSize: 12,
+            color: C.text3,
+            textAlign: 'center',
+            paddingVertical: 4,
+          }}
+          accessibilityLiveRegion="polite"
+        >
+          下書き保存済み
+        </Animated.Text>
+      )}
+
       {/* ================================================================
           本体 — KeyboardAvoiding + ScrollView
           ================================================================ */}
@@ -1049,6 +1107,7 @@ export default function CreatePost() {
                 {/* 投稿は常に匿名 — 操作不可の静的バッジで明示 (トグル廃止 #3) */}
                 <View
                   accessibilityLabel="この投稿は匿名で送信されます"
+                  accessibilityRole="text"
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
@@ -1104,6 +1163,7 @@ export default function CreatePost() {
                         onPress={() => removeTag(t)}
                         haptic="tap"
                         accessibilityLabel={`タグ ${t} を削除`}
+                        accessibilityRole="button"
                         style={{
                           flexDirection: 'row',
                           alignItems: 'center',
