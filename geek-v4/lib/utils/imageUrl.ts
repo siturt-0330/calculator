@@ -27,10 +27,19 @@ const SUPABASE_PUBLIC_RENDER = '/storage/v1/render/image/public/';
  * そのまま返す (二重変換 / 壊れた URL 防止)。
  *
  * 注意 (2026-05 修正): `resize=cover` で **正方形** に center-crop したい場合は
- *   `opts.height` を `width` と同じ値で指定する。height を省くと Supabase は
- *   width だけで等倍スケールするため、横長画像は縦が短いまま帰ってきて、
- *   円形 avatar 内で expo-image が `contentFit="cover"` で拡大表示 → 「顔が
- *   押し込まれて拡大されすぎ」に見える原因になる。
+ *   `opts.height` を `width` と同じ値で指定する (squareThumbedUrl 参照)。
+ *
+ * ★★ 重大バグ修正 (2026-06): height を省いて width だけ + resize=cover を渡すと、
+ *   Supabase render endpoint は **幅だけを要求値に縮小して高さは元のまま** 返す。
+ *   例: 元 1179x866 (横長) に width=480&resize=cover → 480x866 (aspect 0.55 に
+ *   水平つぶれ)。さらに width=240 なら 240x866 (aspect 0.28 の激細)。これが
+ *   - フィード写真が「縦長/細い」セルで表示される (getSize が 0.28 を測る)
+ *   - 表示画像そのものが水平方向に潰れる (ProgressiveImage が潰れた bitmap を取得)
+ *   の両方の真因だった。EXIF とは無関係 (元画像の EXIF は既に strip 済み)。
+ *   resize=contain なら width だけでも比率を維持して比例縮小する
+ *   (480x866→480x353 / 240→240x176)。よって **height 未指定なら contain を既定**
+ *   にする。height 指定時 (正方形 avatar/icon) は従来どおり呼出側の resize を尊重。
+ *   表示側の crop/fit は expo-image の contentFit が担うので contain ソースで問題ない。
  */
 export function thumbedUrl(
   url: string | null | undefined,
@@ -39,7 +48,7 @@ export function thumbedUrl(
     quality?: number;
     format?: 'webp' | 'avif' | 'origin';
     height?: number;
-    /** crop=cover (default) / 全体を収める=contain。アイコンは contain で「拡大」を防ぐ。 */
+    /** crop=cover / 全体を収める=contain。既定は height 有→cover, height 無→contain。 */
     resize?: 'cover' | 'contain';
   } = {},
 ): string {
@@ -49,7 +58,9 @@ export function thumbedUrl(
   if (/[?&]width=/.test(rendered)) return rendered;
   const quality = opts.quality ?? 75;
   const format = opts.format ?? 'webp';   // ★ デフォルトを WebP に (JPEG 比 25-30% 軽量)
-  const resize = opts.resize ?? 'cover';
+  // ★ height 無しで cover を渡すと Supabase が高さを元のまま残し画像が潰れる (上記コメント)。
+  //   height 指定 (正方形サムネ) のときだけ cover が正しく box を埋める。
+  const resize = opts.resize ?? (opts.height ? 'cover' : 'contain');
   const sep = rendered.includes('?') ? '&' : '?';
   const heightPart = opts.height ? `&height=${opts.height}` : '';
   return `${rendered}${sep}width=${width}${heightPart}&quality=${quality}&resize=${resize}&format=${format}`;

@@ -43,15 +43,16 @@ export function FeedMediaGrid({
   const [measured, setMeasured] = useState<Record<string, number>>({});
 
   // aspect 未指定の item は実寸を計測 (一度測れば measured に保持し再計測しない)。
-  // format=origin: WebP 変換を避け EXIF 情報を保持した JPEG で測定する。
-  // WebP thumbnail で getSize すると Supabase が EXIF rotation を適用しないケースで
-  // 横長写真が縦長として測定されてしまう。origin 形式なら iOS が EXIF を読んで正しく回転後の
-  // 寸法を返すため縦横の取り違えが起きない。帯域は 240px サムネで十分小さい。
+  // 測定は thumbedUrl(240) の比例縮小サムネ (既定 resize=contain) を使う。
+  // ★ height 無しで resize=cover を渡すと Supabase render endpoint は幅だけ縮小して
+  //   高さを元のまま残す (1179x866 → 240x866) ため getSize が aspect=0.28 の激細を返し、
+  //   横長写真が縦長セルに化ける。contain 既定なら 240x176 と比率を維持して正しく測れる
+  //   (imageUrl.ts の thumbedUrl コメント参照)。EXIF は無関係 (upload で strip 済)。
   useEffect(() => {
     let alive = true;
     for (const it of items) {
       if (it.aspect == null && measured[it.uri] == null) {
-        const measureUri = thumbedUrl(it.uri, 240, { format: 'origin' });
+        const measureUri = thumbedUrl(it.uri, 240);
         RNImage.getSize(
           measureUri,
           (w, h) => {

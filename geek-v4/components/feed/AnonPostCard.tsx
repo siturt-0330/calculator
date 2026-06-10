@@ -109,8 +109,8 @@ function measureAspect(url: string, measureUri: string, cb: (ratio: number) => v
         _drain();
       },
       () => {
-        // WebP サムネでの getSize 失敗 → オリジナル URL で再計測してフォールバック。
-        // Supabase transform が EXIF rotation を適用せず portrait を返す場合に備える。
+        // サムネでの getSize 失敗 → オリジナル URL で再計測してフォールバック
+        // (CORS / 形式 / render endpoint 不調の保険)。
         RNImage.getSize(
           url,
           (w, h) => {
@@ -669,11 +669,11 @@ function AnonPostCardInner({
         setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: r.ratio }));
         continue;
       }
-      // format=origin: オリジナル JPEG のまま 240px にリサイズ。
-      // WebP 変換すると Supabase が EXIF rotation を適用せず portrait サムネを
-      // 返すケースがあり、RNImage.getSize が縦長の誤った比率を返す原因となる。
-      // origin 形式なら EXIF が保持されるため iOS/Android で正しく回転して測定できる。
-      const measureUri = thumbedUrl(url, 240, { format: 'origin' });
+      // 測定は thumbedUrl(240) の比例縮小サムネ (既定 resize=contain) で行う。
+      // ★ height 無しで resize=cover を渡すと Supabase render が幅だけ縮小し高さを
+      //   元のまま残す (240xH の歪んだ寸法 → 横長が縦長に化ける真因)。contain 既定なら
+      //   240x(240/ar) と比率を維持するので getSize が正しい aspect を返す。EXIF は無関係。
+      const measureUri = thumbedUrl(url, 240);
       measureAspect(url, measureUri, (ratio) => {
         if (!alive) return;
         setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: ratio }));

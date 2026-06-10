@@ -440,6 +440,7 @@ Native module を触ったら必ず通常 build & submit。
 | 「戻るボタンが効かない」事故 | アニメ中の race + ディープリンクで back stack 空 | 200ms in-flight lock + `router.canGoBack()` false なら `/(tabs)/feed` fallback |
 | 起動 5 秒「黒画面」 | Splash + intro 合算で 8 秒 | intro 5.5s → 3.0s + skip タップ + sessionStorage で 2 回目以降 skip + `forceReady` 500ms safety |
 | フィード画像が一部しか映らない / 横が映らない | ProgressiveImage の ken-burns (scale 1.04→1.0) + overflow:hidden が `contain` 表示時に左右をクリップしていた | `ProgressiveImage.tsx`: `contentFit="contain"` 時は `useKenBurns=false` → scale を 1.0 固定でアニメなし。`feedMediaLayout.ts` の `mediaItemAspect`: 横長/適度な縦長は `{w:containerW, h:naturalH}`、縦長 `naturalH>cap` は `{w:cap×ar, h:cap}` (比例縮小 + `alignSelf:'center'`)。`mediaMaxH = winH × 0.58`・`contentFit="contain"`。cap を上げると画面外 → **0.58 以上には上げない** |
+| 横長写真がフィードで縦長/細く表示される・画像が水平に潰れる | `thumbedUrl` が `resize=cover` を **height 無し** で Supabase render endpoint に渡すと、幅だけ要求値に縮小し高さは元のまま返す。例: 1179x866 を width=480 → **480x866 (aspect 0.55)**、width=240 → 240x866 (0.28 激細)。`getSize` 測定値も表示 bitmap も潰れる。**EXIF は無関係**(upload で strip 済)。アバター/アイコン(正方形 512)も width のみ cover では 120x512 に潰れていた | `imageUrl.ts`: height 未指定なら `resize=contain` を既定に → `opts.resize ?? (opts.height ? 'cover' : 'contain')`。contain は width だけでも比率維持(480x353)。height 指定の正方形サムネ(squareThumbedUrl)は cover 維持で回帰なし。表示 crop は expo-image contentFit が担う。検証は `image-size` で本番画像実測(object=正 / render+cover=潰れ) |
 
 ---
 
