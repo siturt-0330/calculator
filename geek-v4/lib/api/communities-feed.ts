@@ -288,9 +288,14 @@ export async function fetchMyCommunityFeed(limit = 30): Promise<CommunityPostWit
  */
 export async function fetchMyCommunityPostsRich(
   limit = 40,
-): Promise<{ posts: Post[]; communityByPost: Record<string, CommunityMetaLite> }> {
+): Promise<{
+  posts: Post[];
+  communityByPost: Record<string, CommunityMetaLite>;
+  // ★ フィルタ判定用: post → 所属する全 community id (cross-post 対応)。
+  communityIdsByPost: Record<string, string[]>;
+}> {
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { posts: [], communityByPost: {} };
+  if (!user) return { posts: [], communityByPost: {}, communityIdsByPost: {} };
 
   // ----- 高速パス: 1 RPC で全部取得 (migration 0042) -----
   // get_community_feed は SECURITY DEFINER + STABLE で、
@@ -316,7 +321,7 @@ export async function fetchMyCommunityPostsRich(
     const payload = (data ?? { posts: [] }) as { posts?: RpcPostRow[] };
     const rpcPosts = Array.isArray(payload.posts) ? payload.posts : [];
 
-    if (rpcPosts.length === 0) return { posts: [], communityByPost: {} };
+    if (rpcPosts.length === 0) return { posts: [], communityByPost: {}, communityIdsByPost: {} };
 
     // community メタの解決:
     //   - 0112 適用済: RPC が per-post 'community' を inline 返却 → 追加 query 不要 (1 RTT)。
@@ -368,7 +373,32 @@ export async function fetchMyCommunityPostsRich(
       };
     });
 
-    return { posts, communityByPost };
+    // ★ Bug fix (コミュタブで cross-post が特定コミュ選択時に消える):
+    //   communityByPost は表示メタ用に最新 attach 1 件のみ。一方フィルタ判定には post が属する
+    //   「全コミュ」が要る (詳細ページは community_id 直引きなので cross-post でも出るのにタブでは
+    //   消える不一致の真因)。RPC は per-post 1 件しか返さないため post_communities を 1 回引いて
+    //   post→所属全コミュ id を作る (RLS=can_view_post なので可視 post の attach のみ返る)。
+    //   fetch 失敗時は communityByPost の代表 id を baseline に残し従来挙動を保つ (no-regression)。
+    const communityIdsByPost: Record<string, string[]> = {};
+    for (const p of posts) {
+      const metaId = communityByPost[p.id]?.id;
+      if (metaId) communityIdsByPost[p.id] = [metaId];
+    }
+    {
+      const pids = posts.map((p) => p.id);
+      if (pids.length > 0) {
+        const { data: pcAll } = await supabase
+          .from('post_communities')
+          .select('post_id, community_id')
+          .in('post_id', pids);
+        for (const row of pcAll ?? []) {
+          const arr = (communityIdsByPost[row.post_id] ??= []);
+          if (!arr.includes(row.community_id)) arr.push(row.community_id);
+        }
+      }
+    }
+
+    return { posts, communityByPost, communityIdsByPost };
   } catch (rpcErr) {
     // RPC が無い / 失敗した時のフォールバック (旧 4 連 query 実装)
     // migration 0042 が未適用な環境 (CI / 古いプレビュー) でも壊れないように。
@@ -386,14 +416,18 @@ export async function fetchMyCommunityPostsRich(
 async function fetchMyCommunityPostsRichLegacy(
   userId: string,
   limit: number,
-): Promise<{ posts: Post[]; communityByPost: Record<string, CommunityMetaLite> }> {
+): Promise<{
+  posts: Post[];
+  communityByPost: Record<string, CommunityMetaLite>;
+  communityIdsByPost: Record<string, string[]>;
+}> {
   // 1) 所属 community_id 一覧
   const { data: memberRows, error: memErr } = await supabase
     .from('community_members')
     .select('community_id')
     .eq('user_id', userId);
   if (memErr || !memberRows || memberRows.length === 0) {
-    return { posts: [], communityByPost: {} };
+    return { posts: [], communityByPost: {}, communityIdsByPost: {} };
   }
   const myCommunityIds = memberRows.map((r) => r.community_id);
 
@@ -407,15 +441,18 @@ async function fetchMyCommunityPostsRichLegacy(
     .limit(overfetch);
   if (pcErr) {
     console.warn('[communities] fetchMyCommunityPostsRichLegacy (pc) failed:', pcErr.message);
-    return { posts: [], communityByPost: {} };
+    return { posts: [], communityByPost: {}, communityIdsByPost: {} };
   }
   const pc = pcRows ?? [];
-  if (pc.length === 0) return { posts: [], communityByPost: {} };
+  if (pc.length === 0) return { posts: [], communityByPost: {}, communityIdsByPost: {} };
 
-  // 重複削除 (同一 post が複数コミュに attach されている場合は最新の attach を採用)
+  // 重複削除 (表示メタ用は最新 attach 1 件を採用)。同時に、コミュタブの cross-post フィルタ用に
+  // post→所属する全 community id (communityIdsByPost) も併走して作る (pc は my-community に絞り済み)。
   const postToCommunity = new Map<string, string>();
+  const communityIdsByPost: Record<string, string[]> = {};
   const order: string[] = [];
   for (const row of pc) {
+    (communityIdsByPost[row.post_id] ??= []).push(row.community_id);
     if (!postToCommunity.has(row.post_id)) {
       postToCommunity.set(row.post_id, row.community_id);
       order.push(row.post_id);
@@ -435,7 +472,7 @@ async function fetchMyCommunityPostsRichLegacy(
     .in('id', postIds);
   if (postErr) {
     console.warn('[communities] fetchMyCommunityPostsRichLegacy (posts) failed:', postErr.message);
-    return { posts: [], communityByPost: {} };
+    return { posts: [], communityByPost: {}, communityIdsByPost: {} };
   }
   // attach 時刻順に並べる (Map で O(N) lookup)
   const byId = new Map((postRows ?? []).map((p) => [p.id, p as Post]));
@@ -465,5 +502,5 @@ async function fetchMyCommunityPostsRichLegacy(
     }
   }
 
-  return { posts: ordered, communityByPost };
+  return { posts: ordered, communityByPost, communityIdsByPost };
 }

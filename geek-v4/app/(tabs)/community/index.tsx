@@ -134,6 +134,13 @@ export default function CommunityScreen() {
     () => feedQuery.data?.communityByPost ?? {},
     [feedQuery.data?.communityByPost],
   );
+  // ★ フィルタ判定用: post → 所属する全 community id (cross-post 対応)。
+  //   表示メタ(代表1件)は communityByPost、特定コミュ選択時の絞り込みはこの全集合で
+  //   「いずれか一致」を見る (最新 attach 先 ≠ 選択コミュ でも消えないように)。
+  const communityIdsByPost: Record<string, string[]> = useMemo(
+    () => feedQuery.data?.communityIdsByPost ?? {},
+    [feedQuery.data?.communityIdsByPost],
+  );
   const loading = myCommunitiesQuery.isLoading || feedQuery.isLoading;
   // cold load (cache 無し) のときだけ skeleton を出す。<200ms で解決する cache hit は
   // skeleton も白画面も出さない (feed と同じ smart skeleton timing)。
@@ -154,8 +161,8 @@ export default function CommunityScreen() {
   // 表示用 post 配列 — 選択中 community があれば絞り込む。
   // 純関数は lib/utils/communityFilter.ts に切り出して unit test 可能に。
   const filteredPosts = useMemo(
-    () => filterPostsByCommunity(posts, communityByPost, selectedCommunityId),
-    [posts, communityByPost, selectedCommunityId],
+    () => filterPostsByCommunity(posts, communityIdsByPost, selectedCommunityId),
+    [posts, communityIdsByPost, selectedCommunityId],
   );
 
   // 選択中 community の meta (「コミュニティに移動」 chip 表示判定用)

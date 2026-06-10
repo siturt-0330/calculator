@@ -52,7 +52,8 @@ export default function OfficialLayout() {
       screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: C.bg },
-        animation: 'slide_from_right',
+        // ios_from_right: iOS 不変・Android のみ iOS 風 push に統一 (root Stack と同方針)。
+        animation: 'ios_from_right',
         animationDuration: 220,
       }}
     >
