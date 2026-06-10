@@ -15,6 +15,7 @@ import { useState, useEffect } from 'react';
 import { ScrollView, Pressable, useWindowDimensions, Platform, Image as RNImage } from 'react-native';
 import { C, SP } from '../../design/tokens';
 import { ProgressiveImage } from '../ui/ProgressiveImage';
+import { thumbedUrl } from '../../lib/utils/imageUrl';
 
 const GAP = 6;
 const RADIUS = 14;
@@ -42,18 +43,34 @@ export function FeedMediaGrid({
   const [measured, setMeasured] = useState<Record<string, number>>({});
 
   // aspect 未指定の item は実寸を計測 (一度測れば measured に保持し再計測しない)。
+  // format=origin: WebP 変換を避け EXIF 情報を保持した JPEG で測定する。
+  // WebP thumbnail で getSize すると Supabase が EXIF rotation を適用しないケースで
+  // 横長写真が縦長として測定されてしまう。origin 形式なら iOS が EXIF を読んで正しく回転後の
+  // 寸法を返すため縦横の取り違えが起きない。帯域は 240px サムネで十分小さい。
   useEffect(() => {
     let alive = true;
     for (const it of items) {
       if (it.aspect == null && measured[it.uri] == null) {
+        const measureUri = thumbedUrl(it.uri, 240, { format: 'origin' });
         RNImage.getSize(
-          it.uri,
+          measureUri,
           (w, h) => {
             if (alive && w > 0 && h > 0) {
               setMeasured((m) => (m[it.uri] != null ? m : { ...m, [it.uri]: w / h }));
             }
           },
-          () => {},
+          () => {
+            // サムネ失敗時はオリジナル URL で再試行 (CORS/形式問題の回避)
+            RNImage.getSize(
+              it.uri,
+              (w, h) => {
+                if (alive && w > 0 && h > 0) {
+                  setMeasured((m) => (m[it.uri] != null ? m : { ...m, [it.uri]: w / h }));
+                }
+              },
+              () => {},
+            );
+          },
         );
       }
     }

@@ -293,13 +293,22 @@ export function safeExtension(mime: string): string {
 //   あった。まず無 resize で JPEG 化 (= EXIF strip) しつつ寸法を得て、長辺が
 //   上限超のときだけ「長辺のみ」を指定して比率を保ったまま縮小する。
 //   (長辺以下の画像は再エンコードのみ = 歪み無し・upscale 無し)
+//
+// ★ EXIF 向き (2026-06 追加修正): manipulateAsync に空の actions を渡すと
+//   iOS では EXIF 回転タグを保持したまま JPEG を返す場合がある。
+//   保存後の JPEG を Supabase transform でサムネ生成すると transform が EXIF を
+//   無視して raw ピクセルの向きで返し、フィードの aspect 測定が縦横逆になる問題。
+//   → 明示的に { rotate: 0 } を action に加えることで manipulateAsync が
+//     EXIF 回転を物理的に適用して EXIF タグを 1 (= 回転不要) にリセットする。
+//     これで保存後の JPEG は「display 向きのピクセル + EXIF=1」になる。
 export async function stripExifAndResize(
   uri: string,
   opts: { maxWidth?: number; maxHeight?: number; quality?: number } = {},
 ): Promise<{ uri: string; width: number; height: number }> {
   const { maxWidth = 1600, maxHeight = 1600, quality = 0.85 } = opts;
-  // 1) 無 resize で JPEG 化 (EXIF strip) + 寸法取得
-  const first = await ImageManipulator.manipulateAsync(uri, [], {
+  // 1) rotate:0 を action に入れると manipulateAsync が EXIF 向きを物理適用して
+  //    EXIF タグをリセットする。空 actions では EXIF が残る iOS 実装の罠を回避。
+  const first = await ImageManipulator.manipulateAsync(uri, [{ rotate: 0 }], {
     compress: quality,
     format: ImageManipulator.SaveFormat.JPEG,
   });

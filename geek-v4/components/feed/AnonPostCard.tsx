@@ -100,18 +100,35 @@ function measureAspect(url: string, measureUri: string, cb: (ratio: number) => v
       measureUri,
       (w, h) => {
         _pending.delete(url);
-        const ratio = h > 0 && w > 0 ? Math.max(0.5, Math.min(2.0, w / h)) : 1;
+        // アスペクト比のクランプ上限を 3.0 に緩和 (2.0 は超横長パノラマで潰れる)。
+        // 下限は 0.3 (超縦長は Feed でコンパクトに表示すれば十分)。
+        const ratio = h > 0 && w > 0 ? Math.max(0.3, Math.min(3.0, w / h)) : 1;
         _trimAspectCache();
         _aspectCache.set(url, { ratio, ts: Date.now() });
         cb(ratio);
         _drain();
       },
       () => {
-        _pending.delete(url);
-        _trimAspectCache();
-        _aspectCache.set(url, { ratio: 1, ts: Date.now() });
-        cb(1);
-        _drain();
+        // WebP サムネでの getSize 失敗 → オリジナル URL で再計測してフォールバック。
+        // Supabase transform が EXIF rotation を適用せず portrait を返す場合に備える。
+        RNImage.getSize(
+          url,
+          (w, h) => {
+            _pending.delete(url);
+            const ratio = h > 0 && w > 0 ? Math.max(0.3, Math.min(3.0, w / h)) : 1;
+            _trimAspectCache();
+            _aspectCache.set(url, { ratio, ts: Date.now() });
+            cb(ratio);
+            _drain();
+          },
+          () => {
+            _pending.delete(url);
+            _trimAspectCache();
+            _aspectCache.set(url, { ratio: 1, ts: Date.now() });
+            cb(1);
+            _drain();
+          },
+        );
       },
     );
   };
@@ -652,7 +669,11 @@ function AnonPostCardInner({
         setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: r.ratio }));
         continue;
       }
-      const measureUri = thumbedUrl(url, 240);
+      // format=origin: オリジナル JPEG のまま 240px にリサイズ。
+      // WebP 変換すると Supabase が EXIF rotation を適用せず portrait サムネを
+      // 返すケースがあり、RNImage.getSize が縦長の誤った比率を返す原因となる。
+      // origin 形式なら EXIF が保持されるため iOS/Android で正しく回転して測定できる。
+      const measureUri = thumbedUrl(url, 240, { format: 'origin' });
       measureAspect(url, measureUri, (ratio) => {
         if (!alive) return;
         setImgAspects((p) => (p[url] !== undefined ? p : { ...p, [url]: ratio }));
