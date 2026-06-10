@@ -705,7 +705,9 @@ export default function RootLayout() {
                   screenOptions={{
                     headerShown: false,
                     contentStyle: { backgroundColor: C.bg },
-                    animation: 'slide_from_right',
+                    // ios_from_right: iOS はネイティブ既定 push (不変)、Android のみ iOS 風の
+                    // 右→左 push + 視差で質感統一 (slide_from_right より自然)。
+                    animation: 'ios_from_right',
                     // パフォーマンス監査: Platform 別に最適化。
                     //   iOS: 220ms (自然な感じ)
                     //   Android: 160ms (slow device で sluggish 感を緩和)

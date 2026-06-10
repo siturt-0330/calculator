@@ -3,13 +3,18 @@
 // ============================================================
 // YouTube 登録チャンネル風 UX のための post filter helper。
 //
+// 判定モデル: post → 所属する全 community id の配列 (communityIdsByPost)。
+//   1 投稿が複数コミュに cross-post される (post_communities 複数行) ため、
+//   「代表 1 community」ではなく「所属全コミュ集合」で一致を見る。
+//
 // 検証観点:
 //   1. selectedCommunityId === null → 全 post 返す (「すべて」)
-//   2. 特定 id 指定 → そのコミュ post のみ
-//   3. communityByPost に entry が無い post は selected 時に除外
-//   4. 順序保持 (filter は元配列の順序を崩さない)
-//   5. empty input
-//   6. countPostsPerCommunity の数値正確性
+//   2. 特定 id 指定 → その community に所属する post のみ
+//   3. ★ cross-post: 複数 community 所属 post は、所属するどの community を選んでも残る (回帰防止)
+//   4. communityIdsByPost に entry が無い post は selected 時に除外
+//   5. 順序保持 (filter は元配列の順序を崩さない)
+//   6. empty input
+//   7. countPostsPerCommunity の数値正確性 (cross-post は各コミュで +1)
 // ============================================================
 
 import {
@@ -17,10 +22,9 @@ import {
   countPostsPerCommunity,
 } from '../../lib/utils/communityFilter';
 import type { Post } from '../../types/models';
-import type { CommunityMetaLite } from '../../lib/api/communities';
 
 // ------------------------------------------------------------
-// テスト fixture (最低限の Post / CommunityMetaLite)
+// テスト fixture (最低限の Post)
 // ------------------------------------------------------------
 function mkPost(id: string): Post {
   return {
@@ -43,17 +47,6 @@ function mkPost(id: string): Post {
   };
 }
 
-function mkCommunity(id: string, name = `Community ${id}`): CommunityMetaLite {
-  return {
-    id,
-    name,
-    icon_emoji: '🌐',
-    icon_color: '#7C6AF7',
-    icon_url: null,
-    is_official: false,
-  };
-}
-
 const COMMUNITY_A = 'community-aaaa';
 const COMMUNITY_B = 'community-bbbb';
 const COMMUNITY_C = 'community-cccc';
@@ -64,36 +57,51 @@ const COMMUNITY_C = 'community-cccc';
 describe('filterPostsByCommunity', () => {
   it('selectedCommunityId が null → 全 post を返す (「すべて」)', () => {
     const posts = [mkPost('p1'), mkPost('p2'), mkPost('p3')];
-    const map: Record<string, CommunityMetaLite> = {
-      p1: mkCommunity(COMMUNITY_A),
-      p2: mkCommunity(COMMUNITY_B),
-      p3: mkCommunity(COMMUNITY_A),
+    const map: Record<string, string[]> = {
+      p1: [COMMUNITY_A],
+      p2: [COMMUNITY_B],
+      p3: [COMMUNITY_A],
     };
     expect(filterPostsByCommunity(posts, map, null)).toEqual(posts);
   });
 
-  it('特定 community 指定 → その community の post のみ返す', () => {
+  it('特定 community 指定 → その community に所属する post のみ返す', () => {
     const p1 = mkPost('p1');
     const p2 = mkPost('p2');
     const p3 = mkPost('p3');
     const p4 = mkPost('p4');
     const posts = [p1, p2, p3, p4];
-    const map: Record<string, CommunityMetaLite> = {
-      p1: mkCommunity(COMMUNITY_A),
-      p2: mkCommunity(COMMUNITY_B),
-      p3: mkCommunity(COMMUNITY_A),
-      p4: mkCommunity(COMMUNITY_C),
+    const map: Record<string, string[]> = {
+      p1: [COMMUNITY_A],
+      p2: [COMMUNITY_B],
+      p3: [COMMUNITY_A],
+      p4: [COMMUNITY_C],
     };
     const result = filterPostsByCommunity(posts, map, COMMUNITY_A);
     expect(result).toEqual([p1, p3]);
   });
 
-  it('communityByPost に entry が無い post は selected 時に除外する', () => {
+  // ★ 回帰防止: cross-post された投稿が「最新 attach 先 ≠ 選択コミュ」でも消えないこと。
+  //   これが旧「代表 1 community」判定で消えていたバグ (タブには出ないが詳細には出る) の核心。
+  it('複数 community 所属 post は、所属するどの community を選んでも残る (cross-post)', () => {
+    const p1 = mkPost('p1'); // A と B に cross-post
+    const p2 = mkPost('p2'); // B のみ
+    const posts = [p1, p2];
+    const map: Record<string, string[]> = {
+      p1: [COMMUNITY_B, COMMUNITY_A], // 配列順 (= attach 順) に依存せず両方で出る
+      p2: [COMMUNITY_B],
+    };
+    expect(filterPostsByCommunity(posts, map, COMMUNITY_A).map((p) => p.id)).toEqual(['p1']);
+    expect(filterPostsByCommunity(posts, map, COMMUNITY_B).map((p) => p.id)).toEqual(['p1', 'p2']);
+    expect(filterPostsByCommunity(posts, map, COMMUNITY_C)).toEqual([]);
+  });
+
+  it('communityIdsByPost に entry が無い post は selected 時に除外する', () => {
     const posts = [mkPost('p1'), mkPost('p2'), mkPost('p3')];
-    const map: Record<string, CommunityMetaLite> = {
+    const map: Record<string, string[]> = {
       // p2 の entry を意図的に欠落させる
-      p1: mkCommunity(COMMUNITY_A),
-      p3: mkCommunity(COMMUNITY_A),
+      p1: [COMMUNITY_A],
+      p3: [COMMUNITY_A],
     };
     const result = filterPostsByCommunity(posts, map, COMMUNITY_A);
     expect(result.map((p) => p.id)).toEqual(['p1', 'p3']);
@@ -106,9 +114,9 @@ describe('filterPostsByCommunity', () => {
 
   it('該当する post が 0 件なら empty 配列', () => {
     const posts = [mkPost('p1'), mkPost('p2')];
-    const map: Record<string, CommunityMetaLite> = {
-      p1: mkCommunity(COMMUNITY_A),
-      p2: mkCommunity(COMMUNITY_A),
+    const map: Record<string, string[]> = {
+      p1: [COMMUNITY_A],
+      p2: [COMMUNITY_A],
     };
     expect(filterPostsByCommunity(posts, map, COMMUNITY_B)).toEqual([]);
   });
@@ -123,10 +131,10 @@ describe('filterPostsByCommunity', () => {
     const p2 = mkPost('p2');
     const p3 = mkPost('p3');
     const posts = [p3, p1, p2]; // 意図的に並べ替えた順
-    const map: Record<string, CommunityMetaLite> = {
-      p1: mkCommunity(COMMUNITY_A),
-      p2: mkCommunity(COMMUNITY_A),
-      p3: mkCommunity(COMMUNITY_A),
+    const map: Record<string, string[]> = {
+      p1: [COMMUNITY_A],
+      p2: [COMMUNITY_A],
+      p3: [COMMUNITY_A],
     };
     const result = filterPostsByCommunity(posts, map, COMMUNITY_A);
     expect(result.map((p) => p.id)).toEqual(['p3', 'p1', 'p2']);
@@ -145,12 +153,12 @@ describe('countPostsPerCommunity', () => {
       mkPost('p4'),
       mkPost('p5'),
     ];
-    const map: Record<string, CommunityMetaLite> = {
-      p1: mkCommunity(COMMUNITY_A),
-      p2: mkCommunity(COMMUNITY_A),
-      p3: mkCommunity(COMMUNITY_B),
-      p4: mkCommunity(COMMUNITY_A),
-      p5: mkCommunity(COMMUNITY_C),
+    const map: Record<string, string[]> = {
+      p1: [COMMUNITY_A],
+      p2: [COMMUNITY_A],
+      p3: [COMMUNITY_B],
+      p4: [COMMUNITY_A],
+      p5: [COMMUNITY_C],
     };
     const counts = countPostsPerCommunity(posts, map);
     expect(counts.get(COMMUNITY_A)).toBe(3);
@@ -158,15 +166,26 @@ describe('countPostsPerCommunity', () => {
     expect(counts.get(COMMUNITY_C)).toBe(1);
   });
 
+  it('cross-post された post は所属する各 community で +1 される', () => {
+    const posts = [mkPost('p1'), mkPost('p2')];
+    const map: Record<string, string[]> = {
+      p1: [COMMUNITY_A, COMMUNITY_B], // 両方で +1
+      p2: [COMMUNITY_A],
+    };
+    const counts = countPostsPerCommunity(posts, map);
+    expect(counts.get(COMMUNITY_A)).toBe(2);
+    expect(counts.get(COMMUNITY_B)).toBe(1);
+  });
+
   it('post が空なら空 Map', () => {
     const counts = countPostsPerCommunity([], {});
     expect(counts.size).toBe(0);
   });
 
-  it('communityByPost に entry が無い post はカウントしない', () => {
+  it('communityIdsByPost に entry が無い post はカウントしない', () => {
     const posts = [mkPost('p1'), mkPost('p2'), mkPost('p3')];
-    const map: Record<string, CommunityMetaLite> = {
-      p1: mkCommunity(COMMUNITY_A),
+    const map: Record<string, string[]> = {
+      p1: [COMMUNITY_A],
       // p2 / p3 は欠落
     };
     const counts = countPostsPerCommunity(posts, map);
@@ -176,8 +195,8 @@ describe('countPostsPerCommunity', () => {
 
   it('存在しない community を get → undefined', () => {
     const posts = [mkPost('p1')];
-    const map: Record<string, CommunityMetaLite> = {
-      p1: mkCommunity(COMMUNITY_A),
+    const map: Record<string, string[]> = {
+      p1: [COMMUNITY_A],
     };
     const counts = countPostsPerCommunity(posts, map);
     expect(counts.get(COMMUNITY_B)).toBeUndefined();

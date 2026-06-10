@@ -867,8 +867,24 @@ export default function CreatePost() {
             }
           : undefined;
 
-      // 投稿成功後の共通後始末 (navigate + toast + draft 削除 + invalidate + prefetch Map clear)。
+      // ★ コミュ feed 系 cache の invalidate (冪等)。post_communities への attach が
+      //   完了した後に呼ぶ専用。onInserted (楽観遷移) は INSERT 直後=attach 前に走るため、
+      //   そこで invalidate すると junction 行がまだ無く「新 post 抜き」を refetch して書き戻し、
+      //   コミュタブ/詳細に投稿が出ない (反映が遅い) race になる。よってコミュ系は
+      //   finishPostSuccess から分離し、createPost(=attach) の await 完了後に必ず実行する。
+      const invalidateCommunityCaches = () => {
+        void qc.invalidateQueries({ queryKey: ['my-community-feed'] });
+        void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'] });
+        void qc.invalidateQueries({ queryKey: ['my-communities'] });
+        for (const cid of s.selectedCommunityIds) {
+          void qc.invalidateQueries({ queryKey: ['community', cid, 'feed'] });
+          void qc.invalidateQueries({ queryKey: ['community', cid] });
+        }
+      };
+
+      // 投稿成功後の共通後始末 (navigate + toast + draft 削除 + feed系invalidate + prefetch Map clear)。
       // onInserted (楽観) からも、従来 await 後からも、同一処理を navigated ガードで1回だけ実行。
+      // ※ コミュ系 invalidate は junction 依存なので attach 後に invalidateCommunityCaches() で別途行う。
       const finishPostSuccess = () => {
         if (navigated) return;
         navigated = true;
@@ -878,15 +894,8 @@ export default function CreatePost() {
           const did = usePostDraftStore.getState().draftId;
           if (did) useDraftsStore.getState().remove(did);
         }
-        void qc.invalidateQueries({ queryKey: ['my-community-feed'] });
-        void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'] });
-        void qc.invalidateQueries({ queryKey: ['my-communities'] });
-        for (const cid of s.selectedCommunityIds) {
-          void qc.invalidateQueries({ queryKey: ['community', cid, 'feed'] });
-          void qc.invalidateQueries({ queryKey: ['community', cid] });
-        }
         void qc.invalidateQueries({ queryKey: ['feed'] });
-        void qc.invalidateQueries({ queryKey: ['feed-page'] }); // ★ 遷移先 feed の RPC cache も更新
+        void qc.invalidateQueries({ queryKey: ['feed-page'] }); // ★ 遷移先 feed の RPC cache も更新 (junction 非依存)
         // ★ 4-F: prefetch Map は clear のみ (storage.remove は一切しない=採用済み media を消す race 根絶)。
         imageUploadsRef.current.clear();
         videoUploadsRef.current.clear();
@@ -917,6 +926,11 @@ export default function CreatePost() {
         // ★ v2: 楽観遷移が有効な時のみ INSERT 直後に finishPostSuccess (attach/poll は背後)。
         onInserted: optimisticNav ? () => finishPostSuccess() : undefined,
       });
+
+      // ★ attach (post_communities) 完了後に必ず1回コミュ系 cache を invalidate (race 解消)。
+      //   楽観経路では遷移は onInserted で済んでおり、ここでは invalidate だけが効く。
+      //   invalidateQueries は staleTime を無視して即 refetch するので数百ms で反映される。
+      invalidateCommunityCaches();
 
       // 楽観時は onInserted で実行済み (navigated=true で no-op)。
       // 非楽観 (offline / poll あり) はここで初めて実行 = 従来どおり全 await 後に遷移。

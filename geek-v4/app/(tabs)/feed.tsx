@@ -6,6 +6,7 @@ import {
   Platform,
   StyleSheet,
   ActivityIndicator,
+  InteractionManager,
   useWindowDimensions,
   type NativeSyntheticEvent,
   type NativeScrollEvent,
@@ -41,7 +42,8 @@ import { EASE_OUT_QUART, TIMING_NORM, clampHandoff } from '../../design/motion';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useNavigation } from 'expo-router';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useFeed } from '../../hooks/useFeed';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { markStartupOnce } from '../../lib/perf';
@@ -200,6 +202,49 @@ function progressFromDx(
   'worklet';
   const next = dx / Math.max(1, width);
   progress.value = Math.max(0, Math.min(1, next));
+}
+
+// タブ即時表示: feed (landing・常時マウント) 内で first paint 後 idle に隣接タブを v7 の
+// navigation.preload() で事前マウントする。preload された route は freezeOnBlur の
+// !isPreloaded 除外で生きたまま背面に置かれ、タブを開いた瞬間に表示される。
+// (旧 lazyPreloadDistance は v7 で no-op だったため撤去 → これが実プリロードの代替)。
+// search の重い Discovery fetch は useIsFocused ゲートで preload 中は撃たない (search.tsx)。
+type TabsParamList = { feed: undefined; search: undefined; community: undefined; mypage: undefined };
+function TabPreloader() {
+  // feed タブ画面内で呼ぶので useNavigation は bottom-tab navigator を指す
+  // (root stack の app/search.tsx に誤爆しない)。
+  const nav = useNavigation<BottomTabNavigationProp<TabsParamList>>();
+  useEffect(() => {
+    let cancelled = false;
+    const g = globalThis as typeof globalThis & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    // first paint / 初回フェッチと帯域を食い合わせないよう idle に逃がす。
+    const idle = (fn: () => void): (() => void) => {
+      if (typeof g.requestIdleCallback === 'function') {
+        const id = g.requestIdleCallback(fn, { timeout: 3000 });
+        return () => g.cancelIdleCallback?.(id);
+      }
+      const h = InteractionManager.runAfterInteractions(fn);
+      return () => h.cancel();
+    };
+    // 1 マウント=1 長タスク化で INP を汚さないよう search と community を別 idle に分割。
+    let cancelInner: (() => void) | undefined;
+    const cancelOuter = idle(() => {
+      if (cancelled) return;
+      nav.preload('search');
+      cancelInner = idle(() => {
+        if (!cancelled) nav.preload('community');
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelOuter();
+      cancelInner?.();
+    };
+  }, [nav]);
+  return null;
 }
 
 export default function FeedScreen() {
@@ -778,6 +823,7 @@ export default function FeedScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <TabPreloader />
       <GestureDetector gesture={openGesture}>
         <Animated.View style={animatedViewStyle}>
       {/* 上部 hero エリア — bg は flat だと無機質なので、ごく弱い紫 → 透明のグラデを
