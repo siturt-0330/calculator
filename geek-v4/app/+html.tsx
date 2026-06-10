@@ -32,9 +32,11 @@ const ACCENT   = '#7C6AF7';       // ブランド色
 // で先行ダウンロードさせ、useAppFonts() の loadAsync より早くネットワーク要求を
 // キックする。これで font の到着が typical 100-200ms 早まり、100ms timeout fallback
 // に切り替わる前に "本来の" font で描画できる確率が上がる。
-//   - Inter_700Bold:        UI の太字 (button / heading の英文)
-//   - NotoSansJP_400Regular: 日本語の本文
-//   - NotoSansJP_700Bold:    日本語の見出し / 太字
+//   - Inter_700Bold: UI の太字 (button / heading の英文)
+// ※ NotoSansJP は web では woff2 + unicode-range subset に移行したので preload から外した
+//   (scripts/inject-jp-fonts.mjs が dist に @font-face を注入する)。.ttf を web bundle に
+//   引き戻さないよう、ここでも NotoSansJP の require を削除している。+html.tsx 自体は
+//   single export では dist に反映されないが、念のため require 経路も断つ。
 // require() は Metro web target で hashed asset URL に inline 解決される。
 // Asset.fromModule(require(...)).uri は SSR / runtime どちらでも安全に動く。
 // 解決に失敗した build (Asset registry 未初期化等) は uri=null を返し、
@@ -54,16 +56,6 @@ const PRELOAD_FONTS: { uri: string | null; family: string }[] = [
     // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     uri: resolveFontUri(require('@expo-google-fonts/inter/Inter_700Bold.ttf')),
     family: 'Inter_700Bold',
-  },
-  {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    uri: resolveFontUri(require('@expo-google-fonts/noto-sans-jp/NotoSansJP_400Regular.ttf')),
-    family: 'NotoSansJP_400Regular',
-  },
-  {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    uri: resolveFontUri(require('@expo-google-fonts/noto-sans-jp/NotoSansJP_700Bold.ttf')),
-    family: 'NotoSansJP_700Bold',
   },
 ];
 

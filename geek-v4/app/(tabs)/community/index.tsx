@@ -6,15 +6,17 @@ import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { R, SP } from '../../../design/tokens';
 import { useTheme } from '../../../hooks/useColors';
+import { useDelayedLoading } from '../../../hooks/useDelayedLoading';
 import { T } from '../../../design/typography';
 import { TABBAR } from '../../../design/tabbar';
 import { Icon } from '../../../constants/icons';
 import { PressableScale } from '../../../components/ui/PressableScale';
 import { CommunityAvatarBar } from '../../../components/community/CommunityAvatarBar';
 import { AnonPostCard } from '../../../components/feed/AnonPostCard';
+import { PostCardSkeleton } from '../../../components/feed/PostCardSkeleton';
 import { ReportSheet } from '../../../components/post/ReportSheet';
 import { thumbedUrl, squareThumbedUrl } from '../../../lib/utils/imageUrl';
 import { filterPostsByCommunity } from '../../../lib/utils/communityFilter';
@@ -52,6 +54,18 @@ type CommunityFeedItem = {
   community: CommunityMetaLite | undefined;
   key: string;
 };
+
+// loading 中 (cache 無しの cold open) に表示する skeleton。feed.tsx の FeedSkeleton と同型 —
+// 同じ AnonPostCard を描画する画面なので同じ PostCardSkeleton を 3 枚並べて「白画面」を消す。
+function CommunityFeedSkeleton() {
+  return (
+    <View>
+      {Array.from({ length: 3 }).map((_, i) => (
+        <PostCardSkeleton key={`comm-skel-${i}`} />
+      ))}
+    </View>
+  );
+}
 
 export default function CommunityScreen() {
   const insets = useSafeAreaInsets();
@@ -94,9 +108,12 @@ export default function CommunityScreen() {
     queryKey: ['my-community-feed-rich', user?.id],
     queryFn: () => fetchMyCommunityPostsRich(40),
     enabled: !!user,
-    // staleTime 0: リロード/タブ復帰のたびに最新を取り直す (focus invalidate と協調)
-    staleTime: 0,
+    // SWR: 30s 以内のタブ復帰は cache を即表示し、staleTime 経過後だけ裏で更新する。
+    // (旧 staleTime:0 は復帰毎に必ず network RTT を払い「タブ開くと白画面/もたつき」の主因だった)
+    staleTime: 30_000,
     gcTime: 5 * 60_000,
+    // タブ復帰で前回データを保持 → 空フリッカー無し (feed と同じ keepPreviousData / SWR)
+    placeholderData: keepPreviousData,
   });
 
   // ★ `data ?? []` を毎 render で評価すると新参照 → 下流の useEffect / useMemo の
@@ -115,6 +132,9 @@ export default function CommunityScreen() {
     [feedQuery.data?.communityByPost],
   );
   const loading = myCommunitiesQuery.isLoading || feedQuery.isLoading;
+  // cold load (cache 無し) のときだけ skeleton を出す。<200ms で解決する cache hit は
+  // skeleton も白画面も出さない (feed と同じ smart skeleton timing)。
+  const showSkeleton = useDelayedLoading(loading, 200);
   const refreshing =
     (myCommunitiesQuery.isFetching && !myCommunitiesQuery.isLoading) ||
     (feedQuery.isFetching && !feedQuery.isLoading);
@@ -154,10 +174,16 @@ export default function CommunityScreen() {
     return () => sub.unsubscribe();
   }, [user?.id, qc]);
 
-  // タブ復帰時に refetch
+  // タブ復帰時に refetch — ただし直近 30s 以内の再フォーカスは skip (feed.tsx と同手法)。
+  // 毎フォーカスで invalidate すると staleTime を無視して必ず network RTT が走り、
+  // タブ往復のたびに「白画面/もたつき」が再発する。明示更新は pull-to-refresh に委ねる。
+  const lastFocusRefreshRef = useRef(0);
   useFocusEffect(
     useCallback(() => {
       if (!user?.id) return;
+      const now = Date.now();
+      if (now - lastFocusRefreshRef.current < 30_000) return;
+      lastFocusRefreshRef.current = now;
       void qc.invalidateQueries({ queryKey: ['my-communities', user.id] });
       void qc.invalidateQueries({ queryKey: ['my-community-feed-rich', user.id] });
     }, [user?.id, qc]),
@@ -579,7 +605,7 @@ export default function CommunityScreen() {
         //   多発させ「めっちゃ切れる」(コンテンツ瞬間消失/位置ズレ) が出る。
         extraData={feedExtra}
         ListHeaderComponent={ListHeader}
-        ListEmptyComponent={loading ? null : ListEmpty}
+        ListEmptyComponent={loading ? (showSkeleton ? <CommunityFeedSkeleton /> : null) : ListEmpty}
         refreshControl={
           <RefreshControl tintColor={C.text2} refreshing={refreshing} onRefresh={onRefresh} />
         }

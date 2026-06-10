@@ -72,6 +72,14 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
+# NotoSansJP woff2 subset スライス + 生成 CSS (scripts/inject-jp-fonts.mjs)。
+# 内容は build ごとに決定的 (fontsource バージョン固定 + 決定的変換) なので immutable で長期キャッシュ。
+# demand-driven なので初回転送は数百KB、2 回目以降はここで full cache。
+[[headers]]
+  for = "/fonts/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
 # HTML / Service Worker は常に re-validate して古い shell をユーザーに残さない
 [[headers]]
   for = "/"

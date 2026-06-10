@@ -438,12 +438,38 @@ export default function RootLayout() {
         if (cancelled) return;
         const { sort, scope } = useFeedStore.getState();
         const { likedTags, blockedTags } = useTagFilterStore.getState();
-        void qc.prefetchInfiniteQuery({
-          queryKey: feedQueryKey(sort, scope, likedTags, blockedTags),
-          queryFn: () => fetchFeedFirstPage({ sort, scope, likedTags, blockedTags, userId: uid, qc }),
-          initialPageParam: undefined,
-          staleTime: 0,
-        });
+        // ★ データを prefetch して cache を温める (useFeed mount 時に dedupe で即表示)。
+        //   prefetchInfiniteQuery ではなく fetchInfiniteQuery を使い、返ってきた先頭
+        //   投稿のメディアサムネも expo-image へ先読みする。従来は landing の feed が
+        //   「データだけ prefetch・画像は viewport prefetch 任せ」で、コミュ prewarm が
+        //   画像まで温めるのと非対称だった (テキストは即出るが画像が一拍遅れる)。
+        //   thumbWidth=480 は feed.tsx の viewport prefetch / ProgressiveImage と一致必須
+        //   (URL が完全一致しないと cache hit しない)。失敗は握り潰す (mount 時に取り直す)。
+        void qc
+          .fetchInfiniteQuery({
+            queryKey: feedQueryKey(sort, scope, likedTags, blockedTags),
+            queryFn: () =>
+              fetchFeedFirstPage({ sort, scope, likedTags, blockedTags, userId: uid, qc }),
+            initialPageParam: undefined,
+            staleTime: 0,
+          })
+          .then((data) => {
+            if (cancelled) return;
+            const urls = (data?.pages?.[0]?.posts ?? [])
+              .flatMap((p) => p.media_urls ?? [])
+              .filter(Boolean)
+              .slice(0, 8);
+            for (const url of urls) {
+              try {
+                void ExpoImage.prefetch(thumbedUrl(url, 480), 'memory-disk');
+              } catch {
+                /* ignore — feed 表示時に通常 prefetch される */
+              }
+            }
+          })
+          .catch(() => {
+            /* prefetch 失敗は無視 (mount 時の useFeed が取り直す) */
+          });
       });
     return () => {
       cancelled = true;
@@ -602,14 +628,18 @@ export default function RootLayout() {
   const [forceReady, setForceReady] = useState(false);
   useEffect(() => {
     // パフォーマンス監査:
-    //   旧 800ms → 500ms に短縮。MMKV 化で settings / tagFilter の hydrate が
-    //   1ms 以下になり、残りクリティカルパスは font 読み込み + auth getSession
-    //   (~150-300ms 程度)。500ms あれば font fallback + auth まで余裕で完了する。
-    //   一方、auth は supabase 側で AsyncStorage 経由 session 読み込みが残るため
-    //   400ms は若干攻めすぎ (低速 device で false render risk あり)。
-    //   実測 cold start 短縮見込み: 約 50-150ms (forceReady ラインの 300ms 縮小と
-    //   stores の hydrate 同期化分の重ね合わせ)。
-    const t = setTimeout(() => setForceReady(true), 500);
+    //   旧 800ms → 500ms → 400ms と段階短縮。MMKV 化で settings / tagFilter の
+    //   hydrate は ~1ms、残りクリティカルパスは font fallback (最大 100ms) + auth
+    //   getSession (~150-300ms)。400ms で healthy 回線なら hydrate 完了に間に合う。
+    //   ★ 400ms に下げても login flash は起きない: redirect する useEffect は
+    //     `forceReady` ではなく `authHydrated` で gate している ([[project_geek_v4_auth_session]]
+    //     F4 修正)。forceReady が先に立っても auth 未確定の間は redirect が抑止されるので
+    //     「login が一瞬見える」事故にはならない。最悪でも背景色フレームが一瞬長く出るだけで、
+    //     これは 500ms でも auth が遅れれば同様に起きる (旧コメントの「400ms は攻めすぎ /
+    //     false render」は redirect が ready 基準だった F4 修正前の懸念で、現状は当たらない)。
+    //   ※ さらに 300ms まで詰める余地はあるが、throttled 回線での cold start 実測
+    //     (背景フレームが目立たないか) を確認してからにする。
+    const t = setTimeout(() => setForceReady(true), 400);
     return () => clearTimeout(t);
   }, []);
 
