@@ -1,31 +1,34 @@
 import { Platform } from 'react-native';
-import { track } from './analytics';
+import { reportPerf } from './perf';
 
 // ============================================================
 // Web Vitals (Google Core Web Vitals) + custom events
 // ============================================================
-// 計測する 5 つの指標:
+// 計測する指標:
 //   - LCP (Largest Contentful Paint): 主要コンテンツ表示までの時間。良い: ≤ 2.5s
-//   - FID (First Input Delay): 初回入力遅延。良い: ≤ 100ms
+//   - INP (Interaction to Next Paint): 操作→次描画。良い: ≤ 200ms (2024 から FID の後継・正式指標)
+//   - FID (First Input Delay): 初回入力遅延。良い: ≤ 100ms (INP に置換された旧指標だが互換で併設)
 //   - CLS (Cumulative Layout Shift): レイアウトずれの累積。良い: ≤ 0.1
 //   - FCP (First Contentful Paint): 初回描画。良い: ≤ 1.8s
 //   - TTFB (Time to First Byte): サーバー応答。良い: ≤ 800ms
 //
 // 実装: web-vitals ライブラリではなく、ブラウザ標準 PerformanceObserver を使う
 //   - 依存ゼロ・バンドル無し
-//   - INP (Interaction to Next Paint) は v5 から推奨だが、ブラウザ依存があるため省略
+//   - INP は event timing で「最も遅かったインタラクション」を近似 (CLS と同じく hidden 時 flush)。
+//     正確な INP は高パーセンタイルだが、依存を増やさず操作の重さを捕捉するのが目的。
 //
-// 送信先: PostHog (analytics.track 経由)
+// 送信先: lib/perf.ts の reportPerf (dev=console / prod=Sentry breadcrumb + poor は captureMessage)
 // ============================================================
 
 type Metric = {
-  name: 'LCP' | 'FID' | 'CLS' | 'FCP' | 'TTFB';
+  name: 'LCP' | 'INP' | 'FID' | 'CLS' | 'FCP' | 'TTFB';
   value: number;
   rating: 'good' | 'needs-improvement' | 'poor';
 };
 
 const THRESHOLDS: Record<Metric['name'], [number, number]> = {
   LCP: [2500, 4000],
+  INP: [200, 500],
   FID: [100, 300],
   CLS: [0.1, 0.25],
   FCP: [1800, 3000],
@@ -41,15 +44,11 @@ function rate(name: Metric['name'], v: number): Metric['rating'] {
 
 function report(name: Metric['name'], value: number) {
   const m: Metric = { name, value, rating: rate(name, value) };
-  track('web_vitals', {
-    metric: m.name,
-    value: Math.round(m.value * 1000) / 1000,
-    rating: m.rating,
+  // PostHog 撤去後の no-op track() ではなく lib/perf.ts に流す
+  // (dev=console / prod=Sentry breadcrumb + poor は captureMessage)。
+  reportPerf(m.name, m.value, m.rating, {
     url: typeof window !== 'undefined' ? window.location.pathname : '',
   });
-  if (typeof console !== 'undefined' && (globalThis as { __DEV__?: boolean }).__DEV__) {
-    console.log(`[WebVitals] ${name}: ${value.toFixed(1)} (${m.rating})`);
-  }
 }
 
 // 重複送信を防ぐ
@@ -92,6 +91,39 @@ export function initWebVitals(): () => void {
     fidObserver.observe({ type: 'first-input', buffered: true });
     observers.push(fidObserver);
   } catch { /* PerformanceObserver 未対応ブラウザ */ }
+
+  // ---- INP (Interaction to Next Paint) の近似 — 最も遅いインタラクションを hidden 時に flush ----
+  let inpValue = 0;
+  let inpReported = false;
+  try {
+    const inpObserver = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries() as PerformanceEntry[]) {
+        // event timing の duration ≈ 入力から次 paint までの概算。最大値を近似 INP とする。
+        if (entry.duration > inpValue) inpValue = entry.duration;
+      }
+    });
+    // durationThreshold は型に無いブラウザ拡張プロパティなので init を緩く cast。
+    // 40ms 以上のインタラクションだけ通知してノイズを間引く。
+    inpObserver.observe({
+      type: 'event',
+      durationThreshold: 40,
+      buffered: true,
+    } as PerformanceObserverInit);
+    observers.push(inpObserver);
+
+    const flushInp = () => {
+      if (inpReported || inpValue <= 0) return;
+      inpReported = true;
+      reportOnce('INP', inpValue);
+    };
+    const onInpVis = () => { if (document.visibilityState === 'hidden') flushInp(); };
+    window.addEventListener('visibilitychange', onInpVis);
+    window.addEventListener('pagehide', flushInp);
+    cleanupCallbacks.push(() => {
+      window.removeEventListener('visibilitychange', onInpVis);
+      window.removeEventListener('pagehide', flushInp);
+    });
+  } catch { /* event timing 未対応ブラウザ */ }
 
   // ---- CLS (累積なので unload まで監視) ----
   let clsValue = 0;

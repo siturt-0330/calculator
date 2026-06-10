@@ -44,6 +44,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useFeed } from '../../hooks/useFeed';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
+import { markStartupOnce } from '../../lib/perf';
 // BlockedTagBanner はホームから削除済。useTagFilterStore は scope 判定 (hasLikedTags) で引き続き使用
 import { useTagFilterStore } from '../../stores/tagFilterStore';
 import { useLike, useLikes } from '../../hooks/useLike';
@@ -400,6 +401,12 @@ export default function FeedScreen() {
       void qc.invalidateQueries({ queryKey: ['feed'] });
     }, [qc]),
   );
+
+  // 起動計測: feed が初めて実コンテンツを描画した時刻を 1 度だけ記録 (cross-platform な TTI 近似)。
+  // markStartupOnce が内部で重複を弾くので毎 render 評価でも送信は 1 回きり。native の唯一の起動シグナル。
+  useEffect(() => {
+    if (!loading && posts.length > 0) markStartupOnce('feed_first_content');
+  }, [loading, posts.length]);
 
   // posts は毎 render で新しい配列参照になる (data?.pages.flatMap 経由)。
   // ID リストの中身が変わらない限り再計算したくないので、id を join したハッシュで
