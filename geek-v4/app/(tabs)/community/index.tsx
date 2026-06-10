@@ -47,6 +47,9 @@ const EMPTY_REACTIONS: ReactionAgg[] = [];
 const EMPTY_ADDED_TAGS: string[] = [];
 const EMPTY_COMMUNITIES: PostCommunityRef[] = [];
 const VIEWABILITY_CONFIG = { viewAreaCoveragePercentThreshold: 30 } as const;
+// prefetch の同時 in-flight 上限 — feed.tsx と同値。ブラウザの host あたり 6 接続制限の
+// もとで可視画像の本命取得と帯域を奪い合わないようにする。
+const PREFETCH_CONCURRENCY_CAP = 4;
 
 // FlashList の data 型 — Post に community メタを同梱
 type CommunityFeedItem = {
@@ -328,22 +331,48 @@ export default function CommunityScreen() {
   }, [filteredPosts, communityByPost]);
 
   // ★ Viewport prewarm: 次の 5 セル分の画像を ExpoImage.prefetch で先読み
-  // feed.tsx と同じパターン — スクロール中の image jank を消す
+  // feed.tsx と同じパターン — スクロール中の image jank を消す。
+  // dedup + concurrency 制御 (feed.tsx:584-602 と同パターン): 試行済 URL を Set で
+  // dedup し、in-flight 数を cap=4 で制限。旧実装は slice 全件へ無制限・dedup 無しで
+  // prefetch を発行していて、可視画像の本命取得と帯域を奪い合っていた。
+  const prefetchedUrlsRef = useRef<Set<string>>(new Set());
+  const inFlightCountRef = useRef(0);
+  const enqueuePrefetch = useCallback((url: string) => {
+    if (!url) return;
+    if (prefetchedUrlsRef.current.has(url)) return;
+    if (inFlightCountRef.current >= PREFETCH_CONCURRENCY_CAP) return;
+    prefetchedUrlsRef.current.add(url);
+    inFlightCountRef.current += 1;
+    // expo-image の prefetch は Promise を返す — settle で counter を戻して
+    // 次の prefetch を許可する。失敗 URL も dedup されてるので無限再試行はしない。
+    Promise.resolve()
+      .then(() => ExpoImage.prefetch(url, 'memory-disk'))
+      .catch(() => { /* ignore — viewer 側で再 fetch される */ })
+      .finally(() => {
+        inFlightCountRef.current = Math.max(0, inFlightCountRef.current - 1);
+      });
+  }, []);
+
   const handleViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
       if (viewableItems.length === 0) return;
-      const lastIdx = Math.max(...viewableItems.map((v) => v.index ?? 0));
+      // ★ perf: spread + map を for-of に置換 — 中間配列アロケーションを排除 (feed.tsx と同パターン)
+      let lastIdx = 0;
+      for (const v of viewableItems) {
+        const idx = v.index ?? 0;
+        if (idx > lastIdx) lastIdx = idx;
+      }
       const lookahead = feedItems.slice(lastIdx + 1, lastIdx + 6);
       for (const item of lookahead) {
         const urls = item.post.media_urls ?? [];
         for (const u of urls) {
           // 480 で AnonPostCard 側 ProgressiveImage の thumbWidth と完全一致させて
           // prefetch を cache hit させる (URL ミスマッチだと無意味になる)
-          try { ExpoImage.prefetch(thumbedUrl(u, 480)); } catch { /* ignore */ }
+          enqueuePrefetch(thumbedUrl(u, 480));
         }
       }
     },
-    [feedItems],
+    [feedItems, enqueuePrefetch],
   );
 
   // renderItem は posts/handlers/states に依存 — 単純化のため deps を明示
@@ -591,8 +620,10 @@ export default function CommunityScreen() {
         data={feedItems}
         renderItem={renderItem}
         keyExtractor={keyExtractor}
-        estimatedItemSize={520}
-        drawDistance={250}
+        estimatedItemSize={640}
+        drawDistance={600}
+        // 慣性スクロールの減速を速める — feed / bbs / tag / liked と同値に統一
+        decelerationRate="fast"
         viewabilityConfig={VIEWABILITY_CONFIG}
         onViewableItemsChanged={handleViewableItemsChanged}
         // ★ extraData: useReactionToggle / useLike / useConcern / useSave /
@@ -600,9 +631,11 @@ export default function CommunityScreen() {
         //   でも FlashList の visible item を再 render するように補助データ全部を渡す。
         //   reactionsByPost だけだと like/concern/save/addedTags の即時反映が漏れる。
         //   `feedExtra` を useMemo で安定化 → 値変化時のみ参照変更が伝わる。
-        //   estimatedItemSize: 380 → 520 — 実 post の高さ (画像 + 操作行 + メタ)
-        //   に近づける。低すぎると FlashList がスクロール中に layout 再計算を
-        //   多発させ「めっちゃ切れる」(コンテンツ瞬間消失/位置ズレ) が出る。
+        //   estimatedItemSize: 380 → 520 → 640 — feed.tsx と同じ AnonPostCard
+        //   (thumbWidth 480 同一) を描く画面なので feed 実測の mixed P50/P75 ≈ 640 に統一。
+        //   低すぎると overscan バッファが痩せ fast scroll で blank/位置ズレが出る。
+        //   drawDistance: 250 → 600 — feed と同値。1.7.3 では renderAheadOffset=
+        //   drawDistance がそのまま overscan 量で、blank セルに直接効くのはこちら。
         extraData={feedExtra}
         ListHeaderComponent={ListHeader}
         ListEmptyComponent={loading ? (showSkeleton ? <CommunityFeedSkeleton /> : null) : ListEmpty}
