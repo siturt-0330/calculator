@@ -18,6 +18,34 @@ export const LANG_OPTIONS: { code: Lang; name: string; native: string; flag: str
 
 const KEY = 'geek:lang';
 
+// 端末/ブラウザの言語コードを Lang union に落とす (先頭2字一致)。未対応コードは null。
+const SUPPORTED_LANGS: readonly Lang[] = ['ja', 'en', 'zh', 'ko', 'es', 'fr', 'th', 'vi', 'id'];
+function toSupportedLang(code: string | null | undefined): Lang | null {
+  if (!code) return null;
+  const two = code.toLowerCase().slice(0, 2);
+  return (SUPPORTED_LANGS as readonly string[]).includes(two) ? (two as Lang) : null;
+}
+
+// OS / ブラウザの既定言語を検出する。オンボ廃止で「初回の言語選択画面」が消えたため、
+// 初回起動時 (保存値が無いとき) の既定言語をここで推定する。検出不能/未対応は null。
+// ★ i18n unit test 地雷: lib/i18n.ts が当 store を import するため、expo-localization /
+//   react-native を **トップレベル import してはいけない** (純ユニットテストの import 連鎖が壊れる)。
+//   native パスは関数内で遅延 require する (この関数は module import 時には実行されない)。
+function detectDeviceLang(): Lang | null {
+  try {
+    // web (RN Web): navigator.language。native には document が無いので web 判定に使える。
+    if (typeof document !== 'undefined' && typeof navigator !== 'undefined') {
+      return toSupportedLang(navigator.language);
+    }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const Localization = require('expo-localization') as typeof import('expo-localization');
+    const locales = Localization.getLocales?.();
+    return toSupportedLang(locales && locales[0] ? locales[0].languageCode : null);
+  } catch {
+    return null;
+  }
+}
+
 type LangState = {
   lang: Lang;
   autoTranslate: boolean;  // 投稿/コメントを自動翻訳
@@ -47,6 +75,14 @@ export const useLanguageStore = create<LangState>((set, get) => ({
         return;
       }
     } catch (e) { swallow('store.language.hydrate', e); }
+    // 保存値が無い = 初回起動。OS/ブラウザ言語を既定にする (オンボの初回言語選択 UI の代替)。
+    // 検出不能/日本語なら既定 'ja' のまま。autoTranslate は触らない (勝手翻訳事故の再発防止 — 上の改修)。
+    const detected = detectDeviceLang();
+    if (detected && detected !== 'ja') {
+      set({ lang: detected, hydrated: true });
+      void save({ lang: detected, autoTranslate: get().autoTranslate });
+      return;
+    }
     set({ hydrated: true });
   },
   // ★ 2026-05-25 改修: setLang から autoTranslate の自動連動を撤廃。

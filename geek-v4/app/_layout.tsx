@@ -669,13 +669,10 @@ export default function RootLayout() {
     } else if (inResetPassword) {
       // ログイン状態でも reset-password 画面はそのまま表示する
       return;
-    } else if (user.onboarded === false) {
-      // F3: onboarded が undefined(=profile 取得 timeout / cache miss で未確定)では
-      // onboarding に飛ばさない。確実に false のときだけ誘導する (確立済ユーザーが
-      // 一過性の profile fetch 失敗で onboarding に誤バウンスするのを防ぐ)。
-      // 真の新規ユーザーの onboarding 誘導は signIn 経路が担保している。
-      if (!inOnboarding) router.replace('/onboarding');
     } else {
+      // オンボーディング廃止: onboarded フラグでの /onboarding 誘導を撤去 (migration 適用
+      // タイミングと無関係に全員フィードへ)。認証画面 / 旧オンボ画面に居る既ログイン
+      // ユーザーだけフィードへ送る。
       if (inAuth || inOnboarding) router.replace('/(tabs)/feed');
     }
   }, [user, authHydrated, segments, router]);
