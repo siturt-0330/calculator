@@ -747,8 +747,9 @@ const DiscoveryView = memo(function DiscoveryView() {
   const { joiningIds, onJoin, onPressCommunity } = useJoinCommunity();
 
   // ★ 重いセクション (Hot / For-You / コミュ3種) は検索タブが実際に focus された
-  //   ときだけ発火させる。lazyPreloadDistance:2 で起動時に background mount される
-  //   間は撃たない → 起動時のホームフィードとの帯域競合と 150ms 固定待ちを除去。
+  //   ときだけ発火させる。v7 の lazy:true では検索タブは初回フォーカスまで mount されず、
+  //   useIsFocused ゲートは blur 中の refetch 抑止 + フォーカス時のみ重い Discovery fetch
+  //   を発火させるために維持 (起動時のホームフィードとの帯域競合と固定待ちを避ける)。
   //   useIsFocused は Web でも発火するので「おすすめ永久スケルトン」回帰も起きない。
   const isFocused = useIsFocused();
 

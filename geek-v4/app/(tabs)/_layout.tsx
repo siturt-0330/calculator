@@ -8,9 +8,9 @@
 //   - 右   : RightSearchPanel (固定 340) — 検索バー + トレンド
 // PC のとき下部 TabBar は非表示 (LeftSidebar に統合済み)。
 //
-// タブ切替を即時化 (IG/YouTube 風): lazy: true + lazyPreloadDistance: 2 で、feed の
-// 隣接タブ (search / community) を first paint 後にバックグラウンド mount しておく。
-// → データ + リスト先頭のメディアが事前ロードされ、タブを開いた瞬間に表示される。
+// タブは lazy: true (初回フォーカス時 mount)。旧 lazyPreloadDistance:2 は react-navigation v7
+// の bottom-tabs に存在せず no-op だったため撤去 [実証済: node_modules grep 0 件]。
+// タブ即時表示のデータ/画像温めは app/_layout.tsx (root) の RQ prewarm effect が担当。
 // =============================================================================
 
 import { useWindowDimensions, View, Platform } from 'react-native';
@@ -38,9 +38,11 @@ export default function TabsLayout() {
       screenOptions={{
         headerShown: false,
         lazy: true,
-        // 1 → 2: feed から search / community を背景 preload してタブ即時表示
-        lazyPreloadDistance: 2,
-      } as object}
+        // 非フォアグラウンドのタブを react-freeze で凍結 — 裏タブの realtime/RQ 由来の
+        // 再レンダ/effect を停止し、前面のスクロール/遷移にフレーム予算を回す (native のみ。
+        // Web は screens 無効のため no-op)。state は保持・unmount しない。
+        freezeOnBlur: true,
+      }}
     >
       <Tabs.Screen name="feed" />
       <Tabs.Screen name="search" />

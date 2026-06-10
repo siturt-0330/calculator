@@ -938,6 +938,9 @@ export default function FeedScreen() {
         ref={listRef}
         data={feedItems}
         drawDistance={600}
+        // 慣性スクロールの減速を速める — bbs / tag / liked と同値に統一 (キレのある停止感)。
+        // ScrollView pass-through prop で recycling / layout に影響しない。Web は no-op。
+        decelerationRate="fast"
         // drawer open 中は scroll を lock — drawer の左 swipe close と FlashList の
         // 垂直 scroll が両方走ると親 GestureDetector との競合が出るため。
         scrollEnabled={!drawerOpen}

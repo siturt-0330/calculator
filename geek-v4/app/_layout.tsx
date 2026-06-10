@@ -714,6 +714,11 @@ export default function RootLayout() {
                     //   Android: 160ms (slow device で sluggish 感を緩和)
                     //   Web: 180ms (Safari 体感重さ削減)
                     animationDuration: Platform.select({ ios: 220, android: 160, web: 180, default: 200 }),
+                    // 裏画面を react-freeze で凍結 (native のみ・Web は no-op)。Fabric では
+                    // focused 直下 1 枚と iOS modal は凍結除外 (native-stack の shouldFreeze
+                    // ガード) — 効くのは深さ 2 以上: 例 (tabs)→post/[id]→post/comment 中の
+                    // (tabs)。modal 1 枚では背面は凍結されない (仕様・回帰ではない)。
+                    freezeOnBlur: true,
                   }}
                 >
                   <Stack.Screen name="(tabs)" />
