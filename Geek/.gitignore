@@ -1,0 +1,6 @@
+# Obsidian の「画面の開き具合」など毎回変わる揮発ファイルは git に入れない
+# (これらを追跡すると Obsidian を開くたびに差分が出てノイズになる)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
+.trash/
