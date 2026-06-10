@@ -104,7 +104,9 @@ supabase db push --linked
 supabase functions deploy <name>
 ```
 
-CI (`.github/workflows/ci.yml`) は `type-check + test` を毎 PR で実行、master push のみ `build:web` smoke test。
+CI (**repo root** の `.github/workflows/ci.yml`。アプリは `geek-v4/` にあるが GitHub Actions は repo root の `.github/workflows/` しか実行しないため、workflow は root 配置 + `defaults.run.working-directory: geek-v4` で動かす。`setup-node` の cache は `cache-dependency-path: geek-v4/package-lock.json` を明示) は `type-check + test` を毎 PR で実行 (`paths` フィルタ `geek-v4/**` で geek-v4 配下の変更時のみ起動)、master push / 手動 `workflow_dispatch` のみ `build:web` smoke test。
+
+> ⚠️ 旧 `geek-v4/.github/workflows/` 配下に置くと Actions が拾わず CI が一切走らない (過去そうなっていた)。CI 定義は必ず **repo root** の `.github/workflows/` に置く。
 
 ### Metro キャッシュ運用 (2026-05-28 〜)
 
