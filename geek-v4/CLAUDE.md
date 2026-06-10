@@ -307,6 +307,46 @@ const hydrateAuth = useAuthStore((s) => s.hydrate);
   4. 5MB 超は自動圧縮
 - bucket 一覧: `avatars`, `community-icons`, `posts-media`
 
+### 5.10 Image **display** / サムネ (`lib/utils/imageUrl.ts` `thumbedUrl`) ★ 事故多発
+
+表示は必ず `thumbedUrl()` で Supabase の画像変換 endpoint (`/render/image/public/`) を
+経由する (帯域削減)。**ここに踏み抜きやすい罠があるので必ず守る:**
+
+- **🔴 鉄則: `resize=cover` は `height` とセットでしか使わない。**
+  Supabase render endpoint に **`width` だけ + `resize=cover`** を渡すと、
+  **幅だけ要求値に縮小して高さは元のまま**返す = 画像が水平に潰れる。
+  実測 (元 1179x866 横長):
+  - `width=480&resize=cover` → **480x866 (aspect 0.55 潰れ)** ❌
+  - `width=240&resize=cover` → **240x866 (aspect 0.28 激細)** ❌
+  - `width=480&resize=contain` → **480x353 (aspect 1.36 正)** ✅
+  → `thumbedUrl` は **height 未指定なら `resize=contain` を既定**にしてある
+  (`opts.resize ?? (opts.height ? 'cover' : 'contain')`)。**この既定を壊さない。**
+  正方形 crop が欲しい時 (avatar/icon) は `squareThumbedUrl` / `iconThumbedUrl`
+  (= `width=height` を渡す) を使う。**生 `thumbedUrl(url, w, {resize:'cover'})` を
+  height 無しで書かない。**
+- **crop/fit は `contentFit` に任せる。** Supabase からは比率を保った contain ソースを
+  もらい、最終的な「枠を埋める / 収める」は expo-image の `contentFit='cover'|'contain'`
+  が決める。Supabase 側で cover crop しようとしない (上記の潰れ事故になる)。
+- **アスペクト測定パイプライン** (`AnonPostCard.measureAspect` / `FeedMediaGrid`):
+  `RNImage.getSize(thumbedUrl(url, 240))` で実寸を測りセル幅を出す。測定 URL も
+  上の鉄則に従う (height 無し → contain)。cover を渡すと測定値が縦長に化けて
+  「横長写真が縦長/細いセルで出る」症状になる。
+- **🚫 EXIF を疑う前にこれを疑え。** 「写真が縦長/潰れる」を見ると EXIF orientation を
+  疑いがちだが、**アップロードは `prepareImageUpload` で EXIF strip 済み**で原因では
+  ないことがほとんど。実際の真因は上記の `resize=cover` だった (2026-06)。
+  `[{rotate:0}]` や `format=origin` を足しても **直らない** (どちらも render endpoint を
+  通る限り cover の潰れは残る)。
+- **検証は推測でなく実測する。** 本番の実画像 URL で寸法を測れば一発で切り分く:
+  ```bash
+  # object(生) と render(変換) の寸法を image-size で比較
+  node -e 'const s=require("image-size").default||require("image-size");const https=require("https");
+    const f=u=>new Promise((r,j)=>https.get(u,x=>{const c=[];x.on("data",d=>c.push(d));x.on("end",()=>r(Buffer.concat(c)))}));
+    (async()=>{for(const[l,u]of[["object",OBJ_URL],["render+cover",RENDER_URL]]){const d=s(await f(u));console.log(l,d.width+"x"+d.height,(d.width/d.height).toFixed(2))}})()'
+  ```
+  object が正しい比率 / render+cover が潰れていれば原因確定。preview でも
+  `img.naturalWidth/Height` と `getBoundingClientRect()` を eval して
+  `cellAspect ≈ natAspect` を確認できる。
+
 ---
 
 ## 6. コード規約 / lint ルール
@@ -529,6 +569,7 @@ Native module を触ったら必ず通常 build & submit。
 | アカウント停止条件 / trust 計算 | `lib/trust/` + `supabase/migrations/0006_credibility.sql` |
 | RLS ポリシー | `supabase/migrations/00XX_*.sql` の `create policy` |
 | feed の RPC schema | `supabase/migrations/0041_get_feed_page_rpc.sql` |
+| サムネ/画像表示の resize 規約 (cover 潰れ罠) | `lib/utils/imageUrl.ts` の `thumbedUrl` + CLAUDE.md §5.10 |
 | Supabase Edge | `supabase/functions/` |
 | feed の cache 書き換え helper | `lib/cacheUpdates/feedPagePatcher.ts` |
 | realtime ラッパ | `lib/realtime.ts` |
