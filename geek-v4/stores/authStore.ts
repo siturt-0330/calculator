@@ -58,7 +58,8 @@ type SignInResult = {
   /** エラー分類コード (UI が文言/導線を分岐するため。raw Supabase メッセージは出さない) */
   code?: 'invalid_credentials' | 'email_not_confirmed' | 'rate_limited' | 'network' | 'unknown';
   user?: AppUser;
-  next?: 'feed' | 'onboarding';
+  /** ログイン後の遷移先。オンボーディング廃止により常に 'feed' (旧 'onboarding' 分岐は撤去)。 */
+  next?: 'feed';
 };
 
 type AuthState = {
@@ -77,7 +78,7 @@ type AuthState = {
 
   /**
    * メール/パスワードでサインインする。
-   * @returns `next: 'feed'` = onboarded ユーザー / `next: 'onboarding'` = 初回セットアップが必要
+   * @returns `next: 'feed'` = ログイン後の遷移先 (オンボ廃止により常に feed)
    */
   signIn: (email: string, password: string) => Promise<SignInResult>;
 
@@ -522,8 +523,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return { error: stateError };
       }
       set({ user });
-      // onboarded が undefined (profile fetch failed) なら安全側 = onboarding に飛ばす
-      const next: 'feed' | 'onboarding' = user.onboarded === true ? 'feed' : 'onboarding';
+      // オンボーディング廃止 (登録は email+パスワードのみ・登録後そのままフィード)。
+      // 既存の onboarded フラグに関わらず常にフィードへ送る。
+      const next = 'feed' as const;
       return { error: null, user, next };
     } catch (e) {
       console.error('signIn exception:', e);

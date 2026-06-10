@@ -17,17 +17,18 @@
 // 公開範囲: 投稿/コメントは他人も見られる(公開された姿) / 保存は自分だけ(RLS + Lock notice)。
 // =============================================================================
 
-import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   View,
   Text,
   Modal,
   Pressable,
+  Platform,
   useWindowDimensions,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useScrollToTop } from '@react-navigation/native';
@@ -40,9 +41,12 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { useAuthStore } from '../../stores/authStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { supabase } from '../../lib/supabase';
+import { getBool, setBool } from '../../lib/storage';
 import { fetchMyComments, type MyCommentRow, deleteComment } from '../../lib/api/comments';
 import { deleteOwnPost, fetchCommunitiesForPosts, type PostCommunityRef } from '../../lib/api/posts';
+import { isVapidConfigured } from '../../lib/api/push';
 import { withApiTimeout } from '../../lib/withApiTimeout';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { formatRelative } from '../../lib/utils/date';
@@ -311,6 +315,69 @@ export default function MypageScreen() {
     [stats?.cover_url],
   );
 
+  // ---- 初回ナッジ ----
+  // 登録を email+パスワードだけに最小化した代わりに、プロフィール(ニックネーム)と
+  // 通知をマイページで後から促す。dismiss は user 別 key で永続化(端末ローカル)。
+  const pushEnabled = useSettingsStore((s) => s.pushEnabled);
+  const nudgeKey = userId ? `geek:nudge:profile_setup:dismissed:${userId}` : '';
+  const [nudgeDismissed, setNudgeDismissed] = useState(() =>
+    nudgeKey ? getBool(nudgeKey) === true : false,
+  );
+  const dismissNudge = useCallback(() => {
+    if (nudgeKey) setBool(nudgeKey, true);
+    setNudgeDismissed(true);
+  }, [nudgeKey]);
+  // userId が初回 render で未確定だと nudgeKey='' で false 初期化されるため、nudgeKey 確定時に
+  // storage を読み直して dismiss 状態を同期する (dismiss 済が auth hydrate 競合で再出現するのを防ぐ)。
+  useEffect(() => {
+    if (nudgeKey) setNudgeDismissed(getBool(nudgeKey) === true);
+  }, [nudgeKey]);
+  // OS の push 許可状態 (未許可 = 有効化を促す)。focus ごとに読み直す (通知設定へ往復して許可を
+  // 付けて戻っても古い状態が残らないように。逆に許可後もナッジが残るのも防ぐ)。
+  // web は Push 非対応ブラウザ / VAPID 未設定だと「通知をオン」に到達しても操作不能なので、
+  // その場合は needsEnable を立てない (空振りナッジを出さない)。判定不能なら false のまま = 控えめに非表示。
+  const [pushNeedsEnable, setPushNeedsEnable] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      void (async () => {
+        try {
+          if (Platform.OS === 'web') {
+            const supported =
+              typeof window !== 'undefined' &&
+              typeof navigator !== 'undefined' &&
+              'Notification' in window &&
+              'serviceWorker' in navigator &&
+              'PushManager' in window;
+            if (!supported || !isVapidConfigured()) {
+              if (!cancelled) setPushNeedsEnable(false);
+              return;
+            }
+            const granted =
+              typeof Notification !== 'undefined' && Notification.permission === 'granted';
+            if (!cancelled) setPushNeedsEnable(!granted);
+          } else {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+            const Notifications = require('expo-notifications') as typeof import('expo-notifications');
+            const perm = await Notifications.getPermissionsAsync();
+            if (!cancelled) setPushNeedsEnable(!perm.granted);
+          }
+        } catch {
+          /* 判定不能 — ナッジを出さない */
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
+  // nickname がサーバ自動採番のまま (user_ + 8桁hex / migration 0146) or 空なら「未設定」。
+  // {6,} で桁数に非依存に検出 — 採番長を将来変えても (旧 6 桁/新 8 桁とも) nudge が壊れない。
+  const needProfile =
+    !!stats && (!stats.nickname || /^user_[0-9a-f]{6,}$/.test(stats.nickname));
+  const needPush = pushNeedsEnable || pushEnabled === false;
+  const showNudge = !!userId && !nudgeDismissed && (needProfile || needPush);
+
   // 現タブのロード中(まだ 1 件も無い)か。本文領域に skeleton を出す条件。
   const activeLoading =
     (tab === 'posts' && postsLoading && posts.length === 0) ||
@@ -368,6 +435,10 @@ export default function MypageScreen() {
 
   const openSettings = useCallback(() => router.push('/settings' as never), [router]);
   const editAvatar = useCallback(() => router.push('/settings/profile-edit' as never), [router]);
+  const openNotifications = useCallback(
+    () => router.push('/settings/notifications' as never),
+    [router],
+  );
   const openPost = useCallback((id: string) => router.push(`/post/${id}` as never), [router]);
   const openCommunity = useCallback((id: string) => router.push(`/community/${id}` as never), [router]);
   const openImage = useCallback((url: string) => setLightboxUri(thumbedUrl(url, 1280)), []);
@@ -423,6 +494,15 @@ export default function MypageScreen() {
           onEditAvatar={editAvatar}
           onOpenSettings={openSettings}
         />
+        {showNudge && (
+          <FirstRunNudge
+            needProfile={needProfile}
+            needPush={needPush}
+            onSetProfile={editAvatar}
+            onEnablePush={openNotifications}
+            onDismiss={dismissNudge}
+          />
+        )}
         <ProfileTabsBar active={tab} onChange={onSelectTab} />
       </View>
     ),
@@ -437,6 +517,11 @@ export default function MypageScreen() {
       openSettings,
       tab,
       onSelectTab,
+      showNudge,
+      needProfile,
+      needPush,
+      openNotifications,
+      dismissNudge,
     ],
   );
 
@@ -844,6 +929,66 @@ const LockNotice = memo(function LockNotice(): ReactNode {
     >
       <Icon.lock size={14} color={C.text3} strokeWidth={2.2} />
       <Text style={[T.caption, { color: C.text3, flex: 1 }]}>保存済みはあなただけが見られます</Text>
+    </View>
+  );
+});
+
+// -----------------------------------------------------------------------------
+// 初回ナッジ — 登録を最小化した代わりに、プロフィール(ニックネーム)と通知を
+// マイページで後から促す。カードはグレー、CTA だけ accent(1画面1アクセント)。dismiss 可。
+// -----------------------------------------------------------------------------
+const FirstRunNudge = memo(function FirstRunNudge({
+  needProfile,
+  needPush,
+  onSetProfile,
+  onEnablePush,
+  onDismiss,
+}: {
+  needProfile: boolean;
+  needPush: boolean;
+  onSetProfile: () => void;
+  onEnablePush: () => void;
+  onDismiss: () => void;
+}): ReactNode {
+  const rowStyle = {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: SP['2'],
+    paddingVertical: SP['2'],
+  };
+  return (
+    <View
+      style={{
+        marginHorizontal: SP['4'],
+        marginTop: SP['3'],
+        paddingHorizontal: SP['3'],
+        paddingVertical: SP['2'],
+        backgroundColor: C.bg2,
+        borderRadius: R.lg,
+        borderWidth: 1,
+        borderColor: C.border,
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: SP['1'] }}>
+        <Text style={[T.caption, { color: C.text3, flex: 1 }]}>プロフィールを仕上げましょう</Text>
+        <Pressable onPress={onDismiss} hitSlop={10} accessibilityRole="button" accessibilityLabel="閉じる">
+          <Icon.close size={16} color={C.text3} strokeWidth={2.2} />
+        </Pressable>
+      </View>
+      {needProfile && (
+        <Pressable onPress={onSetProfile} style={rowStyle} accessibilityRole="button">
+          <Icon.edit size={18} color={C.accent} strokeWidth={2.2} />
+          <Text style={[T.body, { color: C.text, flex: 1 }]}>ニックネームを設定する</Text>
+          <Icon.chevronR size={18} color={C.text3} strokeWidth={2.2} />
+        </Pressable>
+      )}
+      {needPush && (
+        <Pressable onPress={onEnablePush} style={rowStyle} accessibilityRole="button">
+          <Icon.bell size={18} color={C.accent} strokeWidth={2.2} />
+          <Text style={[T.body, { color: C.text, flex: 1 }]}>通知をオンにする</Text>
+          <Icon.chevronR size={18} color={C.text3} strokeWidth={2.2} />
+        </Pressable>
+      )}
     </View>
   );
 });

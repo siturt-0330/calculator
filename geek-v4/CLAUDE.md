@@ -37,6 +37,11 @@
   - **[仮説]** = まだ実測していない。直す前に最小の検証 (一発で切り分くコマンド or テスト) を回す。
 - 過去に「画像が縦長/潰れる」を **EXIF orientation のせいと誤診** して `[{rotate:0}]` / `format=origin` を足したが直らなかった事故がある (真因は §5.10 の `resize=cover`)。**「いかにもそれっぽい原因」を推測で確定させない**。実測してから書く。検証手段は §5.10 末尾 (image-size 実測 / preview の naturalWidth 比較) を雛形に。
 
+### 🔁 壊れた / 未実行のツール呼び出しは「黙って自動再実行」(2026-06-10 ユーザー明示)
+
+- ツール呼び出しが malformed / 未実行になったら (例: 「Your tool call was malformed and could not be parsed. Please retry.」/ 生テキスト化して実行されない)、**ユーザーに尋ねず・止まらず・謝罪を並べず、黙って正しい構文で即・自動再実行する (毎回)**。ユーザーがこの挙動を強く支持し「これからも必ず起きるから絶対に忘れないで」と明言した恒久ルール。
+- ただし **「本物の失敗」(permission denied = ユーザーが拒否 / 実エラー / 非ゼロ終了) は対象外** — 盲目的に再試行せず原因を診断する。自動再実行するのは「自分の書式ミスで未実行になった呼び出し」だけ。
+
 ### 🔒 Geek イントロ / 起動スプラッシュは【確定版・変更禁止】(2026-06-06 確定)
 
 「Geek」起動演出 = **(A) 起動スプラッシュ**(`scripts/web-postbuild.mjs` が `dist/index.html` に注入する素 HTML/CSS の `#geek-splash`、JS 到着前から表示)+ **(B) イントロ**(`components/ui/IntroAnimation.tsx`、アプリ mount 後に表示)。この 2 つは **「同じ寸法・同じ演出」で完全一致** させてある(スプラッシュ→イントロ→本体が seam なく繋がるため)。**ユーザが「これで固定」と確定した最終版。デザイン・寸法・タイミングを勝手に変えない。**
@@ -104,7 +109,9 @@ supabase db push --linked
 supabase functions deploy <name>
 ```
 
-CI (`.github/workflows/ci.yml`) は `type-check + test` を毎 PR で実行、master push のみ `build:web` smoke test。
+CI (**repo root** の `.github/workflows/ci.yml`。アプリは `geek-v4/` にあるが GitHub Actions は repo root の `.github/workflows/` しか実行しないため、workflow は root 配置 + `defaults.run.working-directory: geek-v4` で動かす。`setup-node` の cache は `cache-dependency-path: geek-v4/package-lock.json` を明示) は `type-check + test` を毎 PR で実行 (`paths` フィルタ `geek-v4/**` で geek-v4 配下の変更時のみ起動)、master push / 手動 `workflow_dispatch` のみ `build:web` smoke test。
+
+> ⚠️ 旧 `geek-v4/.github/workflows/` 配下に置くと Actions が拾わず CI が一切走らない (過去そうなっていた)。CI 定義は必ず **repo root** の `.github/workflows/` に置く。
 
 ### Metro キャッシュ運用 (2026-05-28 〜)
 
@@ -131,7 +138,10 @@ app/                    Expo Router (file-based)
                         ※ _layout.tsx の Tabs.Screen は feed/search/community/mypage の 4 つだけ。
                         ※ bbs.tsx は (tabs)/ に存在するが Tabs.Screen 未登録 = タブバーには出ない
                           (bbs スレ画面のルーティング用。掲示板は「タブ」ではない)
-  onboarding/           初回設定ウィザード (5 画面 / 進捗 4 ステップ — index/language/nickname/liked-tags/notifications)
+  onboarding/           【廃止・到達不能 dead code】旧初回設定ウィザード。登録は email+pw のみに簡素化し
+                        登録後そのままフィードへ。nickname はサーバが匿名ランダム user_xxxxxxxx (0146) を自動採番、
+                        ニックネーム/通知はマイページの FirstRunNudge から後設定。_layout.tsx は /(tabs)/feed へ Redirect
+                        (直 URL 露出を封じる)。画面ファイルは harmless dead code として残置 (削除は別 PR)
   post/[id].tsx         投稿詳細, post/create.tsx で作成 (modal)
   bbs/[id].tsx          掲示板スレ詳細, bbs/create.tsx で作成
   settings/             プロフィール編集・通知・プライバシー等
@@ -142,7 +152,7 @@ app/                    Expo Router (file-based)
   mypage/{saved,liked,posts}.tsx
   search.tsx            全文検索 (post/bbs/tag/community/user)
   filter/index.tsx      タグフィルタ管理 (modal)
-  _layout.tsx           Root: PersistQueryClientProvider + auth/onboarding redirect
+  _layout.tsx           Root: PersistQueryClientProvider + auth redirect (onboarding 誘導は撤去済 — 常に feed)
 
 components/             再利用 UI (feed/ bbs/ community/ post/ settings/ shared/ ui/ tag/ nav/ ...)
 hooks/                  カスタム React Hooks (60+)
@@ -506,7 +516,7 @@ Native module を触ったら必ず通常 build & submit。
 | 「Geek」が「オタク」に翻訳される | MyMemory は固有名詞を分かってくれない | `protectBrandNames` → API → `restoreBrandNames` |
 | store の小変更で全画面 re-render | `const { user, ... } = useStore()` で全 destructure | selector に切り替え (`(s) => s.user`) |
 | AnonPostCard がスクロール中にカクつく | 反応イベント毎に全 post invalidate | scope down + Set で O(1) lookup + debounce 300ms |
-| `a@example.com` ユーザーが登録できない | profiles.nickname の length 制約に違反 | migration 0016 で trigger 関数を堅牢化 (短ければ `_u` 追加、長ければ truncate) |
+| `a@example.com` ユーザーが登録できない | profiles.nickname の length 制約に違反 | migration 0016 で trigger 関数を堅牢化 (短ければ `_u` 追加、長ければ truncate)。★0146 で handle_new_user は **email を一切使わず匿名ランダム `user_`+8桁hex(13文字)** を採番するよう変更 → email 由来の length 地雷自体が解消 (★0146 は手動適用前提・Netlify は流さない) |
 | ハーフカクの「タップ感」 | PressableScale の delayPressIn=130ms + haptic を onPress に紐付け | `delayPressIn=0`, `onPressIn` で haptic, `hitSlop: 8` 標準 |
 | Sentry に email / JWT が漏れていた | `beforeSend` redact が無かった | `lib/sentry.ts` の `redact()` + `redactObject()` + `console: false` integration |
 | アイコンクロップで EXIF が漏れていた | expo-image-picker の生 URI を直 upload | `lib/image.ts` の `prepareImageUpload()` で EXIF strip + magic-byte 検証 + JPEG 再エンコード |

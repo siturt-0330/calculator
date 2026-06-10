@@ -1,19 +1,39 @@
 name: CI
 
 # PR / push to master で typecheck + unit test を実行。
-# eslint は eslint-config-expo の依存欠落のため一旦コメントアウト
-# (https://github.com/siturt-0330/geek-v4/issues — 別 PR で resolve 予定)
+#
+# ⚠️ アプリ本体は repo root ではなく geek-v4/ サブディレクトリにある。
+#    GitHub Actions は repo root の .github/workflows/ しか実行しないので、
+#    この workflow は root に置き、全 run step を defaults.run.working-directory で
+#    geek-v4/ に固定する (npm ci は geek-v4/package-lock.json と
+#    geek-v4/.npmrc の legacy-peer-deps=true を読む)。
+#
+# eslint は eslint-config-expo の依存欠落のため一旦コメントアウト (別 PR で resolve 予定)
 
 on:
   push:
     branches: [master, main]
+    paths:
+      - 'geek-v4/**'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [master, main]
+    paths:
+      - 'geek-v4/**'
+      - '.github/workflows/ci.yml'
+  # CI 設定変更後などに手動で回せるように (build-web の if が参照する)
+  workflow_dispatch:
 
 # 同一 PR で push を連打した時は古い run をキャンセル
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+# 全 run step を geek-v4/ で実行 (uses: のアクションには効かないので
+# setup-node の cache-dependency-path は別途 geek-v4/ を明示する)
+defaults:
+  run:
+    working-directory: geek-v4
 
 jobs:
   check:
@@ -28,6 +48,8 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+          # working-directory は uses: に効かないため lockfile を明示
+          cache-dependency-path: geek-v4/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -59,6 +81,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+          cache-dependency-path: geek-v4/package-lock.json
       - run: npm ci
         env:
           NODE_ENV: development

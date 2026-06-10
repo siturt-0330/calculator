@@ -16,16 +16,18 @@
 //   - components: TopBar, BackButton, Divider, PressableScale, native Switch
 // ============================================================
 
-import { useState, useMemo } from 'react';
-import { View, Text, ScrollView, Switch, Modal, Pressable } from 'react-native';
+import { useState, useMemo, useCallback } from 'react';
+import { View, Text, ScrollView, Switch, Modal, Pressable, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TopBar } from '../../components/nav/TopBar';
 import { BackButton } from '../../components/nav/BackButton';
 import { Divider } from '../../components/ui/Divider';
 import { PressableScale } from '../../components/ui/PressableScale';
 import { PushNotificationToggle } from '../../components/ui/PushNotificationToggle';
+import { registerNativePushToken } from '../../lib/api/push';
 import { NotificationToggleRow } from '../../components/settings/NotificationToggleRow';
 import { useSettingsStore, isInQuietHours } from '../../stores/settingsStore';
+import { useToastStore } from '../../stores/toastStore';
 import {
   useNotificationPreferences,
   useUpdateNotificationPreference,
@@ -97,6 +99,7 @@ export default function NotificationsSettingsScreen() {
   const quietStartHour = useSettingsStore((s) => s.quietStartHour);
   const quietEndHour = useSettingsStore((s) => s.quietEndHour);
   const update = useSettingsStore((s) => s.update);
+  const show = useToastStore((s) => s.show);
   const [quietPickerOpen, setQuietPickerOpen] = useState<null | 'start' | 'end'>(null);
 
   const quietActive = isInQuietHours(quietStartHour, quietEndHour);
@@ -133,6 +136,41 @@ export default function NotificationsSettingsScreen() {
       }
     }
   }
+
+  // マスタースイッチ ON 時、native は OS 権限要求 + Expo Push Token 登録まで行う。
+  // 旧 onboarding 通知画面が native の唯一の権限要求箇所だったが、登録最小化で廃止したため、
+  // ここが native ユーザーの push 有効化の入口になる。これが無いと token 未登録で通知が永遠に届かない。
+  // web は PushNotificationToggle が別途権限/購読を扱うので、ここではフラグ更新のみ。
+  const handleMasterToggle = useCallback(
+    async (v: boolean) => {
+      if (v && Platform.OS !== 'web') {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+          const Notifications = require('expo-notifications') as typeof import('expo-notifications');
+          const perm = await Notifications.requestPermissionsAsync();
+          // OS ダイアログで「許可しない」を選んだら pushEnabled を true にしない。
+          // (旧実装は granted を無視して必ず ON にしていたため「ONなのに永遠に届かない」不整合が出た)
+          if (!perm.granted) {
+            show('端末の通知が許可されていません。設定アプリから許可してください', 'warn');
+            update('pushEnabled', false);
+            return;
+          }
+          const r = await registerNativePushToken();
+          if (!r.ok) {
+            console.warn('[settings] push token register failed:', r.error);
+            show('通知の登録に失敗しました。時間をおいて再試行してください', 'warn');
+          }
+        } catch (e) {
+          console.warn('[settings] notification setup error:', e);
+          show('通知の設定中にエラーが発生しました', 'warn');
+          update('pushEnabled', false);
+          return;
+        }
+      }
+      update('pushEnabled', v);
+    },
+    [update, show],
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -202,7 +240,7 @@ export default function NotificationsSettingsScreen() {
           </View>
           <Switch
             value={pushEnabled}
-            onValueChange={(v) => update('pushEnabled', v)}
+            onValueChange={handleMasterToggle}
             trackColor={{ false: C.bg4, true: C.accent }}
             thumbColor="#fff"
           />

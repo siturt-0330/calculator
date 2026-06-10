@@ -95,11 +95,8 @@ export default function LoginScreen() {
       }
       return;
     }
-    if (result.next === 'onboarding') {
-      router.replace('/onboarding');
-    } else {
-      router.replace('/(tabs)/feed');
-    }
+    // オンボーディング廃止: signIn の next は常に 'feed'。ログイン後そのままフィードへ。
+    router.replace('/(tabs)/feed');
   };
 
   // 確認メールを再送信
