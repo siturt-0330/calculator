@@ -15,7 +15,7 @@
     "test": "jest --passWithNoTests",
     "test:e2e": "maestro test tests/e2e",
     "supabase:gen": "supabase gen types typescript --project-id $SUPABASE_PROJECT_ID > types/supabase.ts",
-    "build:web": "expo export --platform web --output-dir dist && node scripts/web-postbuild.mjs",
+    "build:web": "expo export --platform web --output-dir dist && node scripts/web-postbuild.mjs && node scripts/inject-jp-fonts.mjs",
     "build:ios": "eas build --platform ios --profile production",
     "build:android": "eas build --platform android --profile production",
     "update": "eas update --branch production --message"
@@ -27,6 +27,7 @@
     "@expo-google-fonts/syne": "^0.2.3",
     "@expo/metro-runtime": "~4.0.1",
     "@expo/vector-icons": "~14.0.4",
+    "@fontsource/noto-sans-jp": "^5.2.9",
     "@gorhom/bottom-sheet": "^5.0.0",
     "@react-native-async-storage/async-storage": "1.23.1",
     "@sentry/react-native": "~6.10.0",
