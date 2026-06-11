@@ -1,5 +1,18 @@
 # SECURITY_OPS — セキュリティ手動適用の手順書 (2026-06 監査対応)
 
+> **進行状況 (2026-06-11 Claude Code 実施済み):**
+> - ✅ §1 de-anon 確認 SQL 実行済 — 5 RPC とも本番適用済・マスク確認 (discovery/comments の
+>   フラグ差は設計どおり: discovery は識別非表示・comments は全件匿名で分岐不要)。主経路クローズ確定。
+> - ✅ §2 migration 0134 適用済 + 検証済 (authenticated の UPDATE 列 = 編集可 11 列のみ、
+>   counter トリガ 3 本 prosecdef=true)。**残り: アプリで like 1 タップ → 数字が動くことの目視のみ。**
+> - ✅ §4 Edge 全 10 関数 deploy 済 + 検証済 (CORS: geekboard.netlify.app に ACAO 返却 /
+>   SSRF: ::ffff:7f00:1 が null preview でブロック)。なお check-content は**今回が史上初 deploy**
+>   (それまで本番に存在せず moderation は常に fail-open だった)。初回 boot 失敗 (503) の真因は
+>   郵便番号 regex の `[\s-－]` が /u モードで SyntaxError [実証済] → エスケープ修正して復旧。
+>   現在 200 + PII 検出が機能。
+> - ⬜ §5 Redirect URLs — ダッシュボード操作のみ残 (CLI/API に安全な経路なし・2 分)。
+> - ⬜ §3 0138 — 引き続きブロック (exportUserData の RPC 移行が先・次バッチ)。
+
 > 対象: 2026-06-11 大規模監査で確定したセキュリティ P1 のうち、**コードでは完結せず
 > Supabase ダッシュボード / CLI での手動操作が必要なもの**。上から順に実施する。
 > 各ステップに「事前確認 → 適用 → 事後検証」を付けてある。**事後検証まで必ずやる**。
