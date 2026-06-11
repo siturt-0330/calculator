@@ -230,8 +230,10 @@ function ForYouCard({
   const firstMedia = post.media_urls?.[0];
   // ★ sanitizeUrl は通さない (HotPostsRow と同理由): data: URL 等を弾いて「詳細では
   //   出るのにカードだけ画像が出ない」原因になっていた。生 URL を thumbedUrl に通すだけにする。
+  // 480: カード実表示幅 (~半画面 × 2-3x DPR) に対し 240 は引き伸ばしで異常に粗かった。
+  // フィードの prefetch/ProgressiveImage 標準と同じ 480 に揃える = cache hit も狙える。
   const thumb = useMemo(
-    () => (firstMedia ? thumbedUrl(firstMedia, 240) : null),
+    () => (firstMedia ? thumbedUrl(firstMedia, 480) : null),
     [firstMedia],
   );
   // render 変換エンドポイント (thumbedUrl) が解決できない環境でも画像が出るよう、
