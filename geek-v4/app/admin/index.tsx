@@ -629,6 +629,43 @@ function DashboardTab({ stats, onJumpReports }: { stats: { totalUsers: number; t
         </PressableScale>
       </View>
 
+      {/* 機能フラグ (WordPress 的トグル) */}
+      <SectionHeader label="機能フラグ" />
+      <View style={{ paddingHorizontal: SP['4'] }}>
+        <PressableScale
+          onPress={() => router.push('/admin/flags' as never)}
+          haptic="tap"
+          style={[{
+            padding: SP['3'],
+            backgroundColor: C.bg2,
+            borderRadius: R.lg,
+            borderWidth: 1,
+            borderColor: C.border,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: SP['3'],
+          }, SHADOW.card]}
+        >
+          <View
+            style={{
+              width: 40, height: 40, borderRadius: 20,
+              backgroundColor: C.accentBg,
+              alignItems: 'center', justifyContent: 'center',
+              borderWidth: 1, borderColor: C.accent + '55',
+            }}
+          >
+            <Icon.flag size={18} color={C.accentLight} strokeWidth={2.4} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[T.bodyB, { color: C.text }]}>機能フラグ</Text>
+            <Text style={[T.caption, { color: C.text3 }]}>
+              アプリの機能をトグルで ON/OFF — 全端末に即時反映 (再デプロイ不要)
+            </Text>
+          </View>
+          <Icon.chevronR size={18} color={C.text3} strokeWidth={2.2} />
+        </PressableScale>
+      </View>
+
       {/* Top reported */}
       <SectionHeader
         label="Top Reported"
