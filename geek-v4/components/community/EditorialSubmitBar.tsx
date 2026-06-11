@@ -12,7 +12,7 @@
 //     (2) 本体ボタン
 //         EDITORIAL: 角丸 R.lg の accent 塗りの横長ボタン。
 //         disabled 時は C.bg4 + opacity で「不能」を罫線でなく沈黙で示す。
-//         loading 時は白の ActivityIndicator を中央に出し二重送信を防ぐ。
+//         loading 時は C.text2 の ActivityIndicator を中央に出し二重送信を防ぐ。
 //
 //   presentational に徹する: 表示文言・色・disabled/loading・理由は全て props。
 //   内部 state を持たない(アニメ sharedValue も不要 = 純表示)。
@@ -24,13 +24,15 @@
 //   - iOS/Android/Web 全対応・BlurView 不使用(フラット = Web 同一品質)。
 // =============================================================================
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 
-import { C, SP, R, SIZE } from '../../design/tokens';
+import { SP, R, SIZE } from '../../design/tokens';
 import { T, FONT } from '../../design/typography';
 import { PressableScale } from '../ui/PressableScale';
 import { Icon } from '../../constants/icons';
+import { useColors } from '../../hooks/useColors';
+import type { ColorPalette } from '../../lib/theme/palettes';
 
 // -----------------------------------------------------------------------------
 // props
@@ -40,7 +42,7 @@ export interface EditorialSubmitBarProps {
   label: string;
   /** 押下時(disabled / loading 中は親側で抑止される) */
   onPress: () => void;
-  /** 送信中: 中央に白の ActivityIndicator を出し、押下を無効化する */
+  /** 送信中: 中央に ActivityIndicator (C.text2) を出し、押下を無効化する */
   loading?: boolean;
   /** 不能: accent 塗りをやめ C.bg4 + opacity で沈黙させ、押下を無効化する */
   disabled?: boolean;
@@ -62,6 +64,10 @@ export function EditorialSubmitBar({
   disabled = false,
   disabledReason,
 }: EditorialSubmitBarProps) {
+  // テーマ追従のため makeStyles 化 (AnonPostCard と同規約)
+  const C = useColors();
+  const styles = useMemo(() => makeStyles(C), [C]);
+
   // loading 中も実質 disabled(二重送信防止)。press 自体を殺す。
   const isInactive = disabled || loading;
 
@@ -101,7 +107,9 @@ export function EditorialSubmitBar({
         ]}
       >
         {loading ? (
-          <ActivityIndicator color="#ffffff" />
+          // loading 中の背景は buttonInactive (C.bg4) — light の bg4 に白スピナーは
+          // 不可視のため、両テーマで視認できる C.text2 を使う。
+          <ActivityIndicator color={C.text2} />
         ) : (
           <View style={styles.buttonInner}>
             <Text style={[styles.label, { color: labelColor }]} numberOfLines={1}>
@@ -116,9 +124,11 @@ export function EditorialSubmitBar({
 }
 
 // -----------------------------------------------------------------------------
-// styles
+// styles — テーマ追従のため makeStyles 化 (AnonPostCard と同規約)。
+// factory 経由参照のため no-unused-styles が全キーを未使用と誤報する → disable。
 // -----------------------------------------------------------------------------
-const styles = StyleSheet.create({
+/* eslint-disable react-native/no-unused-styles */
+const makeStyles = (C: ColorPalette) => StyleSheet.create({
   root: {
     paddingHorizontal: SP['5'],
   },
@@ -172,3 +182,4 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
 });
+/* eslint-enable react-native/no-unused-styles */

@@ -8,16 +8,28 @@
 //   - master switch / quiet hours / Web push 設定 → zustand (settingsStore)
 //   - カテゴリ別 push / inapp → notification_preferences テーブル (migration 0070)
 //
-// Geek UI 統一:
-//   - 色: C.bg / C.bg2 / C.text / C.text3 / C.accent
-//   - typography: T.h3 / T.bodyM / T.bodyMd / T.smallM / T.caption
-//   - spacing: SP['2'..'5']
-//   - radius: R.lg
-//   - components: TopBar, BackButton, Divider, PressableScale, native Switch
+// UI 構成 (2026-06-11 刷新):
+//   - PC (web の広い画面) ではコンテンツを maxWidth 640 で中央寄せして間延びを防ぐ
+//   - セクション = 小さな uppercase ラベル + hairline (admin の SectionHeader 風)
+//     「プッシュ通知」(マスター + おやすみ時間を 1 カードに divider でまとめる)
+//     → 「一括操作」(outline pill chips) → カテゴリ別カード
+//   - 行アイコンは accentBg の丸チップ (影・白背景なし)
+//   - 配色は useColors() (ライト/ダーク両対応)
 // ============================================================
 
 import { useState, useMemo, useCallback } from 'react';
-import { View, Text, ScrollView, Switch, Modal, Pressable, Platform } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  Switch,
+  Modal,
+  Pressable,
+  Platform,
+  StyleSheet,
+  useWindowDimensions,
+} from 'react-native';
+import type { ComponentType } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TopBar } from '../../components/nav/TopBar';
 import { BackButton } from '../../components/nav/BackButton';
@@ -36,9 +48,11 @@ import type {
   NotificationCategory,
   NotificationPref,
 } from '../../lib/api/notificationPreferences';
-import { C, R, SP } from '../../design/tokens';
+import { R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { Icon } from '../../constants/icons';
+import { useColors } from '../../hooks/useColors';
+import type { LucideIcon } from 'lucide-react-native';
 
 // ============================================================
 // セクション定義 — UI 上のグルーピング
@@ -91,8 +105,16 @@ const SECTIONS: readonly Section[] = [
   },
 ] as const;
 
+// PC ブラウザでカードが全幅に間延びしないための中央寄せ幅
+const CONTENT_MAX_WIDTH = 640;
+
 export default function NotificationsSettingsScreen() {
   const insets = useSafeAreaInsets();
+  const C = useColors();
+  const { width: winW } = useWindowDimensions();
+  // web の広い画面のみ中央 640px に収める (native / 狭い web では全幅)
+  const isWideWeb = Platform.OS === 'web' && winW >= 700;
+
   // 全 store 取得をやめて必要 field のみ subscribe — 他 field の更新で
   // re-render されないようにする (旧 _layout の挙動と同じ)
   const pushEnabled = useSettingsStore((s) => s.pushEnabled);
@@ -179,162 +201,25 @@ export default function NotificationsSettingsScreen() {
         contentContainerStyle={{
           padding: SP['4'],
           paddingBottom: insets.bottom + SP['10'],
-          gap: SP['5'],
         }}
       >
-        {/* 説明 */}
+        {/* 中央寄せラッパ — PC の広い画面でのみ maxWidth を効かせる */}
         <View
           style={{
-            padding: SP['4'],
-            backgroundColor: C.bg2,
-            borderRadius: R.lg,
-            borderWidth: 1,
-            borderColor: C.border,
-            gap: SP['2'],
+            width: '100%',
+            maxWidth: isWideWeb ? CONTENT_MAX_WIDTH : undefined,
+            alignSelf: 'center',
+            gap: SP['6'],
           }}
         >
-          <Text style={[T.bodyMd, { color: C.text }]}>
-            カテゴリ別に通知を on / off できます。
+          {/* リード文 — カード化せず軽く添える */}
+          <Text style={[T.caption, { color: C.text3, paddingHorizontal: SP['1'] }]}>
+            Push (端末通知) と In-app (アプリ内通知一覧) はカテゴリごとに別々で on / off できます。
           </Text>
-          <Text style={[T.caption, { color: C.text3 }]}>
-            Push (端末通知) と In-app (アプリ内通知一覧) は別々に設定できます。
-          </Text>
-        </View>
 
-        {/* Master switch */}
-        <View
-          style={{
-            padding: SP['4'],
-            backgroundColor: C.bg2,
-            borderRadius: R.lg,
-            borderWidth: 1,
-            borderColor: C.border,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: SP['3'],
-          }}
-        >
-          <View
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 22,
-              backgroundColor: pushEnabled ? C.accent : C.bg3,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Icon.bell
-              size={22}
-              color={pushEnabled ? '#fff' : C.text3}
-              strokeWidth={2.2}
-            />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]}>
-              プッシュ通知マスター
-            </Text>
-            <Text style={[T.caption, { color: C.text3 }]}>
-              {pushEnabled ? '有効' : 'すべての Push が無効化されています'}
-            </Text>
-          </View>
-          <Switch
-            value={pushEnabled}
-            onValueChange={handleMasterToggle}
-            trackColor={{ false: C.bg4, true: C.accent }}
-            thumbColor="#fff"
-          />
-        </View>
-
-        {/* Web Push (ブラウザ通知) — native では何も描画されない */}
-        <PushNotificationToggle />
-
-        {/* おやすみ時間 */}
-        <View
-          style={{
-            padding: SP['4'],
-            backgroundColor: C.bg2,
-            borderRadius: R.lg,
-            borderWidth: 1,
-            borderColor: C.border,
-            gap: SP['3'],
-          }}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-            <Icon.clock size={16} color={C.text2} strokeWidth={2.2} />
-            <Text style={[T.bodyMd, { color: C.text, fontWeight: '700' }]}>おやすみ時間</Text>
-            {quietActive && (
-              <View
-                style={{
-                  marginLeft: 'auto',
-                  paddingHorizontal: SP['2'],
-                  paddingVertical: 2,
-                  backgroundColor: C.accent + '33',
-                  borderRadius: R.full,
-                }}
-              >
-                <Text style={[T.caption, { color: C.accent, fontWeight: '700' }]}>
-                  現在ミュート中
-                </Text>
-              </View>
-            )}
-          </View>
-          <Text style={[T.caption, { color: C.text3 }]}>
-            指定した時間帯はすべてのプッシュ通知をミュートします
-          </Text>
-          <View style={{ flexDirection: 'row', gap: SP['2'], alignItems: 'center' }}>
-            <HourPickerButton
-              label="開始"
-              value={quietStartHour}
-              onPress={() => setQuietPickerOpen('start')}
-            />
-            <Text style={{ color: C.text3 }}>—</Text>
-            <HourPickerButton
-              label="終了"
-              value={quietEndHour}
-              onPress={() => setQuietPickerOpen('end')}
-            />
-            {(quietStartHour !== null || quietEndHour !== null) && (
-              <PressableScale
-                onPress={() => {
-                  update('quietStartHour', null);
-                  update('quietEndHour', null);
-                }}
-                style={{ paddingHorizontal: SP['2'], paddingVertical: SP['1'] }}
-              >
-                <Text style={[T.caption, { color: C.text3 }]}>解除</Text>
-              </PressableScale>
-            )}
-          </View>
-        </View>
-
-        {/* 一括操作 */}
-        <View
-          style={{
-            padding: SP['4'],
-            backgroundColor: C.bg2,
-            borderRadius: R.lg,
-            borderWidth: 1,
-            borderColor: C.border,
-            gap: SP['2'],
-          }}
-        >
-          <Text style={[T.smallM, { color: C.text2 }]}>一括操作</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-            <BulkButton label="全 Push OFF" onPress={() => bulkApply(false, 'push')} />
-            <BulkButton label="全 In-app OFF" onPress={() => bulkApply(false, 'inapp')} />
-            <BulkButton label="全 ON" onPress={() => bulkApply(true, 'both')} />
-          </View>
-        </View>
-
-        {/* カテゴリ別 prefs */}
-        {SECTIONS.map((section) => (
-          <View key={section.title} style={{ gap: SP['2'] }}>
-            <Text
-              style={[T.smallM, { color: C.text3, paddingHorizontal: SP['2'] }]}
-            >
-              {section.title}
-            </Text>
+          {/* ===== プッシュ通知 (マスター + おやすみ時間) ===== */}
+          <View style={{ gap: SP['2'] }}>
+            <SectionHeader label="プッシュ通知" />
             <View
               style={{
                 backgroundColor: C.bg2,
@@ -342,30 +227,154 @@ export default function NotificationsSettingsScreen() {
                 borderWidth: 1,
                 borderColor: C.border,
                 overflow: 'hidden',
-                opacity: isLoading ? 0.6 : 1,
               }}
             >
-              {section.rows.map((row, i) => {
-                const IconCmp = Icon[row.icon];
-                const { push, inapp } = getPref(row.category);
-                return (
-                  <View key={row.category}>
-                    <NotificationToggleRow
-                      icon={IconCmp}
-                      label={row.label}
-                      description={row.description}
-                      push={push}
-                      inapp={inapp}
-                      onChangePush={(v) => handleChange(row.category, { push: v })}
-                      onChangeInApp={(v) => handleChange(row.category, { inapp: v })}
-                    />
-                    {i < section.rows.length - 1 && <Divider />}
+              {/* マスタートグル */}
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: SP['3'],
+                  padding: SP['4'],
+                }}
+              >
+                <IconChip icon={Icon.bell} active={pushEnabled} />
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={[T.bodyB, { color: C.text }]}>プッシュ通知マスター</Text>
+                  <Text style={[T.caption, { color: C.text3 }]}>
+                    {pushEnabled
+                      ? 'カテゴリ別の設定に従って通知します'
+                      : 'すべての Push が無効化されています'}
+                  </Text>
+                </View>
+                <Switch
+                  value={pushEnabled}
+                  onValueChange={handleMasterToggle}
+                  trackColor={{ false: C.bg4, true: C.accent }}
+                  thumbColor="#fff"
+                />
+              </View>
+              <Divider />
+              {/* おやすみ時間 */}
+              <View style={{ padding: SP['4'], gap: SP['3'] }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['3'] }}>
+                  <IconChip icon={Icon.moon} />
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={[T.bodyB, { color: C.text }]}>おやすみ時間</Text>
+                    <Text style={[T.caption, { color: C.text3 }]}>
+                      指定した時間帯はすべてのプッシュ通知をミュートします
+                    </Text>
                   </View>
-                );
-              })}
+                  {quietActive && (
+                    <View
+                      style={{
+                        paddingHorizontal: SP['2'],
+                        paddingVertical: 2,
+                        backgroundColor: C.accentBg,
+                        borderRadius: R.full,
+                      }}
+                    >
+                      <Text style={[T.captionM, { color: C.accent }]}>ミュート中</Text>
+                    </View>
+                  )}
+                </View>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: SP['3'],
+                  }}
+                >
+                  <HourPill
+                    label="開始"
+                    value={quietStartHour}
+                    onPress={() => setQuietPickerOpen('start')}
+                  />
+                  <Text style={[T.bodyM, { color: C.text3 }]}>〜</Text>
+                  <HourPill
+                    label="終了"
+                    value={quietEndHour}
+                    onPress={() => setQuietPickerOpen('end')}
+                  />
+                </View>
+                {(quietStartHour !== null || quietEndHour !== null) && (
+                  <PressableScale
+                    onPress={() => {
+                      update('quietStartHour', null);
+                      update('quietEndHour', null);
+                    }}
+                    style={{
+                      alignSelf: 'center',
+                      paddingHorizontal: SP['3'],
+                      paddingVertical: SP['1'],
+                    }}
+                  >
+                    <Text style={[T.caption, { color: C.text3, textDecorationLine: 'underline' }]}>
+                      設定を解除
+                    </Text>
+                  </PressableScale>
+                )}
+              </View>
+            </View>
+
+            {/* Web Push (ブラウザ通知) — native では何も描画されない */}
+            <PushNotificationToggle />
+          </View>
+
+          {/* ===== 一括操作 ===== */}
+          <View style={{ gap: SP['2'] }}>
+            <SectionHeader label="一括操作" />
+            <View
+              style={{
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                gap: SP['2'],
+                paddingHorizontal: SP['1'],
+              }}
+            >
+              <BulkChip label="全 Push OFF" onPress={() => bulkApply(false, 'push')} />
+              <BulkChip label="全 In-app OFF" onPress={() => bulkApply(false, 'inapp')} />
+              <BulkChip label="全 ON" onPress={() => bulkApply(true, 'both')} />
             </View>
           </View>
-        ))}
+
+          {/* ===== カテゴリ別 prefs ===== */}
+          {SECTIONS.map((section) => (
+            <View key={section.title} style={{ gap: SP['2'] }}>
+              <SectionHeader label={section.title} />
+              <View
+                style={{
+                  backgroundColor: C.bg2,
+                  borderRadius: R.lg,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  overflow: 'hidden',
+                  opacity: isLoading ? 0.6 : 1,
+                }}
+              >
+                {section.rows.map((row, i) => {
+                  const IconCmp = Icon[row.icon];
+                  const { push, inapp } = getPref(row.category);
+                  return (
+                    <View key={row.category}>
+                      <NotificationToggleRow
+                        icon={IconCmp}
+                        label={row.label}
+                        description={row.description}
+                        push={push}
+                        inapp={inapp}
+                        onChangePush={(v) => handleChange(row.category, { push: v })}
+                        onChangeInApp={(v) => handleChange(row.category, { inapp: v })}
+                      />
+                      {i < section.rows.length - 1 && <Divider />}
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          ))}
+        </View>
       </ScrollView>
 
       <HourPickerModal
@@ -384,20 +393,76 @@ export default function NotificationsSettingsScreen() {
 }
 
 // ============================================================
-// 一括操作ボタン
+// セクション見出し — 小さな uppercase ラベル + hairline (admin の SectionHeader 風)
 // ============================================================
-function BulkButton({ label, onPress }: { label: string; onPress: () => void }) {
+function SectionHeader({ label }: { label: string }) {
+  const C = useColors();
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SP['2'],
+        paddingHorizontal: SP['1'],
+      }}
+    >
+      <Text
+        style={{
+          fontSize: 10,
+          fontWeight: '800',
+          color: C.text3,
+          letterSpacing: 1.2,
+          textTransform: 'uppercase',
+        }}
+      >
+        {label}
+      </Text>
+      <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: C.border }} />
+    </View>
+  );
+}
+
+// ============================================================
+// アイコン丸チップ — 背景 accentBg の正円。影・白背景は付けない
+// ============================================================
+type IconLike = LucideIcon | ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
+
+function IconChip({ icon: IconCmp, active = false }: { icon: IconLike; active?: boolean }) {
+  const C = useColors();
+  return (
+    <View
+      style={{
+        width: 40,
+        height: 40,
+        borderRadius: R.full,
+        backgroundColor: active ? C.accent : C.accentBg,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <IconCmp size={20} color={active ? '#fff' : C.accent} strokeWidth={2.2} />
+    </View>
+  );
+}
+
+// ============================================================
+// 一括操作 chip — outline pill
+// ============================================================
+function BulkChip({ label, onPress }: { label: string; onPress: () => void }) {
+  const C = useColors();
   return (
     <PressableScale
       onPress={onPress}
       haptic="tap"
       style={{
-        paddingHorizontal: SP['3'],
-        paddingVertical: SP['2'],
-        backgroundColor: C.bg3,
-        borderRadius: R.md,
+        height: 34,
+        paddingHorizontal: SP['4'],
+        borderRadius: R.full,
         borderWidth: 1,
-        borderColor: C.border,
+        borderColor: C.border2,
+        backgroundColor: 'transparent',
+        alignItems: 'center',
+        justifyContent: 'center',
       }}
     >
       <Text style={[T.smallM, { color: C.text2 }]}>{label}</Text>
@@ -406,9 +471,9 @@ function BulkButton({ label, onPress }: { label: string; onPress: () => void }) 
 }
 
 // ============================================================
-// おやすみ時間ピッカー
+// おやすみ時間ピッカー — 丸ピル (未設定は「—」/ 設定済みは accent 文字)
 // ============================================================
-function HourPickerButton({
+function HourPill({
   label,
   value,
   onPress,
@@ -417,23 +482,27 @@ function HourPickerButton({
   value: number | null;
   onPress: () => void;
 }) {
+  const C = useColors();
   return (
     <PressableScale
       onPress={onPress}
       haptic="tap"
       style={{
-        paddingHorizontal: SP['3'],
-        paddingVertical: SP['3'],
-        backgroundColor: C.bg3,
-        borderRadius: R.md,
-        borderWidth: 1,
-        borderColor: C.border,
-        minWidth: 92,
+        flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
+        gap: SP['2'],
+        height: 40,
+        minWidth: 116,
+        paddingHorizontal: SP['4'],
+        borderRadius: R.full,
+        backgroundColor: C.bg3,
+        borderWidth: 1,
+        borderColor: value === null ? C.border : C.accent + '66',
       }}
     >
       <Text style={[T.caption, { color: C.text3 }]}>{label}</Text>
-      <Text style={[T.body, { color: C.text, fontWeight: '700' }]}>
+      <Text style={[T.bodyB, { color: value === null ? C.text3 : C.accent }]}>
         {value === null ? '—' : `${String(value).padStart(2, '0')}:00`}
       </Text>
     </PressableScale>
@@ -453,15 +522,20 @@ function HourPickerModal({
   onClose: () => void;
   onConfirm: (hour: number) => void;
 }) {
+  const C = useColors();
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable
         onPress={onClose}
-        style={{ flex: 1, backgroundColor: '#000a', justifyContent: 'flex-end' }}
+        style={{ flex: 1, backgroundColor: C.scrim, justifyContent: 'flex-end' }}
       >
         <Pressable
           onPress={(e) => e.stopPropagation()}
           style={{
+            // PC でも間延びしないようシートの中身は中央 560px に収める (狭い画面では全幅)
+            width: '100%',
+            maxWidth: 560,
+            alignSelf: 'center',
             backgroundColor: C.bg2,
             borderTopLeftRadius: R.xl,
             borderTopRightRadius: R.xl,

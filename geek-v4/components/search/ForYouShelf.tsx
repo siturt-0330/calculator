@@ -34,7 +34,6 @@ import type { Post } from '../../types/models';
 
 const COLUMNS = 2;
 const ROWS = 3;
-const LIMIT = COLUMNS * ROWS;
 // 個人化再ランク用に広めの候補プールを取得（hot 上位の素並びと差別化する余白）
 const POOL = 12;
 const GAP = SP['2']; // 8px
@@ -49,9 +48,16 @@ export function ForYouShelf({
   const userId = useAuthStore((s) => s.user?.id ?? null);
   const userCreatedAt = useAuthStore((s) => s.user?.created_at);
 
-  // 親 padding は paddingHorizontal: SP['4'] (16) を想定
+  // ★ PC レイアウト修正: デスクトップ Web は 3 カラム構成で中央カラムが maxWidth 720 に
+  //   制限されるため、useWindowDimensions (全ウィンドウ幅) でカード幅を計算すると
+  //   カードが中央カラムから大きくはみ出して崩れていた。実コンテナ幅を onLayout で測り、
+  //   測れるまでは min(画面幅, 720) を仮値にする。広い幅では 3 列にして間延びも防ぐ。
+  const [containerW, setContainerW] = useState<number | null>(null);
+  const effectiveW = containerW ?? Math.min(screenWidth, 720);
+  const columns = effectiveW >= 600 ? 3 : COLUMNS;
+  const limit = columns * ROWS;
   const cardWidth = Math.floor(
-    (screenWidth - SP['4'] * 2 - GAP * (COLUMNS - 1)) / COLUMNS,
+    (effectiveW - SP['4'] * 2 - GAP * (columns - 1)) / columns,
   );
 
   // 候補プール: hot 候補を広め (POOL) に取得し、下でローカルの興味プロフィールで再ランクする。
@@ -121,8 +127,8 @@ export function ForYouShelf({
         totalPosts: candidates.length,
       }),
     }));
-    return diversifyFeed(scored, 2).slice(0, LIMIT);
-  }, [poolProp, pool, events, myAccountAgeDays]);
+    return diversifyFeed(scored, 2).slice(0, limit);
+  }, [poolProp, pool, events, myAccountAgeDays, limit]);
 
   // 未ログイン → 描画しない (親はこの section の高さを 0 で扱える)
   if (!userId) return null;
@@ -130,7 +136,7 @@ export function ForYouShelf({
   if (poolProp !== undefined ? !!loadingProp : isLoading) {
     // skeleton: 「For You」ヘッダー + grid 6 セル分の placeholder
     return (
-      <View style={{ gap: SP['3'] }}>
+      <View style={{ gap: SP['3'] }} onLayout={(e) => setContainerW(e.nativeEvent.layout.width)}>
         <ForYouHeader C={C} />
         <View
           style={{
@@ -140,7 +146,7 @@ export function ForYouShelf({
             gap: GAP,
           }}
         >
-          {[0, 1, 2, 3, 4, 5].map((i) => (
+          {Array.from({ length: limit }, (_, i) => i).map((i) => (
             <View
               key={`sk-${i}`}
               style={{
@@ -163,7 +169,7 @@ export function ForYouShelf({
   if (posts.length === 0) return null;
 
   return (
-    <View style={{ gap: SP['3'] }}>
+    <View style={{ gap: SP['3'] }} onLayout={(e) => setContainerW(e.nativeEvent.layout.width)}>
       <ForYouHeader C={C} />
       <View
         style={{

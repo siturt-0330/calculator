@@ -70,6 +70,12 @@ export interface CommunityPickerSheetProps {
   query: string;
   /** 検索文字列の変更 */
   onQueryChange: (q: string) => void;
+  /** 未参加だが参加して投稿できる候補 (検索ヒットから親が絞る・任意) */
+  discover?: Community[];
+  /** 参加処理中の community id 集合 (二重タップガード表示用) */
+  joiningIds?: ReadonlySet<string>;
+  /** 未参加候補の「参加」タップ (open=即参加 / それ以外=親が申請導線へ) */
+  onJoin?: (community: Community) => void;
 }
 
 const AVATAR = 36;
@@ -91,6 +97,9 @@ export function CommunityPickerSheet({
   loading = false,
   query,
   onQueryChange,
+  discover = [],
+  joiningIds,
+  onJoin,
 }: CommunityPickerSheetProps) {
   const C = useColors();
   const insets = useSafeAreaInsets();
@@ -110,8 +119,10 @@ export function CommunityPickerSheet({
   // 空状態の出し分け:
   //   - communities 自体が空        → 参加中コミュニティ無し
   //   - communities はあるが filtered 空 → 検索ヒット無し
+  //   - 未参加候補 (discover) があれば「一致なし」でもリストを出す
   const hasAnyCommunity = communities.length > 0;
   const hasMatch = filtered.length > 0;
+  const hasDiscover = (discover?.length ?? 0) > 0 && !!onJoin;
 
   const handleClose = () => {
     hap.tap();
@@ -219,9 +230,16 @@ export function CommunityPickerSheet({
             {/* ===== body: list / loading / empty ===== */}
             {loading ? (
               <LoadingState C={C} />
-            ) : !hasAnyCommunity ? (
-              <EmptyState C={C} message="参加中のコミュニティがありません" />
-            ) : !hasMatch ? (
+            ) : !hasAnyCommunity && !hasDiscover ? (
+              <EmptyState
+                C={C}
+                message={
+                  trimmedQuery.length > 0
+                    ? `「${trimmedQuery}」に一致するコミュニティがありません`
+                    : '参加中のコミュニティがありません — 検索すると未参加のコミュにも参加して投稿できます'
+                }
+              />
+            ) : !hasMatch && !hasDiscover ? (
               <EmptyState
                 C={C}
                 message={`「${trimmedQuery}」に一致するコミュニティがありません`}
@@ -249,6 +267,43 @@ export function CommunityPickerSheet({
                     C={C}
                   />
                 ))}
+
+                {/* ===== 未参加候補 — 参加して投稿 (検索ヒットから) ===== */}
+                {hasDiscover && (
+                  <>
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: SP['2'],
+                        paddingTop: filtered.length > 0 ? SP['3'] : SP['1'],
+                        paddingBottom: SP['1'],
+                        paddingHorizontal: SP['1'],
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          fontWeight: '800',
+                          color: C.text3,
+                          letterSpacing: 1.0,
+                        }}
+                      >
+                        未参加 — 参加して投稿
+                      </Text>
+                      <View style={{ flex: 1, height: 1, backgroundColor: C.border }} />
+                    </View>
+                    {discover.map((community) => (
+                      <DiscoverRow
+                        key={community.id}
+                        community={community}
+                        busy={joiningIds?.has(community.id) ?? false}
+                        onJoin={() => onJoin?.(community)}
+                        C={C}
+                      />
+                    ))}
+                  </>
+                )}
               </ScrollView>
             )}
           </Animated.View>
@@ -346,6 +401,94 @@ function CommunityRow({ community, selected, onPress, C }: CommunityRowProps) {
           }}
         />
       )}
+    </PressableScale>
+  );
+}
+
+// ============================================================
+// DiscoverRow — 未参加コミュニティの行 (右端が check ではなく「参加」ボタン)
+// ------------------------------------------------------------
+// open コミュ: 参加 → 親が即 join + 自動選択。request/invite 制: 「申請制」表示で
+// 親が詳細画面の申請フローへ誘導する (その場では投稿先にできないため)。
+// ============================================================
+function DiscoverRow({
+  community,
+  busy,
+  onJoin,
+  C,
+}: {
+  community: Community;
+  busy: boolean;
+  onJoin: () => void;
+  C: ReturnType<typeof useColors>;
+}) {
+  const isOpen = community.visibility === 'open';
+  return (
+    <PressableScale
+      onPress={onJoin}
+      disabled={busy}
+      accessibilityRole="button"
+      accessibilityLabel={
+        isOpen
+          ? `${community.name} に参加して投稿先にする`
+          : `${community.name} は申請制 — 詳細を開く`
+      }
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SP['3'],
+        paddingVertical: SP['2'],
+        paddingHorizontal: SP['3'],
+        borderRadius: R.lg,
+        opacity: busy ? 0.6 : 1,
+      }}
+    >
+      <CommunityIcon
+        iconUrl={community.icon_url}
+        iconEmoji={community.icon_emoji}
+        iconColor={community.icon_color}
+        name={community.name}
+        size={AVATAR}
+      />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <Text numberOfLines={1} style={[T.bodyM, { color: C.text, flexShrink: 1 }]}>
+            {community.name}
+          </Text>
+          {community.is_official ? <Icon.award size={14} color={C.accent} /> : null}
+          {!isOpen ? <Icon.lock size={12} color={C.text3} /> : null}
+        </View>
+        <Text numberOfLines={1} style={[T.caption, { color: C.text3, marginTop: 2 }]}>
+          {`${formatCountJa(community.member_count)} メンバー · ${formatCountJa(
+            community.post_count,
+          )} 投稿`}
+        </Text>
+      </View>
+      {/* 右端: 参加ボタン (open) / 申請制ラベル (request・invite) */}
+      <View
+        accessible={false}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 4,
+          paddingHorizontal: SP['3'],
+          paddingVertical: 6,
+          borderRadius: R.full,
+          backgroundColor: isOpen ? C.accent : C.bg3,
+          borderWidth: isOpen ? 0 : 1,
+          borderColor: C.border,
+        }}
+      >
+        {busy ? (
+          <ActivityIndicator size="small" color={isOpen ? '#fff' : C.text2} />
+        ) : (
+          <Text
+            style={[T.captionM, { color: isOpen ? '#fff' : C.text2, fontWeight: '700' }]}
+          >
+            {isOpen ? '参加' : '申請制'}
+          </Text>
+        )}
+      </View>
     </PressableScale>
   );
 }

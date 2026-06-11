@@ -147,7 +147,10 @@ export function EmptyState({
       {hasVisual && (
         // 96x96 gradient circle — 紫 → ピンク のブランドグラデ + soft halo。
         // emoji があれば 44pt で float、なければ icon を white 36pt で描画。
-        <Animated.View style={[circleStyle, SHADOW.glow]}>
+        // ★ wrapper にも円と同じ radius を付ける — web では shadow が box-shadow に
+        //   変換され要素の矩形に沿うため、radius 無しだと丸アイコンの背後に
+        //   四角い halo (ライトテーマで白っぽい正方形) が浮いて見える。
+        <Animated.View style={[circleStyle, { borderRadius: 48 }, SHADOW.glow]}>
           <LinearGradient
             colors={[...GRAD.primary]}
             start={{ x: 0, y: 0 }}
@@ -214,7 +217,9 @@ export function EmptyState({
       )}
 
       {actionLabel && onAction && (
-        <Animated.View style={[{ marginTop: SP['3'] }, SHADOW.glow, ctaStyle]}>
+        // wrapper に Button と同じ radius (12) — radius 無しの wrapper に glow を
+        // 付けると web で四角い影が CTA の背後に出る (上の circle と同じ理屈)
+        <Animated.View style={[{ marginTop: SP['3'], borderRadius: 12 }, SHADOW.glow, ctaStyle]}>
           <Button label={actionLabel} onPress={onAction} variant="primary" fullWidth={false} />
         </Animated.View>
       )}

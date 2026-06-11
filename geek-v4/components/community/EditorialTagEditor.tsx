@@ -12,7 +12,7 @@
 // 縦罫の色アニメ(focusP)のみ(仕様で許可された唯一の内部状態)。
 // =============================================================================
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, {
   Extrapolation,
@@ -27,9 +27,11 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { Icon } from '../../constants/icons';
-import { C, R, SIZE, SP } from '../../design/tokens';
+import { R, SIZE, SP } from '../../design/tokens';
 import { TIMING_NORM } from '../../design/motion';
 import { FONT, T } from '../../design/typography';
+import { useColors } from '../../hooks/useColors';
+import type { ColorPalette } from '../../lib/theme/palettes';
 import { HighlightedText } from '../ui/HighlightedText';
 import { PressableScale } from '../ui/PressableScale';
 
@@ -62,6 +64,10 @@ export type EditorialTagEditorProps = {
 };
 
 export function EditorialTagEditor(props: EditorialTagEditorProps) {
+  // テーマ追従のため makeStyles 化 (AnonPostCard と同規約)。ローカル C が
+  // JSX 内の C.* 直読みと worklet の interpolateColor も hook palette に揃える。
+  const C = useColors();
+  const styles = useMemo(() => makeStyles(C), [C]);
   const reduce = useReducedMotion();
   const [focused, setFocused] = useState(false);
 
@@ -214,9 +220,11 @@ export function EditorialTagEditor(props: EditorialTagEditorProps) {
 }
 
 // -----------------------------------------------------------------------------
-// styles — 静的トークンで統一(塗りなし・1px hairline・余白でリズム)
+// styles — テーマ追従のため makeStyles 化 (AnonPostCard と同規約)。
+// factory 経由参照のため no-unused-styles が全キーを未使用と誤報する → disable。
 // -----------------------------------------------------------------------------
-const styles = StyleSheet.create({
+/* eslint-disable react-native/no-unused-styles */
+const makeStyles = (C: ColorPalette) => StyleSheet.create({
   root: {
     paddingHorizontal: SP[5],
     paddingVertical: SP[4],
@@ -353,3 +361,4 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
+/* eslint-enable react-native/no-unused-styles */
