@@ -116,6 +116,19 @@ function isBlockedIpv6(rawHost: string): boolean {
   // IPv4-mapped (::ffff:127.0.0.1 等) は埋め込み v4 を再判定
   const mapped = h.match(/:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
   if (mapped && mapped[1] && isBlockedIpv4(mapped[1])) return true;
+  // ★ hex 形の IPv4-mapped (::ffff:7f00:1 = 127.0.0.1) もオクテットへ展開して再判定。
+  //   入力が最初から hex 形だと上のドット形 match を素通りして内部 IP へ到達できた (監査 S-5)。
+  const hexMapped = h.match(/(?:^|:)ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hexMapped && hexMapped[1] && hexMapped[2]) {
+    const hi = parseInt(hexMapped[1], 16);
+    const lo = parseInt(hexMapped[2], 16);
+    if (!Number.isNaN(hi) && !Number.isNaN(lo)) {
+      const v4 = `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
+      if (isBlockedIpv4(v4)) return true;
+    }
+  }
+  // NAT64 (64:ff9b::/96) 経由の内部 v4 到達も遮断 (翻訳プレフィックスごと拒否)
+  if (h.startsWith('64:ff9b:')) return true;
 
   // 先頭ハイバイトで範囲判定
   const firstGroup = h.split(':').find((g) => g.length > 0) ?? '';
@@ -174,6 +187,7 @@ function imageResponse(req: Request, body: Uint8Array, contentType: string): Res
     status: 200,
     headers: {
       ...corsHeaders(req),
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
       'Content-Type': contentType,
       // 画像は事実上不変。CDN / ブラウザに 7 日間強キャッシュさせる。
       'Cache-Control': 'public, max-age=604800, immutable',
@@ -189,6 +203,7 @@ function transparentResponse(req: Request): Response {
     status: 200,
     headers: {
       ...corsHeaders(req),
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
       'Content-Type': 'image/png',
       // 失敗応答は長くキャッシュしない (一時障害なら後でちゃんと取れるように)。
       'Cache-Control': 'public, max-age=300',

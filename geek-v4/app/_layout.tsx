@@ -88,7 +88,7 @@ if (typeof globalThis !== 'undefined') {
 }
 import 'react-native-reanimated';
 
-import { useEffect, useCallback, useState, lazy, Suspense } from 'react';
+import { useEffect, useCallback, useRef, useState, lazy, Suspense } from 'react';
 import { View, Platform } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -676,6 +676,26 @@ export default function RootLayout() {
       if (inAuth || inOnboarding) router.replace('/(tabs)/feed');
     }
   }, [user, authHydrated, segments, router]);
+
+  // ★ セキュリティ (監査 S-7): signOut 時に React Query の in-memory + 永続キャッシュを破棄する。
+  //   無いと共有端末で前ユーザーの個人データ (保存/いいね/通知/マイページ統計、特に userId
+  //   非スコープの ['my-likes'] 等) が次ユーザーの refetch 完了まで表示され、disk にも最大 2h 残る。
+  //   「非 null → null 遷移時のみ」発火させる (素朴な if(!user) は cold start のログイン前や
+  //   401→refresh 中の一時 null でも誤発火してキャッシュを無駄に消すため ref でガード)。
+  const wasAuthedRef = useRef(false);
+  useEffect(() => {
+    if (!authHydrated) return;
+    if (user) {
+      wasAuthedRef.current = true;
+      return;
+    }
+    if (wasAuthedRef.current) {
+      wasAuthedRef.current = false;
+      qc.clear();
+      // removeClient 必須 — 無いと次回 cold start で disk から前ユーザー分が復元され再発する
+      void persister.removeClient?.();
+    }
+  }, [authHydrated, user]);
 
   if (!ready) return null;
 

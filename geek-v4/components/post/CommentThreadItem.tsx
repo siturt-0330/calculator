@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { memo, useMemo, useState, useEffect } from 'react';
 import { View, Text } from 'react-native';
 import Animated, {
   FadeIn,
@@ -216,7 +216,7 @@ function ThreadRail({
   );
 }
 
-export function CommentThreadItem({
+function CommentThreadItemInner({
   comment,
   rootIndex,
   unread = false,
@@ -745,8 +745,10 @@ export function CommentThreadItem({
         </Animated.View>
       )}
 
-      {/* スタンプピッカー (このコメント専用・反応行の「反応」/chip から開く) */}
-      {onReact && (
+      {/* スタンプピッカー (このコメント専用・反応行の「反応」/chip から開く)。
+          ★ pickerOpen 中だけマウント — 旧実装は全コメント行に常時マウントされ、
+          コメント N 件で N 個の query/store 購読が走っていた (監査 P1-I)。 */}
+      {onReact && pickerOpen && (
         <MemeReactionPicker
           visible={pickerOpen}
           onClose={() => setPickerOpen(false)}
@@ -758,3 +760,9 @@ export function CommentThreadItem({
     </View>
   );
 }
+
+// ★ memo 化 (shallow 比較): コメントツリーは投稿詳細の再レンダ (コンポーザー入力・
+//   無関係 cache 更新等) のたびに全行再構築されていた (監査 P1-I)。props 参照が変わらない
+//   行はスキップされる。カスタム比較は再帰ツリーの子孫更新を誤ブロックするリスクが
+//   あるため使わない (reactionsByComment の参照変化時は全行再レンダ = 従来挙動を維持)。
+export const CommentThreadItem = memo(CommentThreadItemInner);

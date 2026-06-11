@@ -30,10 +30,13 @@ function buildResetRedirectUrl(): string {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     return `${window.location.origin}/reset-password`;
   }
-  // Native: Universal Links / App Links 経由で web 版に着地。
-  // 端末に Geek アプリがインストールされていれば自動的にアプリで開かれる
-  // (Associated Domains / Digital Asset Links により検証された場合のみ)。
-  return 'https://geek.app/reset-password';
+  // ★ 監査 P1-M: 旧 'https://geek.app/reset-password' は未配信ドメインでリンクが解決せず
+  //   native のリセットが詰んでいた。実稼働 web (geekboard.netlify.app/reset-password = 200 実測)
+  //   に統一。アプリで直接開きたければ将来 associatedDomains を geekboard へ更新 + EAS rebuild
+  //   (それまでは web の reset 画面に着地して完了できる)。
+  //   Supabase Authentication → URL Configuration → Redirect URLs への登録が必要:
+  //   https://geekboard.netlify.app/reset-password
+  return 'https://geekboard.netlify.app/reset-password';
 }
 
 export default function ForgotPasswordScreen() {
