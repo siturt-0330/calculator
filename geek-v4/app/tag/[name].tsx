@@ -239,15 +239,16 @@ export default function TagDetailScreen() {
           //   FlashList が visible item を再 render するように補助データ全部を渡す。
           //   reactionsByPost だけだと like/concern/addedTags の即時反映が漏れる。
           extraData={listExtra}
-          estimatedItemSize={300}
+          // feed/community と同じ AnonPostCard を描くので overscan を同値に (過小だと fast flick で白セル)。
+          estimatedItemSize={640}
           // スワイプフリック時の慣性減速を速める (iOS デフォルトの "normal" は
           // ややダラダラ滑るので、リスト系では "fast" のほうがキビキビ感が出る)。
           decelerationRate="fast"
-          // viewport 外で +250px 先読み — スクロール中に AnonPostCard の画像が
+          // viewport 外で +600px 先読み — スクロール中に AnonPostCard の画像が
           // 間に合わないと白セルが見える。
-          drawDistance={250}
-          // 大きい AnonPostCard を unmount してメモリ + GPU 負荷を下げる
-          removeClippedSubviews
+          drawDistance={600}
+          // (FlashList 1.7.3 は recycler 方式で virtualization 済み。removeClippedSubviews は
+          //  RecyclerListView へ forward されない silent no-op だったため撤去)
           onEndReached={() => hasNextPage && fetchNextPage()}
           onEndReachedThreshold={0.5}
           refreshControl={

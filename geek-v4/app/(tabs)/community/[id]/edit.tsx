@@ -226,6 +226,9 @@ export default function EditCommunityScreen() {
       }
       show('コミュニティをオープンに変更しました', 'success');
       void qc.invalidateQueries({ queryKey: ['community', id] });
+      // avatar 行 + フィードカードのコミュラベル(名前/アイコン)も追従させる
+      void qc.invalidateQueries({ queryKey: ['my-communities'] });
+      void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'] });
       setShowOpenConfirm(false);
     } finally {
       setChangingVisibility(false);
@@ -279,6 +282,9 @@ export default function EditCommunityScreen() {
 
       show('コミュニティを更新しました', 'success');
       void qc.invalidateQueries({ queryKey: ['community', id] });
+      // avatar 行 + フィードカードのコミュラベル(名前/アイコン)も追従させる
+      void qc.invalidateQueries({ queryKey: ['my-communities'] });
+      void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'] });
       router.back();
     } catch (e) {
       const msg = e instanceof Error ? e.message : '更新に失敗しました';

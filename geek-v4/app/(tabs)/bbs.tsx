@@ -541,8 +541,8 @@ export default function BBSScreen() {
         keyboardShouldPersistTaps="handled"
         // viewport 外で +FLASH_DRAW_DISTANCE px 先読み — スクロール中の白セル防止
         drawDistance={FLASH_DRAW_DISTANCE}
-        // 大量にあるスレッドカードを virtualization で省メモリ化
-        removeClippedSubviews
+        // (FlashList 1.7.3 は recycler 方式で virtualization 済み。removeClippedSubviews は
+        //  RecyclerListView へ forward されない silent no-op だったため撤去)
         // 「上に戻る」ボタン用: SCROLL_THROTTLE_MS throttle で過剰 re-render 防止 (60fps 想定)
         onScroll={handleScroll}
         scrollEventThrottle={SCROLL_THROTTLE_MS}

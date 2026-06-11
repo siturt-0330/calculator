@@ -52,13 +52,8 @@ export function useConcern() {
       else await addConcern(postId, 'other', concernsPrivate);
     },
     onMutate: async ({ postId, current }) => {
-      // ★ await でレース防止
-      await Promise.all([
-        qc.cancelQueries({ queryKey: ['my-concerns'] }).catch(() => {}),
-        qc.cancelQueries({ queryKey: ['feed'] }).catch(() => {}),
-        qc.cancelQueries({ queryKey: ['feed-page'] }).catch(() => {}),
-      ]);
-
+      // ★ snapshot を先取り (await の前)。cancel を待たず楽観 patch を同期適用して反映を即時化し、
+      //   in-flight cancel は patch の後に revert:false で行う (useLike/useReactionToggle と同順序)。
       const prevConcerns = qc.getQueriesData<Record<string, boolean> | undefined>({
         queryKey: ['my-concerns'],
       });
@@ -102,6 +97,13 @@ export function useConcern() {
         my_concern: !current,
         concern_count: Math.max(0, (p.concern_count ?? 0) + (current ? -1 : 1)),
       }));
+
+      // in-flight refetch を cancel (楽観 patch の後・revert:false で patch を巻き戻させない)
+      await Promise.all([
+        qc.cancelQueries({ queryKey: ['my-concerns'] }, { revert: false }).catch(() => {}),
+        qc.cancelQueries({ queryKey: ['feed'] }, { revert: false }).catch(() => {}),
+        qc.cancelQueries({ queryKey: ['feed-page'] }, { revert: false }).catch(() => {}),
+      ]);
 
       return { prevConcerns, prevFeed, prevFeedPage };
     },

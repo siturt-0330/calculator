@@ -35,6 +35,7 @@ import { PressableScale } from '../../../../components/ui/PressableScale';
 import { BackButton } from '../../../../components/nav/BackButton';
 import { Icon } from '../../../../constants/icons';
 import { AnonPostCard } from '../../../../components/feed/AnonPostCard';
+import { ReportSheet } from '../../../../components/post/ReportSheet';
 import { useAuthStore } from '../../../../stores/authStore';
 import { useRecentCommunitiesStore } from '../../../../stores/recentCommunitiesStore';
 import { useDelayedLoading } from '../../../../hooks/useDelayedLoading';
@@ -243,7 +244,9 @@ export default function CommunityDetailScreen() {
     void qc.invalidateQueries({ queryKey: ['community', id] });
     // コミュタブ index.tsx (React Query 化済) — user.id サフィックス含めて prefix 一致
     void qc.invalidateQueries({ queryKey: ['my-communities'] });
-    void qc.invalidateQueries({ queryKey: ['my-community-feed'] });
+    // ★ コミュタブ feed の現用キーは ['my-community-feed-rich']。旧 ['my-community-feed'] は
+    //   読み手ゼロのデッドキーで、join/leave がコミュタブに反映されない原因だった。
+    void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'] });
     // mypage の統計 (KPI: コミュ数)
     void qc.invalidateQueries({ queryKey: ['mypage-stats'] });
     // discover 画面
@@ -560,6 +563,7 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
   const C = useColors();
   const [sort, setSort] = useState<FeedSort>('new');
   const onSortChange = useCallback((s: FeedSort) => setSort(s), []);
+  const [reportPostId, setReportPostId] = useState<string | null>(null);
   const router = useRouter();
   const showToast = useToastStore((s) => s.show);
   const { data, isLoading, isError } = useQuery({
@@ -696,10 +700,16 @@ const FeedTab = memo(function FeedTab({ communityId }: FeedTabProps) {
               share={share}
               router={router}
               handleAddTag={handleAddTag}
+              onReport={setReportPostId}
             />
           ))}
         </View>
       )}
+      <ReportSheet
+        visible={!!reportPostId}
+        postId={reportPostId}
+        onClose={() => setReportPostId(null)}
+      />
     </View>
   );
 });
@@ -726,6 +736,7 @@ type FeedPostRowProps = {
   share: (title: string, path: string) => Promise<void>;
   router: ReturnType<typeof useRouter>;
   handleAddTag: (postId: string, tag: string) => Promise<void>;
+  onReport: (postId: string) => void;
 };
 const FeedPostRow = memo(function FeedPostRow({
   post,
@@ -743,6 +754,7 @@ const FeedPostRow = memo(function FeedPostRow({
   share,
   router,
   handleAddTag,
+  onReport,
 }: FeedPostRowProps) {
   const onLike = useCallback(() => toggleLike(post.id), [toggleLike, post.id]);
   const onConcern = useCallback(
@@ -762,9 +774,7 @@ const FeedPostRow = memo(function FeedPostRow({
     (name: string) => router.push(`/tag/${encodeURIComponent(name)}` as never),
     [router],
   );
-  const onMore = useCallback(() => {
-    /* no-op — could add report flow later */
-  }, []);
+  const onMore = useCallback(() => onReport(post.id), [onReport, post.id]);
   const onReact = useCallback(
     (meme: string) => toggleReact(post.id, meme),
     [toggleReact, post.id],
