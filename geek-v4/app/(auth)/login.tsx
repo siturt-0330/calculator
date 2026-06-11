@@ -14,7 +14,6 @@ import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 import { checkRate, rateLimitMessage } from '../../lib/rateLimit';
-import { useT } from '../../hooks/useT';
 import { Icon } from '../../constants/icons';
 
 export default function LoginScreen() {
@@ -31,7 +30,6 @@ export default function LoginScreen() {
   // selector 化: store 全体 subscribe → 必要な action のみ → 不要 re-render 削減
   const signIn = useAuthStore((s) => s.signIn);
   const show = useToastStore((s) => s.show);
-  const t = useT();
   const { online } = useNetworkStatus();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -199,14 +197,14 @@ export default function LoginScreen() {
                 haptic="tap"
                 style={{ flex: 1, padding: SP['2'], borderRadius: R.md, borderWidth: 1, borderColor: C.border, alignItems: 'center' }}
               >
-                <Text style={[T.smallM, { color: C.text }]}>{t('auth.reset_password')}</Text>
+                <Text style={[T.smallM, { color: C.text }]}>パスワード再設定</Text>
               </PressableScale>
               <PressableScale
                 onPress={goToSignup}
                 haptic="confirm"
                 style={{ flex: 1, padding: SP['2'], borderRadius: R.md, backgroundColor: C.accent, alignItems: 'center' }}
               >
-                <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>{t('auth.signup')}</Text>
+                <Text style={[T.smallM, { color: '#fff', fontWeight: '700' }]}>新規登録</Text>
               </PressableScale>
             </View>
           </View>

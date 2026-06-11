@@ -34,7 +34,7 @@ export function useApproveJoinRequest(communityId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['community-join-requests', communityId] });
-      qc.invalidateQueries({ queryKey: ['community-members', communityId] });
+      qc.invalidateQueries({ queryKey: ['community-mods', 'members', communityId] });
       qc.invalidateQueries({ queryKey: ['community', communityId] });
       show('参加を承認しました', 'success');
     },

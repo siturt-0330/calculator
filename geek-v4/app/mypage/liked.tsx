@@ -87,7 +87,7 @@ export default function LikedPosts() {
           // 3 行 numberOfLines + メタ 2 行 で約 140px
           estimatedItemSize={140}
           drawDistance={250}
-          removeClippedSubviews
+          // FlashList 1.7.3 は recycler で virtualization 済み。removeClippedSubviews は no-op のため撤去。
           decelerationRate="fast"
           contentContainerStyle={{ padding: SP['4'], paddingBottom: insets.bottom + SP['10'] }}
           ListHeaderComponent={

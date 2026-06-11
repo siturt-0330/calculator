@@ -23,7 +23,11 @@ const DEFAULT_SET = new Set<string>(DEFAULT_BLOCKED_TAGS);
 export default function BlockedTagsSettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { likedTags, blockedTags, addBlocked, removeBlocked } = useTagFilterStore();
+  // §5.4: 全 destructure はストアのどのフィールド変更でも全 TagPill を再構築する。selector で個別購読。
+  const likedTags = useTagFilterStore((s) => s.likedTags);
+  const blockedTags = useTagFilterStore((s) => s.blockedTags);
+  const addBlocked = useTagFilterStore((s) => s.addBlocked);
+  const removeBlocked = useTagFilterStore((s) => s.removeBlocked);
   const { nodes, rootIds, hydrate: hydrateGraph } = useTagGraphStore();
   const show = useToastStore((s) => s.show);
   const [input, setInput] = useState('');

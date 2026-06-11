@@ -133,6 +133,8 @@ function useInvalidateMods(communityId: string | undefined) {
     qc.invalidateQueries({ queryKey: ['community-mods', 'members', communityId] });
     qc.invalidateQueries({ queryKey: ['community-mods', 'bans', communityId] });
     qc.invalidateQueries({ queryKey: ['community-mods', 'logs', communityId] });
+    // 詳細ヘッダーの member_count を kick/ban/promote/demote/transfer で追従させる
+    qc.invalidateQueries({ queryKey: ['community', communityId], exact: true });
   }, [qc, communityId]);
 }
 

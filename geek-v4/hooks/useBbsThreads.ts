@@ -38,6 +38,9 @@ export type Scope = 'community' | 'all';
  * BBS スレッド一覧 + スコープ + コミュニティメタを束ねた統合フック。
  * bbs.tsx の BBSScreen から抽出 — component は表示ロジックのみに集中できる。
  */
+// 参照安定の空メタ — communityMetaQ.data 未取得時に毎 render 新規 {} を作らない (FlashList extraData churn 防止)
+const EMPTY_META: Record<string, CommunityMeta> = {};
+
 export function useBbsThreads() {
   // ----- 全スレッド / 参加コミュ横断スレッドを両方 mount -----
   // どちらのスコープに切り替えてもデータがキャッシュ済みで即表示できるよう、
@@ -79,7 +82,7 @@ export function useBbsThreads() {
     enabled: communityIds.length > 0,
     staleTime: 5 * 60 * 1000, // コミュ名/アイコンは頻繁に変わらないので 5min キャッシュ
   });
-  const communityMeta: Record<string, CommunityMeta> = communityMetaQ.data ?? {};
+  const communityMeta: Record<string, CommunityMeta> = communityMetaQ.data ?? EMPTY_META;
 
   return {
     /** 表示中のスレッド一覧 (scope + filter 適用済み) */

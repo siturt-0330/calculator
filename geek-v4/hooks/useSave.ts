@@ -73,12 +73,8 @@ export function useSave() {
   const mutation = useMutation<boolean, Error, Vars, Ctx>({
     mutationFn: toggleSaveApi,
     onMutate: async ({ postId, wasSaved }) => {
-      // ★ await でレース防止
-      await Promise.all([
-        qc.cancelQueries({ queryKey: ['my-saves'] }).catch(() => {}),
-        qc.cancelQueries({ queryKey: ['feed-page'] }).catch(() => {}),
-      ]);
-
+      // ★ snapshot を先取り (await の前)。cancel を待たず楽観 patch を同期適用して反映を即時化し、
+      //   in-flight cancel は patch の後に revert:false で行う (useLike/useReactionToggle と同順序)。
       const prevSaves = qc.getQueriesData<Record<string, boolean> | undefined>({
         queryKey: ['my-saves'],
       });
@@ -100,6 +96,12 @@ export function useSave() {
         ...p,
         my_save: !wasSaved,
       }));
+
+      // in-flight refetch を cancel (楽観 patch の後・revert:false で patch を巻き戻させない)
+      await Promise.all([
+        qc.cancelQueries({ queryKey: ['my-saves'] }, { revert: false }).catch(() => {}),
+        qc.cancelQueries({ queryKey: ['feed-page'] }, { revert: false }).catch(() => {}),
+      ]);
 
       return { prevSaves, prevFeedPage };
     },

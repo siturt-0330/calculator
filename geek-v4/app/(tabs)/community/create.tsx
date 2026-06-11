@@ -27,7 +27,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { C, SP } from '../../../design/tokens';
 import { TABBAR } from '../../../design/tabbar';
@@ -62,6 +62,7 @@ import { EditorialSubmitBar } from '../../../components/community/EditorialSubmi
 export default function CreateCommunityScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const qc = useQueryClient();
   const params = useLocalSearchParams<{ draftId?: string }>();
   const show = useToastStore((s) => s.show);
 
@@ -379,6 +380,9 @@ export default function CreateCommunityScreen() {
         show(`アイコンのアップロードに失敗しました。${detail}\n後で詳細画面から再設定できます。`, 'warn');
         // community 自体は作成済 → 下書きは破棄して詳細へ
         if (draftIdRef.current) useDraftsStore.getState().remove(draftIdRef.current);
+        // コミュタブの avatar 行/フィードに新コミュを即時反映
+        void qc.invalidateQueries({ queryKey: ['my-communities'] });
+        void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'] });
         router.replace(`/community/${created.id}` as never);
         return;
       }
@@ -391,6 +395,9 @@ export default function CreateCommunityScreen() {
       show('コミュニティを作成しました！', 'success');
       // 作成成功 → この下書きを削除
       if (draftIdRef.current) useDraftsStore.getState().remove(draftIdRef.current);
+      // コミュタブの avatar 行/フィードに新コミュを即時反映
+      void qc.invalidateQueries({ queryKey: ['my-communities'] });
+      void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'] });
       router.replace(`/community/${created.id}` as never);
     } catch (e) {
       console.warn('[community/create] submit failed:', e);

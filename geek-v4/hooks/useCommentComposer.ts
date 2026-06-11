@@ -17,6 +17,7 @@ import { Platform, TextInput } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
 import { createComment } from '../lib/api/comments';
+import { patchFeedPagePost, invalidateFeedPage } from '../lib/cacheUpdates/feedPagePatcher';
 import { uploadPostImage, uploadPostVideo, validateVideoSource } from '../lib/media';
 import { makeWebPreviewDataUrl } from '../lib/image';
 import { peekRate, rateLimitMessage } from '../lib/rateLimit';
@@ -237,6 +238,10 @@ export function useCommentComposer(
         composerRef.current?.blur();
       }
       void qc.invalidateQueries({ queryKey: ['post-comments', postId] });
+      // ★ フィードカードの comment_count を即時 +1 (feed-page cache を patch)。
+      //   いいね/反応/保存は即反映なのにコメントだけ次の refetch まで増えなかった。root/返信とも postId 単位 +1。
+      patchFeedPagePost(qc, postId, (p) => ({ ...p, comments_count: (p.comments_count ?? 0) + 1 }));
+      invalidateFeedPage(qc);
       // 送信後、新規コメントが見える位置まで自動スクロール (再フェッチ反映待ち 80ms)
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
     } catch (e: unknown) {
