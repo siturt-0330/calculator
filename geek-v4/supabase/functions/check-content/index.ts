@@ -41,7 +41,9 @@ const BANNED_PATTERNS: readonly { pattern: RegExp; reason: string }[] = [
   },
   // 郵便番号 — 〒 か明示的な「郵便番号:」文脈が必要 (誤検出抑制)
   {
-    pattern: /(?:〒\s*|郵便番号[\s::]*)\d{3}[\s-－]?\d{4}/u,
+    // ★ [\s\-－] のハイフンは要エスケープ — /u モードで [\s-－] は「\s〜－の範囲」と解釈され
+    //   SyntaxError → モジュール評価失敗 → 関数 boot 不能 (503) になっていた [実証済: V8 で再現]
+    pattern: /(?:〒\s*|郵便番号[\s::]*)\d{3}[\s\-－]?\d{4}/u,
     reason: '郵便番号らしき数字列',
   },
 ];
