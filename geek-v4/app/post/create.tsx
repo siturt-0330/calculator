@@ -25,9 +25,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { X as IconX, EyeOff } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+// RN の Animated (下書きインジケーター) と名前が衝突するため alias で import
+import ReAnimated, { FadeIn } from 'react-native-reanimated';
 
 import { PressableScale } from '../../components/ui/PressableScale';
-import { Avatar } from '../../components/ui/Avatar';
+import { CommunityIcon } from '../../components/ui/CommunityIcon';
 import { ComposerBodyField } from '../../components/post/composer/ComposerBodyField';
 import { ComposerMediaGrid } from '../../components/post/composer/ComposerMediaGrid';
 import { ComposerBottomBar } from '../../components/post/composer/ComposerBottomBar';
@@ -37,6 +40,7 @@ import { CommunityPickerSheet } from '../../components/post/composer/CommunityPi
 
 import { useToastStore } from '../../stores/toastStore';
 import { useAuthStore } from '../../stores/authStore';
+import { useRecentCommunitiesStore } from '../../stores/recentCommunitiesStore';
 import { usePostDraftStore } from '../../stores/postDraftStore';
 import { useDraftsStore, newDraftId } from '../../stores/draftsStore';
 import { useDraftStore } from '../../stores/draftStore';
@@ -53,7 +57,8 @@ import { isOnline } from '../../lib/offline/networkMonitor';
 import { Icon } from '../../constants/icons';
 import { SP, R } from '../../design/tokens';
 import { T } from '../../design/typography';
-import { useColors } from '../../hooks/useColors';
+import { useColors, useGradients } from '../../hooks/useColors';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
 
 // ============================================================
 // 定数
@@ -64,6 +69,11 @@ const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(n, hi
 // タイトルと本文を分けない単一フィールドのプレースホルダ
 const PLACEHOLDER = '話したいトピックを書いてみよう';
 const MAX_TAGS = 5;
+// 本文が空のときに出す「書き出しヒント」chips (タップで本文へ挿入)。
+// 真っ黒な余白の寂しさを埋めつつ、最初の一歩のハードルを下げる。
+const HINT_CHIPS = ['今日の推し事', '最近ハマってるもの', 'これ見て'] as const;
+// 最近のコミュ chips の最大表示数
+const MAX_RECENT_CHIPS = 5;
 // ローカル下書き自動保存のデバウンス間隔 (ms)
 const DRAFT_DEBOUNCE_MS = 1500;
 // 下書き保存インジケーターの表示保持時間 (ms)
@@ -92,9 +102,10 @@ export default function CreatePost() {
   const insets = useSafeAreaInsets();
   const show = useToastStore((s) => s.show);
   const C = useColors();
+  const GRAD = useGradients();
+  const reduceMotion = useReducedMotion();
 
   const user = useAuthStore((s) => s.user);
-  const displayName = user?.nickname?.trim() || 'あなた';
 
   // -----------------------------------------------------------
   // store selectors — 個別 selector で購読 (destructure 禁止)
@@ -155,6 +166,30 @@ export default function CreatePost() {
     () => myCommunities.find((c) => c.id === selectedCommunityIds[0]),
     [myCommunities, selectedCommunityIds],
   );
+  // 表示用フォールバック: deep link 直後など myCommunities 取得前でも選択済みコミュの
+  // 名前/アイコンを pill に出せるよう、store 保持のメタ (setSelectedCommunities で
+  // 渡された Community[]) も参照する。選択ロジック自体には一切使わない (表示のみ)。
+  const selectedCommunityMeta = usePostDraftStore((s) => s.selectedCommunities);
+  const displayCommunity = useMemo<Community | undefined>(
+    () => selectedCommunity ?? selectedCommunityMeta.find((c) => c.id === selectedCommunityIds[0]),
+    [selectedCommunity, selectedCommunityMeta, selectedCommunityIds],
+  );
+
+  // 最近見たコミュニティ (HomeDrawer 履歴と同じ store・read-only selector 購読)。
+  // 参加中 (myCommunities に含まれる) のものだけ chips に出す — 未参加コミュは
+  // 投稿先にできない可能性があり、選んでも attach で弾かれて混乱するため。
+  const recentCommunities = useRecentCommunitiesStore((s) => s.items);
+  const recentChips = useMemo(
+    () =>
+      recentCommunities
+        .filter((r) => myCommunities.some((c) => c.id === r.id))
+        .slice(0, MAX_RECENT_CHIPS),
+    [recentCommunities, myCommunities],
+  );
+  // 履歴 store は sync 永続化 (MMKV/localStorage) — mount 時に 1 回 hydrate (多重呼び出しは no-op)
+  useEffect(() => {
+    useRecentCommunitiesStore.getState().hydrate();
+  }, []);
 
   // -----------------------------------------------------------
   // refs
@@ -633,6 +668,15 @@ export default function CreatePost() {
   };
 
   // -----------------------------------------------------------
+  // 書き出しヒント chips — タップで本文へ挿入して即フォーカス (表示用の便宜機能)
+  // -----------------------------------------------------------
+  const insertHint = (text: string) => {
+    setContent(text);
+    hap.tap();
+    requestAnimationFrame(() => bodyRef.current?.focus());
+  };
+
+  // -----------------------------------------------------------
   // 投稿 — 旧 Step2 (create-settings) の送信ロジックを 1 画面に統合
   // -----------------------------------------------------------
   const canPost =
@@ -1011,7 +1055,8 @@ export default function CreatePost() {
 
         {/* 投稿 pill (1画面で完結)。disabled にはせず「押せない理由」を toast で示す
             (disabled だと onPress が発火せず "押しても無反応" になるため)。見た目は無効化。
-            両方欠けている場合は 1 回の toast に集約してユーザーの往復タップを防ぐ。 */}
+            両方欠けている場合は 1 回の toast に集約してユーザーの往復タップを防ぐ。
+            有効時は GRAD.primary の gradient pill + 白文字 — 有効⇔無効が一目で分かる。 */}
         <PressableScale
           onPress={canPost ? handlePost : () => {
             const s = usePostDraftStore.getState();
@@ -1029,17 +1074,32 @@ export default function CreatePost() {
           accessibilityRole="button"
           accessibilityLabel={editId ? '更新' : '投稿'}
           accessibilityState={{ disabled: !canPost }}
-          style={{
-            paddingHorizontal: SP['4'],
-            paddingVertical: SP['2'],
-            borderRadius: R.full,
-            backgroundColor: canPost ? C.accent : C.bg3,
-            opacity: canPost ? 1 : 0.5,
-          }}
+          style={{ borderRadius: R.full, overflow: 'hidden' }}
         >
-          <Text style={[T.smallB, { color: canPost ? '#fff' : C.text3 }]}>
-            {posting ? phaseLabel : (editId ? '更新' : '投稿')}
-          </Text>
+          {canPost ? (
+            <LinearGradient
+              colors={GRAD.primary}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={{ paddingHorizontal: SP['5'], paddingVertical: SP['2'] }}
+            >
+              <Text style={[T.smallB, { color: '#fff' }]}>
+                {posting ? phaseLabel : (editId ? '更新' : '投稿')}
+              </Text>
+            </LinearGradient>
+          ) : (
+            <View
+              style={{
+                paddingHorizontal: SP['5'],
+                paddingVertical: SP['2'],
+                backgroundColor: C.bg3,
+              }}
+            >
+              <Text style={[T.smallB, { color: C.text3 }]}>
+                {posting ? phaseLabel : (editId ? '更新' : '投稿')}
+              </Text>
+            </View>
+          )}
         </PressableScale>
       </View>
 
@@ -1074,10 +1134,11 @@ export default function CreatePost() {
           showsVerticalScrollIndicator={false}
         >
           {/* ============================================================
-              投稿先コミュニティ (必須・Reddit 風の上部ピッカー)
+              投稿先コミュニティ — 画面の主役 (必須が一目で分かる accent 強調)
+              未選択: accent 枠 pill + 人アイコン / 選択済: コミュの icon + 名前を accent 背景で
               ============================================================ */}
           {!editId && (
-          <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'] }}>
+          <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'], gap: SP['2'] }}>
             <PressableScale
               onPress={() => {
                 setShowCommunitySheet(true);
@@ -1095,193 +1156,266 @@ export default function CreatePost() {
                 paddingHorizontal: SP['3'],
                 paddingVertical: SP['2'],
                 borderRadius: R.full,
-                backgroundColor: selectedCommunity ? C.accentBg : C.bg2,
-                borderWidth: 1,
-                borderColor: selectedCommunity ? C.accent : C.border,
+                backgroundColor: displayCommunity ? C.accentBg : C.bg2,
+                borderWidth: 1.5,
+                borderColor: C.accent,
               }}
             >
-              <Icon.community size={16} color={selectedCommunity ? C.accent : C.text2} strokeWidth={2.2} />
+              {displayCommunity ? (
+                <CommunityIcon
+                  size={22}
+                  iconUrl={displayCommunity.icon_url}
+                  iconEmoji={displayCommunity.icon_emoji}
+                  iconColor={displayCommunity.icon_color}
+                  name={displayCommunity.name}
+                />
+              ) : (
+                <Icon.community size={18} color={C.accent} strokeWidth={2.2} />
+              )}
               <Text
-                style={[T.smallB, { color: selectedCommunity ? C.accent : C.text2, flexShrink: 1 }]}
+                style={[T.smallB, { color: displayCommunity ? C.accent : C.text, flexShrink: 1 }]}
                 numberOfLines={1}
               >
-                {selectedCommunity ? selectedCommunity.name : 'コミュニティを選択 (必須)'}
+                {displayCommunity ? displayCommunity.name : 'コミュニティを選択'}
               </Text>
-              <Icon.chevronD size={16} color={selectedCommunity ? C.accent : C.text3} strokeWidth={2.2} />
+              <Icon.chevronD size={16} color={C.accent} strokeWidth={2.2} />
             </PressableScale>
+
+            {/* 未選択時だけ「なぜ必要か」を一言で示す caption */}
+            {!displayCommunity && (
+              <Text style={[T.caption, { color: C.text3 }]}>必須・どのコミュに投稿する？</Text>
+            )}
+
+            {/* 最近見たコミュ (参加中のみ・最大5件) — ワンタップで投稿先を選べる横 chips */}
+            {recentChips.length > 0 && (
+              <View style={{ gap: SP['1'] }}>
+                <Text style={[T.caption, { color: C.text3 }]}>最近のコミュ</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={{ gap: SP['2'], paddingRight: SP['4'] }}
+                >
+                  {recentChips.map((r) => {
+                    const active = selectedCommunityIds[0] === r.id;
+                    return (
+                      <PressableScale
+                        key={r.id}
+                        onPress={() => handleToggleCommunity(r.id)}
+                        haptic="tap"
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          active ? `${r.name} の選択を解除` : `${r.name} に投稿する`
+                        }
+                        accessibilityState={{ selected: active }}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 6,
+                          paddingHorizontal: SP['3'],
+                          paddingVertical: 6,
+                          borderRadius: R.full,
+                          backgroundColor: active ? C.accentBg : C.bg2,
+                          borderWidth: 1,
+                          borderColor: active ? C.accent : C.border,
+                        }}
+                      >
+                        <CommunityIcon
+                          size={18}
+                          iconUrl={r.icon_url}
+                          iconEmoji={r.icon_emoji}
+                          iconColor={r.icon_color}
+                          name={r.name}
+                        />
+                        <Text
+                          style={[T.smallM, { color: active ? C.accent : C.text2, maxWidth: 140 }]}
+                          numberOfLines={1}
+                        >
+                          {r.name}
+                        </Text>
+                      </PressableScale>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
           </View>
           )}
 
           {/* ============================================================
-              2カラムレイアウト: [アバター列 | スレッドライン] + [コンテンツ列]
+              匿名であることの明示 — 1 行に集約 (盾 + caption + 既存の匿名バッジ)
+              旧: 匿アバター列 + 2 行の名前ブロックは冗長だったため撤去して縦余白を詰めた
               ============================================================ */}
-          <View style={{ flexDirection: 'row', paddingHorizontal: SP['4'], paddingTop: SP['4'] }}>
-
-            {/* --- 左列: アバター + スレッドライン --- */}
-            <View style={{ width: 48, alignItems: 'center' }}>
-              {anonymous ? (
-                <Avatar size={46} anonymous />
-              ) : (
-                <Avatar size={46} name={displayName} uri={null} ring="accent" />
-              )}
-              {/* スレッドライン */}
-              <View
-                style={{
-                  width: 2,
-                  flex: 1,
-                  marginTop: SP['2'],
-                  borderRadius: R.full,
-                  backgroundColor: C.border,
-                  minHeight: 40,
-                }}
-              />
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: SP['2'],
+              paddingHorizontal: SP['4'],
+              marginTop: SP['3'],
+            }}
+          >
+            <Icon.shield size={14} color={C.text3} strokeWidth={2.2} />
+            <Text style={[T.caption, { color: C.text3, flex: 1 }]} numberOfLines={1}>
+              匿名で投稿されます・名前は表示されません
+            </Text>
+            {/* 投稿は常に匿名 — 操作不可の静的バッジで明示 (トグル廃止 #3) */}
+            <View
+              accessibilityLabel="この投稿は匿名で送信されます"
+              accessibilityRole="text"
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 5,
+                paddingHorizontal: SP['2'],
+                paddingVertical: 4,
+                borderRadius: R.full,
+                backgroundColor: C.accentBg,
+                borderWidth: 1,
+                borderColor: C.accent,
+              }}
+            >
+              <EyeOff size={12} color={C.accent} strokeWidth={2.2} />
+              <Text style={[T.captionM, { color: C.accent }]}>匿名</Text>
             </View>
+          </View>
 
-            {/* --- 右列: すべてのコンテンツ --- */}
-            <View style={{ flex: 1, paddingLeft: SP['3'], paddingBottom: SP['6'] }}>
+          {/* ============================================================
+              本文 + メディア + タグ — 全幅 1 カラム (旧アバター列を撤去して広く書ける)
+              ============================================================ */}
+          <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'], paddingBottom: SP['6'] }}>
 
-              {/* 名前行 + 匿名トグル pill */}
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  marginBottom: SP['2'],
-                  minHeight: 46,
-                }}
+            {/* 本文 — タイトルと本文を分けない単一フィールド (X / Threads 風) */}
+            {/* autoFocus: 投稿画面を開いた瞬間にキーボードを出して即タイプ可能にする
+                (これが無いと最初の数文字がキーボード起動待ちで取りこぼされる) */}
+            <ComposerBodyField
+              value={content}
+              onChangeText={setContent}
+              placeholder={placeholder}
+              autoFocus
+              onSelectionChange={(sel) => {
+                selectionRef.current = sel;
+              }}
+              inputRef={bodyRef}
+            />
+
+            {/* 本文が空のときだけ: 書き出しヒント chips (タップで本文に挿入)。
+                余白の寂しさを埋める + 最初の一歩を軽くする。reduce motion 時は即表示。 */}
+            {!editId && content.trim().length === 0 && (
+              <ReAnimated.View
+                entering={reduceMotion ? undefined : FadeIn.duration(220)}
+                style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'], marginTop: SP['3'] }}
               >
-                <View>
-                  <Text style={[T.bodyB, { color: C.text }]}>
-                    {anonymous ? '匿名で投稿' : displayName}
-                  </Text>
-                  <Text style={[T.caption, { color: C.text3, marginTop: 1 }]}>
-                    {anonymous ? '名前は表示されません' : 'プロフィールに表示されます'}
-                  </Text>
-                </View>
-                {/* 投稿は常に匿名 — 操作不可の静的バッジで明示 (トグル廃止 #3) */}
-                <View
-                  accessibilityLabel="この投稿は匿名で送信されます"
-                  accessibilityRole="text"
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 5,
-                    paddingHorizontal: SP['3'],
-                    paddingVertical: 6,
-                    borderRadius: R.full,
-                    backgroundColor: C.accentBg,
-                    borderWidth: 1,
-                    borderColor: C.accent,
-                  }}
-                >
-                  <EyeOff size={13} color={C.accent} strokeWidth={2.2} />
-                  <Text style={[T.smallB, { color: C.accent }]}>匿名</Text>
-                </View>
-              </View>
-
-              {/* 本文 — タイトルと本文を分けない単一フィールド (X / Threads 風) */}
-              {/* autoFocus: 投稿画面を開いた瞬間にキーボードを出して即タイプ可能にする
-                  (これが無いと最初の数文字がキーボード起動待ちで取りこぼされる) */}
-              <ComposerBodyField
-                value={content}
-                onChangeText={setContent}
-                placeholder={placeholder}
-                autoFocus
-                onSelectionChange={(sel) => {
-                  selectionRef.current = sel;
-                }}
-                inputRef={bodyRef}
-              />
-
-              {/* メディアグリッド */}
-              {(images.length > 0 || video) && (
-                <View style={{ marginTop: SP['3'] }}>
-                  <ComposerMediaGrid
-                    images={images}
-                    video={video ? { uri: video.uri, sizeMb: video.size / 1024 / 1024 } : null}
-                    onRemoveImage={(index) => setImages(images.filter((_, i) => i !== index))}
-                    onRemoveVideo={() => setVideo(null)}
-                    onEditImage={editImage}
-                    containerPaddingH={0}
-                  />
-                </View>
-              )}
-
-              {/* タグ (任意・最大5) */}
-              <View style={{ marginTop: SP['4'], gap: SP['2'] }}>
-                {tags.length > 0 && (
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-                    {tags.map((t) => (
-                      <PressableScale
-                        key={t}
-                        onPress={() => removeTag(t)}
-                        haptic="tap"
-                        accessibilityLabel={`タグ ${t} を削除`}
-                        accessibilityRole="button"
-                        style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          gap: 4,
-                          paddingHorizontal: SP['3'],
-                          paddingVertical: 5,
-                          borderRadius: R.full,
-                          backgroundColor: C.accentBg,
-                          borderWidth: 1,
-                          borderColor: C.accentSoft,
-                        }}
-                      >
-                        <Text style={[T.smallB, { color: C.accentLight }]}>#{t}</Text>
-                        <IconX size={12} color={C.accentLight} strokeWidth={2.4} />
-                      </PressableScale>
-                    ))}
-                  </View>
-                )}
-                {tags.length < MAX_TAGS && (
-                  <View
+                {HINT_CHIPS.map((h) => (
+                  <PressableScale
+                    key={h}
+                    onPress={() => insertHint(h)}
+                    haptic="tap"
+                    accessibilityRole="button"
+                    accessibilityLabel={`「${h}」で書き始める`}
                     style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: SP['2'],
                       paddingHorizontal: SP['3'],
-                      paddingVertical: SP['2'],
-                      borderRadius: R.md,
+                      paddingVertical: 6,
+                      borderRadius: R.full,
                       backgroundColor: C.bg2,
                       borderWidth: 1,
                       borderColor: C.border,
                     }}
                   >
-                    <Icon.hash size={14} color={C.text3} strokeWidth={2.2} />
-                    <TextInput
-                      value={tagInput}
-                      onChangeText={setTagInput}
-                      onSubmitEditing={addTag}
-                      placeholder="タグを追加 (任意)"
-                      placeholderTextColor={C.text3}
-                      returnKeyType="done"
-                      maxLength={30}
-                      style={[T.small, { color: C.text, flex: 1, padding: 0 }]}
-                    />
-                    {/* タップでも確定できるよう「追加」ボタンを併設 (return キーのみだと不便) */}
+                    <Text style={[T.small, { color: C.text2 }]}>{h}</Text>
+                  </PressableScale>
+                ))}
+              </ReAnimated.View>
+            )}
+
+            {/* メディアグリッド */}
+            {(images.length > 0 || video) && (
+              <View style={{ marginTop: SP['3'] }}>
+                <ComposerMediaGrid
+                  images={images}
+                  video={video ? { uri: video.uri, sizeMb: video.size / 1024 / 1024 } : null}
+                  onRemoveImage={(index) => setImages(images.filter((_, i) => i !== index))}
+                  onRemoveVideo={() => setVideo(null)}
+                  onEditImage={editImage}
+                  containerPaddingH={0}
+                />
+              </View>
+            )}
+
+            {/* タグ (任意・最大5) — 追加済みは削除可能な chips (#tag ×) で入力欄の上に */}
+            <View style={{ marginTop: SP['4'], gap: SP['2'] }}>
+              {tags.length > 0 && (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
+                  {tags.map((t) => (
                     <PressableScale
-                      onPress={addTag}
+                      key={t}
+                      onPress={() => removeTag(t)}
                       haptic="tap"
-                      disabled={!tagInput.trim()}
-                      accessibilityLabel="タグを追加"
-                      accessibilityState={{ disabled: !tagInput.trim() }}
+                      accessibilityLabel={`タグ ${t} を削除`}
+                      accessibilityRole="button"
                       style={{
-                        paddingHorizontal: SP['2'],
-                        paddingVertical: 4,
-                        borderRadius: R.sm,
-                        backgroundColor: tagInput.trim() ? C.accent : C.bg3,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 4,
+                        paddingHorizontal: SP['3'],
+                        paddingVertical: 5,
+                        borderRadius: R.full,
+                        backgroundColor: C.accentBg,
+                        borderWidth: 1,
+                        borderColor: C.accentSoft,
                       }}
                     >
-                      <Text style={[T.small, { color: tagInput.trim() ? '#fff' : C.text3, fontWeight: '700' }]}>
-                        追加
-                      </Text>
+                      <Text style={[T.smallB, { color: C.accentLight }]}>#{t}</Text>
+                      <IconX size={12} color={C.accentLight} strokeWidth={2.4} />
                     </PressableScale>
-                  </View>
-                )}
-              </View>
+                  ))}
+                </View>
+              )}
+              {tags.length < MAX_TAGS && (
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: SP['2'],
+                    paddingHorizontal: SP['3'],
+                    paddingVertical: SP['2'],
+                    borderRadius: R.md,
+                    backgroundColor: C.bg2,
+                    borderWidth: 1,
+                    borderColor: C.border,
+                  }}
+                >
+                  <Icon.hash size={14} color={C.text3} strokeWidth={2.2} />
+                  <TextInput
+                    value={tagInput}
+                    onChangeText={setTagInput}
+                    onSubmitEditing={addTag}
+                    placeholder="タグを追加 (任意)"
+                    placeholderTextColor={C.text3}
+                    returnKeyType="done"
+                    maxLength={30}
+                    style={[T.small, { color: C.text, flex: 1, padding: 0 }]}
+                  />
+                  {/* タップでも確定できるよう「追加」ボタンを併設 (return キーのみだと不便) */}
+                  <PressableScale
+                    onPress={addTag}
+                    haptic="tap"
+                    disabled={!tagInput.trim()}
+                    accessibilityLabel="タグを追加"
+                    accessibilityState={{ disabled: !tagInput.trim() }}
+                    style={{
+                      paddingHorizontal: SP['2'],
+                      paddingVertical: 4,
+                      borderRadius: R.sm,
+                      backgroundColor: tagInput.trim() ? C.accent : C.bg3,
+                    }}
+                  >
+                    <Text style={[T.small, { color: tagInput.trim() ? '#fff' : C.text3, fontWeight: '700' }]}>
+                      追加
+                    </Text>
+                  </PressableScale>
+                </View>
+              )}
             </View>
           </View>
         </ScrollView>
