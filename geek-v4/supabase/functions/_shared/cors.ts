@@ -4,10 +4,14 @@
 // 全 Edge Function で共通利用。Origin allowlist 方式で `*` を廃止。
 // preview / staging 用ドメインを増やす時はここを更新するだけで OK。
 //
-// 開発時 (localhost) は許可、production は geek.app のみ。
+// 開発時 (localhost) は許可、production は geekboard.netlify.app + geek.app 系。
+// ★ 実本番 web は geekboard.netlify.app。ここに無いと check-content が本番で
+//   CORS ブロック → クライアントの catch が fail-open し moderation が silent no-op、
+//   og-fetch も microlink fallback に落ちる (2026-06 監査 S-6)。
 // ============================================================
 
 const STATIC_ALLOWED_ORIGINS: ReadonlySet<string> = new Set([
+  'https://geekboard.netlify.app', // ★ 実本番 (Netlify)
   'https://geek.app',
   'https://www.geek.app',
   'https://admin.geek.app',
@@ -23,11 +27,15 @@ const STATIC_ALLOWED_ORIGINS: ReadonlySet<string> = new Set([
 
 // *.geek.app は許可 (preview deploy 等)
 const ALLOWED_HOST_SUFFIX = /^https:\/\/[a-z0-9-]+\.geek\.app$/i;
+// Netlify の deploy-preview (deploy-preview-123--geekboard.netlify.app) は限定許可。
+// ★ *.netlify.app 全許可は不可 (他人のサイトも乗るため geekboard サブドメインに限定)。
+const ALLOWED_NETLIFY_PREVIEW = /^https:\/\/[a-z0-9-]+--geekboard\.netlify\.app$/i;
 
 function isOriginAllowed(origin: string): boolean {
   if (!origin) return false;
   if (STATIC_ALLOWED_ORIGINS.has(origin)) return true;
   if (ALLOWED_HOST_SUFFIX.test(origin)) return true;
+  if (ALLOWED_NETLIFY_PREVIEW.test(origin)) return true;
   return false;
 }
 

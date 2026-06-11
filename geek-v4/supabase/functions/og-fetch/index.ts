@@ -34,6 +34,7 @@ const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
 // fetch の上限値
 const FETCH_TIMEOUT_MS = 6000;
+const MAX_REDIRECTS = 3; // 手動リダイレクト追跡の上限 (各ホップで SSRF 再検証)
 const MAX_BODY_BYTES = 512 * 1024; // 512KB
 const USER_AGENT = 'GeekBot/1.0 (+link-preview)';
 
@@ -104,6 +105,19 @@ function isBlockedIpv6(rawHost: string): boolean {
   // IPv4-mapped (::ffff:127.0.0.1 等) は埋め込み v4 を再判定
   const mapped = h.match(/:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
   if (mapped && mapped[1] && isBlockedIpv4(mapped[1])) return true;
+  // ★ hex 形の IPv4-mapped (::ffff:7f00:1 = 127.0.0.1) もオクテットへ展開して再判定。
+  //   入力が最初から hex 形だと上のドット形 match を素通りして内部 IP へ到達できた (監査 S-5)。
+  const hexMapped = h.match(/(?:^|:)ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hexMapped && hexMapped[1] && hexMapped[2]) {
+    const hi = parseInt(hexMapped[1], 16);
+    const lo = parseInt(hexMapped[2], 16);
+    if (!Number.isNaN(hi) && !Number.isNaN(lo)) {
+      const v4 = `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
+      if (isBlockedIpv4(v4)) return true;
+    }
+  }
+  // NAT64 (64:ff9b::/96) 経由の内部 v4 到達も遮断 (翻訳プレフィックスごと拒否)
+  if (h.startsWith('64:ff9b:')) return true;
 
   // 先頭ハイバイトで範囲判定
   const firstGroup = h.split(':').find((g) => g.length > 0) ?? '';
@@ -271,32 +285,61 @@ async function fetchPreview(safeUrl: string): Promise<PreviewResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(safeUrl, {
-      method: 'GET',
-      redirect: 'follow', // リダイレクト上限は fetch default に委ねる
-      signal: controller.signal,
-      headers: {
-        'User-Agent': USER_AGENT,
-        Accept: 'text/html,application/xhtml+xml',
-      },
-    });
+    // ★ リダイレクトは手動で最大 MAX_REDIRECTS ホップ追跡し、各ホップで SSRF 再検証する
+    //   (og-image の fetchImage と同パターン)。旧 'follow' は初回 URL しか検証せず、
+    //   302 Location: http://169.254.169.254/... で内部 EP の HTML を取得できた (監査 S-4)。
+    let currentUrl = safeUrl;
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const res = await fetch(currentUrl, {
+        method: 'GET',
+        redirect: 'manual',
+        signal: controller.signal,
+        headers: {
+          'User-Agent': USER_AGENT,
+          Accept: 'text/html,application/xhtml+xml',
+        },
+      });
 
-    if (!res.ok) return nullPreview(safeUrl);
-
-    const contentType = res.headers.get('content-type') ?? '';
-    if (!contentType.toLowerCase().includes('text/html')) {
-      // HTML 以外 (画像 / PDF / JSON 等) は parse 対象外。本文は読まず破棄。
-      try {
-        await res.body?.cancel();
-      } catch {
-        // 無視
+      const isRedirect =
+        res.status === 0 ||
+        res.type === 'opaqueredirect' ||
+        (res.status >= 300 && res.status < 400);
+      if (isRedirect) {
+        const location = res.headers.get('location');
+        try {
+          await res.body?.cancel();
+        } catch {
+          // 無視
+        }
+        if (!location || hop >= MAX_REDIRECTS) return nullPreview(safeUrl);
+        let nextUrl: string;
+        try {
+          nextUrl = new URL(location, currentUrl).toString();
+        } catch {
+          return nullPreview(safeUrl);
+        }
+        const safeNext = validateUrl(nextUrl);
+        if (!safeNext) return nullPreview(safeUrl); // 内部 IP 等へのリダイレクトは拒否
+        currentUrl = safeNext;
+        continue;
       }
-      return nullPreview(safeUrl);
-    }
 
-    // リダイレクト後の最終 URL (相対 image 解決の base に使う)
-    const finalUrl = res.url || safeUrl;
-    const html = await readCappedBody(res);
+      if (!res.ok) return nullPreview(safeUrl);
+
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.toLowerCase().includes('text/html')) {
+        // HTML 以外 (画像 / PDF / JSON 等) は parse 対象外。本文は読まず破棄。
+        try {
+          await res.body?.cancel();
+        } catch {
+          // 無視
+        }
+        return nullPreview(safeUrl);
+      }
+
+      // 手動追跡なので最終 URL = currentUrl (相対 image 解決の base に使う)
+      const finalUrl = currentUrl;
+      const html = await readCappedBody(res);
 
     const title =
       extractMetaContent(html, ['og:title']) ??
@@ -324,6 +367,9 @@ async function fetchPreview(safeUrl: string): Promise<PreviewResult> {
       site_name: truncate(siteName, MAX_SITE_NAME),
       fetched_at: new Date().toISOString(),
     };
+    }
+    // 到達しない (ループ内の各分岐で return 済み) — 型と fail-secure の保険
+    return nullPreview(safeUrl);
   } catch {
     // timeout / network error 等は fail-secure
     return nullPreview(safeUrl);

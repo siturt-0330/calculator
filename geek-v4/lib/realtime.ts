@@ -58,7 +58,10 @@ export function attachChannel(
   if (existing) {
     existing.refCount++;
     existing.lastAttachAt = Date.now();
-    return () => detachChannel(name);
+    // ★ detacher は channel instance に束縛 (name だけだと auto-detach 後に同名で
+    //   張り直された「他人の」新 channel を古い detacher が kill してしまう — 監査 P1-K)
+    const boundCh = existing.channel;
+    return () => detachChannel(name, boundCh);
   }
   // 上限到達: 警告だけ出して何もしない (戻り値は no-op detacher)
   if (channels.size >= MAX_CONCURRENT_CHANNELS) {
@@ -90,7 +93,7 @@ export function attachChannel(
     }
   });
   channels.set(name, { channel: ch, refCount: 1, lastAttachAt: Date.now() });
-  return () => detachChannel(name);
+  return () => detachChannel(name, ch);
 }
 
 // 全 channel を強制的に detach (logout 時など)
@@ -127,9 +130,12 @@ export function getChannelStats(): { count: number; names: string[]; max: number
   };
 }
 
-function detachChannel(name: string) {
+function detachChannel(name: string, ch: RealtimeChannel) {
   const entry = channels.get(name);
   if (!entry) return;
+  // ★ stale detacher ガード: auto-detach で entry が消えた後に同名で張り直された
+  //   新 channel の refCount を、古い detacher が誤って減らす事故を防ぐ (instance 一致時のみ)。
+  if (entry.channel !== ch) return;
   entry.refCount--;
   if (entry.refCount <= 0) {
     void supabase.removeChannel(entry.channel);

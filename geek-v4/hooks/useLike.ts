@@ -81,6 +81,7 @@ export function useLike() {
     prevFeed: Array<[readonly unknown[], unknown]>;
     prevFeedPage: Array<[readonly unknown[], FeedPagePost[] | undefined]>;
     prevCommunity: Array<[readonly unknown[], unknown]>;
+    prevCommunityRich: Array<[readonly unknown[], unknown]>;
   };
 
   const mutation = useMutation<void, Error, Vars, Ctx>({
@@ -102,6 +103,7 @@ export function useLike() {
       const prevFeed = qc.getQueriesData({ queryKey: ['feed'] });
       const prevFeedPage = snapshotFeedPage(qc);
       const prevCommunity = qc.getQueriesData({ queryKey: ['community'] });
+      const prevCommunityRich = qc.getQueriesData({ queryKey: ['my-community-feed-rich'] });
 
       // 2) optimistic patch (同期)
       // legacy my-likes cache — exact-key 書き戻し (partial-match 廃止)
@@ -153,6 +155,26 @@ export function useLike() {
         if (touched) qc.setQueryData(exactKey, next);
       }
 
+      // 2.6) ★ コミュタブ feed cache (['my-community-feed-rich', userId] →
+      //   { posts: Post[], communityByPost, communityIdsByPost }) — likes_count を ±1。
+      //   コミュタブのカードはこの cache の post.likes_count を表示するため、ここを
+      //   patch しないと「コミュタブでいいねしても数字が変わらない」(監査: 93% 凍結)。
+      const richEntries = qc.getQueriesData<unknown>({ queryKey: ['my-community-feed-rich'] });
+      for (const [exactKey, data] of richEntries) {
+        if (!data || typeof data !== 'object' || Array.isArray(data)) continue;
+        const old = data as { posts?: Array<{ id: string; likes_count: number }> };
+        if (!Array.isArray(old.posts)) continue;
+        let touched = false;
+        const nextPosts = old.posts.map((p) => {
+          if (p && p.id === postId) {
+            touched = true;
+            return { ...p, likes_count: Math.max(0, (p.likes_count ?? 0) + (wasLiked ? -1 : 1)) };
+          }
+          return p;
+        });
+        if (touched) qc.setQueryData(exactKey, { ...old, posts: nextPosts });
+      }
+
       // 3) ★ RPC cache (feed-page) — my_like + likes_count を更新
       //    feed.tsx は full.my_like / full.likes_count を参照するので、ここを更新しないと UI 反映 0。
       patchFeedPagePost(qc, postId, (p) => ({
@@ -168,9 +190,10 @@ export function useLike() {
         qc.cancelQueries({ queryKey: ['feed'] }).catch(() => {}),
         qc.cancelQueries({ queryKey: ['feed-page'] }).catch(() => {}),
         qc.cancelQueries({ queryKey: ['community'] }).catch(() => {}),
+        qc.cancelQueries({ queryKey: ['my-community-feed-rich'] }).catch(() => {}),
       ]);
 
-      return { prevLikes, prevFeed, prevFeedPage, prevCommunity };
+      return { prevLikes, prevFeed, prevFeedPage, prevCommunity, prevCommunityRich };
     },
     onError: (_e, _v, ctx) => {
       if (!ctx) return;
@@ -178,6 +201,7 @@ export function useLike() {
       for (const [k, d] of ctx.prevFeed) qc.setQueryData(k, d);
       revertFeedPageSnapshot(qc, ctx.prevFeedPage);
       for (const [k, d] of ctx.prevCommunity) qc.setQueryData(k, d);
+      for (const [k, d] of ctx.prevCommunityRich) qc.setQueryData(k, d);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['my-likes'] });
