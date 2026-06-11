@@ -77,8 +77,9 @@ import type { Post } from '../../types/models';
 // Discovery セクション (C3 担当 — props で連携)
 import { HotPostsRow } from '../../components/search/HotPostsRow';
 import { CommunityShelf } from '../../components/search/CommunityShelf';
-import { InterestCategories } from '../../components/search/InterestCategories';
 import { ForYouShelf } from '../../components/search/ForYouShelf';
+import { useFeatureFlag } from '../../hooks/useFeatureFlag';
+import { resolveCommunitiesForTags } from '../../lib/api/communities';
 import { RankingExplainer } from '@/components/search/RankingExplainer';
 
 // 検索 input の debounce — typing 中の不要な fetch を抑える
@@ -763,17 +764,29 @@ const DiscoveryView = memo(function DiscoveryView() {
     [discovery.myCommunityIds],
   );
 
+  // ★ 検索タブの投稿カードは「画像/動画が載っている投稿」だけを出す (文字だけの投稿は
+  //   ビジュアル棚に合わないため非表示)。将来のコンテスト機能などで文字投稿も出したく
+  //   なったら、admin が DB の feature_flags に `discovery_show_text_posts` を enabled で
+  //   入れるだけで全クライアントに即時反映される (realtime invalidate 済み・再デプロイ不要)。
+  const showTextPosts = useFeatureFlag('discovery_show_text_posts');
+  const visualPool = useMemo(() => {
+    if (showTextPosts) return discovery.hot;
+    return discovery.hot.filter(
+      (p) => (p.media_urls?.length ?? 0) > 0 || (p.video_urls?.length ?? 0) > 0,
+    );
+  }, [discovery.hot, showTextPosts]);
+
   return (
     <View style={{ gap: SP['5'] }}>
-      {/* 1) Trending — topic chip 行 (server-side acceleration) */}
+      {/* 1) いま盛り上がってるコミュニティ — トレンドタグをコミュニティに解決して表示 */}
       <TrendingTopicsRow />
 
       {/* 2) 今日のホット — 横スクロールカード (動画サムネ対応)。
           first paint 後に mount (内部 query を初回フレームで走らせない)。 */}
-      {isFocused && <HotPostsRow posts={discovery.hot} loading={discoveryLoading} />}
+      {isFocused && <HotPostsRow posts={visualPool} loading={discoveryLoading} />}
 
       {/* 3) あなたへのおすすめ — hot 共有プールを端末ローカルで再ランク */}
-      {isFocused && <ForYouShelf pool={discovery.hot} loading={discoveryLoading} />}
+      {isFocused && <ForYouShelf pool={visualPool} loading={discoveryLoading} />}
 
       {/* 4) おすすめコミュニティ — 人気順の大カード */}
       <CommunityShelf
@@ -814,8 +827,7 @@ const DiscoveryView = memo(function DiscoveryView() {
         emptyText="公式コミュニティはまだありません"
       />
 
-      {/* 7) ジャンル別 */}
-      <InterestCategories />
+      {/* (旧 7: 「興味のあるカテゴリ」グリッドはユーザー要望で撤去 — 2026-06-12) */}
     </View>
   );
 });
@@ -830,7 +842,19 @@ const DiscoveryView = memo(function DiscoveryView() {
 const TrendingTopicsRow = memo(function TrendingTopicsRow() {
   const router = useRouter();
   const { data: topics } = useTrendingTopics(24, 12);
-  const items = topics ?? [];
+  // `?? []` の素のままだと毎 render 新参照になり下流 useMemo の deps が毎回変わる
+  const items = useMemo(() => topics ?? [], [topics]);
+
+  // ★ トレンドタグ → コミュニティ解決 (ユーザー要望: タグ検索ではなくコミュニティへの入口に)。
+  //   name 完全一致 → community_tags 一致の順で解決し、一致した chip はコミュアイコン付きで
+  //   タップ時にそのコミュ詳細へ。未解決のタグは従来どおりタグ検索へフォールバック。
+  const topicNames = useMemo(() => items.map((t) => t.topic), [items]);
+  const { data: tagCommunities } = useQuery({
+    queryKey: ['trending-tag-communities', topicNames.join('|')],
+    queryFn: () => resolveCommunitiesForTags(topicNames),
+    enabled: topicNames.length > 0,
+    staleTime: 5 * 60_000,
+  });
   if (items.length === 0) return null;
 
   return (
@@ -845,7 +869,7 @@ const TrendingTopicsRow = memo(function TrendingTopicsRow() {
       >
         <Icon.sparkles size={14} color={C.text3} strokeWidth={2.2} />
         <Text style={[T.smallM, { color: C.text3, letterSpacing: 0.5 }]}>
-          いまのトレンド
+          いま盛り上がってるコミュニティ
         </Text>
       </View>
       <ScrollView
@@ -856,12 +880,20 @@ const TrendingTopicsRow = memo(function TrendingTopicsRow() {
           paddingHorizontal: SP['4'],
         }}
       >
-        {items.map((t, i) => (
+        {items.map((t, i) => {
+          const community = tagCommunities?.[t.topic.replace(/^#/, '').trim()];
+          return (
           <PressableScale
             key={t.topic}
-            onPress={() => router.push(`/search?q=${encodeURIComponent(t.topic)}` as never)}
+            onPress={() =>
+              community
+                ? router.push(`/community/${community.id}` as never)
+                : router.push(`/search?q=${encodeURIComponent(t.topic)}` as never)
+            }
             haptic="tap"
-            accessibilityLabel={`トレンドで検索: ${t.topic}`}
+            accessibilityLabel={
+              community ? `コミュニティを開く: ${community.name}` : `トレンドで検索: ${t.topic}`
+            }
             style={{
               flexDirection: 'row',
               alignItems: 'center',
@@ -874,13 +906,20 @@ const TrendingTopicsRow = memo(function TrendingTopicsRow() {
               borderColor: i === 0 ? C.accent : C.border,
             }}
           >
+            {community ? (
+              <Text style={{ fontSize: 12 }}>{community.icon_emoji ?? '👥'}</Text>
+            ) : null}
             <Text
               style={[
                 T.smallM,
                 { color: i === 0 ? C.accent : C.text, fontWeight: '700' },
               ]}
             >
-              {t.topic.startsWith('#') ? t.topic : `#${t.topic}`}
+              {community
+                ? community.name
+                : t.topic.startsWith('#')
+                  ? t.topic
+                  : `#${t.topic}`}
             </Text>
             <View
               style={{
@@ -901,7 +940,8 @@ const TrendingTopicsRow = memo(function TrendingTopicsRow() {
               </Text>
             </View>
           </PressableScale>
-        ))}
+          );
+        })}
       </ScrollView>
     </View>
   );

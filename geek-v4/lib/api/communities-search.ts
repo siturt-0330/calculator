@@ -335,3 +335,54 @@ export async function discoverCommunities(opts: {
   const hits = await searchCommunities(opts);
   return hits;
 }
+
+// ============================================================
+// resolveCommunitiesForTags — トレンドタグ → コミュニティ解決
+// ------------------------------------------------------------
+// 検索タブの「いまのトレンド」chip をタグ検索ではなくコミュニティへの
+// 入口にするための解決 API (ユーザー要望 2026-06-12)。
+//   1) communities.name がタグと完全一致するものを優先
+//   2) 残りは community_tags (junction) の tag 一致で解決
+// 一致しなかったタグは呼び出し側でタグ検索へフォールバックする。
+// ============================================================
+import { withApiTimeout } from '../withApiTimeout';
+import type { CommunityMetaLite } from './communities-feed';
+
+export async function resolveCommunitiesForTags(
+  tags: string[],
+): Promise<Record<string, CommunityMetaLite>> {
+  const out: Record<string, CommunityMetaLite> = {};
+  const clean = Array.from(new Set(tags.map((t) => t.replace(/^#/, '').trim()).filter(Boolean)));
+  if (clean.length === 0) return out;
+
+  // 1) name 完全一致 (最優先)
+  const { data: byName } = await withApiTimeout(
+    supabase
+      .from('communities')
+      .select('id, name, icon_emoji, icon_color, icon_url, is_official')
+      .in('name', clean)
+      .limit(24),
+    'communities.resolveByName',
+    8000,
+  );
+  for (const c of (byName ?? []) as CommunityMetaLite[]) out[c.name] = c;
+
+  // 2) community_tags 一致 (name 未解決のタグのみ)
+  const remaining = clean.filter((t) => !out[t]);
+  if (remaining.length > 0) {
+    type TagRow = { tag: string; communities: CommunityMetaLite | null };
+    const { data: tagRows } = await withApiTimeout(
+      supabase
+        .from('community_tags')
+        .select('tag, communities(id, name, icon_emoji, icon_color, icon_url, is_official)')
+        .in('tag', remaining)
+        .limit(48),
+      'communities.resolveByTag',
+      8000,
+    );
+    for (const row of (tagRows ?? []) as unknown as TagRow[]) {
+      if (!out[row.tag] && row.communities) out[row.tag] = row.communities;
+    }
+  }
+  return out;
+}
