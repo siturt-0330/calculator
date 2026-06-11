@@ -12,6 +12,8 @@ import {
   type NativeScrollEvent,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
+// ★ FlashList v2 パイロット (検証ロールアウト・既定OFF): alias 'flash-list-v2' = @shopify/flash-list@2。
+import { FlashList as FlashListV2Raw } from 'flash-list-v2';
 import { Image as ExpoImage } from 'expo-image';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
@@ -203,6 +205,16 @@ function progressFromDx(
   const next = dx / Math.max(1, width);
   progress.value = Math.max(0, Math.min(1, next));
 }
+
+// ★ FlashList v2 パイロット (検証ロールアウト・既定OFF):
+//   EXPO_PUBLIC_FLASHLIST_V2='1' のときだけ feed のリストを v2 (自動測定で estimatedItemSize 不要・
+//   maintainVisibleContentPosition 既定ON) に切替える。v2 を v1 の型として扱う薄いブリッジにすることで
+//   余剰 props (estimatedItemSize 等) は v2 側で無視される (無害)。本番既定は従来の v1 (1.7.3) のまま。
+//   feed 1 画面のみのパイロット — 実機/実ビルドで blank 率・スクロール追従を v1/v2 で A/B 検証する用途。
+const FLASHLIST_V2_ENABLED = process.env.EXPO_PUBLIC_FLASHLIST_V2 === '1';
+const FeedListComponent = FLASHLIST_V2_ENABLED
+  ? (FlashListV2Raw as unknown as typeof FlashList)
+  : FlashList;
 
 // タブ即時表示: feed (landing・常時マウント) 内で first paint 後 idle に隣接タブを v7 の
 // navigation.preload() で事前マウントする。preload された route は freezeOnBlur の
@@ -980,7 +992,7 @@ export default function FeedScreen() {
           (フラット化で投稿が全幅 hairline 区切りになったため、先頭境界も同じ細さに) */}
       <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: C.divider }} />
 
-      <FlashList
+      <FeedListComponent
         ref={listRef}
         data={feedItems}
         drawDistance={600}

@@ -66,6 +66,7 @@
     "expo-symbols": "~0.2.0",
     "expo-updates": "~0.27.0",
     "expo-video": "~2.0.0",
+    "flash-list-v2": "npm:@shopify/flash-list@^2.3.2",
     "i18n-js": "^4.5.0",
     "lucide-react-native": "^0.460.0",
     "nativewind": "^4.1.0",

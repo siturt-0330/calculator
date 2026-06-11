@@ -440,6 +440,7 @@ deploy: `supabase functions deploy <name>`。秘密は `supabase secrets set KEY
 | `EXPO_PUBLIC_DISCOVERY_RPC` | 任意 | `'0'` で discovery RPC を kill-switch (`!== '0'` で **既定 ON** / `lib/api/discovery.ts`) |
 | `EXPO_PUBLIC_HOME_FEED_RPC` | 任意 | `'1'` で home feed 1ページ目集約 RPC (get_home_feed/0114) を有効化。**コード既定 OFF (`=== '1'`)。ただし本番 `netlify.toml` では `"1"` で有効化済** |
 | `EXPO_PUBLIC_FOR_YOU_FEED_RPC` | 任意 | `'1'` で Value Model 個人化フィード RPC (get_for_you_feed/0141) を有効化 (★既定 OFF)。0139+0140+0141 migration 適用 + pg_cron 登録後に有効化すること |
+| `EXPO_PUBLIC_FLASHLIST_V2` | 任意 | `'1'` で **feed のリストだけ** FlashList v2 (npm alias `flash-list-v2` = `@shopify/flash-list@2`) に切替 (★既定 OFF・パイロット)。v2 は自動測定で `estimatedItemSize` 不要・`maintainVisibleContentPosition` 既定ON。`feed.tsx` で v2 を v1 の型として扱う薄いブリッジ (`FeedListComponent`) にしており余剰 props は無視される。**有効化には実ビルド再起動が必要** (`process.env` は static inline)。native は New Arch 必須 (有効済)、web は v2 の JS 実装。blank率/追従を v1 と A/B 検証する用途。他5リストは v1 (1.7.3) のまま |
 
 > ⚠️ flag の既定方向に注意: `DISCOVERY_RPC` / `FEED_PAGE_RPC` は `!== '0'` で **既定 ON**、
 > `HOME_FEED_RPC` / `FOR_YOU_FEED_RPC` は `=== '1'` で **既定 OFF**。パターンをコピペ流用すると意図せず逆になる (§14 参照)。
@@ -496,6 +497,7 @@ Native module を触ったら必ず通常 build & submit。
 - 代表的なテスト (回帰防止の要):
   - 画像表示: `feedMediaLayout.test.ts` / `cropMath.test.ts` (§5.10 の潰れ回帰を守る)
   - イントロ固定値: `introSplashLock.test.ts` (§0 の A↔B 一致を守る)
+  - 滑らかさ固定値: `smoothnessLock.test.ts` (feed/community の FlashList overscan `estimatedItemSize`/`drawDistance`・`decelerationRate="fast"`・root/Tabs の `freezeOnBlur:true`・AnonPostCard の memo を守る。弱めると CI が落ちる。**意図的に値を変える時は実機で blank率/追従/INP を計測してから期待値を更新**)
   - `trustTier.test.ts` (newcomer/regular/probably_nice/definitely_nice/god の境界)
   - `spamDetection.test.ts` / `quotePosts.test.ts` / `sharePost.test.ts` / `automodMatcher.test.ts` / `commentTree.test.ts`
   - ランキング: `feedRanking` / `hotScore` / `rising` / `searchRanking`
