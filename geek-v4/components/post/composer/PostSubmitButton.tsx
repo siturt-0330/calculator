@@ -54,7 +54,11 @@ export function PostSubmitButton({
   };
 
   return (
-    <Animated.View style={[animStyle, !inactive ? SHADOW.accentGlow : null]}>
+    // wrapper にも pill と同じ radius — web では shadow が box-shadow になり要素の
+    // 矩形に沿うため、radius 無しだと丸ボタンの背後に四角い glow が出る。
+    <Animated.View
+      style={[animStyle, { borderRadius: R.full }, !inactive ? SHADOW.accentGlow : null]}
+    >
       <PressableScale
         onPress={inactive ? undefined : onPress}
         onPressIn={handlePressIn}

@@ -24,10 +24,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { X as IconX, EyeOff } from 'lucide-react-native';
+import { X as IconX } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-// RN の Animated (下書きインジケーター) と名前が衝突するため alias で import
-import ReAnimated, { FadeIn } from 'react-native-reanimated';
 
 import { PressableScale } from '../../components/ui/PressableScale';
 import { CommunityIcon } from '../../components/ui/CommunityIcon';
@@ -45,7 +43,13 @@ import { usePostDraftStore } from '../../stores/postDraftStore';
 import { useDraftsStore, newDraftId } from '../../stores/draftsStore';
 import { useDraftStore } from '../../stores/draftStore';
 import { hap } from '../../design/haptics';
-import { fetchCommunity, fetchMyCommunities, type Community } from '../../lib/api/communities';
+import {
+  fetchCommunity,
+  fetchMyCommunities,
+  joinCommunity,
+  searchByName,
+  type Community,
+} from '../../lib/api/communities';
 import { createPost, fetchPostById, updatePost } from '../../lib/api/posts';
 import { checkContent } from '../../lib/ai/checkContent';
 import { validateVideoSource, uploadPostImage, uploadPostVideo } from '../../lib/media';
@@ -58,7 +62,6 @@ import { Icon } from '../../constants/icons';
 import { SP, R } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { useColors, useGradients } from '../../hooks/useColors';
-import { useReducedMotion } from '../../hooks/useReducedMotion';
 
 // ============================================================
 // 定数
@@ -71,7 +74,6 @@ const PLACEHOLDER = '話したいトピックを書いてみよう';
 const MAX_TAGS = 5;
 // 本文が空のときに出す「書き出しヒント」chips (タップで本文へ挿入)。
 // 真っ黒な余白の寂しさを埋めつつ、最初の一歩のハードルを下げる。
-const HINT_CHIPS = ['今日の推し事', '最近ハマってるもの', 'これ見て'] as const;
 // 最近のコミュ chips の最大表示数
 const MAX_RECENT_CHIPS = 5;
 // ローカル下書き自動保存のデバウンス間隔 (ms)
@@ -103,7 +105,6 @@ export default function CreatePost() {
   const show = useToastStore((s) => s.show);
   const C = useColors();
   const GRAD = useGradients();
-  const reduceMotion = useReducedMotion();
 
   const user = useAuthStore((s) => s.user);
 
@@ -638,6 +639,61 @@ export default function CreatePost() {
   };
 
   // -----------------------------------------------------------
+  // 未参加コミュへの「参加して投稿」 (ユーザー要望 2026-06-12)
+  // 検索ヒットのうち未参加のものを sheet の discover セクションに出し、
+  // open コミュは参加 → 即投稿先に自動選択 → sheet を閉じる。
+  // request/invite 制はその場で参加できないため詳細画面の申請フローへ
+  // (下書きは autosave されるので戻ってきても消えない)。
+  // -----------------------------------------------------------
+  const { data: discoverHits = [] } = useQuery({
+    queryKey: ['composer-discover', communityQuery.trim()],
+    queryFn: () => searchByName(communityQuery.trim(), 20),
+    enabled: showCommunitySheet && communityQuery.trim().length >= 1,
+    staleTime: 30_000,
+  });
+  const discoverUnjoined = useMemo(
+    () => discoverHits.filter((h) => !myCommunities.some((m) => m.id === h.id)),
+    [discoverHits, myCommunities],
+  );
+  const [joiningIds, setJoiningIds] = useState<Set<string>>(new Set());
+  const handleJoinAndSelect = (c: Community) => {
+    if (c.visibility !== 'open') {
+      show('このコミュニティは参加申請が必要です。詳細から申請してください', 'warn');
+      setShowCommunitySheet(false);
+      router.push(`/community/${c.id}` as never);
+      return;
+    }
+    if (joiningIds.has(c.id)) return; // 二重タップガード
+    setJoiningIds((prev) => new Set(prev).add(c.id));
+    void (async () => {
+      try {
+        const { error } = await joinCommunity(c.id);
+        if (error) {
+          show(error || '参加に失敗しました', 'error');
+          return;
+        }
+        // メンバーシップ cache を更新しつつ、待たずに即選択して閉じる
+        void qc.invalidateQueries({ queryKey: ['my-community-ids'] });
+        void qc.invalidateQueries({ queryKey: ['my-communities'] });
+        void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'] });
+        setSelectedCommunities([c.id], [c]);
+        setVisibility('community_public');
+        setShowCommunitySheet(false);
+        hap.success();
+        show(`${c.name} に参加しました — このコミュに投稿します`, 'success');
+      } catch {
+        show('通信エラーが発生しました', 'error');
+      } finally {
+        setJoiningIds((prev) => {
+          const next = new Set(prev);
+          next.delete(c.id);
+          return next;
+        });
+      }
+    })();
+  };
+
+  // -----------------------------------------------------------
   // タグ (任意・最大 5)
   // -----------------------------------------------------------
   const addTag = () => {
@@ -665,15 +721,6 @@ export default function CreatePost() {
         if (!cur.includes(t)) setTags([...cur, t].slice(0, MAX_TAGS));
       },
     });
-  };
-
-  // -----------------------------------------------------------
-  // 書き出しヒント chips — タップで本文へ挿入して即フォーカス (表示用の便宜機能)
-  // -----------------------------------------------------------
-  const insertHint = (text: string) => {
-    setContent(text);
-    hap.tap();
-    requestAnimationFrame(() => bodyRef.current?.focus());
   };
 
   // -----------------------------------------------------------
@@ -1242,43 +1289,7 @@ export default function CreatePost() {
           </View>
           )}
 
-          {/* ============================================================
-              匿名であることの明示 — 1 行に集約 (盾 + caption + 既存の匿名バッジ)
-              旧: 匿アバター列 + 2 行の名前ブロックは冗長だったため撤去して縦余白を詰めた
-              ============================================================ */}
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: SP['2'],
-              paddingHorizontal: SP['4'],
-              marginTop: SP['3'],
-            }}
-          >
-            <Icon.shield size={14} color={C.text3} strokeWidth={2.2} />
-            <Text style={[T.caption, { color: C.text3, flex: 1 }]} numberOfLines={1}>
-              匿名で投稿されます・名前は表示されません
-            </Text>
-            {/* 投稿は常に匿名 — 操作不可の静的バッジで明示 (トグル廃止 #3) */}
-            <View
-              accessibilityLabel="この投稿は匿名で送信されます"
-              accessibilityRole="text"
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 5,
-                paddingHorizontal: SP['2'],
-                paddingVertical: 4,
-                borderRadius: R.full,
-                backgroundColor: C.accentBg,
-                borderWidth: 1,
-                borderColor: C.accent,
-              }}
-            >
-              <EyeOff size={12} color={C.accent} strokeWidth={2.2} />
-              <Text style={[T.captionM, { color: C.accent }]}>匿名</Text>
-            </View>
-          </View>
+          {/* (匿名表示行はユーザー要望で撤去 — 投稿は常に匿名のため UI で明示しない 2026-06-12) */}
 
           {/* ============================================================
               本文 + メディア + タグ — 全幅 1 カラム (旧アバター列を撤去して広く書ける)
@@ -1299,34 +1310,7 @@ export default function CreatePost() {
               inputRef={bodyRef}
             />
 
-            {/* 本文が空のときだけ: 書き出しヒント chips (タップで本文に挿入)。
-                余白の寂しさを埋める + 最初の一歩を軽くする。reduce motion 時は即表示。 */}
-            {!editId && content.trim().length === 0 && (
-              <ReAnimated.View
-                entering={reduceMotion ? undefined : FadeIn.duration(220)}
-                style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'], marginTop: SP['3'] }}
-              >
-                {HINT_CHIPS.map((h) => (
-                  <PressableScale
-                    key={h}
-                    onPress={() => insertHint(h)}
-                    haptic="tap"
-                    accessibilityRole="button"
-                    accessibilityLabel={`「${h}」で書き始める`}
-                    style={{
-                      paddingHorizontal: SP['3'],
-                      paddingVertical: 6,
-                      borderRadius: R.full,
-                      backgroundColor: C.bg2,
-                      borderWidth: 1,
-                      borderColor: C.border,
-                    }}
-                  >
-                    <Text style={[T.small, { color: C.text2 }]}>{h}</Text>
-                  </PressableScale>
-                ))}
-              </ReAnimated.View>
-            )}
+            {/* (書き出しヒント chips はユーザー要望で撤去 2026-06-12) */}
 
             {/* メディアグリッド */}
             {(images.length > 0 || video) && (
@@ -1479,6 +1463,9 @@ export default function CreatePost() {
         loading={communitiesLoading}
         query={communityQuery}
         onQueryChange={setCommunityQuery}
+        discover={discoverUnjoined}
+        joiningIds={joiningIds}
+        onJoin={handleJoinAndSelect}
       />
     </View>
   );

@@ -23,12 +23,11 @@ import {
   Text,
   Modal,
   Pressable,
-  Platform,
   useWindowDimensions,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useScrollToTop } from '@react-navigation/native';
@@ -46,7 +45,6 @@ import { supabase } from '../../lib/supabase';
 import { getBool, setBool } from '../../lib/storage';
 import { fetchMyComments, type MyCommentRow, deleteComment } from '../../lib/api/comments';
 import { deleteOwnPost, fetchCommunitiesForPosts, type PostCommunityRef } from '../../lib/api/posts';
-import { isVapidConfigured } from '../../lib/api/push';
 import { withApiTimeout } from '../../lib/withApiTimeout';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { formatRelative } from '../../lib/utils/date';
@@ -332,50 +330,14 @@ export default function MypageScreen() {
   useEffect(() => {
     if (nudgeKey) setNudgeDismissed(getBool(nudgeKey) === true);
   }, [nudgeKey]);
-  // OS の push 許可状態 (未許可 = 有効化を促す)。focus ごとに読み直す (通知設定へ往復して許可を
-  // 付けて戻っても古い状態が残らないように。逆に許可後もナッジが残るのも防ぐ)。
-  // web は Push 非対応ブラウザ / VAPID 未設定だと「通知をオン」に到達しても操作不能なので、
-  // その場合は needsEnable を立てない (空振りナッジを出さない)。判定不能なら false のまま = 控えめに非表示。
-  const [pushNeedsEnable, setPushNeedsEnable] = useState(false);
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false;
-      void (async () => {
-        try {
-          if (Platform.OS === 'web') {
-            const supported =
-              typeof window !== 'undefined' &&
-              typeof navigator !== 'undefined' &&
-              'Notification' in window &&
-              'serviceWorker' in navigator &&
-              'PushManager' in window;
-            if (!supported || !isVapidConfigured()) {
-              if (!cancelled) setPushNeedsEnable(false);
-              return;
-            }
-            const granted =
-              typeof Notification !== 'undefined' && Notification.permission === 'granted';
-            if (!cancelled) setPushNeedsEnable(!granted);
-          } else {
-            // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-            const Notifications = require('expo-notifications') as typeof import('expo-notifications');
-            const perm = await Notifications.getPermissionsAsync();
-            if (!cancelled) setPushNeedsEnable(!perm.granted);
-          }
-        } catch {
-          /* 判定不能 — ナッジを出さない */
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }, []),
-  );
   // nickname がサーバ自動採番のまま (user_ + 8桁hex / migration 0146) or 空なら「未設定」。
   // {6,} で桁数に非依存に検出 — 採番長を将来変えても (旧 6 桁/新 8 桁とも) nudge が壊れない。
   const needProfile =
     !!stats && (!stats.nickname || /^user_[0-9a-f]{6,}$/.test(stats.nickname));
-  const needPush = pushNeedsEnable || pushEnabled === false;
+  // ★ ユーザー要望 (2026-06-12): アプリ内の通知設定がオンなら「通知をオンにする」は出さない。
+  //   旧実装は OS/ブラウザ権限 ('default' 含む) まで見て、設定オン済みのユーザーにも
+  //   ナッジが出っぱなしだった。判定はアプリ内トグルのみに単純化。
+  const needPush = pushEnabled === false;
   const showNudge = !!userId && !nudgeDismissed && (needProfile || needPush);
 
   // 現タブのロード中(まだ 1 件も無い)か。本文領域に skeleton を出す条件。

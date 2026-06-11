@@ -6,13 +6,19 @@
 //     → ~180ms 後に自動クローズして「送った感」を出す。
 //     既に押してあるスタンプのタップ = 取り消しで、こちらは閉じない
 //     (誤送リカバリの動線なので「送った」演出を付けない)。
-//   - 長押し = マイスタンプ保存/解除のミニシート (既存挙動を維持)。
+//   - 長押し = アクションメニュー (ミニシート): マイスタンプ保存/解除 +
+//     「このスタンプを非表示」(端末ローカル / useHiddenStamps)。
 //     保存済みスタンプには小さな ★ を付けて視覚フィードバック。
+//     非表示の復帰導線はマイスタンプタブ末尾の「非表示中 N 件」折りたたみ
+//     (誤操作を不可逆にしないため必須)。
 //   - カテゴリ chips は選択中のみ GRAD.primary の gradient pill + 白文字。
 //   - スタンプ chips は FadeInDown の stagger で入場 (タブ切替で再生)。
 //     useReducedMotion() が true なら entering / pop とも無効。
 //   - 「あたらしいスタンプを作る」は常設の大ボックスをやめ、グリッド先頭の
 //     破線 chip に集約。タップでその場にフォーム展開 (作って送る = gradient)。
+//     フォーム内のカテゴリ chips で登録先ジャンルを選べる (既定 = 開いている
+//     ジャンルタブ / でなければ先頭カテゴリ)。作ったスタンプは履歴・マイスタンプ
+//     に加えて該当ジャンルタブにもマージ表示される (MEMES 静的分の後ろ)。
 //   - 検索は入力中クリア (×) ボタン + 0 件時は「作っちゃおう」CTA。
 //
 // props 契約 {visible, onClose, onPick, picked, reactions} は不変。
@@ -45,6 +51,8 @@ import { PressableScale } from '../ui/PressableScale';
 import { Icon } from '../../constants/icons';
 import { MEMES, ALL_MEMES } from '../../lib/memes';
 import { useUserStamps, useCreateUserStamp } from '../../hooks/useUserStamps';
+import { useHiddenStamps } from '../../hooks/useHiddenStamps';
+import { useAuthStore } from '../../stores/authStore';
 import { useStampPrefsStore } from '../../stores/stampPrefsStore';
 import { useToastStore } from '../../stores/toastStore';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
@@ -61,6 +69,9 @@ const TAB_MYSTAMPS = '__mystamps';
 
 // 送信タップ後に自動クローズするまでの時間 (pop を見せてから閉じる)
 const AUTO_CLOSE_MS = 180;
+
+// 作成フォームの既定カテゴリ (開いているタブがジャンルタブでない場合に使う)
+const DEFAULT_CREATE_CATEGORY = MEMES[0]?.category ?? 'カスタム';
 
 type Tab = { key: string; label: string };
 
@@ -85,10 +96,17 @@ export function MemeReactionPicker({
   const [activeTab, setActiveTab] = useState<string>(TAB_MYSTAMPS);
   const [customText, setCustomText] = useState('');
   const [showCustomInput, setShowCustomInput] = useState(false);
-  // 長押し対象 (マイスタンプ保存/解除のミニシート)
+  // 作成スタンプの登録先カテゴリ (lib/memes.ts の長ラベル)
+  const [customCategory, setCustomCategory] = useState<string>(DEFAULT_CREATE_CATEGORY);
+  // 長押し対象 (保存/非表示のアクションメニュー)
   const [longPressTarget, setLongPressTarget] = useState<string | null>(null);
+  // マイスタンプタブ末尾の「非表示中 N 件」折りたたみの開閉
+  const [showHiddenList, setShowHiddenList] = useState(false);
 
+  const userId = useAuthStore((s) => s.user?.id);
   const { stamps: userStamps } = useUserStamps();
+  // 非表示スタンプ (端末ローカル / 未ログイン時は canHide=false で no-op)
+  const { hidden: hiddenStamps, hiddenSet, hide, unhide, canHide } = useHiddenStamps();
   const { mutateAsync: createStamp, isPending: creating } = useCreateUserStamp();
   const show = useToastStore((s) => s.show);
   const [submitting, setSubmitting] = useState(false);
@@ -169,6 +187,7 @@ export function MemeReactionPicker({
       setShowCustomInput(false);
       setCustomText('');
       setLongPressTarget(null);
+      setShowHiddenList(false);
       const initial =
         reactionStamps.length > 0
           ? TAB_POST
@@ -214,13 +233,36 @@ export function MemeReactionPicker({
     return out;
   }, [q, reactionStamps, history, myStamps, userStamps]);
 
-  // アクティブタブの中身
+  // 自分が作ったスタンプをカテゴリ別に引ける map (ジャンルタブへのマージ用)
+  const myCreatedByCategory = useMemo(() => {
+    const map = new Map<string, string[]>();
+    if (!userId) return map;
+    for (const s of userStamps) {
+      if (s.creator_id !== userId) continue;
+      const list = map.get(s.category);
+      if (list) list.push(s.text);
+      else map.set(s.category, [s.text]);
+    }
+    return map;
+  }, [userStamps, userId]);
+
+  // アクティブタブの中身 (ジャンルタブは MEMES 静的分の後ろに自作分をマージ)
   const tabItems = useMemo(() => {
     if (activeTab === TAB_POST) return reactionStamps;
     if (activeTab === TAB_HISTORY) return history;
     if (activeTab === TAB_MYSTAMPS) return myStamps;
-    return MEMES.find((c) => c.category === activeTab)?.items ?? [];
-  }, [activeTab, reactionStamps, history, myStamps]);
+    const statics = MEMES.find((c) => c.category === activeTab)?.items ?? [];
+    const mine = myCreatedByCategory.get(activeTab) ?? [];
+    if (mine.length === 0) return statics;
+    const seen = new Set(statics);
+    const out = [...statics];
+    for (const m of mine) {
+      if (seen.has(m)) continue;
+      seen.add(m);
+      out.push(m);
+    }
+    return out;
+  }, [activeTab, reactionStamps, history, myStamps, myCreatedByCategory]);
 
   // タップ = 送信 (未選択 → 送信して自動クローズ / 選択済 → 取り消しで開いたまま)
   const handleSend = (meme: string, wasPicked: boolean) => {
@@ -247,7 +289,8 @@ export function MemeReactionPicker({
     if (!t) return;
     setSubmitting(true);
     try {
-      const stamp = await createStamp({ text: t, isPublic: true });
+      // 選択したジャンル (長ラベル) で登録 → そのジャンルタブにもマージ表示される
+      const stamp = await createStamp({ text: t, category: customCategory, isPublic: true });
       const text = stamp?.text ?? t;
       saveToMyStamps(text); // マイスタンプにも即反映
       show(`「${text}」を作成しました`, 'success');
@@ -280,18 +323,39 @@ export function MemeReactionPicker({
     setLongPressTarget(null);
   };
 
+  // 長押しメニュー「このスタンプを非表示」(端末ローカル / 未ログイン時は出さない)
+  const hideLongPress = () => {
+    if (!longPressTarget) return;
+    hide(longPressTarget);
+    show('スタンプを非表示にしました', 'info');
+    setLongPressTarget(null);
+  };
+
   const showingSearch = q.length > 0;
-  const gridItems = showingSearch ? searchResults : tabItems;
+  // 非表示スタンプは全タブ + 検索結果から filter する (復帰はマイスタンプタブ末尾)
+  const gridItems = useMemo(() => {
+    const base = showingSearch ? searchResults : tabItems;
+    if (hiddenSet.size === 0) return base;
+    return base.filter((m) => !hiddenSet.has(m));
+  }, [showingSearch, searchResults, tabItems, hiddenSet]);
   const targetSaved = longPressTarget ? myStampsSet.has(longPressTarget) : false;
   const canCreate = !!customText.trim() && !creating && !submitting;
   // タブ切替で stagger を再生させるための remount key (検索中は keystroke ごとの
   // 全 remount を避けるため固定 key にする — 新規ヒット分だけ個別に entering)
   const gridKey = showingSearch ? '__search' : activeTab;
 
+  // 作成フォームを開く (既定カテゴリ = 開いているジャンルタブ / でなければ先頭)
+  const openCreateForm = (prefill = '') => {
+    setCustomText(prefill);
+    setCustomCategory(
+      MEMES.some((c) => c.category === activeTab) ? activeTab : DEFAULT_CREATE_CATEGORY,
+    );
+    setShowCustomInput(true);
+  };
+
   // 検索 0 件 → そのまま作成フォームへ (検索語をプリフィル)
   const openCreateFromSearch = () => {
-    setCustomText(searchQuery.trim().slice(0, 40));
-    setShowCustomInput(true);
+    openCreateForm(searchQuery.trim().slice(0, 40));
   };
 
   return (
@@ -490,6 +554,44 @@ export function MemeReactionPicker({
                   onSubmitEditing={handleCreate}
                   returnKeyType="send"
                 />
+                {/* 登録先ジャンル (short ラベルの横スクロール chips / 選択中 = accent) */}
+                <View style={{ gap: SP['1'] }}>
+                  <Text style={[T.caption, { color: C.text3 }]}>登録するジャンル</Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={{ gap: 6 }}
+                    style={{ flexGrow: 0 }}
+                  >
+                    {MEMES.map((c) => {
+                      const active = c.category === customCategory;
+                      return (
+                        <PressableScale
+                          key={c.category}
+                          onPress={() => setCustomCategory(c.category)}
+                          haptic="tap"
+                          scaleValue={0.95}
+                          accessibilityRole="radio"
+                          accessibilityState={{ selected: active }}
+                          accessibilityLabel={`ジャンル ${c.short}`}
+                          style={{
+                            paddingHorizontal: SP['3'],
+                            paddingVertical: 6,
+                            borderRadius: R.full,
+                            borderWidth: 1,
+                            borderColor: active ? C.accent : C.border,
+                            backgroundColor: active ? C.accent : C.bg,
+                          }}
+                        >
+                          <Text style={[T.smallB, { color: active ? '#fff' : C.text2 }]}>
+                            {c.short}
+                          </Text>
+                        </PressableScale>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
                 <View style={{ flexDirection: 'row', gap: SP['2'] }}>
                   <PressableScale
                     onPress={() => {
@@ -551,7 +653,7 @@ export function MemeReactionPicker({
               {!showingSearch && !showCustomInput && (
                 <Animated.View entering={reduceMotion ? undefined : FadeInDown.duration(180)}>
                   <PressableScale
-                    onPress={() => setShowCustomInput(true)}
+                    onPress={() => openCreateForm()}
                     haptic="tap"
                     accessibilityLabel="あたらしいスタンプを作る"
                     style={{
@@ -635,14 +737,75 @@ export function MemeReactionPicker({
             {/* ヒント (控えめな caption) */}
             {gridItems.length > 0 && (
               <Text style={[T.caption, { color: C.text3, textAlign: 'center', marginTop: SP['1'] }]}>
-                タップで送信・長押しでマイスタンプに保存
+                タップで送信・長押しで保存/非表示
               </Text>
+            )}
+
+            {/* 非表示スタンプの復帰導線 (マイスタンプタブ末尾の折りたたみ)
+                — これが無いと長押しメニューの「非表示」が不可逆になる */}
+            {activeTab === TAB_MYSTAMPS && !showingSearch && hiddenStamps.length > 0 && (
+              <View style={{ gap: SP['2'] }}>
+                <PressableScale
+                  onPress={() => setShowHiddenList((v) => !v)}
+                  haptic="tap"
+                  accessibilityLabel={`非表示中のスタンプ ${hiddenStamps.length} 件を${showHiddenList ? '閉じる' : '表示する'}`}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: SP['1'],
+                    paddingVertical: SP['2'],
+                  }}
+                >
+                  <Icon.eyeOff size={13} color={C.text3} strokeWidth={2.2} />
+                  <Text style={[T.caption, { color: C.text3 }]}>
+                    非表示中 {hiddenStamps.length} 件
+                  </Text>
+                  {showHiddenList ? (
+                    <Icon.chevronU size={13} color={C.text3} strokeWidth={2.2} />
+                  ) : (
+                    <Icon.chevronD size={13} color={C.text3} strokeWidth={2.2} />
+                  )}
+                </PressableScale>
+                {showHiddenList && (
+                  <Animated.View
+                    entering={reduceMotion ? undefined : FadeIn.duration(160)}
+                    style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}
+                  >
+                    {hiddenStamps.map((m) => (
+                      <PressableScale
+                        key={m}
+                        onPress={() => {
+                          unhide(m);
+                          show('非表示を解除しました', 'success');
+                        }}
+                        haptic="tap"
+                        accessibilityLabel={`スタンプ ${m} の非表示を解除`}
+                        // 薄表示 = 「今は隠れている」ことの視覚表現。タップで解除
+                        style={{
+                          opacity: 0.45,
+                          minHeight: 44,
+                          justifyContent: 'center',
+                          paddingHorizontal: SP['3'],
+                          paddingVertical: SP['2'],
+                          backgroundColor: C.bg3,
+                          borderRadius: R.full,
+                          borderWidth: 1.5,
+                          borderColor: C.border,
+                        }}
+                      >
+                        <Text style={[T.bodyB, { color: C.text }]}>{m}</Text>
+                      </PressableScale>
+                    ))}
+                  </Animated.View>
+                )}
+              </View>
             )}
           </ScrollView>
         </Pressable>
       </Pressable>
 
-      {/* 長押し: マイスタンプ保存/解除のミニシート */}
+      {/* 長押し: アクションメニュー (マイスタンプ保存/解除 + 非表示) のミニシート */}
       {longPressTarget !== null && (
         <Pressable
           onPress={() => setLongPressTarget(null)}
@@ -693,6 +856,30 @@ export function MemeReactionPicker({
                 {targetSaved ? 'マイスタンプから外す' : 'マイスタンプに保存する'}
               </Text>
             </PressableScale>
+            {/* 非表示 (端末ローカル) — 未ログイン時は no-op なので出さない */}
+            {canHide && (
+              <PressableScale
+                onPress={hideLongPress}
+                haptic="tap"
+                accessibilityLabel="このスタンプを非表示にする"
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: SP['2'],
+                  paddingVertical: SP['3'],
+                  backgroundColor: C.bg3,
+                  borderRadius: R.lg,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                }}
+              >
+                <Icon.eyeOff size={16} color={C.text2} strokeWidth={2.2} />
+                <Text style={[T.bodyM, { color: C.text2, fontWeight: '700' }]}>
+                  このスタンプを非表示
+                </Text>
+              </PressableScale>
+            )}
             <PressableScale
               onPress={() => setLongPressTarget(null)}
               haptic="tap"
