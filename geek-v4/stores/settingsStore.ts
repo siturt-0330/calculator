@@ -43,6 +43,7 @@ type Settings = {
   quietStartHour: number | null;  // 0-23
   quietEndHour: number | null;    // 0-23
   reduceMotion: boolean;
+  reduceHaptics: boolean;  // 触覚フィードバック抑制 (Apple HIG: System Haptics OFF の app 内補完)
   dataSaver: boolean;
   concernsPrivate: boolean;
   autoApplyTagClusters: boolean;  // 高信頼タグクラスタを自動グループ化
@@ -62,6 +63,7 @@ const DEFAULTS: Settings = {
   quietStartHour: null,
   quietEndHour: null,
   reduceMotion: false,
+  reduceHaptics: false,
   dataSaver: false,
   concernsPrivate: true,
   autoApplyTagClusters: false,  // opt-in (ユーザーが明示 ON にしないと自動 accept しない)
@@ -120,6 +122,7 @@ function sanitizeSettings(raw: unknown): Settings {
     quietStartHour: pickHour('quietStartHour'),
     quietEndHour: pickHour('quietEndHour'),
     reduceMotion: pickBool('reduceMotion'),
+    reduceHaptics: pickBool('reduceHaptics'),
     dataSaver: pickBool('dataSaver'),
     concernsPrivate: pickBool('concernsPrivate'),
     autoApplyTagClusters: pickBool('autoApplyTagClusters'),
@@ -167,6 +170,7 @@ function loadSettingsSync(): Settings {
     quietStartHour: pickHour('quietStartHour'),
     quietEndHour: pickHour('quietEndHour'),
     reduceMotion: pickBool('reduceMotion'),
+    reduceHaptics: pickBool('reduceHaptics'),
     dataSaver: pickBool('dataSaver'),
     concernsPrivate: pickBool('concernsPrivate'),
     autoApplyTagClusters: pickBool('autoApplyTagClusters'),

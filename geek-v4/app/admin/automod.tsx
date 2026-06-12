@@ -181,7 +181,7 @@ export default function AdminAutomodScreen() {
                   borderColor: C.red + '55',
                 }}
               >
-                <Text style={{ fontSize: 9, color: C.red, fontWeight: '800', letterSpacing: 0.6 }}>
+                <Text style={{ fontSize: 11, color: C.red, fontWeight: '800', letterSpacing: 0.6 }}>
                   DEV
                 </Text>
               </View>
@@ -331,7 +331,7 @@ function SectionHeader({ label, right }: { label: string; right?: React.ReactNod
     >
       <Text
         style={{
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: '800',
           color: C.text3,
           letterSpacing: 1.2,
@@ -407,7 +407,7 @@ function MetricCard({
       >
         <Text
           style={{
-            fontSize: 10,
+            fontSize: 11,
             color: C.text3,
             fontWeight: '700',
             letterSpacing: 0.8,
@@ -418,7 +418,7 @@ function MetricCard({
           {label}
         </Text>
         {hint && (
-          <Text style={{ fontSize: 9, color: C.text4, fontWeight: '600' }} numberOfLines={1}>
+          <Text style={{ fontSize: 11, color: C.text4, fontWeight: '600' }} numberOfLines={1}>
             {hint}
           </Text>
         )}

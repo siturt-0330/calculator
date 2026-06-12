@@ -37,6 +37,7 @@ import { PollEditorSheet } from '../../components/post/composer/PollEditorSheet'
 import { CommunityPickerSheet } from '../../components/post/composer/CommunityPickerSheet';
 
 import { useToastStore } from '../../stores/toastStore';
+import { showPermissionRescue } from '../../lib/permissionRescue';
 import { useAuthStore } from '../../stores/authStore';
 import { useRecentCommunitiesStore } from '../../stores/recentCommunitiesStore';
 import { usePostDraftStore } from '../../stores/postDraftStore';
@@ -450,7 +451,8 @@ export default function CreatePost() {
       if (Platform.OS !== 'web') {
         const perm = await ImagePicker.requestCameraPermissionsAsync();
         if (!perm.granted) {
-          show('カメラへのアクセス許可が必要です', 'warn');
+          // 拒否済みは再プロンプト不可 — 設定アプリへの導線付き toast (HIG)
+          showPermissionRescue('カメラへのアクセスが許可されていません');
           return;
         }
       }

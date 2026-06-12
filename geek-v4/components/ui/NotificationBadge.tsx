@@ -22,7 +22,8 @@ export function NotificationBadge({ count, top = -2, right = -2 }: { count: numb
         borderColor: C.bg,
       }}
     >
-      <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800', lineHeight: 11 }}>
+      {/* fontSize 11 = Apple HIG 最小。lineHeight 13 = 高さ16 − 枠線1.5×2 の内寸ちょうど */}
+      <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800', lineHeight: 13 }} numberOfLines={1}>
         {label}
       </Text>
     </View>

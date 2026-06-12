@@ -410,7 +410,7 @@ function EventCard({
               }}
             >
               <Icon.clock size={10} color={C.accentLight} strokeWidth={2.4} />
-              <Text style={{ color: C.accentLight, fontSize: 10, fontWeight: '700' }}>{time}</Text>
+              <Text style={{ color: C.accentLight, fontSize: 11, fontWeight: '700' }}>{time}</Text>
             </View>
             {canDelete && (
               <PressableScale onPress={onDelete} haptic="warn" hitSlop={6} style={{ padding: 4, marginLeft: 'auto' }}>

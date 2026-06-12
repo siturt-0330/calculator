@@ -66,10 +66,13 @@ export interface UseCommentComposerResult {
  *
  * @param postId      投稿 ID
  * @param scrollRef   送信後の自動スクロール用 ScrollView ref
+ * @param onPosted    送信成功時に新規コメント id を通知 (作成直後のハイライト用。
+ *                    id が取得できない環境では null)
  */
 export function useCommentComposer(
   postId: string,
   scrollRef: React.RefObject<{ scrollToEnd: (opts?: { animated?: boolean }) => void }>,
+  onPosted?: (newCommentId: string | null) => void,
 ): UseCommentComposerResult {
   const qc = useQueryClient();
   const show = useToastStore((s) => s.show);
@@ -102,7 +105,9 @@ export function useCommentComposer(
     setComposerActive(true);
     const handle = pseudonymFor(c.pseudonym_id).handle;
     setCommentText((prev) => (prev.trim().length === 0 ? `@${handle} ` : prev));
-    setTimeout(() => composerRef.current?.focus(), 50);
+    // 100ms: 返信チップ表示のレイアウト settle を待ってから focus
+    // (50ms だと web でキーボード/フォーカスが先に走りチップ出現でガタつく)
+    setTimeout(() => composerRef.current?.focus(), 100);
   }, []);
 
   // ----------------------------------------------------------------
@@ -221,7 +226,7 @@ export function useCommentComposer(
         return;
       }
 
-      await createComment(postId, commentText, {
+      const newCommentId = await createComment(postId, commentText, {
         parentId: replyTarget?.id ?? null,
         replyToId: replyTarget?.id ?? null,
         mediaUrls: uploadedMediaUrls,
@@ -229,6 +234,8 @@ export function useCommentComposer(
 
       hap.success();
       show(replyTarget ? '返信しました' : 'コメントしました', 'success');
+      // 作成直後ハイライト用に新規 id を親へ通知 (取得不可環境は null)
+      onPosted?.(newCommentId);
       if (mounted.current) {
         setCommentText('');
         setImages([]);
@@ -275,6 +282,7 @@ export function useCommentComposer(
     qc,
     show,
     scrollRef,
+    onPosted,
   ]);
 
   const scrollToEnd = useCallback(() => {

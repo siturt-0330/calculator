@@ -104,7 +104,7 @@ export function PressableScale({
         onLongPress
           ? () => {
               if (disabled) return;
-              // Medium impact for the longer press gesture.
+              // Heavy impact for the longer press gesture (pop は Heavy 固定 — lib/haptics が SoT)。
               triggerHapticPreset('pop');
               onLongPress();
             }

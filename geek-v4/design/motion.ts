@@ -23,6 +23,45 @@ export const SPRING_TIGHT: WithSpringConfig = { damping: 18, stiffness: 320, mas
 export const SPRING_GENTLE: WithSpringConfig = { damping: 22, stiffness: 180, mass: 1 };
 // legacy alias — 旧コードがまだ参照しているので残置 (SPRING_SNAPPY に統合予定)
 export const SPRING_SNAP: WithSpringConfig = SPRING_SNAPPY;
+//  SPRING_SEGMENT — Apple Segmented Control 風の indicator slide / 画面 enter。
+//                   ScopeToggle・投稿詳細 enter で使っていた inline {22,240,0.7} を統合
+//                   (値は当時の指示書準拠のまま — 体感不変)。
+export const SPRING_SEGMENT: WithSpringConfig = { damping: 22, stiffness: 240, mass: 0.7 };
+//  SPRING_SLIDE_SOFT — mass 1 既定のやや柔らかい indicator slide (admin タブ pill)。
+//                      SPRING_SEGMENT より一拍ゆったり収束する。
+export const SPRING_SLIDE_SOFT: WithSpringConfig = { damping: 22, stiffness: 220, mass: 1 };
+//  SPRING_POP_SOFT — ゆったり弾む出現ポップ (Avatar の emoji fallback mount 等)。
+//                    SPRING_BOUNCY より遅く・柔らかい登場感。
+export const SPRING_POP_SOFT: WithSpringConfig = { damping: 12, stiffness: 180, mass: 1 };
+//  SPRING_PRESS_QUICK — 小型 chip の素早い押下→復帰 (AI 提案 chip 等)。
+//                       SPRING_SNAPPY より硬く速い。わずかに弾んで戻る。
+export const SPRING_PRESS_QUICK: WithSpringConfig = { damping: 14, stiffness: 360, mass: 0.6 };
+//  SPRING_LIQUID — Liquid Glass TabBar (indicator slide / pill⇄ball morph) 専用。
+//  知覚ベース API (duration/dampingRatio)。Apple WWDC23 の spring ガイダンス
+//  (bounce ≈ 0.2 — 「UI 要素は 0.4 以下」警告レンジ内) ベース。
+//  v5 (2026-06-12): 300ms/0.8 — morph を transform-only 化したのに合わせ、
+//  収縮もキビキビ寄りに短縮 (350→300ms)。
+//  ※ physics 系 (damping/stiffness) と知覚系 (duration/dampingRatio) は混在不可。
+export const SPRING_LIQUID: WithSpringConfig = { duration: 300, dampingRatio: 0.8 };
+//  SPRING_LIQUID_FAST — TabBar 展開 (ball → pill) 専用の速い spring。
+//  展開が遅いと「タブ操作したいのに待たされる」UX になるため、収縮より大幅に速く。
+//  v5: 220→180ms / 0.88→0.85 (わずかな弾みを残しつつ即応)。
+//  ユーザー指示「もっともっとぬるぬる早くスムーズに」(2026-06-12)。
+export const SPRING_LIQUID_FAST: WithSpringConfig = { duration: 180, dampingRatio: 0.85 };
+
+// ============================================================
+// Apple 知覚 spring presets (SwiftUI 互換)
+// ============================================================
+//
+// SwiftUI の .smooth / .snappy / .bouncy に対応する知覚ベース preset
+// (Obsidian「Apple モーション」章準拠)。reanimated の withSpring は
+// duration を **ms** で受ける (SwiftUI は秒) ことに注意。
+// SPRING_LIQUID と同じ { duration, dampingRatio } フォーマット
+// (※ physics 系 damping/stiffness と混在不可)。
+//
+export const SPRING_SMOOTH_P: WithSpringConfig = { duration: 500, dampingRatio: 1.0 }; // SwiftUI .smooth
+export const SPRING_SNAPPY_P: WithSpringConfig = { duration: 300, dampingRatio: 0.85 }; // SwiftUI .snappy
+export const SPRING_BOUNCY_P: WithSpringConfig = { duration: 500, dampingRatio: 0.7 }; // SwiftUI .bouncy
 
 // ============================================================
 // Easing curves

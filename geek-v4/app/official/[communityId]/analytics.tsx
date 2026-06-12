@@ -236,7 +236,7 @@ function SectionHeader({ label }: { label: string }) {
         paddingBottom: SP['2'],
       }}
     >
-      <Text style={{ fontSize: 10, fontWeight: '800', color: C.text3, letterSpacing: 1.2, textTransform: 'uppercase' }}>
+      <Text style={{ fontSize: 11, fontWeight: '800', color: C.text3, letterSpacing: 1.2, textTransform: 'uppercase' }}>
         {label}
       </Text>
       <View style={{ flex: 1, height: 1, backgroundColor: C.border }} />
@@ -299,7 +299,7 @@ function BigKpi({
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SP['2'] }}>
         <Text
           style={{
-            fontSize: 10,
+            fontSize: 11,
             color: C.text3,
             fontWeight: '700',
             letterSpacing: 0.6,
@@ -310,7 +310,7 @@ function BigKpi({
         >
           {label}
         </Text>
-        {hint && <Text style={{ fontSize: 9, color: C.text4, fontWeight: '600' }}>{hint}</Text>}
+        {hint && <Text style={{ fontSize: 11, color: C.text4, fontWeight: '600' }}>{hint}</Text>}
       </View>
     </View>
   );

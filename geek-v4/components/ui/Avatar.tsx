@@ -9,6 +9,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, GRAD, R, SIZE } from '../../design/tokens';
+import { SPRING_POP_SOFT } from '../../design/motion';
 import { T } from '../../design/typography';
 import { useTheme } from '../../hooks/useColors';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
@@ -56,7 +57,7 @@ function EmojiInner({ size, emoji, color }: { size: number; emoji: string; color
 
   useEffect(() => {
     // mount 時に spring で 1.0 へ
-    scale.value = withSpring(1, { damping: 12, stiffness: 180 });
+    scale.value = withSpring(1, SPRING_POP_SOFT);
   }, [scale]);
 
   const animatedStyle = useAnimatedStyle(() => ({

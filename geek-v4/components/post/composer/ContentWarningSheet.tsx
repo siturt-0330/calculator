@@ -46,6 +46,8 @@ import { hap } from '../../../design/haptics';
 import { Icon } from '../../../constants/icons';
 import { PressableScale } from '../../ui/PressableScale';
 import { Input } from '../../ui/Input';
+// ★ 2026-06-12 P0-2: grabber を「引っ張れる契約」にする
+import { SheetSwipeDown } from '../../ui/SheetSwipeDown';
 
 /**
  * コンテンツ警告のカテゴリ。
@@ -135,6 +137,7 @@ export function ContentWarningSheet({
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           pointerEvents="box-none"
         >
+          <SheetSwipeDown onClose={onClose}>
           <Animated.View
             entering={SlideInDown.duration(260)}
             exiting={SlideOutDown.duration(200)}
@@ -268,6 +271,7 @@ export function ContentWarningSheet({
               />
             </View>
           </Animated.View>
+          </SheetSwipeDown>
         </KeyboardAvoidingView>
       </Animated.View>
     </Modal>

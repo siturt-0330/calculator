@@ -6,13 +6,15 @@
 // 自動で再 render → body 背景 + Stack 背景が即時切り替わる。
 // ============================================================
 
-import { View, ScrollView, Text, Pressable, StyleSheet } from 'react-native';
+import { View, ScrollView, Text, Pressable, StyleSheet, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TopBar } from '../../components/nav/TopBar';
 import { BackButton } from '../../components/nav/BackButton';
 import { SectionHeader } from '../../components/ui/SectionHeader';
+import { Toggle } from '../../components/ui/Toggle';
 import { useColors, useShadows } from '../../hooks/useColors';
 import { useThemeStore, useResolvedTheme, type ThemeMode } from '../../lib/theme/themeStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { Icon } from '../../constants/icons';
@@ -74,6 +76,9 @@ export default function AppearanceSettingsScreen() {
   const mode = useThemeStore((s) => s.mode);
   const setMode = useThemeStore((s) => s.setMode);
   const resolved = useResolvedTheme();
+  const reduceMotion = useSettingsStore((s) => s.reduceMotion);
+  const reduceHaptics = useSettingsStore((s) => s.reduceHaptics);
+  const updateSetting = useSettingsStore((s) => s.update);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -180,6 +185,66 @@ export default function AppearanceSettingsScreen() {
             </Pressable>
           );
         })}
+
+        {/* ===== 動きと触感 (2026-06-12 Apple HIG 対応) =====
+              OS の Reduce Motion は hooks/useReducedMotion が自動購読 (OR 評価)。
+              ここは「OS 設定は触りたくないがアプリだけ抑えたい」ユーザー向けの app 内トグル。 */}
+        <View style={{ height: SP['6'] }} />
+        <SectionHeader title="動きと触感" />
+        <View
+          style={{
+            borderRadius: R.lg,
+            backgroundColor: C.bg2,
+            borderWidth: 1,
+            borderColor: C.border,
+            overflow: 'hidden',
+          }}
+        >
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: SP['3'],
+              padding: SP['3'],
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[T.body, { color: C.text, fontWeight: '600' }]}>アニメーションを減らす</Text>
+              <Text style={[T.caption, { color: C.text3, marginTop: 2 }]}>
+                画面の動き・弾むアニメーションを抑えます (OS の「視差効果を減らす」設定にも自動で従います)
+              </Text>
+            </View>
+            <Toggle
+              value={reduceMotion}
+              onChange={(v) => updateSetting('reduceMotion', v)}
+              accessibilityLabel="アニメーションを減らす"
+            />
+          </View>
+          {Platform.OS !== 'web' && (
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: SP['3'],
+                padding: SP['3'],
+                borderTopWidth: StyleSheet.hairlineWidth,
+                borderTopColor: C.border,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[T.body, { color: C.text, fontWeight: '600' }]}>触覚フィードバックを減らす</Text>
+                <Text style={[T.caption, { color: C.text3, marginTop: 2 }]}>
+                  タップ時などの振動をオフにします
+                </Text>
+              </View>
+              <Toggle
+                value={reduceHaptics}
+                onChange={(v) => updateSetting('reduceHaptics', v)}
+                accessibilityLabel="触覚フィードバックを減らす"
+              />
+            </View>
+          )}
+        </View>
 
         <View
           style={{

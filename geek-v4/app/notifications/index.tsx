@@ -9,8 +9,10 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQuery } from '@tanstack/react-query';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { TopBar } from '../../components/nav/TopBar';
@@ -28,6 +30,26 @@ import { withApiTimeout } from '../../lib/withApiTimeout';
 import type { Notification } from '../../types/models';
 import { useColors } from '../../hooks/useColors';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
+import { useAuthStore } from '../../stores/authStore';
+import { stableKeyFor } from '../../lib/utils/queryKey';
+import { squareThumbedUrl } from '../../lib/utils/imageUrl';
+import {
+  aggregateNotifications,
+  type NotificationGroup,
+} from '../../lib/notifications/aggregate';
+import {
+  fetchNotificationPostPreviews,
+  fetchNotificationCommunityIcons,
+  type NotificationPostPreview,
+  type NotificationCommunityIcon,
+} from '../../lib/api/notifications';
+import { ActionSheetModal, type Action } from '../../components/ui/ActionSheet';
+import { HeadingText } from '../../components/ui/HeadingText';
+import { CommunityIcon } from '../../components/ui/CommunityIcon';
+import { updateNotificationPreference } from '../../lib/api/notificationPreferences';
+import { notificationCategoryFor } from '../../lib/utils/notificationFilter';
+import { useQueryClient } from '@tanstack/react-query';
+import { useToastStore } from '../../stores/toastStore';
 
 // 通知を 4 つの時間バケットへグルーピング
 type Bucket = '今日' | '昨日' | '1週間以内' | 'それ以前';
@@ -64,16 +86,17 @@ function matchesFilter(type: Notification['type'], f: NFilter): boolean {
       type === 'join_request' ||
       type === 'event' ||
       type === 'announcement' ||
-      type === 'mod_action'
+      type === 'mod_action' ||
+      type === 'community_post'
     );
   }
   return type === 'follow' || type === 'system'; // other / お知らせ
 }
 
-// FlashList 用の行データ — section ヘッダーは別 type で混在させる
+// 行データ — section ヘッダーと集約済み通知グループを混在させる
 type Row =
   | { kind: 'header'; bucket: Bucket; id: string }
-  | { kind: 'item'; n: Notification; id: string };
+  | { kind: 'item'; g: NotificationGroup; id: string };
 
 // type → 視覚デザイン (icon / accent color / bg)
 // like=pink, comment=blue, follow=accent purple, reply=teal/green,
@@ -102,59 +125,207 @@ function visualFor(type: Notification['type']): NotifVisual {
     case 'mod_action':
       // コミュニティ管理人の処置 (投稿削除 / キック / BAN) — amber の盾で警告系
       return { icon: '🛡️', color: C.amber, bgSoft: C.amberBg, borderSoft: C.amber + '55' };
+    case 'community_post':
+      // 参加コミュニティの新着投稿 (YouTube のチャンネル新着相当・0149)。
+      // 行アイコンは発信源コミュニティのアイコンで置き換わる (これは fallback)
+      return { icon: '📬', color: C.accentLight, bgSoft: C.accentBg, borderSoft: C.accent + '55' };
     default:
       return { icon: '🔔', color: C.text2, bgSoft: C.bg3, borderSoft: C.border };
   }
 }
 
+// 「…」メニューの「この種類の通知をオフ」用ラベル
+const CATEGORY_LABELS: Record<string, string> = {
+  like: 'いいね',
+  comment: 'コメント',
+  reply: '返信',
+  mention: 'メンション',
+  follow: 'フォロー',
+  friend_request: '友達リクエスト',
+  friend_accept: '友達承認',
+  official_post: '公式投稿',
+  event: 'イベント',
+  mod_action: 'モデレーション',
+  system: 'システム',
+  community_post: 'コミュニティ新着',
+};
+
+// data.community_id を持つ type (発信源コミュニティアイコンを出す対象)
+function communityIdOf(g: NotificationGroup): string | null {
+  if (
+    g.type !== 'community_post' &&
+    g.type !== 'join_request' &&
+    g.type !== 'mod_action'
+  ) {
+    return null;
+  }
+  const d = g.latest.data as { community_id?: unknown } | null;
+  return d && typeof d.community_id === 'string' && d.community_id ? d.community_id : null;
+}
+
 export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { notifications, loading: isLoading, markAllRead, markRead } = useNotifications();
-  // markRead は useNotifications() が毎 render 再生成するため、handleTap を
-  // 安定参照 (useCallback) にできるよう ref 経由で最新版を参照する。これにより
-  // memo 化した各 NotificationRow に渡す onPress の identity が固定され、
-  // 通知 cache 更新ごとの全行 re-render を防ぐ。
-  const markReadRef = useRef(markRead);
-  markReadRef.current = markRead;
+  const userId = useAuthStore((s) => s.user?.id);
+  const {
+    notifications,
+    loading: isLoading,
+    markAllRead,
+    markReadMany,
+    deleteMany,
+  } = useNotifications();
+  const qc = useQueryClient();
+  const showToast = useToastStore((s) => s.show);
+  // markReadMany / deleteMany は useNotifications() が毎 render 再生成するため、
+  // handleTap / handleMenu を安定参照 (useCallback) にできるよう ref 経由で
+  // 最新版を参照する。これにより memo 化した各 NotificationRow に渡す
+  // onPress の identity が固定され、通知 cache 更新ごとの全行 re-render を防ぐ。
+  const markReadManyRef = useRef(markReadMany);
+  markReadManyRef.current = markReadMany;
+  const deleteManyRef = useRef(deleteMany);
+  deleteManyRef.current = deleteMany;
+  // 行ごとの「…」メニュー (YouTube 流) — 開いている対象グループ
+  const [menuGroup, setMenuGroup] = useState<NotificationGroup | null>(null);
+  const openMenu = useCallback((g: NotificationGroup) => setMenuGroup(g), []);
+  const closeMenu = useCallback(() => setMenuGroup(null), []);
   const [filter, setFilter] = useState<NFilter>('all');
   // Smart skeleton timing — skeleton only after 200ms of continuous loading.
   // <200ms loads (cache hits) skip skeleton entirely to avoid flash.
   const showSkeleton = useDelayedLoading(isLoading && notifications.length === 0, 200);
 
-  // 旧版は画面を開いた瞬間に全件既読化していたが、未読ハイライトが一瞬で消えて
-  // 「何が新着か」が分からなくなる + 見逃しに繋がるため廃止。既読化は
-  // 「タップした通知」または明示的な「すべて既読」ボタンでのみ行う。
+  // ★ 自動既読 (X/IG 流・2026-06-12 ユーザー指示): 画面を開いたら全件を自動で
+  //   既読化する (「すべて既読」ボタンは廃止)。バッジは開いた瞬間に消えるが、
+  //   「何が新着だったか」は visitUnreadIds スナップショットでこの訪問中は
+  //   ハイライト表示を維持する (旧懸念「未読ハイライトが一瞬で消える」の対策)。
+  const autoReadDoneRef = useRef(false);
+  const [visitUnreadIds, setVisitUnreadIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  useEffect(() => {
+    if (autoReadDoneRef.current) return;
+    if (isLoading) return; // 初回ロード完了を待つ
+    autoReadDoneRef.current = true;
+    const unread = notifications.filter((n) => !n.read).map((n) => n.id);
+    if (unread.length > 0) {
+      setVisitUnreadIds(new Set(unread));
+      void markAllRead().catch(() => {});
+    }
+  }, [isLoading, notifications, markAllRead]);
 
-  // アクティブなカテゴリで絞り込み
-  const filteredNotifs = useMemo(
-    () => notifications.filter((n) => matchesFilter(n.type, filter)),
-    [notifications, filter],
+  // ★ IG/X 流の集約 (2026-06-12): 同じ投稿への同種反応 (like/comment/reply) を
+  //   1 行にまとめる。集約はフィルタ前に行い、フィルタはグループ type で判定。
+  const groups = useMemo(() => aggregateNotifications(notifications), [notifications]);
+  const filteredGroups = useMemo(
+    () => groups.filter((g) => matchesFilter(g.type, filter)),
+    [groups, filter],
   );
 
-  // 通知 → セクション化された Row 配列
+  // ★ 投稿プレビュー (IG/X 流: どの投稿への反応か一目で分かる) —
+  //   表示中グループの post_id を 1 query (IN) でまとめて取得。
+  const previewPostIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const g of groups) if (g.postId) ids.add(g.postId);
+    return Array.from(ids).sort();
+  }, [groups]);
+  const { data: previews } = useQuery({
+    queryKey: ['notification-post-previews', userId ?? null, stableKeyFor(previewPostIds)],
+    queryFn: () => fetchNotificationPostPreviews(previewPostIds),
+    enabled: previewPostIds.length > 0,
+    staleTime: 60_000,
+  });
+  const previewById = useMemo(() => {
+    const m = new Map<string, NotificationPostPreview>();
+    for (const p of previews ?? []) m.set(p.id, p);
+    return m;
+  }, [previews]);
+
+  // ★ 発信源コミュニティのアイコン (YouTube のチャンネルアイコン相当・2026-06-12) —
+  //   community_post / join_request / mod_action の data.community_id をまとめて取得。
+  const communityIconIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const g of groups) {
+      const cid = communityIdOf(g);
+      if (cid) ids.add(cid);
+    }
+    return Array.from(ids).sort();
+  }, [groups]);
+  const { data: communityIcons } = useQuery({
+    queryKey: [
+      'notification-community-icons',
+      userId ?? null,
+      stableKeyFor(communityIconIds),
+    ],
+    queryFn: () => fetchNotificationCommunityIcons(communityIconIds),
+    enabled: communityIconIds.length > 0,
+    staleTime: 5 * 60_000,
+  });
+  const communityIconById = useMemo(() => {
+    const m = new Map<string, NotificationCommunityIcon>();
+    for (const c of communityIcons ?? []) m.set(c.id, c);
+    return m;
+  }, [communityIcons]);
+
+  // 「…」メニューの選択肢 (YouTube 流: 削除 / この種類をオフ / 設定)
+  const menuActions = useMemo<Action[]>(() => {
+    if (!menuGroup) return [];
+    const g = menuGroup;
+    const category = notificationCategoryFor(g.type);
+    const label = CATEGORY_LABELS[category] ?? 'この種類';
+    return [
+      {
+        label: g.count > 1 ? `この通知を削除 (${g.count} 件)` : 'この通知を削除',
+        icon: Icon.trash,
+        destructive: true,
+        onPress: () => {
+          void deleteManyRef.current(g.items.map((n) => n.id));
+        },
+      },
+      {
+        label: `「${label}」の通知をオフ`,
+        icon: Icon.bell,
+        onPress: () => {
+          void updateNotificationPreference(category, { inapp: false })
+            .then(() => {
+              qc.invalidateQueries({ queryKey: ['notification-preferences'] });
+              showToast(`「${label}」の通知をオフにしました (設定からいつでも戻せます)`, 'info');
+            })
+            .catch(() => {
+              showToast('設定の変更に失敗しました', 'error');
+            });
+        },
+      },
+      {
+        label: '通知設定を開く',
+        icon: Icon.settings,
+        onPress: () => router.push('/settings/notifications' as never),
+      },
+    ];
+  }, [menuGroup, qc, router, showToast]);
+
+  // 通知グループ → セクション化された Row 配列
   const rows = useMemo<Row[]>(() => {
     const order: Bucket[] = ['今日', '昨日', '1週間以内', 'それ以前'];
-    const groups: Record<Bucket, Notification[]> = {
+    const byBucket: Record<Bucket, NotificationGroup[]> = {
       '今日': [], '昨日': [], '1週間以内': [], 'それ以前': [],
     };
-    for (const n of filteredNotifs) groups[bucketFor(n.created_at)].push(n);
+    for (const g of filteredGroups) byBucket[bucketFor(g.createdAt)].push(g);
     const out: Row[] = [];
     for (const b of order) {
-      if (groups[b].length === 0) continue;
+      if (byBucket[b].length === 0) continue;
       out.push({ kind: 'header', bucket: b, id: `h:${b}` });
-      for (const n of groups[b]) out.push({ kind: 'item', n, id: n.id });
+      for (const g of byBucket[b]) out.push({ kind: 'item', g, id: g.id });
     }
     return out;
-  }, [filteredNotifs]);
+  }, [filteredGroups]);
 
   // 通知タップ時 — 関連 surface (タグ feed など) へ遷移する。
   // notifications table に source_id が無いケースが多いので tag_name を最優先で利用。
   // 'official_post' だけは tag_name が「コミュニティ名」なので name→id を runtime ルックアップ。
   // memo 化した行に渡すため安定参照 (useCallback)。早期 return より前に定義する
   // (Rules of Hooks)。
-  const handleTap = useCallback((n: Notification) => {
-    void markReadRef.current(n.id); // タップした通知だけ既読化
+  const handleTap = useCallback((g: NotificationGroup) => {
+    void markReadManyRef.current(g.unreadIds); // グループ内の未読を一括既読化
+    const n = g.latest; // 遷移先はグループの代表 (最新) 通知で解決
     if (n.type === 'official_post' && n.tag_name) {
       // 旧版は communities lookup (name→id) の RTT を await してから push して
       // いたため、タップ後に画面が止まって見えた。即座に公式コミュ一覧 (corners)
@@ -208,10 +379,22 @@ export default function NotificationsScreen() {
     }
     // 投稿への反応 (いいね/コメント/リアクション/返信) — data.post_id があれば
     // 該当投稿を直接開く。0008/0111 トリガが post_id を data に格納済み。
-    // (旧挙動はタグフィードへ飛ばしていて「自分の投稿が開けない」不便があった)
-    const withPost = (n.data ?? null) as { post_id?: unknown } | null;
+    // コメント/返信は data.comment_id も持つので ?commentId= で該当コメントへ
+    // ジャンプ&ハイライトする (post/[id].tsx 側で処理・2026-06-12)。
+    const withPost = (n.data ?? null) as {
+      post_id?: unknown;
+      comment_id?: unknown;
+    } | null;
     if (withPost && typeof withPost.post_id === 'string' && withPost.post_id.length > 0) {
-      router.push(`/post/${withPost.post_id}` as never);
+      const cid =
+        typeof withPost.comment_id === 'string' && withPost.comment_id.length > 0
+          ? withPost.comment_id
+          : null;
+      router.push(
+        (cid
+          ? `/post/${withPost.post_id}?commentId=${encodeURIComponent(cid)}`
+          : `/post/${withPost.post_id}`) as never,
+      );
       return;
     }
     if (n.tag_name) {
@@ -261,7 +444,11 @@ export default function NotificationsScreen() {
                 <Icon.bell size={44} color="#fff" strokeWidth={2.2} />
               </LinearGradient>
             </View>
-            <Text style={[T.h2, { color: C.text, textAlign: 'center' }]}>まだ通知がありません</Text>
+            {/* 画面コンテンツの見出し — HeadingText で VoiceOver の見出しナビ対象に
+                (style は従来と同一のものを渡すので見た目は不変) */}
+            <HeadingText level={2} style={[T.h2, { color: C.text, textAlign: 'center' }]}>
+              まだ通知がありません
+            </HeadingText>
             <Text style={[T.body, { color: C.text2, textAlign: 'center', maxWidth: 320 }]}>
               好きなタグの新着、自分の投稿への反応がここに届きます
             </Text>
@@ -301,42 +488,11 @@ export default function NotificationsScreen() {
     );
   }
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
-
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <TopBar
-        title="通知"
-        left={<BackButton />}
-        right={
-          unreadCount > 0 ? (
-            // outline pill: subtle, secondary action ("すべて既読" は破壊的でない)
-            <PressableScale
-              onPress={() => void markAllRead()}
-              haptic="confirm"
-              hitSlop={10}
-              accessibilityLabel="すべて既読にする"
-              accessibilityRole="button"
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 4,
-                paddingHorizontal: SP['3'],
-                paddingVertical: 6,
-                backgroundColor: 'transparent',
-                borderRadius: R.full,
-                borderWidth: 1,
-                borderColor: C.accent,
-              }}
-            >
-              <Icon.check size={12} color={C.accentLight} strokeWidth={2.4} />
-              <Text style={[T.caption, { color: C.accentLight, fontWeight: '700' }]}>
-                すべて既読
-              </Text>
-            </PressableScale>
-          ) : null
-        }
-      />
+      {/* 「すべて既読」ボタンは廃止 — 画面を開いた時点で自動既読化される
+          (上の autoRead effect)。 */}
+      <TopBar title="通知" left={<BackButton />} />
       {/* カテゴリ フィルタ (横スクロール pill) */}
       <ScrollView
         horizontal
@@ -408,11 +564,35 @@ export default function NotificationsScreen() {
                 </Text>
               </View>
             ) : (
-              <NotificationRow key={item.id} n={item.n} onPress={handleTap} />
+              <NotificationRow
+                key={item.id}
+                g={item.g}
+                // 未読ハイライト: 実 read 状態 OR この訪問で新着だったもの
+                // (自動既読後もこの訪問中はハイライトを維持する)
+                highlightUnread={
+                  item.g.unread ||
+                  item.g.items.some((nn) => visitUnreadIds.has(nn.id))
+                }
+                preview={item.g.postId ? previewById.get(item.g.postId) : undefined}
+                communityIcon={(() => {
+                  const cid = communityIdOf(item.g);
+                  return cid ? communityIconById.get(cid) : undefined;
+                })()}
+                onPress={handleTap}
+                onMenu={openMenu}
+              />
             ),
           )
         )}
       </ScrollView>
+
+      {/* 行ごとの「…」メニュー (YouTube 流: 削除 / この種類をオフ / 設定) */}
+      <ActionSheetModal
+        visible={menuGroup !== null}
+        title="通知のオプション"
+        actions={menuActions}
+        onClose={closeMenu}
+      />
     </View>
   );
 }
@@ -428,19 +608,33 @@ export default function NotificationsScreen() {
 // - reduceMotion 時は即時表示 (pulse / entrance とも skip)
 // ============================================================
 const NotificationRow = memo(function NotificationRow({
-  n,
+  g,
+  highlightUnread,
+  preview,
+  communityIcon,
   onPress,
+  onMenu,
 }: {
-  n: Notification;
-  // 安定参照の handleTap を直接受け取り、行内で n を渡して呼ぶ。これにより
+  g: NotificationGroup;
+  // 未読ハイライト — 実 read 状態だけでなく「この訪問で新着だったもの」も
+  // 含む (自動既読化の後も訪問中はハイライトを維持するため)。
+  highlightUnread: boolean;
+  // 対象投稿のプレビュー (本文先頭 + サムネ)。取得前/削除済みは undefined。
+  preview?: NotificationPostPreview;
+  // 発信源コミュニティ (YouTube のチャンネルアイコン相当)。該当 type のみ。
+  communityIcon?: NotificationCommunityIcon;
+  // 安定参照の handleTap を直接受け取り、行内で g を渡して呼ぶ。これにより
   // 親が毎 render でインライン関数を生成せず、memo が効く。
-  onPress: (n: Notification) => void;
+  onPress: (g: NotificationGroup) => void;
+  // 行の「…」メニューを開く (YouTube 流)。
+  onMenu: (g: NotificationGroup) => void;
 }) {
   const C = useColors();
   const reduceMotion = useReducedMotion();
+  const n = g.latest;
   const visual = visualFor(n.type);
   const isOfficial = n.type === 'official_post';
-  const unread = !n.read;
+  const unread = highlightUnread;
 
   // ============================================================
   // Entrance animation — mount 時のみ実行。
@@ -525,11 +719,11 @@ const NotificationRow = memo(function NotificationRow({
   return (
     <Animated.View style={enterStyle}>
       <PressableScale
-        onPress={() => onPress(n)}
+        onPress={() => onPress(g)}
         haptic="tap"
         scaleValue={0.97}
         accessibilityRole="button"
-        accessibilityLabel={n.message}
+        accessibilityLabel={g.message}
         accessibilityState={{ selected: unread }}
         style={[
           {
@@ -580,33 +774,76 @@ const NotificationRow = memo(function NotificationRow({
           ]}
         />
 
-        {/* type ごとの icon — 公式は gradient, それ以外は themed soft bg */}
-        {isOfficial ? (
-          <View style={[{ borderRadius: 10 }, SHADOW.sm]}>
-            <LinearGradient
-              colors={GRAD.primary}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
+        {/* 発信源 icon — コミュニティ通知は実コミュアイコン (YouTube の
+            チャンネルアイコン相当)、公式は gradient、他は type 絵文字。
+            集約行 (count>1) は右下に件数バッジ (IG のスタックアバター相当) */}
+        <View>
+          {communityIcon ? (
+            <View
               style={{
                 width: 40, height: 40, borderRadius: 10,
+                backgroundColor: C.bg3,
                 alignItems: 'center', justifyContent: 'center',
+                borderWidth: 1, borderColor: C.border,
+                overflow: 'hidden',
               }}
             >
+              <CommunityIcon
+                size={32}
+                iconUrl={communityIcon.icon_url}
+                iconEmoji={communityIcon.icon_emoji ?? '👥'}
+                name={communityIcon.name}
+              />
+            </View>
+          ) : isOfficial ? (
+            <View style={[{ borderRadius: 10 }, SHADOW.sm]}>
+              <LinearGradient
+                colors={GRAD.primary}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={{
+                  width: 40, height: 40, borderRadius: 10,
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <Text style={{ fontSize: 18 }}>{visual.icon}</Text>
+              </LinearGradient>
+            </View>
+          ) : (
+            <View style={{
+              width: 40, height: 40, borderRadius: 10,
+              backgroundColor: C.bg3,
+              alignItems: 'center', justifyContent: 'center',
+              borderWidth: 1, borderColor: C.border,
+            }}>
               <Text style={{ fontSize: 18 }}>{visual.icon}</Text>
-            </LinearGradient>
-          </View>
-        ) : (
-          <View style={{
-            width: 40, height: 40, borderRadius: 10,
-            backgroundColor: C.bg3,
-            alignItems: 'center', justifyContent: 'center',
-            borderWidth: 1, borderColor: C.border,
-          }}>
-            <Text style={{ fontSize: 18 }}>{visual.icon}</Text>
-          </View>
-        )}
+            </View>
+          )}
+          {g.count > 1 && (
+            <View
+              style={{
+                position: 'absolute',
+                right: -6,
+                bottom: -6,
+                minWidth: 20,
+                height: 20,
+                borderRadius: 10,
+                paddingHorizontal: 5,
+                backgroundColor: visual.color,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 2,
+                borderColor: C.bg2,
+              }}
+            >
+              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800', lineHeight: 14 }}>
+                {g.count > 99 ? '99+' : g.count}
+              </Text>
+            </View>
+          )}
+        </View>
 
-        {/* メッセージ + タグ */}
+        {/* メッセージ + 投稿プレビュー + タグ */}
         <View style={{ flex: 1, gap: 3 }}>
           <Text
             style={[
@@ -618,8 +855,14 @@ const NotificationRow = memo(function NotificationRow({
               },
             ]}
           >
-            {n.message}
+            {g.message}
           </Text>
+          {/* 対象投稿の本文プレビュー (IG/X 流: どの投稿か一目で分かる) */}
+          {preview?.content ? (
+            <Text numberOfLines={1} style={[T.small, { color: C.text3 }]}>
+              {preview.content}
+            </Text>
+          ) : null}
           {n.tag_name && (
             <Text
               style={[
@@ -635,7 +878,25 @@ const NotificationRow = memo(function NotificationRow({
           )}
         </View>
 
-        {/* 右側カラム: ドット + 時刻 (右揃え) */}
+        {/* 対象投稿のサムネ (メディアがある投稿のみ) — IG の右端サムネと同型 */}
+        {preview?.thumb ? (
+          <ExpoImage
+            source={{ uri: squareThumbedUrl(preview.thumb, 96) }}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 8,
+              backgroundColor: C.bg3,
+              borderWidth: 1,
+              borderColor: C.border,
+            }}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            recyclingKey={preview.thumb}
+          />
+        ) : null}
+
+        {/* 右側カラム: ドット + 時刻 + 「…」メニュー (YouTube 流) */}
         <View style={{ alignItems: 'flex-end', gap: 4, minWidth: 48 }}>
           <Animated.View
             style={[
@@ -647,8 +908,18 @@ const NotificationRow = memo(function NotificationRow({
             ]}
           />
           <Text style={[T.caption, { color: C.text3, textAlign: 'right' }]}>
-            {formatRelative(n.created_at)}
+            {formatRelative(g.createdAt)}
           </Text>
+          <PressableScale
+            onPress={() => onMenu(g)}
+            haptic="tap"
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="通知のオプション"
+            style={{ paddingVertical: 2, paddingHorizontal: 4 }}
+          >
+            <Icon.more size={16} color={C.text3} strokeWidth={2.2} />
+          </PressableScale>
         </View>
       </PressableScale>
     </Animated.View>

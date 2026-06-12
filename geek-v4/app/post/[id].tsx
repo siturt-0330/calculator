@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TextInput, KeyboardAvoidingView, Platform,
   useWindowDimensions, ActivityIndicator, RefreshControl, ScrollView,
@@ -24,6 +24,7 @@ import { LinkPreviewCard } from '../../components/feed/LinkPreviewCard';
 import { FeedMediaGrid } from '../../components/feed/FeedMediaGrid';
 import { mediaItemAspect, mediaContainerWidth } from '../../components/feed/feedMediaLayout';
 import { SP, R } from '../../design/tokens';
+import { SPRING_SEGMENT } from '../../design/motion';
 import { useColors } from '../../hooks/useColors';
 import { T } from '../../design/typography';
 import { PressableScale } from '../../components/ui/PressableScale';
@@ -70,9 +71,15 @@ const QUICK_EMOJIS = ['❤️', '😂', '🎉', '😢', '😮', '😅', '😊'] 
 // ----------------------------------------------------------------
 
 export default function PostDetailScreen() {
-  const { id: rawId } = useLocalSearchParams<{ id: string }>();
+  // commentId: 通知 (コメント/返信) から来たとき該当コメントへジャンプ&ハイライト
+  const { id: rawId, commentId: rawCommentId } = useLocalSearchParams<{
+    id: string;
+    commentId?: string;
+  }>();
   // route param を UUID validation して cache DoS を防ぐ
   const id = isValidUuid(rawId) ? rawId : null;
+  const jumpCommentId =
+    typeof rawCommentId === 'string' && isValidUuid(rawCommentId) ? rawCommentId : null;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
@@ -88,7 +95,7 @@ export default function PostDetailScreen() {
     if (reduceMotion) {
       enterProgress.value = withTiming(1, { duration: 150, easing: Easing.out(Easing.cubic) });
     } else {
-      enterProgress.value = withSpring(1, { damping: 22, stiffness: 240, mass: 0.7 });
+      enterProgress.value = withSpring(1, SPRING_SEGMENT);
     }
   }, [reduceMotion, enterProgress]);
   const enterStyle = useAnimatedStyle(() => {
@@ -131,11 +138,34 @@ export default function PostDetailScreen() {
   } = usePostDetail(id);
 
   // ============================================================
+  // コメントハイライト (2026-06-12 コメント UX 改善)
+  // ------------------------------------------------------------
+  // - 通知 (コメント/返信) から来た ?commentId= の該当コメント
+  // - 直前に自分が投稿したコメント (useCommentComposer の onPosted)
+  // を accent 薄帯で 4 秒ハイライトする (CommentThreadItem の highlightedId)。
+  // ============================================================
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashHighlight = useCallback((cid: string | null) => {
+    if (!cid) return;
+    setHighlightedId(cid);
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = setTimeout(() => setHighlightedId(null), 4000);
+  }, []);
+  useEffect(
+    () => () => {
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    },
+    [],
+  );
+
+  // ============================================================
   // コンポーザー (useCommentComposer に集約)
   // ============================================================
   const { composerState, handlers, composerRef } = useCommentComposer(
     id ?? '',
     scrollRef as React.RefObject<{ scrollToEnd: (opts?: { animated?: boolean }) => void }>,
+    flashHighlight, // 投稿直後の自分のコメントをハイライト
   );
   const {
     replyTarget,
@@ -191,6 +221,39 @@ export default function PostDetailScreen() {
   );
 
   // ============================================================
+  // 通知からのコメントジャンプ (?commentId=) — 対象 root の y へスクロール
+  // ------------------------------------------------------------
+  // root ごとの y は wrapper View の onLayout で計測 (rootYRef)。コメント
+  // セクション自体の y (ヘッダー分) は sectionY と合算する。返信が対象の
+  // 場合は「それを含む root」へスクロールし、対象ノード自体をハイライト。
+  // ============================================================
+  const rootYRef = useRef(new Map<string, number>());
+  const sectionYRef = useRef(0);
+  const jumpDoneRef = useRef(false);
+  useEffect(() => {
+    if (jumpDoneRef.current || !jumpCommentId || commentTree.length === 0) return;
+    type CNode = { id: string; children?: CNode[] };
+    const containsId = (c: CNode): boolean =>
+      c.id === jumpCommentId || (c.children ?? []).some(containsId);
+    const root = (commentTree as CNode[]).find(containsId);
+    if (!root) return; // 対象がまだ未ロード — 次の tree 更新で再試行
+    jumpDoneRef.current = true;
+    flashHighlight(jumpCommentId);
+    // onLayout 完了を待ってからスクロール (400ms は entrance アニメと整合)
+    setTimeout(() => {
+      const y = rootYRef.current.get(root.id);
+      if (y == null) return;
+      const scroller = scrollRef.current as unknown as {
+        scrollTo?: (o: { y: number; animated: boolean }) => void;
+      } | null;
+      scroller?.scrollTo?.({
+        y: Math.max(0, sectionYRef.current + y - 96),
+        animated: true,
+      });
+    }, 400);
+  }, [jumpCommentId, commentTree, flashHighlight, scrollRef]);
+
+  // ============================================================
   // コメントツリー描画 (IIFE → useMemo でレンダー毎再評価を抑制)
   // ============================================================
   const commentNodes = useMemo(() => {
@@ -210,18 +273,24 @@ export default function PostDetailScreen() {
       if (item.kind === 'single') {
         const { root, idx } = item.comment;
         return (
-          <CommentThreadItem
+          // wrapper View: 通知ジャンプ用に root の y を計測 (style 無しで layout 中立)
+          <View
             key={root.id}
-            comment={root}
-            rootIndex={idx + 1}
-            unread={unreadIds.has(root.id)}
-            postContent={post.content}
-            postId={post.id}
-            parentCommunityId={postCommunities[0]?.community_id ?? null}
-            onReply={handleReply}
-            reactionsByComment={commentReactions}
-            onReact={toggleCommentReact}
-          />
+            onLayout={(e) => rootYRef.current.set(root.id, e.nativeEvent.layout.y)}
+          >
+            <CommentThreadItem
+              comment={root}
+              rootIndex={idx + 1}
+              unread={unreadIds.has(root.id)}
+              postContent={post.content}
+              postId={post.id}
+              parentCommunityId={postCommunities[0]?.community_id ?? null}
+              onReply={handleReply}
+              reactionsByComment={commentReactions}
+              onReact={toggleCommentReact}
+              highlightedId={highlightedId}
+            />
+          </View>
         );
       }
       return (
@@ -241,6 +310,7 @@ export default function PostDetailScreen() {
               onReply={handleReply}
               reactionsByComment={commentReactions}
               onReact={toggleCommentReact}
+              highlightedId={highlightedId}
             />
           ))}
         </CollapsedComment>
@@ -254,6 +324,7 @@ export default function PostDetailScreen() {
     handleReply,
     commentReactions,
     toggleCommentReact,
+    highlightedId,
   ]);
 
   // ============================================================
@@ -660,13 +731,46 @@ export default function PostDetailScreen() {
               </View>
             ) : null
           ) : commentTree.length === 0 ? (
-            <View style={[styles.centerPad, { padding: SP['6'] }]}>
-              <Text style={[T.small, { color: C.text3 }]}>
-                コメントはまだありません
+            // 0 件 empty state — 「書きたくなる」招待 (IG/YouTube の最初のコメント誘導)
+            <View style={[styles.centerPad, { padding: SP['6'], gap: SP['3'], alignItems: 'center' }]}>
+              <Text style={{ fontSize: 36 }}>💭</Text>
+              <Text style={[T.bodyM, { color: C.text, fontWeight: '700', textAlign: 'center' }]}>
+                最初のコメントを書いてみませんか？
               </Text>
+              <Text style={[T.small, { color: C.text3, textAlign: 'center', maxWidth: 280 }]}>
+                あなたの一言が会話のきっかけになります
+              </Text>
+              <PressableScale
+                onPress={() => {
+                  setComposerActive(true);
+                  composerRef.current?.focus();
+                }}
+                haptic="tap"
+                accessibilityRole="button"
+                accessibilityLabel="コメントを書く"
+                style={{
+                  marginTop: SP['1'],
+                  paddingHorizontal: SP['5'],
+                  paddingVertical: SP['2'],
+                  borderRadius: R.full,
+                  backgroundColor: C.accentBg,
+                  borderWidth: 1,
+                  borderColor: C.accent + '55',
+                }}
+              >
+                <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>
+                  コメントを書く
+                </Text>
+              </PressableScale>
             </View>
           ) : (
-            <View style={styles.alignCenter}>
+            <View
+              style={styles.alignCenter}
+              onLayout={(e) => {
+                // 通知ジャンプ用: コメントセクションの scroll content 内 y
+                sectionYRef.current = e.nativeEvent.layout.y;
+              }}
+            >
               <View style={[styles.maxW, styles.commentPad]}>
                 {commentNodes}
               </View>
@@ -774,12 +878,13 @@ export default function PostDetailScreen() {
                 </Text>
                 <PressableScale
                   onPress={() => setReplyTarget(null)}
-                  hitSlop={8}
+                  hitSlop={10}
+                  haptic="select"
                   accessibilityRole="button"
                   accessibilityLabel="返信をやめる"
-                  style={styles.replyDismiss}
+                  style={[styles.replyDismiss, { backgroundColor: C.bg3 }]}
                 >
-                  <Icon.close size={15} color={C.text3} strokeWidth={2.4} />
+                  <Icon.close size={16} color={C.text2} strokeWidth={2.4} />
                 </PressableScale>
               </View>
             )}
@@ -1166,10 +1271,12 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: SP['1'],
   },
+  // 返信キャンセル ✕ — 32px + 薄 bg で「押せる」ことを明示 (24px は小さすぎて
+  // ミスタップ多発・存在に気づきにくい) [コメント UX 改善 2026-06-12]
   replyDismiss: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },

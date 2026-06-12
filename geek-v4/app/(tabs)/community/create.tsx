@@ -40,6 +40,7 @@ import {
   type Community,
 } from '../../../lib/api/communities';
 import { useToastStore } from '../../../stores/toastStore';
+import { showPermissionRescue } from '../../../lib/permissionRescue';
 import { searchTags } from '../../../lib/api/tags';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { deepNormalize } from '../../../lib/search/tokenize';
@@ -218,7 +219,8 @@ export default function CreateCommunityScreen() {
       if (Platform.OS !== 'web') {
         const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!perm.granted) {
-          show('写真へのアクセス権限が必要です', 'warn');
+          // 拒否済みは再プロンプト不可 — 設定アプリへの導線付き toast (HIG)
+          showPermissionRescue('写真へのアクセスが許可されていません');
           return; // finally で loading 解除される
         }
       }

@@ -36,6 +36,8 @@ import { T } from '../../../design/typography';
 import { hap } from '../../../design/haptics';
 import { Icon } from '../../../constants/icons';
 import { PressableScale } from '../../ui/PressableScale';
+// ★ 2026-06-12 P0-2: grabber を「引っ張れる契約」にするため SheetSwipeDown を被せる
+import { SheetSwipeDown } from '../../ui/SheetSwipeDown';
 import type { PostVisibility } from '../../../lib/api/posts';
 
 export interface VisibilitySheetProps {
@@ -99,6 +101,7 @@ export function VisibilitySheet({ visible, value, onChange, onClose }: Visibilit
           accessibilityLabel="閉じる"
         />
 
+        <SheetSwipeDown onClose={onClose}>
         <Animated.View
           entering={SlideInDown.duration(260)}
           exiting={SlideOutDown.duration(200)}
@@ -216,6 +219,7 @@ export function VisibilitySheet({ visible, value, onChange, onClose }: Visibilit
             })}
           </View>
         </Animated.View>
+        </SheetSwipeDown>
       </Animated.View>
     </Modal>
   );

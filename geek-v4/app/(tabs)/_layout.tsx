@@ -19,6 +19,7 @@ import { TabBar } from '../../components/nav/TabBar';
 import { LeftSidebar } from '../../components/nav/LeftSidebar';
 import { RightSearchPanel } from '../../components/nav/RightSearchPanel';
 import { useTheme } from '../../hooks/useColors';
+import { TabBarScrollProvider } from '../../lib/contexts/tabBarScroll';
 
 // 3 カラム化する横幅の閾値 (左 260 + 中央 600 + 右 340 + 余白)。
 // 1100 未満はモバイル相当の単一カラム + 下部 TabBar。
@@ -51,15 +52,21 @@ export default function TabsLayout() {
     </Tabs>
   );
 
-  if (!isDesktop) return tabs;
+  // モバイル / デスクトップ いずれでも、TabBar が読む scrollY SharedValue を
+  // タブナビ全体で共有する Provider をルートに置く (2026-06-12)。
+  // デスクトップでは TabBar 自体は描画されないが、Provider があっても無害
+  // (各画面の onScroll が SV に書き込むだけで、購読側が居なければ no-op)。
+  if (!isDesktop) return <TabBarScrollProvider>{tabs}</TabBarScrollProvider>;
 
   // デスクトップ Web: 3 カラム並び (左 sidebar / 中央 Tabs / 右 検索パネル)。
   // 中央は flex:1 + maxWidth で X と同じ「狭めで読みやすい」幅に収める。
   return (
-    <View style={{ flex: 1, flexDirection: 'row', backgroundColor: C.bg }}>
-      <LeftSidebar />
-      <View style={{ flex: 1, maxWidth: 720, alignSelf: 'stretch' }}>{tabs}</View>
-      <RightSearchPanel />
-    </View>
+    <TabBarScrollProvider>
+      <View style={{ flex: 1, flexDirection: 'row', backgroundColor: C.bg }}>
+        <LeftSidebar />
+        <View style={{ flex: 1, maxWidth: 720, alignSelf: 'stretch' }}>{tabs}</View>
+        <RightSearchPanel />
+      </View>
+    </TabBarScrollProvider>
   );
 }

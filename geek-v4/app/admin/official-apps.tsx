@@ -175,7 +175,7 @@ export default function AdminOfficialAppsScreen() {
                         borderColor: C.accent + '55',
                       }}
                     >
-                      <Text style={{ color: C.accentLight, fontSize: 10, fontWeight: '700' }}>
+                      <Text style={{ color: C.accentLight, fontSize: 11, fontWeight: '700' }}>
                         {FEATURE_LABEL[f] ?? f}
                       </Text>
                     </View>
@@ -456,7 +456,7 @@ function VerificationBadge({ status }: { status: string | undefined }) {
         borderColor: border,
       }}
     >
-      <Text style={{ color: fg, fontSize: 10, fontWeight: '700' }}>{label}</Text>
+      <Text style={{ color: fg, fontSize: 11, fontWeight: '700' }}>{label}</Text>
     </View>
   );
 }

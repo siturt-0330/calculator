@@ -13,11 +13,10 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Modal, Pressable, TextInput, ScrollView } from 'react-native';
 import Animated, { FadeIn, FadeOut, ZoomIn, ZoomOut } from 'react-native-reanimated';
-import { C, R, SP } from '../../design/tokens';
+import { C, R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { Button } from '../ui/Button';
 import { PressableScale } from '../ui/PressableScale';
-import { SHADOW } from '../../design/shadows';
 import { MOD_REMOVAL_REASONS } from '../../constants/modReasons';
 
 export function ReasonPickerDialog({

@@ -4,6 +4,7 @@ import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { Icon } from '../../constants/icons';
 import { swallow } from '../../lib/swallow';
+import { showPermissionRescue } from '../../lib/permissionRescue';
 import {
   pushSubscribe,
   pushUnsubscribe,
@@ -87,6 +88,11 @@ export function PushNotificationToggle() {
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
         setStatus(permission === 'denied' ? 'denied' : 'disabled');
+        // 拒否済みブラウザは requestPermission が無言で 'denied' を返すだけ (silent fail)。
+        // web は Linking.openSettings() が無いのでサイト設定の変更手順を toast で案内する
+        if (permission === 'denied') {
+          showPermissionRescue('通知がブロックされています');
+        }
         return;
       }
       const reg = await navigator.serviceWorker.register('/push-sw.js');
@@ -160,7 +166,7 @@ export function PushNotificationToggle() {
       case 'loading': return '確認中…';
       case 'unsupported': return 'このブラウザは Web Push に対応していません';
       case 'no-vapid': return '管理者がプッシュ通知を有効にしていません';
-      case 'denied': return 'ブラウザ設定で通知が拒否されています。設定から許可してください';
+      case 'denied': return 'ブラウザで通知がブロックされています。アドレスバーの鍵アイコン → サイトの設定 → 通知 から許可し、ページを再読み込みしてください';
       case 'enabled': return 'このブラウザでお知らせを受け取ります';
       case 'disabled': return 'ブラウザを閉じていてもお知らせが届きます';
     }

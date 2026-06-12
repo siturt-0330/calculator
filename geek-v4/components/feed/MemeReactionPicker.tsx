@@ -48,6 +48,8 @@ import Animated, {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '../ui/PressableScale';
+// ★ 2026-06-12 P0-2: grabber を「引っ張れる契約」にする
+import { SheetSwipeDown } from '../ui/SheetSwipeDown';
 import { Icon } from '../../constants/icons';
 import { MEMES, ALL_MEMES } from '../../lib/memes';
 import { useUserStamps, useCreateUserStamp } from '../../hooks/useUserStamps';
@@ -367,6 +369,7 @@ export function MemeReactionPicker({
         style={{ flex: 1, backgroundColor: C.scrim, justifyContent: 'flex-end' }}
       >
         {/* シート本体 — タップは内側で止める (背景クローズに食われない) */}
+        <SheetSwipeDown onClose={requestClose}>
         <Pressable
           onPress={(e) => e.stopPropagation()}
           style={{
@@ -803,6 +806,7 @@ export function MemeReactionPicker({
             )}
           </ScrollView>
         </Pressable>
+        </SheetSwipeDown>
       </Pressable>
 
       {/* 長押し: アクションメニュー (マイスタンプ保存/解除 + 非表示) のミニシート */}

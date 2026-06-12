@@ -161,7 +161,7 @@ export default function AdminUsersScreen() {
                   borderColor: C.red + '55',
                 }}
               >
-                <Text style={{ fontSize: 9, color: C.red, fontWeight: '800', letterSpacing: 0.6 }}>
+                <Text style={{ fontSize: 11, color: C.red, fontWeight: '800', letterSpacing: 0.6 }}>
                   DEV
                 </Text>
               </View>
@@ -286,7 +286,7 @@ function SectionLabel({ label, count }: { label: string; count?: number }) {
     >
       <Text
         style={{
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: '800',
           color: C.text3,
           letterSpacing: 1.2,
@@ -311,7 +311,7 @@ function SectionLabel({ label, count }: { label: string; count?: number }) {
         >
           <Text
             style={{
-              fontSize: 10,
+              fontSize: 11,
               fontWeight: '800',
               color: count > 0 ? C.red : C.text3,
             }}
@@ -510,7 +510,7 @@ function RoleBadge({ label, color, bg }: { label: string; color: string; bg: str
         borderColor: color + '55',
       }}
     >
-      <Text style={{ fontSize: 9, color, fontWeight: '800', letterSpacing: 0.5 }}>{label}</Text>
+      <Text style={{ fontSize: 11, color, fontWeight: '800', letterSpacing: 0.5 }}>{label}</Text>
     </View>
   );
 }

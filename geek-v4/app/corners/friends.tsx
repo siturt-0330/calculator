@@ -3,6 +3,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, SP, R } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { BackButton } from '../../components/nav/BackButton';
+import { HeadingText } from '../../components/ui/HeadingText';
 import { Icon } from '../../constants/icons';
 
 const PROFILES = [
@@ -31,7 +32,9 @@ export default function FriendsScreen() {
 
       <View style={{ gap: SP['1'] }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-          <Text style={[T.display, { color: C.text }]}>友達作り</Text>
+          {/* 画面見出し — HeadingText で VoiceOver の見出しナビ対象に
+              (style は従来と同一のものを渡すので見た目は不変) */}
+          <HeadingText level={1} style={[T.display, { color: C.text }]}>友達作り</HeadingText>
           <View style={{
             paddingHorizontal: SP['2'], paddingVertical: 2,
             backgroundColor: C.amberBg, borderRadius: R.sm,

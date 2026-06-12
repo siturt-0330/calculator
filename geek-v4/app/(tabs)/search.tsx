@@ -34,7 +34,10 @@ import {
   TextInput,
   RefreshControl,
   Keyboard,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
+import { useTabBarScrollSV } from '../../lib/contexts/tabBarScroll';
 import { useSharedValue, withTiming } from 'react-native-reanimated';
 import { useScrollToTop, useIsFocused } from '@react-navigation/native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -112,6 +115,16 @@ export default function SearchScreen() {
   // 同時に TabBar 側で router.navigate('/(tabs)/search') を呼び stack root にリセット。
   const scrollRef = useRef<ScrollView>(null);
   useScrollToTop(scrollRef);
+
+  // TabBar shrink 用 scrollY を共有 SV に転送 (2026-06-12)
+  // ⚠ ~60Hz の hot path — 同期軽処理のみ (setState / async の追加禁止)。
+  const tabBarScrollSV = useTabBarScrollSV();
+  const onTabBarShrinkScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (tabBarScrollSV) tabBarScrollSV.value = e.nativeEvent.contentOffset.y;
+    },
+    [tabBarScrollSV],
+  );
 
   // ============= state =============
   const [rawQuery, setRawQuery] = useState<string>(typeof params.q === 'string' ? params.q : '');
@@ -604,6 +617,8 @@ export default function SearchScreen() {
           paddingBottom: TABBAR.height + insets.bottom + SP['10'],
           gap: SP['4'],
         }}
+        onScroll={onTabBarShrinkScroll}
+        scrollEventThrottle={16}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         refreshControl={
@@ -931,7 +946,7 @@ const TrendingTopicsRow = memo(function TrendingTopicsRow() {
             >
               <Text
                 style={{
-                  fontSize: 10,
+                  fontSize: 11,
                   color: i === 0 ? C.accent : C.text3,
                   fontWeight: '700',
                 }}
@@ -995,7 +1010,7 @@ const ResultSection = memo(function ResultSection({
               borderRadius: R.sm,
             }}
           >
-            <Text style={{ fontSize: 10, color: C.text3, fontWeight: '700' }}>
+            <Text style={{ fontSize: 11, color: C.text3, fontWeight: '700' }}>
               {total}
             </Text>
           </View>

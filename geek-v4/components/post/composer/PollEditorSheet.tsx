@@ -53,6 +53,8 @@ import { hap } from '../../../design/haptics';
 import { PressableScale } from '../../ui/PressableScale';
 import { Input } from '../../ui/Input';
 import { Toggle } from '../../ui/Toggle';
+// ★ 2026-06-12 P0-2: grabber を「引っ張れる契約」にする
+import { SheetSwipeDown } from '../../ui/SheetSwipeDown';
 
 // ============================================================
 // constants
@@ -196,6 +198,7 @@ export function PollEditorSheet({
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={{ width: '100%' }}
         >
+          <SheetSwipeDown onClose={handleClose}>
           <Animated.View
             entering={SlideInDown.duration(260)}
             exiting={SlideOutDown.duration(200)}
@@ -372,7 +375,7 @@ export function PollEditorSheet({
                     オンにすると複数の選択肢に投票できます
                   </Text>
                 </View>
-                <Toggle value={multiSelect} onChange={onToggleMulti} />
+                <Toggle value={multiSelect} onChange={onToggleMulti} accessibilityLabel="複数選択を許可" />
               </View>
 
               {/* ===== 4) 期間 ===== */}
@@ -443,6 +446,7 @@ export function PollEditorSheet({
               )}
             </ScrollView>
           </Animated.View>
+          </SheetSwipeDown>
         </KeyboardAvoidingView>
       </Animated.View>
     </Modal>

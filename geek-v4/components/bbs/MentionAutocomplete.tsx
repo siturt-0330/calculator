@@ -165,7 +165,7 @@ export function MentionAutocomplete({
         >
           <Text style={[T.caption, { color: C.text3 }]}>@ メンション候補</Text>
           {Platform.OS === 'web' && matches.length > 1 ? (
-            <Text style={[T.caption, { color: C.text4, fontSize: 10 }]}>
+            <Text style={[T.caption, { color: C.text4, fontSize: 11 }]}>
               ↑↓ / Enter
             </Text>
           ) : null}

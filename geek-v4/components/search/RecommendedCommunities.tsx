@@ -209,7 +209,7 @@ function CommunityCard({
         }}
       >
         <Icon.friends size={9} color={C.text3} strokeWidth={2.2} />
-        <Text style={{ fontSize: 10, color: C.text3, fontWeight: '700' }}>
+        <Text style={{ fontSize: 11, color: C.text3, fontWeight: '700' }}>
           {community.member_count.toLocaleString('ja-JP')}
         </Text>
       </View>

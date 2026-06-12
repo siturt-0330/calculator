@@ -30,8 +30,8 @@ export function ReasonBadge({ seenBefore }: Props) {
         borderColor: C.border,
       }}
     >
-      <Text style={{ fontSize: 10, color: C.text3 }}>🕐</Text>
-      <Text style={{ fontSize: 10, color: C.text3, fontWeight: '600' }}>履歴あり</Text>
+      <Text style={{ fontSize: 11, color: C.text3 }}>🕐</Text>
+      <Text style={{ fontSize: 11, color: C.text3, fontWeight: '600' }}>履歴あり</Text>
     </View>
   );
 }

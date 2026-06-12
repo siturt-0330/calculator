@@ -31,6 +31,7 @@ import { Lock, Camera, Image as ImageIcon } from 'lucide-react-native';
 
 import { useAuthStore } from '../../stores/authStore';
 import { useToastStore } from '../../stores/toastStore';
+import { showPermissionRescue } from '../../lib/permissionRescue';
 import { supabase } from '../../lib/supabase';
 import { prepareImageUpload, makeWebPreviewDataUrl } from '../../lib/image';
 import { openCropper } from '../../lib/imageCropper';
@@ -95,7 +96,8 @@ export default function ProfileEditScreen() {
     if (Platform.OS !== 'web') {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        show('写真へのアクセス権限が必要です', 'warn');
+        // 拒否済みは再プロンプト不可 — 設定アプリへの導線付き toast (HIG)
+        showPermissionRescue('写真へのアクセスが許可されていません');
         return;
       }
     }
@@ -146,7 +148,8 @@ export default function ProfileEditScreen() {
     if (Platform.OS !== 'web') {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        show('写真へのアクセス権限が必要です', 'warn');
+        // 拒否済みは再プロンプト不可 — 設定アプリへの導線付き toast (HIG)
+        showPermissionRescue('写真へのアクセスが許可されていません');
         return;
       }
     }

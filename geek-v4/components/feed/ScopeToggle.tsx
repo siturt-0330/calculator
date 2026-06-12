@@ -11,7 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { PressableScale } from '../ui/PressableScale';
 import { R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
-import { TIMING_NORM } from '../../design/motion';
+import { SPRING_SEGMENT, TIMING_NORM } from '../../design/motion';
 import { useColors, useGradients } from '../../hooks/useColors';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { useT } from '../../lib/i18n';
@@ -19,13 +19,17 @@ import type { FeedScope } from '../../stores/feedStore';
 
 const PAD = 3;
 // Apple Segmented Control 風 spring (damping 22, stiffness 240) ※ 指示書準拠
-const SCOPE_SPRING = { damping: 22, stiffness: 240, mass: 0.7 } as const;
+// — 同値だった design/motion.ts の SPRING_SEGMENT token 参照に統一 (体感不変)
+const SCOPE_SPRING = SPRING_SEGMENT;
 
 // 2 値で固定 (open / closed) — 配列を component 外に持つと再 render 時に
 // useEffect の依存が安定する。
+// ★ 2026-06-12 ユーザー要望: 'closed' の意味を「選択した # のみ」から
+//   「参加していないコミュニティの投稿だけ」(= 新しいコミュの発見モード) に変更。
+//   store の値 ('open'/'closed') は永続化互換のため変えない。
 const OPTIONS = [
   { v: 'open' as FeedScope, label: 'すべて', sub: '全部' },
-  { v: 'closed' as FeedScope, label: '選択した # のみ', sub: '好きだけ' },
+  { v: 'closed' as FeedScope, label: '未参加のコミュ', sub: 'みつける' },
 ] as const;
 
 export function ScopeToggle({

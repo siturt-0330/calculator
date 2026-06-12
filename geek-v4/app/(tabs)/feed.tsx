@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode
 import {
   View,
   Text,
-  RefreshControl,
   Platform,
   StyleSheet,
   ActivityIndicator,
@@ -15,7 +14,7 @@ import { FlashList } from '@shopify/flash-list';
 // ★ FlashList v2 パイロット (検証ロールアウト・既定OFF): alias 'flash-list-v2' = @shopify/flash-list@2。
 import { FlashList as FlashListV2Raw } from 'flash-list-v2';
 import { Image as ExpoImage } from 'expo-image';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
 import { fetchNotifications } from '../../lib/api/notifications';
 import { fetchProfileStatsFull } from '../../lib/api/profile';
@@ -49,8 +48,10 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useFeed } from '../../hooks/useFeed';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { markStartupOnce } from '../../lib/perf';
-// BlockedTagBanner はホームから削除済。useTagFilterStore は scope 判定 (hasLikedTags) で引き続き使用
-import { useTagFilterStore } from '../../stores/tagFilterStore';
+// BlockedTagBanner はホームから削除済。旧 scope='選択タグのみ' 時代の useTagFilterStore
+// 購読も 2026-06-12 の scope 意味変更 (未参加コミュ) で不要になり撤去。
+// 参加コミュ一覧 (未参加 filter 用) は fetchMyCommunities の cache を共有。
+import { fetchMyCommunities } from '../../lib/api/communities';
 import { useLike, useLikes } from '../../hooks/useLike';
 import { useConcern, useConcerns } from '../../hooks/useConcern';
 import { useSave, useSaves } from '../../hooks/useSave';
@@ -63,7 +64,9 @@ import { usePolls } from '../../hooks/usePolls';
 import { useFeedPage } from '../../hooks/useFeedPage';
 import { useFeedRealtime } from '../../hooks/useFeedRealtime';
 import { useUnreadCount } from '../../hooks/useNotifications';
+import { useTabBarScrollSV } from '../../lib/contexts/tabBarScroll';
 import { NotificationBadge } from '../../components/ui/NotificationBadge';
+import { GeekRefreshControl } from '../../components/ui/GeekRefreshControl';
 import { useToastStore } from '../../stores/toastStore';
 import { useFeedStore } from '../../stores/feedStore';
 import { AnonPostCard } from '../../components/feed/AnonPostCard';
@@ -111,36 +114,42 @@ const VIEWABILITY_CONFIG = { viewAreaCoveragePercentThreshold: 30 } as const;
 // ------------------------------------------------------------
 // 220ms ease-out-quart, stagger index*40ms (上限 6 cell = 240ms 上限) で、
 // 50+ items でも 2 秒待ちにならないよう cap している。
-// 初回 mount だけ走り、scroll で再 mount されたときは即表示 (replay しない)
-// — FlashList は cell を recycle するが React 視点では別 component なので、
-//   ここでは「マウント時の time が初回 render 期間内 (1.5s) なら再生する」
-//   というシンプル戦略を取らない。代わりに row 自身が「私は初回」フラグを
-//   useRef で持ち、再 render では shared value 触らず無動作。
-// reduceMotion=true は初期値を 1/0 で固定して即表示。
+// ★ animate=false なら即表示 (アニメ・delay 一切なし)。
+//   親 (FeedScreen) は「画面 mount から 1.5s 以内」だけ animate=true を渡す。
+//   理由 [scroll perf 監査 2026-06-12 確証]: FlashList はスクロールで cell pool を
+//   拡張する際に新規 mount が起き、旧実装 (無条件アニメ) では高速スクロール中の
+//   新セルが「opacity 0 で出現 → 遅れてフェードイン」して知覚的な重さ + アニメ
+//   コストを生んでいた。入場演出は初回表示の 1.5s だけで十分。
+// reduceMotion=true も即表示。
 // ============================================================
 const ROW_ENTER_DURATION = 220;
 const ROW_ENTER_STAGGER_MS = 40;
 const ROW_ENTER_STAGGER_CAP = 6; // index*40 を最大 240ms に
+const ROW_ENTER_WINDOW_MS = 1500; // 画面 mount からこの間だけ入場アニメを再生
 const FeedRowEnter = memo(function FeedRowEnter({
   index,
+  animate,
   children,
 }: {
   index: number;
+  // false なら初期値 1/0 で即表示 (高速スクロール中の新規 mount cell 用)
+  animate: boolean;
   children: ReactNode;
 }) {
   const reduceMotion = useReducedMotion();
-  const opacity = useSharedValue(reduceMotion ? 1 : 0);
-  const translateY = useSharedValue(reduceMotion ? 0 : 12);
+  const play = animate && !reduceMotion;
+  const opacity = useSharedValue(play ? 0 : 1);
+  const translateY = useSharedValue(play ? 12 : 0);
 
   // アニメ開始は mount 後の effect で行う。render 中に shared value を書くと
   // React 並行モードの二重 invocation でアニメが走らない問題が起きる。
   useEffect(() => {
-    if (reduceMotion) return;
+    if (!play) return;
     const delay = Math.min(index, ROW_ENTER_STAGGER_CAP) * ROW_ENTER_STAGGER_MS;
     const cfg = { duration: ROW_ENTER_DURATION, easing: EASE_OUT_QUART };
     opacity.value = withDelay(delay, withTiming(1, cfg));
     translateY.value = withDelay(delay, withTiming(0, cfg));
-  // mount once のみ — index/opacity/translateY は初回アニメ専用で再実行不要
+  // mount once のみ — play/index/opacity/translateY は初回アニメ専用で再実行不要
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -369,12 +378,9 @@ export default function FeedScreen() {
   // Smart skeleton timing — skeleton only after 200ms of continuous loading.
   // <200ms loads (cache hits / fast network) skip skeleton entirely to avoid flash.
   const showSkeleton = useDelayedLoading(loading, 200);
-  // ★ blockedCount は元々 BlockedTagBanner で表示していたが、ホームから外したため未使用
-  const likedTags = useTagFilterStore((s) => s.likedTags);
   const scope = useFeedStore((s) => s.scope);
   const setScope = useFeedStore((s) => s.setScope);
   const hydrateFeed = useFeedStore((s) => s.hydrate);
-  const hasLikedTags = likedTags.length > 0;
   // ★ Background prefetch — feed first paint 後に隣接タブのデータを idle 時間で先読み。
   //   React Query の cache に乗るので、ユーザーが /notifications や /mypage を tap した
   //   瞬間に「白画面 → spinner → データ」ではなく即表示できる。
@@ -384,10 +390,22 @@ export default function FeedScreen() {
   // mypage-stats のキャッシュ温めは下の idle prefetch effect (setTimeout 1500ms) で
   // fetchProfileStatsFull を使って一元化済み。ここで重複 useQuery は不要。
 
-  // 好きなタグが無いときに closed scope に居たら open へ強制
-  useEffect(() => {
-    if (!hasLikedTags && scope === 'closed') setScope('open');
-  }, [hasLikedTags, scope, setScope]);
+  // ★ scope='closed' = 「未参加コミュの投稿のみ」(2026-06-12 意味変更・発見モード)。
+  //   旧「選択した # のみ」時代の "タグ無しなら open へ強制" effect は撤去。
+  //   自分の参加コミュ一覧は community タブ/_layout prewarm と同一 key の cache を共有。
+  const { data: myCommunities } = useQuery({
+    queryKey: ['my-communities', userId],
+    queryFn: fetchMyCommunities,
+    enabled: !!userId,
+    staleTime: 30_000,
+  });
+  const myCommunityIdSet = useMemo(
+    () => new Set((myCommunities ?? []).map((c) => c.id)),
+    [myCommunities],
+  );
+  // 未ログイン (参加 0) は「全コミュ投稿が未参加」扱いで OK。
+  // ログイン済みは my-communities 解決を待ってから filter (誤って全部出すのを防ぐ)。
+  const myCommunitiesReady = !userId || myCommunities !== undefined;
   const { toggle: toggleLike } = useLike();
   const { toggle: toggleConcern } = useConcern();
   const { toggle: toggleSave } = useSave();
@@ -593,7 +611,21 @@ export default function FeedScreen() {
   // 8 件ごとに 1 つ広告を差し込む (8, 17, 26, ...) — ads が足りなければそこで終わり。
   // ad item は __ad プレフィックス + index の安定 key を持つ (ad.id が同じでも
   // 別ポジションに同一広告が出る場合に React のキー衝突を避ける)。
+  // ★ scope='closed' (未参加コミュのみ・発見モード 2026-06-12):
+  //   「コミュニティ付きの投稿」かつ「どのコミュにも参加していない」ものだけ残す。
+  //   コミュ無し投稿は対象外 (発見モードの趣旨 = 新しいコミュとの出会い)。
+  //   my-communities 解決前は素通し (一瞬の全消えと誤表示を防ぐ)。
+  const scopedPosts = useMemo<Post[]>(() => {
+    if (scope !== 'closed' || !myCommunitiesReady) return posts;
+    return posts.filter((p) => {
+      const comms = communitiesByPost[p.id];
+      if (!comms || comms.length === 0) return false;
+      return comms.every((c) => !myCommunityIdSet.has(c.community_id));
+    });
+  }, [posts, scope, communitiesByPost, myCommunityIdSet, myCommunitiesReady]);
+
   const feedItems = useMemo<FeedItem[]>(() => {
+    const posts = scopedPosts;
     if (ads.length === 0) return posts;
     const result: FeedItem[] = [];
     let adIdx = 0;
@@ -616,7 +648,7 @@ export default function FeedScreen() {
       }
     });
     return result;
-  }, [posts, ads, interestTags]);
+  }, [scopedPosts, ads, interestTags]);
 
   // ============================================================
   // ★ Viewport + Scroll velocity ベースの画像 prewarm
@@ -699,32 +731,63 @@ export default function FeedScreen() {
     [feedItems, enqueuePrefetch],
   );
 
+  // TabBar shrink 用の scrollY SharedValue (Context 経由で共有)
+  const tabBarScrollSV = useTabBarScrollSV();
+
   // スクロール速度トラッキング — onScroll は 16ms throttle 想定 (60fps)。
   // dt が 0 の最初のサンプルは無視。state に書かないので余計な re-render なし。
-  const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const y = e.nativeEvent.contentOffset.y;
-    const now = Date.now();
-    const prevT = lastScrollTRef.current;
-    if (prevT > 0) {
-      const dt = now - prevT;
-      if (dt > 0) {
-        const dy = y - lastScrollYRef.current;
-        // px/s — 16ms 単位だと 1px の dy でも 62.5 px/s なので、スパイク抑制に
-        // simple low-pass (0.7 既存 + 0.3 新規) を当てる
-        const instant = (dy / dt) * 1000;
-        scrollVelocityRef.current =
-          scrollVelocityRef.current * 0.7 + instant * 0.3;
+  // ⚠ ~60Hz の hot path — 同期軽処理のみ (setState / async / 重い計算の追加禁止)。
+  const handleScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const y = e.nativeEvent.contentOffset.y;
+      // TabBar が読む scrollY を更新 (shrink interpolation のソース)
+      if (tabBarScrollSV) tabBarScrollSV.value = y;
+      const now = Date.now();
+      const prevT = lastScrollTRef.current;
+      if (prevT > 0) {
+        const dt = now - prevT;
+        if (dt > 0) {
+          const dy = y - lastScrollYRef.current;
+          // px/s — 16ms 単位だと 1px の dy でも 62.5 px/s なので、スパイク抑制に
+          // simple low-pass (0.7 既存 + 0.3 新規) を当てる
+          const instant = (dy / dt) * 1000;
+          scrollVelocityRef.current =
+            scrollVelocityRef.current * 0.7 + instant * 0.3;
+        }
       }
-    }
-    lastScrollYRef.current = y;
-    lastScrollTRef.current = now;
-  }, []);
+      lastScrollYRef.current = y;
+      lastScrollTRef.current = now;
+    },
+    [tabBarScrollSV],
+  );
+
+  // ★ perf (scroll 監査 2026-06-12): enrichedPost の参照キャッシュ。
+  //   AnonPostCard の memo comparator は `prev.post !== next.post` の **参照比較** なので、
+  //   renderItem 内で毎回 spread 生成すると親 re-render のたびに全 visible カードの
+  //   memo が破れて再レンダしていた [実証済: comparator L1233]。
+  //   入力 (base post 参照 + full 由来の merge フィールド) が変わらない限り
+  //   同一オブジェクトを返して memo を効かせる。
+  //   sig はタプル比較 (string 連結より安価で型も安全)。
+  const enrichedCacheRef = useRef(
+    new Map<string, { sig: readonly unknown[]; value: Post }>(),
+  );
+
+  // 入場アニメの再生 window — 画面 mount から ROW_ENTER_WINDOW_MS の間だけ true。
+  // lazy init (render 中の ref 初期化は React 公式の許容パターン)。
+  const rowEnterUntilRef = useRef<number | null>(null);
+  if (rowEnterUntilRef.current === null) {
+    rowEnterUntilRef.current = Date.now() + ROW_ENTER_WINDOW_MS;
+  }
+  const rowEnterActive = useCallback(
+    () => Date.now() < (rowEnterUntilRef.current ?? 0),
+    [],
+  );
 
   const renderItem = useCallback(
     ({ item, index }: { item: FeedItem; index: number }) => {
       if (isAdItem(item)) {
         return (
-          <FeedRowEnter index={index}>
+          <FeedRowEnter index={index} animate={rowEnterActive()}>
             <AdCard ad={item.ad} position={item.position} matchedTags={item.matchedTags} />
           </FeedRowEnter>
         );
@@ -754,19 +817,35 @@ export default function FeedScreen() {
       //   毎 render 再生成され optimistic patch (patchFeedPagePost) で即時更新されるので新鮮。
       // de-anon Phase2: 投稿者アイデンティティ (avatar / pseudonym) も RPC cache (full)
       //   から merge して AnonPostCard に渡す (author_id 非依存で投稿者を主役表示するため)。
-      const enrichedPost = full
-        ? {
+      let enrichedPost: Post;
+      if (full) {
+        const likes = full.likes_count ?? post.likes_count;
+        const comments = full.comments_count ?? post.comments_count;
+        const oa = full.official_author ?? undefined;
+        const av = full.avatar_url ?? post.avatar_url ?? null;
+        const ae = full.avatar_emoji ?? post.avatar_emoji ?? null;
+        const pid = full.pseudonym_id ?? post.pseudonym_id ?? null;
+        const sig = [post, likes, comments, oa, av, ae, pid] as const;
+        const cached = enrichedCacheRef.current.get(post.id);
+        if (cached && cached.sig.every((v, i) => v === sig[i])) {
+          enrichedPost = cached.value;
+        } else {
+          enrichedPost = {
             ...post,
-            likes_count: full.likes_count ?? post.likes_count,
-            comments_count: full.comments_count ?? post.comments_count,
-            ...(full.official_author ? { official_author: full.official_author } : {}),
-            avatar_url: full.avatar_url ?? post.avatar_url ?? null,
-            avatar_emoji: full.avatar_emoji ?? post.avatar_emoji ?? null,
-            pseudonym_id: full.pseudonym_id ?? post.pseudonym_id ?? null,
-          }
-        : post;
+            likes_count: likes,
+            comments_count: comments,
+            ...(oa ? { official_author: oa } : {}),
+            avatar_url: av,
+            avatar_emoji: ae,
+            pseudonym_id: pid,
+          };
+          enrichedCacheRef.current.set(post.id, { sig, value: enrichedPost });
+        }
+      } else {
+        enrichedPost = post;
+      }
       return (
-        <FeedRowEnter index={index}>
+        <FeedRowEnter index={index} animate={rowEnterActive()}>
           <AnonPostCard
             post={enrichedPost}
             isOwn={full?.is_own}
@@ -803,6 +882,7 @@ export default function FeedScreen() {
       legacyPolls,
       reasonsMap,
       communitiesByPost,
+      rowEnterActive,
     ],
   );
 
@@ -979,12 +1059,7 @@ export default function FeedScreen() {
 
       <View style={{ alignItems: 'center' }}>
         <View style={{ width: '100%', maxWidth: 720, paddingHorizontal: SP['4'], paddingBottom: SP['3'] }}>
-        <ScopeToggle
-          value={scope}
-          onChange={setScope}
-          disabledClosed={!hasLikedTags}
-          onClosedWhenEmpty={() => router.push('/filter' as never)}
-        />
+        <ScopeToggle value={scope} onChange={setScope} />
         </View>
       </View>
 
@@ -1030,7 +1105,8 @@ export default function FeedScreen() {
         estimatedItemSize={640}
         ListHeaderComponent={LIST_HEADER_ELEMENT}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.accent} />
+          // ★ brand polish: OS 既定 spinner を Geek の brand gradient tint に置換 (mypage と同じ使い方)
+          <GeekRefreshControl refreshing={refreshing} onRefresh={refresh} />
         }
         onEndReached={loadMore}
         onEndReachedThreshold={0.6}
@@ -1101,10 +1177,12 @@ const FeedEmptyState = memo(function FeedEmptyState({
   return (
     <EmptyState
       icon={Icon.sparkles}
-      title={scope === 'closed' ? '好きなタグの投稿がまだありません' : '投稿がありません'}
+      title={
+        scope === 'closed' ? '未参加コミュニティの投稿はありません' : '投稿がありません'
+      }
       message={
         scope === 'closed'
-          ? '「All」に切り替えるか、好きなタグを増やしてみよう'
+          ? 'いまは参加中のコミュニティの投稿だけのようです。「すべて」に切り替えるか、検索で新しいコミュニティを探してみよう'
           : 'タグをフォローして興味のある投稿を見つけるか、最初の投稿をしてみよう'
       }
       actionLabel="投稿する"

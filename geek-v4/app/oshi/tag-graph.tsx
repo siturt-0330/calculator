@@ -426,9 +426,9 @@ export default function TagGraphScreen() {
                 <Text style={[T.smallM, { color: '#7CB1FF', fontWeight: '700', flex: 1 }]}>
                   AI が連携を提案
                 </Text>
-                {cooccurLoading && <Text style={{ fontSize: 10, color: '#7CB1FF' }}>分析中…</Text>}
+                {cooccurLoading && <Text style={{ fontSize: 11, color: '#7CB1FF' }}>分析中…</Text>}
               </View>
-              <Text style={[T.caption, { color: '#ffffffaa', fontSize: 10 }]}>
+              <Text style={[T.caption, { color: '#ffffffaa', fontSize: 11 }]}>
                 共起・字面・タグ階層・同義語からベクトル類似度を計算
               </Text>
               {aiSuggestions.map((s) => (
@@ -458,9 +458,9 @@ export default function TagGraphScreen() {
                             borderWidth: 1, borderColor: 'rgba(124,177,255,0.45)',
                           }}
                         >
-                          <Text style={{ fontSize: 9, color: '#7CB1FF' }}>＋</Text>
+                          <Text style={{ fontSize: 11, color: '#7CB1FF' }}>＋</Text>
                           <Text style={{ fontSize: 11, color: '#7CB1FF', fontWeight: '700' }}>{sg.tag}</Text>
-                          <Text style={{ fontSize: 9, color: '#ffffff77' }}>{Math.round(sg.score * 100)}%</Text>
+                          <Text style={{ fontSize: 11, color: '#ffffff77' }}>{Math.round(sg.score * 100)}%</Text>
                         </PressableScale>
                       </View>
                     ))}

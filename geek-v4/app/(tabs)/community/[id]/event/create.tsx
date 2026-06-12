@@ -365,7 +365,7 @@ function Badge({ kind }: { kind: BadgeKind }) {
         borderColor: meta.border,
       }}
     >
-      <Text style={{ fontSize: 10, color: meta.fg, fontWeight: '700' }}>
+      <Text style={{ fontSize: 11, color: meta.fg, fontWeight: '700' }}>
         {meta.label}
       </Text>
     </View>

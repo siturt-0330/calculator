@@ -29,6 +29,7 @@ import { PressableScale } from '../../../../components/ui/PressableScale';
 import { ConfirmDialog } from '../../../../components/ui/ConfirmDialog';
 import { Icon } from '../../../../constants/icons';
 import { useToastStore } from '../../../../stores/toastStore';
+import { showPermissionRescue } from '../../../../lib/permissionRescue';
 import {
   fetchCommunity,
   updateCommunity,
@@ -110,7 +111,8 @@ export default function EditCommunityScreen() {
       if (Platform.OS !== 'web') {
         const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!perm.granted) {
-          show('写真へのアクセス権限が必要です', 'warn');
+          // 拒否済みは再プロンプト不可 — 設定アプリへの導線付き toast (HIG)
+          showPermissionRescue('写真へのアクセスが許可されていません');
           return;
         }
       }
@@ -757,7 +759,7 @@ function Badge({ kind }: { kind: BadgeKind }) {
         borderColor: meta.border,
       }}
     >
-      <Text style={{ fontSize: 10, color: meta.fg, fontWeight: '700' }}>
+      <Text style={{ fontSize: 11, color: meta.fg, fontWeight: '700' }}>
         {meta.label}
       </Text>
     </View>

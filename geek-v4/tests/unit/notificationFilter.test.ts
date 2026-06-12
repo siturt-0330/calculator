@@ -46,6 +46,10 @@ describe('notificationCategoryFor', () => {
     expect(notificationCategoryFor('system')).toBe('system');
   });
 
+  it('community_post (0149 コミュニティ新着) も同名 category に変換される', () => {
+    expect(notificationCategoryFor('community_post')).toBe('community_post');
+  });
+
   it('未知の type は "system" にフォールバック', () => {
     expect(notificationCategoryFor('unknown_type')).toBe('system');
     expect(notificationCategoryFor('')).toBe('system');

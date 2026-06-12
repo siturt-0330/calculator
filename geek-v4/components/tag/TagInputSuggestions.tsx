@@ -190,7 +190,7 @@ export function TagInputSuggestions({
                     </Text>
                   ))}
                 </Text>
-                <Text style={{ fontSize: 9, color: C.text3, marginLeft: 2 }}>
+                <Text style={{ fontSize: 11, color: C.text3, marginLeft: 2 }}>
                   {s.primaryReason}
                 </Text>
               </PressableScale>

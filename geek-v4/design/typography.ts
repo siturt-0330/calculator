@@ -69,6 +69,13 @@ export const FONT = {
   jpB: 'NotoSansJP_700Bold',
 } as const;
 
+/**
+ * Text style alias 集。
+ * - 新規 component は Apple HIG 名 (largeTitle / title1〜3 / headline / bodyHig /
+ *   callout / subhead / footnote / caption1 / caption2) を推奨。
+ * - 既存 alias (hero / display / h1〜h4 / body / small / caption ...) は互換維持
+ *   (100+ 箇所で使用中のため変更・削除しない)。
+ */
 export const T: Record<string, TextStyle> = {
   hero:   { fontFamily: FONT.display,  fontSize: 40, lineHeight: 48, letterSpacing: -0.6 },
   display:{ fontFamily: FONT.display,  fontSize: 34, lineHeight: 40, letterSpacing: -0.5 },
@@ -91,6 +98,28 @@ export const T: Record<string, TextStyle> = {
   buttonLg: { fontFamily: FONT.jpB,    fontSize: 16, lineHeight: 22 },
   buttonMd: { fontFamily: FONT.jpB,    fontSize: 14, lineHeight: 20 },
   buttonSm: { fontFamily: FONT.jpM,    fontSize: 12, lineHeight: 16 },
+
+  // ============================================================
+  // Apple HIG Text Styles (11 種) — Obsidian: Apple Typography 章 §2
+  // ------------------------------------------------------------
+  // 新規 component はこちらの HIG 名を推奨 (既存 alias は互換維持)。
+  // - 'body' は既存 15/22 が 100+ 箇所で使用中のため、HIG の body (17pt) は
+  //   'bodyHig' として並列追加する (既存 body の意味は変えない)。
+  // - weight は既存規約どおり原則 fontFamily 側で持つ (jpB/jpM=700 集約)。
+  //   largeTitle / headline のみ HIG 指定の fontWeight を明示 (既存 component
+  //   でも fontFamily + fontWeight 併用は実績ありのパターン)。
+  // ============================================================
+  largeTitle: { fontFamily: FONT.display, fontSize: 34, lineHeight: 40, fontWeight: '700' },
+  title1:   { fontFamily: FONT.display2, fontSize: 28, lineHeight: 34 },
+  title2:   { fontFamily: FONT.jpB,      fontSize: 22, lineHeight: 28 },
+  title3:   { fontFamily: FONT.jpB,      fontSize: 20, lineHeight: 25 },
+  headline: { fontFamily: FONT.jpM,      fontSize: 17, lineHeight: 22, fontWeight: '600' },
+  bodyHig:  { fontFamily: FONT.jp,       fontSize: 17, lineHeight: 22 },
+  callout:  { fontFamily: FONT.jp,       fontSize: 16, lineHeight: 21 },
+  subhead:  { fontFamily: FONT.jp,       fontSize: 15, lineHeight: 20 },
+  footnote: { fontFamily: FONT.jp,       fontSize: 13, lineHeight: 18 },
+  caption1: { fontFamily: FONT.jp,       fontSize: 12, lineHeight: 16 },
+  caption2: { fontFamily: FONT.jp,       fontSize: 11, lineHeight: 13 },
 } as const;
 
 export const textColor = (kind: 'primary' | 'secondary' | 'tertiary' | 'disabled' = 'primary') => ({

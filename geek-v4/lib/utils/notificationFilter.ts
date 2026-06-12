@@ -36,6 +36,7 @@ export function notificationCategoryFor(type: string): NotificationCategory {
     case 'event':
     case 'mod_action':
     case 'system':
+    case 'community_post':
       return type;
     default:
       // 未知 type は system 通知として扱う (運営からのお知らせと同等)

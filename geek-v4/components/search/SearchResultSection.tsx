@@ -75,7 +75,7 @@ export function SearchResultSection<T>({
             borderRadius: R.sm,
           }}
         >
-          <Text style={{ fontSize: 10, color: C.text3, fontWeight: '700' }}>
+          <Text style={{ fontSize: 11, color: C.text3, fontWeight: '700' }}>
             {count}
           </Text>
         </View>

@@ -57,7 +57,7 @@ export function PollCard({ poll }: { poll: Poll }) {
             paddingHorizontal: 6, paddingVertical: 2,
             backgroundColor: C.bg4, borderRadius: R.sm,
           }}>
-            <Text style={[T.caption, { color: C.text3, fontSize: 10 }]}>終了</Text>
+            <Text style={[T.caption, { color: C.text3, fontSize: 11 }]}>終了</Text>
           </View>
         )}
       </View>

@@ -197,8 +197,8 @@ function PhotoCell({
             gap: 2,
           }}
         >
-          <Text style={{ fontSize: 9, color: '#fff' }}>📑</Text>
-          <Text style={{ fontSize: 9, color: '#fff', fontWeight: '700' }}>
+          <Text style={{ fontSize: 11, color: '#fff' }}>📑</Text>
+          <Text style={{ fontSize: 11, color: '#fff', fontWeight: '700' }}>
             {post.media_urls.length}
           </Text>
         </View>
@@ -219,8 +219,8 @@ function PhotoCell({
             gap: 2,
           }}
         >
-          <Text style={{ fontSize: 9, color: '#fff' }}>♥</Text>
-          <Text style={{ fontSize: 9, color: '#fff', fontWeight: '700' }}>
+          <Text style={{ fontSize: 11, color: '#fff' }}>♥</Text>
+          <Text style={{ fontSize: 11, color: '#fff', fontWeight: '700' }}>
             {post.likes_count}
           </Text>
         </View>

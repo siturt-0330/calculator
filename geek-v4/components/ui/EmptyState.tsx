@@ -12,6 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { LucideIcon } from 'lucide-react-native';
 import { SP } from '../../design/tokens';
 import { T } from '../../design/typography';
+import { AppText } from './AppText';
 import { Button } from './Button';
 import { useColors, useGradients, useShadows } from '../../hooks/useColors';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
@@ -200,20 +201,23 @@ export function EmptyState({
       </Animated.Text>
 
       {message && (
-        <Animated.Text
-          style={[
-            T.body,
-            {
-              color: C.text2,
-              textAlign: 'center',
-              maxWidth: 320,
-              lineHeight: 22,
-            },
-            messageStyle,
-          ]}
-        >
-          {message}
-        </Animated.Text>
+        // 本文は AppText (Dynamic Type 部分対応)。入場アニメ (opacity/translateY) は
+        // wrapper の Animated.View に移譲 — 見た目は Animated.Text 時代と同一
+        <Animated.View style={messageStyle}>
+          <AppText
+            style={[
+              T.body,
+              {
+                color: C.text2,
+                textAlign: 'center',
+                maxWidth: 320,
+                lineHeight: 22,
+              },
+            ]}
+          >
+            {message}
+          </AppText>
+        </Animated.View>
       )}
 
       {actionLabel && onAction && (

@@ -149,9 +149,9 @@ export function NodeView({
                   borderColor: C.accentSoft,
                 }}
               >
-                <Text style={{ fontSize: 10, color: C.accentLight }}>≡</Text>
+                <Text style={{ fontSize: 11, color: C.accentLight }}>≡</Text>
                 <Text style={[T.caption, { color: C.accentLight }]}>{a}</Text>
-                <Text style={{ fontSize: 10, color: C.text3 }}>✕</Text>
+                <Text style={{ fontSize: 11, color: C.text3 }}>✕</Text>
               </PressableScale>
             ))}
           </View>
@@ -177,9 +177,9 @@ export function NodeView({
                   borderColor: 'rgba(124,177,255,0.4)',
                 }}
               >
-                <Text style={{ fontSize: 10, color: '#7CB1FF' }}>🔗</Text>
+                <Text style={{ fontSize: 11, color: '#7CB1FF' }}>🔗</Text>
                 <Text style={[T.caption, { color: '#7CB1FF' }]}>{r}</Text>
-                <Text style={{ fontSize: 10, color: C.text3 }}>✕</Text>
+                <Text style={{ fontSize: 11, color: C.text3 }}>✕</Text>
               </PressableScale>
             ))}
           </View>
@@ -210,7 +210,7 @@ export function NodeView({
               borderWidth: 1, borderColor: C.border,
             }}
           >
-            <Text style={{ fontSize: 10, color: C.text2 }}>≡</Text>
+            <Text style={{ fontSize: 11, color: C.text2 }}>≡</Text>
             <Text style={[T.caption, { color: C.text2, fontWeight: '600' }]}>別名</Text>
           </PressableScale>
           <PressableScale
@@ -224,7 +224,7 @@ export function NodeView({
               borderWidth: 1, borderColor: 'rgba(124,177,255,0.4)',
             }}
           >
-            <Text style={{ fontSize: 10 }}>🔗</Text>
+            <Text style={{ fontSize: 11 }}>🔗</Text>
             <Text style={[T.caption, { color: '#7CB1FF', fontWeight: '600' }]}>関連</Text>
           </PressableScale>
           <PressableScale
@@ -253,7 +253,7 @@ export function NodeView({
               borderWidth: 1, borderColor: C.border,
             }}
           >
-            <Text style={{ fontSize: 10, color: C.text2 }}>⇄</Text>
+            <Text style={{ fontSize: 11, color: C.text2 }}>⇄</Text>
             <Text style={[T.caption, { color: C.text2, fontWeight: '600' }]}>移動</Text>
           </PressableScale>
         </View>

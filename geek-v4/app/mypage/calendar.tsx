@@ -103,7 +103,7 @@ export default function MyCalendarScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <Icon.settings size={14} color={hidden.size > 0 ? C.amber : C.text2} strokeWidth={2.4} />
             {hidden.size > 0 && (
-              <Text style={{ fontSize: 10, color: C.amber, fontWeight: '700' }}>
+              <Text style={{ fontSize: 11, color: C.amber, fontWeight: '700' }}>
                 {hidden.size}
               </Text>
             )}

@@ -221,11 +221,11 @@ export default function FilterScreen() {
                         borderStyle: 'dashed',
                       }}
                     >
-                      <Text style={{ fontSize: 10 }}>＋</Text>
+                      <Text style={{ fontSize: 11 }}>＋</Text>
                       <Text style={[T.caption, { color: meta.color, fontWeight: '700' }]}>
                         {s.tag}
                       </Text>
-                      <Text style={{ fontSize: 9, color: C.text3 }}>
+                      <Text style={{ fontSize: 11, color: C.text3 }}>
                         {meta.icon}
                         {s.via}
                       </Text>

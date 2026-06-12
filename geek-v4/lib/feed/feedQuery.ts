@@ -54,7 +54,12 @@ export async function fetchFeedFirstPage(opts: {
   qc: QueryClient;
 }): Promise<FeedPageResult> {
   const { sort, scope, likedTags, blockedTags, userId, qc } = opts;
-  const filterTags = scope === 'closed' && likedTags.length > 0 ? likedTags : undefined;
+  // ★ 2026-06-12: 'closed' の意味を「選択タグのみ」→「未参加コミュの投稿のみ」に変更。
+  //   タグでの server フィルタは廃止 (filterTags 常に undefined)。
+  //   未参加コミュの絞り込みは client 側 (feed.tsx の discoverPosts) で行う —
+  //   posts ↔ communities の対応 (communitiesByPost) と自分の参加コミュ一覧が
+  //   client に揃っており、server 側に新 RPC を足さずに済むため。
+  const filterTags = undefined;
 
   if (sort === 'for-you' && scope === 'open') {
     // Value Model 個人化フィード (0141): タグ親和性・既読除外・コールドスタートを適用

@@ -781,7 +781,7 @@ function ReportCard({
           }}
         >
           <Icon.flag size={11} color={C.red} strokeWidth={2.4} />
-          <Text style={{ color: C.red, fontSize: 10, fontWeight: '800' }}>
+          <Text style={{ color: C.red, fontSize: 11, fontWeight: '800' }}>
             {report.report_count} 件の通報
           </Text>
         </View>
@@ -815,7 +815,7 @@ function ReportCard({
               }}
             >
               <Text
-                style={{ color: C.text3, fontSize: 10, fontWeight: '600' }}
+                style={{ color: C.text3, fontSize: 11, fontWeight: '600' }}
                 numberOfLines={1}
               >
                 {r}
@@ -941,7 +941,7 @@ function BanRow({
         }}
       >
         <Icon.check size={11} color={C.accent} strokeWidth={2.4} />
-        <Text style={{ color: C.accent, fontSize: 10, fontWeight: '700' }}>解除</Text>
+        <Text style={{ color: C.accent, fontSize: 11, fontWeight: '700' }}>解除</Text>
       </PressableScale>
     </View>
   );

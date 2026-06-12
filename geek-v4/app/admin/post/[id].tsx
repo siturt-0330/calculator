@@ -112,7 +112,7 @@ export default function AdminPostDetailScreen() {
                 borderColor: C.border,
               }}
             >
-              <Text style={[T.mono, { color: C.text3, fontSize: 10 }]}>
+              <Text style={[T.mono, { color: C.text3, fontSize: 11 }]}>
                 Post #{postIdShort}
               </Text>
             </View>
@@ -265,7 +265,7 @@ function AuthorCard({
         <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
           投稿: {formatRelative(createdAt)}
         </Text>
-        <Text style={[T.mono, { color: C.text4, fontSize: 10 }]} numberOfLines={1}>
+        <Text style={[T.mono, { color: C.text4, fontSize: 11 }]} numberOfLines={1}>
           {authorId}
         </Text>
       </View>
@@ -406,7 +406,7 @@ function ChipBadge({
         borderColor: subtle ? C.border : color + '55',
       }}
     >
-      <Text style={{ fontSize: 10, color: subtle ? C.text3 : color, fontWeight: '700' }}>
+      <Text style={{ fontSize: 11, color: subtle ? C.text3 : color, fontWeight: '700' }}>
         {label}
       </Text>
     </View>
@@ -500,7 +500,7 @@ function ReporterChip({
       <Text style={[T.caption, { color: C.text, flexShrink: 1 }]} numberOfLines={1}>
         {reporter.nickname ?? '(unknown)'}
       </Text>
-      <Text style={[T.caption, { color: C.text4, fontSize: 10 }]}>
+      <Text style={[T.caption, { color: C.text4, fontSize: 11 }]}>
         {formatRelative(reporter.created_at)}
       </Text>
     </View>
@@ -584,7 +584,7 @@ function TimelineRow({ log, isLast }: { log: ModerationLog; isLast: boolean }) {
             {formatRelative(log.created_at)}
           </Text>
         </View>
-        <Text style={[T.mono, { color: C.text4, fontSize: 10 }]} numberOfLines={1}>
+        <Text style={[T.mono, { color: C.text4, fontSize: 11 }]} numberOfLines={1}>
           admin: {log.admin_id.slice(-12)}
         </Text>
         {log.reason ? (

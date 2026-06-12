@@ -20,6 +20,24 @@ module.exports = {
     'react-native/no-inline-styles': 'off',
     'react-native/no-color-literals': 'off',
     'react-native/sort-styles': 'off',
+    // AppText / HeadingText は Text の wrapper (components/ui/) — 生テキストを許可
+    'react-native/no-raw-text': ['error', { skip: ['AppText', 'HeadingText'] }],
+    // Apple HIG: 可読テキストの最小サイズは 11pt。9-10pt の直書きを再発させない
+    'no-restricted-syntax': [
+      'warn',
+      {
+        selector:
+          "Property[key.name='fontSize'] > Literal[value<11], Property[key.value='fontSize'] > Literal[value<11]",
+        message: 'fontSize は 11pt 未満禁止 (Apple HIG)。T.caption (11pt) 以上を使ってください。',
+      },
+    ],
   },
+  overrides: [
+    {
+      // テストの期待値・typography のトークン定義は fontSize リテラル検査の対象外
+      files: ['tests/**/*', '**/*.test.ts', '**/*.test.tsx', 'design/typography.ts'],
+      rules: { 'no-restricted-syntax': 'off' },
+    },
+  ],
   ignorePatterns: ['node_modules', '.expo', 'ios', 'android', 'dist'],
 };

@@ -12,6 +12,8 @@
 import { Modal, View, Text, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '../ui/PressableScale';
+// ★ 2026-06-12 P0-2: grabber を「引っ張れる契約」にする
+import { SheetSwipeDown } from '../ui/SheetSwipeDown';
 import { useColors } from '../../hooks/useColors';
 import { SP, R } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -54,6 +56,7 @@ export function ReportSheet({
         style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
       >
         {/* カード本体 — タップを captures して backdrop close を防ぐ */}
+        <SheetSwipeDown onClose={onClose}>
         <Pressable
           onPress={() => {}}
           style={{
@@ -116,6 +119,7 @@ export function ReportSheet({
             <Text style={[T.bodyB, { color: C.text2 }]}>キャンセル</Text>
           </PressableScale>
         </Pressable>
+        </SheetSwipeDown>
       </Pressable>
     </Modal>
   );
