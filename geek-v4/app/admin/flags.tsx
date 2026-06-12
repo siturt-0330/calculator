@@ -199,7 +199,7 @@ function FlagRow({
                   borderColor: C.amber + '55',
                 }}
               >
-                <Text style={{ fontSize: 10, color: C.amber, fontWeight: '700' }}>
+                <Text style={{ fontSize: 11, color: C.amber, fontWeight: '700' }}>
                   {flag.percentage}%
                 </Text>
               </View>

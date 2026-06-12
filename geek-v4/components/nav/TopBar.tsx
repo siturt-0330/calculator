@@ -4,16 +4,27 @@ import { BlurView } from 'expo-blur';
 import Animated, {
   interpolate,
   useAnimatedStyle,
-  useReducedMotion,
   SharedValue,
 } from 'react-native-reanimated';
 import { SP, SIZE } from '../../design/tokens';
 import { T } from '../../design/typography';
 import { useColors } from '../../hooks/useColors';
+import { useReduceTransparency } from '../../hooks/useReduceTransparency';
 import { useResolvedTheme } from '../../lib/theme/themeStore';
 
 type Props = {
   title?: string;
+  /**
+   * iOS 11+ の large title スタイル。
+   * 使い方: `<TopBar title="設定" large scrollY={scrollY} />` のように
+   * `scrollY` (Reanimated SharedValue。`useAnimatedScrollHandler` 等でリストの
+   * contentOffset.y を流し込む) とセットで渡すと、スクロール量 [0, 60] で
+   * 下段の大タイトルが消え、上段の小タイトルがフェードインする collapse 表現になる。
+   * `scrollY` 無しだと大タイトルが静的に出続けるだけ。
+   * ※ 注意: collapse は opacity / translateY のみで **バーの高さ自体は縮まない**
+   *   (row 2 のレイアウトは残る)。高さも詰めたい画面では現状使えない。
+   *   2026-06 時点で実渡し 0 件 (将来の large title 画面用に維持)。
+   */
   large?: boolean;
   scrollY?: SharedValue<number>;
   left?: React.ReactNode;
@@ -56,7 +67,15 @@ export function TopBar({
   const C = useColors();
   const theme = useResolvedTheme();
   const isDark = theme === 'dark';
-  const reduceMotion = useReducedMotion();
+  // ★ a11y の役割分担 (Apple HIG / Obsidian「Apple Liquid Glass 設計言語」§4):
+  //   - Reduce Motion が無効化するのは「弾性アニメ・大きな移動」。scroll に 1:1
+  //     追従する opacity 補間は motion ではないため、この file の scroll 連動
+  //     interpolate (aBackdrop / aLargeTitle / aHairline) は RM でも維持する
+  //     (時間アニメ withTiming/withSpring はこの file に存在しない)。
+  //     旧実装は RM で backdrop を常時 opaque に固定し scroll edge appearance を
+  //     失っていた — それは Reduce Transparency の仕事の取り違え。
+  //   - Reduce Transparency ON のときだけ blur/透過をやめて不透明 bg に fallback。
+  const reduceTransparency = useReduceTransparency();
 
   // 上部 small title の opacity:
   // - large モード: scrollY が COLLAPSE_END に近づくと現れる
@@ -77,7 +96,10 @@ export function TopBar({
   // large title 本体 (下部) の collapse: opacity と translateY/scale で縮む
   const aLargeTitle = useAnimatedStyle(() => {
     if (!large) return { opacity: 1 };
-    if (!scrollY || reduceMotion) return { opacity: 1 };
+    // ※ reduce motion でも collapse は維持する (scroll 1:1 追従 = motion ではない。
+    //   UIKit の large title も RM 下で collapse する)。RM で固定すると
+    //   aSmallTitle 側だけ fade in して大小タイトルが二重表示になるバグだった。
+    if (!scrollY) return { opacity: 1 };
     const o = interpolate(
       scrollY.value,
       [COLLAPSE_START, COLLAPSE_END - 10],
@@ -109,8 +131,10 @@ export function TopBar({
 
   // backdrop の不透明度 (transparent → ほぼ opaque)
   // scrollY が undefined のときは static で常時表示
+  // ※ reduce motion でも scroll edge appearance (上端で透明 → スクロールで opaque)
+  //   は維持する。旧実装の `|| reduceMotion` → 常時 opaque は HIG の取り違え (上記)。
   const aBackdrop = useAnimatedStyle(() => {
-    if (!scrollY || reduceMotion) return { opacity: 1 };
+    if (!scrollY) return { opacity: 1 };
     return {
       opacity: interpolate(
         scrollY.value,
@@ -148,20 +172,24 @@ export function TopBar({
         style,
       ]}
     >
-      {/* backdrop: native = BlurView, web = backdrop-filter */}
+      {/* backdrop: native = BlurView, web = backdrop-filter
+          Reduce Transparency ON のときは blur/透過を使わず不透明 bg (C.bg)。
+          scroll edge appearance (aBackdrop の opacity 補間) はどちらでも維持。 */}
       {Platform.OS === 'web' ? (
         <Animated.View
           pointerEvents="none"
           style={[
             StyleSheet.absoluteFill,
-            {
-              backgroundColor: webBgColor,
-              // ★ blur 半径は固定。毎フレーム動かさないことで Safari の全面再描画を断つ。
-              ...({
-                backdropFilter: 'blur(30px) saturate(180%)',
-                WebkitBackdropFilter: 'blur(30px) saturate(180%)',
-              } as object),
-            },
+            reduceTransparency
+              ? { backgroundColor: C.bg }
+              : {
+                  backgroundColor: webBgColor,
+                  // ★ blur 半径は固定。毎フレーム動かさないことで Safari の全面再描画を断つ。
+                  ...({
+                    backdropFilter: 'blur(30px) saturate(180%)',
+                    WebkitBackdropFilter: 'blur(30px) saturate(180%)',
+                  } as object),
+                },
             aBackdrop,
           ]}
         />
@@ -170,17 +198,25 @@ export function TopBar({
           pointerEvents="none"
           style={[StyleSheet.absoluteFill, aBackdrop]}
         >
-          <View
-            style={[
-              StyleSheet.absoluteFill,
-              { backgroundColor: fallbackBg },
-            ]}
-          />
-          <BlurView
-            intensity={BLUR_INTENSITY_MAX}
-            tint={blurTint}
-            style={StyleSheet.absoluteFill}
-          />
+          {reduceTransparency ? (
+            <View
+              style={[StyleSheet.absoluteFill, { backgroundColor: C.bg }]}
+            />
+          ) : (
+            <>
+              <View
+                style={[
+                  StyleSheet.absoluteFill,
+                  { backgroundColor: fallbackBg },
+                ]}
+              />
+              <BlurView
+                intensity={BLUR_INTENSITY_MAX}
+                tint={blurTint}
+                style={StyleSheet.absoluteFill}
+              />
+            </>
+          )}
         </Animated.View>
       )}
 

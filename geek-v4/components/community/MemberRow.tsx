@@ -140,7 +140,7 @@ export function MemberRow({
                 borderRadius: R.sm,
               }}
             >
-              <Text style={{ color: C.text3, fontSize: 10, fontWeight: '700' }}>あなた</Text>
+              <Text style={{ color: C.text3, fontSize: 11, fontWeight: '700' }}>あなた</Text>
             </View>
           )}
         </View>
@@ -155,7 +155,7 @@ export function MemberRow({
               borderColor: meta.border,
             }}
           >
-            <Text style={{ color: meta.color, fontSize: 10, fontWeight: '700' }}>
+            <Text style={{ color: meta.color, fontSize: 11, fontWeight: '700' }}>
               {meta.label}
             </Text>
           </View>
@@ -186,7 +186,7 @@ export function MemberRow({
             }}
           >
             <Icon.award size={11} color="#F5C842" strokeWidth={2.4} />
-            <Text style={{ color: '#F5C842', fontSize: 10, fontWeight: '700' }}>オーナー譲渡</Text>
+            <Text style={{ color: '#F5C842', fontSize: 11, fontWeight: '700' }}>オーナー譲渡</Text>
           </PressableScale>
         )}
         {canPromote && onPromote && (
@@ -207,7 +207,7 @@ export function MemberRow({
             }}
           >
             <Icon.shield size={11} color={C.accent} strokeWidth={2.4} />
-            <Text style={{ color: C.accent, fontSize: 10, fontWeight: '700' }}>昇格</Text>
+            <Text style={{ color: C.accent, fontSize: 11, fontWeight: '700' }}>昇格</Text>
           </PressableScale>
         )}
         {canDemote && onDemote && (
@@ -228,7 +228,7 @@ export function MemberRow({
             }}
           >
             <Icon.mypage size={11} color={C.text2} strokeWidth={2.4} />
-            <Text style={{ color: C.text2, fontSize: 10, fontWeight: '700' }}>降格</Text>
+            <Text style={{ color: C.text2, fontSize: 11, fontWeight: '700' }}>降格</Text>
           </PressableScale>
         )}
         {canKick && onKick && (
@@ -249,7 +249,7 @@ export function MemberRow({
             }}
           >
             <Icon.logout size={11} color={C.text2} strokeWidth={2.4} />
-            <Text style={{ color: C.text2, fontSize: 10, fontWeight: '700' }}>キック</Text>
+            <Text style={{ color: C.text2, fontSize: 11, fontWeight: '700' }}>キック</Text>
           </PressableScale>
         )}
         {canBan && onBan && (
@@ -270,7 +270,7 @@ export function MemberRow({
             }}
           >
             <Icon.block size={11} color={C.red} strokeWidth={2.4} />
-            <Text style={{ color: C.red, fontSize: 10, fontWeight: '700' }}>BAN</Text>
+            <Text style={{ color: C.red, fontSize: 11, fontWeight: '700' }}>BAN</Text>
           </PressableScale>
         )}
       </View>

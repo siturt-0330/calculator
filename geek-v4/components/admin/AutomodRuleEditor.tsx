@@ -408,6 +408,7 @@ export function AutomodRuleEditor({
               <Toggle
                 value={state.enabled}
                 onChange={(v) => setState((s) => ({ ...s, enabled: v }))}
+                accessibilityLabel="このルールを有効化"
               />
               <Text style={[T.body, { color: C.text }]}>
                 {state.enabled ? 'このルールを有効化' : 'このルールを無効化'}
@@ -565,7 +566,11 @@ function ValueInput({
     const v = value === true || value === 'true';
     return (
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
-        <Toggle value={v} onChange={(next) => onChange({ value: next })} />
+        <Toggle
+          value={v}
+          onChange={(next) => onChange({ value: next })}
+          accessibilityLabel="編集済みの投稿に限定"
+        />
         <Text style={[T.body, { color: C.text }]}>
           {v ? '編集されている' : '編集されていない'}
         </Text>

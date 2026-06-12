@@ -96,7 +96,7 @@ export function EventSpotPicker({
             <Text style={[T.smallB, { color: C.text }]} numberOfLines={1}>
               {selected.name}
             </Text>
-            <Text style={{ fontSize: 10, color: selectedMeta?.color ?? C.text3, fontWeight: '700' }}>
+            <Text style={{ fontSize: 11, color: selectedMeta?.color ?? C.text3, fontWeight: '700' }}>
               {selectedMeta?.label ?? 'その他'}
             </Text>
           </View>
@@ -258,7 +258,7 @@ function SpotChoice({
           {label}
         </Text>
         {categoryLabel && (
-          <Text style={{ fontSize: 10, color: selected ? color : C.text3, fontWeight: '600' }}>
+          <Text style={{ fontSize: 11, color: selected ? color : C.text3, fontWeight: '600' }}>
             {categoryLabel}
           </Text>
         )}

@@ -9,6 +9,8 @@
 import { Modal, View, Text, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '../ui/PressableScale';
+// ★ 2026-06-12 P0-2: grabber を「引っ張れる契約」にする
+import { SheetSwipeDown } from '../ui/SheetSwipeDown';
 import { Icon } from '../../constants/icons';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -32,12 +34,17 @@ export function ReactionListSheet({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' }}>
+      {/* ★ 2026-06-12: scrim を C.scrim token に統一 (旧 rgba 直書き)。
+            Apple HIG「Sheets」: medium=0.2, large=0.4 推奨。ReactionListSheet は large
+            (75% height) なので C.scrim (dark=0.75 / light=0.45) で OK。 */}
+      <View style={{ flex: 1, backgroundColor: C.scrim, justifyContent: 'flex-end' }}>
+        <SheetSwipeDown onClose={onClose}>
         <View
           style={{
             maxHeight: '75%',
             backgroundColor: C.bg2,
-            padding: SP['4'],
+            paddingTop: SP['2'],
+            paddingHorizontal: SP['4'],
             paddingBottom: insets.bottom + SP['4'],
             borderTopLeftRadius: 24,
             borderTopRightRadius: 24,
@@ -46,6 +53,13 @@ export function ReactionListSheet({
             gap: SP['3'],
           }}
         >
+          {/* ★ 2026-06-12: grabber 追加 (36×5)。Apple HIG「Sheets」標準寸法。
+                他 9 シートと寸法を揃え、ユーザーが「引っ張れるシート」と認識できるよう一貫性。
+                ※ pan gesture は SheetSwipeDown wrapper で配線済 (下スワイプで dismiss)。 */}
+          <View style={{ alignItems: 'center', marginBottom: SP['1'] }} accessibilityElementsHidden importantForAccessibility="no">
+            <View style={{ width: 36, height: 5, borderRadius: 3, backgroundColor: C.text3, opacity: 0.5 }} />
+          </View>
+
           {/* ヘッダー */}
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <Text style={[T.h4, { color: C.text, flex: 1 }]} numberOfLines={1}>
@@ -100,6 +114,7 @@ export function ReactionListSheet({
             </View>
           </ScrollView>
         </View>
+        </SheetSwipeDown>
       </View>
     </Modal>
   );

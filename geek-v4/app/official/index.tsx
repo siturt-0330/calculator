@@ -87,7 +87,7 @@ export default function OfficialSelectorScreen() {
             >
               <Text
                 style={{
-                  fontSize: 10,
+                  fontSize: 11,
                   color: C.accentLight,
                   fontWeight: '800',
                   letterSpacing: 0.6,
@@ -177,7 +177,7 @@ function CommunityCard({ community, onPress }: { community: Community; onPress: 
                 borderColor: C.accent + '55',
               }}
             >
-              <Text style={{ fontSize: 9, color: C.accentLight, fontWeight: '800', letterSpacing: 0.5 }}>
+              <Text style={{ fontSize: 11, color: C.accentLight, fontWeight: '800', letterSpacing: 0.5 }}>
                 公式
               </Text>
             </View>

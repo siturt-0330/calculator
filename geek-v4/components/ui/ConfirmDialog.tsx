@@ -1,17 +1,39 @@
-import { View, Text, Modal, Pressable } from 'react-native';
+import { View, Text, Modal, Pressable, Platform, type ViewStyle } from 'react-native';
 import Animated, { FadeIn, FadeOut, ZoomIn, ZoomOut } from 'react-native-reanimated';
-import { C, R, SP } from '../../design/tokens';
+import { C, R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
-import { Button } from './Button';
-import { SHADOW } from '../../design/shadows';
+import { hapticPresets } from '../../lib/haptics';
 
-// Polished confirm dialog:
+// Polished confirm dialog (iOS アラート風):
 // - Backdrop fades in 200ms / out 160ms; tapping it dismisses (calls onCancel)
 // - Dialog box scales 0.96 -> 1.0 + fade in (ZoomIn 220ms) on enter
 // - Title (h3, C.text) + body (body, C.text2, lineHeight 22) with clear hierarchy
-// - Confirm button is `danger` (red) when destructive, otherwise `primary` (accent);
-//   cancel is ghost (neutral)
+// - ボタンは iOS HIG に倣い 2 つの時だけ横並び (cancel 左 / confirm 右)。
+//   3 つ以上に拡張する場合は縦並びへフォールバックする (現 API は常に 2)。
+// - confirm は太字 + accent、destructive 時は fontWeight '700' + C.red
 // API kept fully backward-compatible.
+
+// ボタン高さは 44pt 以上を維持 (HIG タップターゲット)
+const ACTION_MIN_HEIGHT = 48;
+// Button.tsx の CTA radius (12) と揃える
+const ACTION_RADIUS = 12;
+
+// delayPressIn は PressableProps の型に無いが実装はサポート (OS 既定 ~130ms 遅延を排除)
+const PRESSABLE_TUNING = { delayPressIn: 0 } as Record<string, unknown>;
+
+// Web のみ cursor: pointer (タップ可能の明示)
+const WEB_CURSOR =
+  Platform.OS === 'web' ? ({ cursor: 'pointer' } as unknown as ViewStyle) : null;
+
+type DialogAction = {
+  key: string;
+  label: string;
+  onPress: () => void;
+  weight: '600' | '700';
+  color: string;
+  haptic: keyof typeof hapticPresets;
+};
+
 export function ConfirmDialog({
   visible,
   title,
@@ -31,6 +53,21 @@ export function ConfirmDialog({
   onCancel: () => void;
   destructive?: boolean;
 }) {
+  // cancel 左 / confirm 右 (iOS の作法: 破壊的でない「逃げ道」が先)
+  const actions: DialogAction[] = [
+    { key: 'cancel', label: cancelLabel, onPress: onCancel, weight: '600', color: C.text, haptic: 'light' },
+    {
+      key: 'confirm',
+      label: confirmLabel,
+      onPress: onConfirm,
+      weight: '700',
+      color: destructive ? C.red : C.accent,
+      haptic: destructive ? 'warning' : 'medium',
+    },
+  ];
+  // 2 ボタン時のみ横並び。3 つ以上は縦並びフォールバック
+  const horizontal = actions.length === 2;
+
   return (
     <Modal transparent visible={visible} animationType="none" onRequestClose={onCancel}>
       <Animated.View
@@ -68,23 +105,43 @@ export function ConfirmDialog({
           {message && (
             <Text style={[T.body, { color: C.text2, lineHeight: 22 }]}>{message}</Text>
           )}
-          <View style={{ gap: SP['2'], marginTop: SP['1'] }}>
-            <Button
-              label={confirmLabel}
-              onPress={onConfirm}
-              variant={destructive ? 'danger' : 'primary'}
-              size="lg"
-              fullWidth
-              haptic={destructive ? 'warn' : 'confirm'}
-            />
-            <Button
-              label={cancelLabel}
-              onPress={onCancel}
-              variant="ghost"
-              size="lg"
-              fullWidth
-              haptic="tap"
-            />
+          <View
+            style={{
+              flexDirection: horizontal ? 'row' : 'column',
+              gap: SP['3'],
+              marginTop: SP['1'],
+            }}
+          >
+            {actions.map((a) => (
+              <Pressable
+                key={a.key}
+                {...PRESSABLE_TUNING}
+                onPress={a.onPress}
+                onPressIn={() => hapticPresets[a.haptic]()}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={a.label}
+                style={({ pressed }) => [
+                  {
+                    flex: horizontal ? 1 : undefined,
+                    minHeight: ACTION_MIN_HEIGHT,
+                    borderRadius: ACTION_RADIUS,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    paddingHorizontal: SP['3'],
+                    backgroundColor: pressed ? C.bg4 : C.bg3,
+                  },
+                  WEB_CURSOR,
+                ]}
+              >
+                <Text
+                  style={{ fontSize: 16, fontWeight: a.weight, color: a.color, letterSpacing: 0.2 }}
+                  numberOfLines={1}
+                >
+                  {a.label}
+                </Text>
+              </Pressable>
+            ))}
           </View>
         </Animated.View>
       </Animated.View>

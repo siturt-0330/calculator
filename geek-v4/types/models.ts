@@ -168,7 +168,11 @@ export type Notification = {
     // 'mod_action' はコミュニティ管理人の処置通知 (投稿削除 / キック / BAN、
     // migration 0136 の trigger / RPC 由来)。data.community_id / action / reason を持つ。
     // ★mod の身元は含めない (匿名性)。
-    | 'mod_action';
+    | 'mod_action'
+    // 'community_post' は参加コミュニティの新着投稿 (migration 0149 の
+    // post_communities トリガ由来・YouTube のチャンネル新着通知相当)。
+    // data.post_id / data.community_id を持つ。★投稿者の身元は含めない (匿名性)。
+    | 'community_post';
   tag_name: string | null;
   message: string;
   read: boolean;

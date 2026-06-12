@@ -63,7 +63,9 @@ export function useFeed() {
   // get_home_feed RPC の p_user_id / seed key 用 (['feed'] key には含めない=従来どおり viewer 非依存)
   const userId = useAuthStore((s) => s.user?.id ?? null);
 
-  const filterTags = scope === 'closed' && likedTags.length > 0 ? likedTags : undefined;
+  // ★ 2026-06-12: 'closed' = 「未参加コミュの投稿のみ」に意味変更。タグの server
+  //   フィルタは廃止 (常に undefined)。絞り込みは feed.tsx の discoverPosts (client)。
+  const filterTags = undefined;
 
   // ホームフィード — fetchPosts は home=true (デフォルト) で
   // visibility IN ('public', 'community_public') の post だけ返す。

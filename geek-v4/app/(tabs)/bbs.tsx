@@ -510,7 +510,7 @@ export default function BBSScreen() {
                       borderWidth: 1, borderColor: active ? C.accent : C.border,
                     }}
                   >
-                    <Text style={{ fontSize: 10 }}>{s.emoji}</Text>
+                    <Text style={{ fontSize: 11 }}>{s.emoji}</Text>
                     <Text style={[T.caption, { color: active ? C.accentLight : C.text2, fontWeight: '600' }]}>
                       {s.label}
                     </Text>
@@ -1017,8 +1017,8 @@ function ThreadRowBase({
                   borderWidth: 1, borderColor: themeC.border,
                 }}
               >
-                <Text style={{ fontSize: 10 }}>{community.icon_emoji || '🏠'}</Text>
-                <Text style={[T.caption, { color: themeC.text2, fontSize: 10, fontWeight: '600' }]} numberOfLines={1}>
+                <Text style={{ fontSize: 11 }}>{community.icon_emoji || '🏠'}</Text>
+                <Text style={[T.caption, { color: themeC.text2, fontSize: 11, fontWeight: '600' }]} numberOfLines={1}>
                   #{community.name}
                 </Text>
               </PressableScale>
@@ -1032,7 +1032,7 @@ function ThreadRowBase({
                 borderRadius: R.sm,
                 borderWidth: 1, borderColor: catColor + '55',
               }}>
-                <Text style={[T.caption, { color: catColor, fontWeight: '700', fontSize: 10 }]}>
+                <Text style={[T.caption, { color: catColor, fontWeight: '700', fontSize: 11 }]}>
                   {item.category}
                 </Text>
               </View>
@@ -1097,8 +1097,8 @@ function ThreadRowBase({
                   hotPulseStyle,
                 ]}
               >
-                <Text style={{ fontSize: 10 }}>🔥</Text>
-                <Text style={{ fontSize: 10, color: '#F87AB4', fontWeight: '700' }}>賑わい中</Text>
+                <Text style={{ fontSize: 11 }}>🔥</Text>
+                <Text style={{ fontSize: 11, color: '#F87AB4', fontWeight: '700' }}>賑わい中</Text>
               </Animated.View>
             )}
           </View>

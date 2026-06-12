@@ -200,7 +200,7 @@ export default function SupportThreadScreen() {
                 borderColor: stateC.border,
               }}
             >
-              <Text style={{ fontSize: 10, color: stateC.fg, fontWeight: '700' }}>
+              <Text style={{ fontSize: 11, color: stateC.fg, fontWeight: '700' }}>
                 {stateMeta.label}
               </Text>
             </View>

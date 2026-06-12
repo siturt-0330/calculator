@@ -366,7 +366,7 @@ function EventCard({ event, onDelete }: { event: CalendarEvent; onDelete: () => 
               }}
             >
               <Icon.clock size={10} color={C.accentLight} strokeWidth={2.4} />
-              <Text style={{ color: C.accentLight, fontSize: 10, fontWeight: '700' }}>{time}</Text>
+              <Text style={{ color: C.accentLight, fontSize: 11, fontWeight: '700' }}>{time}</Text>
             </View>
             <PressableScale onPress={onDelete} haptic="warn" hitSlop={6} style={{ padding: 4, marginLeft: 'auto' }}>
               <Icon.trash size={14} color={C.red} strokeWidth={2.2} />

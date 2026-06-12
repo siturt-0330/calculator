@@ -85,11 +85,11 @@ export function TagRelations({
                   #{s.synonym}
                 </Text>
                 {s.is_confirmed && (
-                  <Text style={{ fontSize: 9, color: C.sameGroup, marginLeft: 2, fontWeight: '700' }}>
+                  <Text style={{ fontSize: 11, color: C.sameGroup, marginLeft: 2, fontWeight: '700' }}>
                     確定
                   </Text>
                 )}
-                <Text style={{ fontSize: 9, color: C.text3, marginLeft: 2 }}>
+                <Text style={{ fontSize: 11, color: C.text3, marginLeft: 2 }}>
                   {s.vote_count}票
                 </Text>
               </PressableScale>

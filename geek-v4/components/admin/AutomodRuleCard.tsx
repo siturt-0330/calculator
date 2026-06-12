@@ -91,14 +91,14 @@ export function AutomodRuleCard({
             borderColor: actionColor + '55',
           }}
         >
-          <Text style={{ fontSize: 10, color: actionColor, fontWeight: '800', letterSpacing: 0.4 }}>
+          <Text style={{ fontSize: 11, color: actionColor, fontWeight: '800', letterSpacing: 0.4 }}>
             {actionLabel}
           </Text>
         </View>
         {toggling ? (
           <ActivityIndicator size="small" color={C.text2} />
         ) : (
-          <Toggle value={rule.enabled} onChange={onToggle} />
+          <Toggle value={rule.enabled} onChange={onToggle} accessibilityLabel="このルールを有効化" />
         )}
       </View>
 

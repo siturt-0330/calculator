@@ -72,11 +72,12 @@ export function HapticTab({ focused, onPress, onPressAgain, children, ...rest }:
       accessibilityState={{ selected: focused }}
       // iOS HIG: tab の tappable area は最小 44pt。flex で水平に伸ばし、
       // 高さは親 (TabBar) が決める bar 高 + label を含めて十分確保される。
-      // active tab は label 付き chip になり横幅が要るので flex:2 (inactive は 1) を
-      // 与え、chip が cell からはみ出して pill の外に飛び出すのを防ぐ
-      // (= 「ホームだけはみ出る」問題の対策)。
+      // M3 リキッド TabBar (2026-06-12): 全 tab に label を常時表示する等幅レイアウトに
+      // 変更したため、active/inactive 問わず flex:1 で 4 tab を均等割りする。
+      // active のハイライトは TabBar 側の絶対配置スライド indicator が担う
+      // (cell 幅は変えない = indicator が等幅セル間を translateX でスライドできる)。
       style={[
-        { flex: focused ? 2 : 1, alignItems: 'center', justifyContent: 'center' },
+        { flex: 1, alignItems: 'center', justifyContent: 'center' },
         aScale,
         webStyle as object,
       ]}

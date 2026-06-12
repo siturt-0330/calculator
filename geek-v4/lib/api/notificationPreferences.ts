@@ -26,7 +26,9 @@ export type NotificationCategory =
   | 'official_post'
   | 'event'
   | 'mod_action'
-  | 'system';
+  | 'system'
+  // コミュニティ新着投稿 (YouTube のチャンネル新着通知相当・migration 0149)
+  | 'community_post';
 
 export const NOTIFICATION_CATEGORIES: readonly NotificationCategory[] = [
   'like',
@@ -40,6 +42,7 @@ export const NOTIFICATION_CATEGORIES: readonly NotificationCategory[] = [
   'event',
   'mod_action',
   'system',
+  'community_post',
 ] as const;
 
 export type NotificationPref = {

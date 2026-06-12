@@ -241,7 +241,7 @@ function AdRow({ ad, onEdit, onDelete }: { ad: AdminAd; onEdit: () => void; onDe
           borderWidth: 1,
           borderColor: meta.border,
         }}>
-          <Text style={{ fontSize: 10, color: meta.fg, fontWeight: '700' }}>{meta.label}</Text>
+          <Text style={{ fontSize: 11, color: meta.fg, fontWeight: '700' }}>{meta.label}</Text>
         </View>
         <Text style={[T.captionM, { color: C.text3 }]} numberOfLines={1}>
           {ad.advertiser_name}
@@ -267,11 +267,11 @@ function AdRow({ ad, onEdit, onDelete }: { ad: AdminAd; onEdit: () => void; onDe
               borderWidth: 1,
               borderColor: C.accent + '44',
             }}>
-              <Text style={{ fontSize: 10, color: C.accentLight, fontWeight: '600' }}>#{t}</Text>
+              <Text style={{ fontSize: 11, color: C.accentLight, fontWeight: '600' }}>#{t}</Text>
             </View>
           ))}
           {ad.target_tags.length > 6 && (
-            <Text style={{ fontSize: 10, color: C.text3, fontWeight: '600' }}>
+            <Text style={{ fontSize: 11, color: C.text3, fontWeight: '600' }}>
               +{ad.target_tags.length - 6}
             </Text>
           )}

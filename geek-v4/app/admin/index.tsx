@@ -35,6 +35,7 @@ import {
 import { fetchPendingOfficialApps } from '../../lib/api/officialCommunities';
 import { formatRelative } from '../../lib/utils/date';
 import { C, R, SP, SHADOW } from '../../design/tokens';
+import { SPRING_SLIDE_SOFT } from '../../design/motion';
 import { T, FONT } from '../../design/typography';
 
 type Tab = 'dashboard' | 'reports' | 'users' | 'posts';
@@ -169,7 +170,7 @@ export default function AdminIndexScreen() {
               backgroundColor: C.redBg, borderRadius: R.sm,
               borderWidth: 1, borderColor: C.red + '55',
             }}>
-              <Text style={{ fontSize: 10, color: C.red, fontWeight: '800', letterSpacing: 0.6 }}>DEV</Text>
+              <Text style={{ fontSize: 11, color: C.red, fontWeight: '800', letterSpacing: 0.6 }}>DEV</Text>
             </View>
           </View>
           <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
@@ -280,7 +281,7 @@ function KpiCard({
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SP['2'] }}>
           <Text
             style={{
-              fontSize: 10,
+              fontSize: 11,
               color: C.text3,
               fontWeight: '700',
               letterSpacing: 0.8,
@@ -292,7 +293,7 @@ function KpiCard({
             {label}
           </Text>
           {hint && (
-            <Text style={{ fontSize: 9, color: C.text4, fontWeight: '600' }} numberOfLines={1}>
+            <Text style={{ fontSize: 11, color: C.text4, fontWeight: '600' }} numberOfLines={1}>
               {hint}
             </Text>
           )}
@@ -315,7 +316,7 @@ function TabPills({ tab, onChange, openReports }: { tab: Tab; onChange: (t: Tab)
   useEffect(() => {
     const targetX = positions[activeIndex] ?? 0;
     const targetW = widths[activeIndex] ?? 0;
-    x.value = withSpring(targetX, { damping: 22, stiffness: 220 });
+    x.value = withSpring(targetX, SPRING_SLIDE_SOFT);
     w.value = withTiming(targetW, { duration: 220 });
   }, [activeIndex, positions, widths, x, w]);
 
@@ -398,7 +399,7 @@ function TabPills({ tab, onChange, openReports }: { tab: Tab; onChange: (t: Tab)
                 alignItems: 'center',
                 justifyContent: 'center',
               }}>
-                <Text style={{ fontSize: 9, color: '#fff', fontWeight: '800' }}>{openReports}</Text>
+                <Text style={{ fontSize: 11, color: '#fff', fontWeight: '800' }}>{openReports}</Text>
               </View>
             )}
           </PressableScale>
@@ -415,7 +416,7 @@ function SectionHeader({ label, right }: { label: string; right?: React.ReactNod
       paddingHorizontal: SP['4'], paddingBottom: SP['2'], paddingTop: SP['4'],
     }}>
       <Text style={{
-        fontSize: 10, fontWeight: '800', color: C.text3,
+        fontSize: 11, fontWeight: '800', color: C.text3,
         letterSpacing: 1.2, textTransform: 'uppercase',
       }}>
         {label}
@@ -755,7 +756,7 @@ function ActivityRow({ entry, last }: { entry: AdminModerationLogEntry; last: bo
         backgroundColor: meta.color + '22', borderRadius: R.sm,
         borderWidth: 1, borderColor: meta.color + '55',
       }}>
-        <Text style={{ fontSize: 10, color: meta.color, fontWeight: '700' }}>{meta.label}</Text>
+        <Text style={{ fontSize: 11, color: meta.color, fontWeight: '700' }}>{meta.label}</Text>
       </View>
       <Text style={[T.caption, { color: C.text2, flex: 1 }]} numberOfLines={1}>
         {entry.target_type} · {entry.target_id.slice(0, 8)}…
@@ -882,7 +883,7 @@ function ReportCountBadge({ count }: { count: number }) {
       <Text style={{ fontSize: 13, fontWeight: '800', color: meta.fg, lineHeight: 15 }}>
         {count}
       </Text>
-      <Text style={{ fontSize: 8, color: meta.fg, letterSpacing: 0.6, fontWeight: '700' }}>
+      <Text style={{ fontSize: 11, color: meta.fg, letterSpacing: 0.6, fontWeight: '700' }}>
         通報
       </Text>
     </View>
@@ -923,7 +924,7 @@ function ReportRow({
               backgroundColor: v.color + '22', borderRadius: R.sm,
               borderWidth: 1, borderColor: v.color + '55',
             }}>
-              <Text style={{ fontSize: 9, color: v.color, fontWeight: '700' }}>{v.label}</Text>
+              <Text style={{ fontSize: 11, color: v.color, fontWeight: '700' }}>{v.label}</Text>
             </View>
             <View style={{ flex: 1 }} />
             <Text style={[T.caption, { color: C.text4 }]}>{formatRelative(row.last_reported_at)}</Text>
@@ -1204,7 +1205,7 @@ function UserRow({
                 backgroundColor: C.accentBg, borderRadius: R.sm,
                 borderWidth: 1, borderColor: C.accent + '55',
               }}>
-                <Text style={{ fontSize: 9, color: C.accentLight, fontWeight: '700' }}>ADMIN</Text>
+                <Text style={{ fontSize: 11, color: C.accentLight, fontWeight: '700' }}>ADMIN</Text>
               </View>
             )}
             <View style={{
@@ -1212,7 +1213,7 @@ function UserRow({
               backgroundColor: stateMeta.color + '22', borderRadius: R.sm,
               borderWidth: 1, borderColor: stateMeta.color + '55',
             }}>
-              <Text style={{ fontSize: 10, color: stateMeta.color, fontWeight: '700' }}>{stateMeta.label}</Text>
+              <Text style={{ fontSize: 11, color: stateMeta.color, fontWeight: '700' }}>{stateMeta.label}</Text>
             </View>
           </View>
           <View style={{ flexDirection: 'row', gap: SP['4'], flexWrap: 'wrap' }}>
@@ -1341,7 +1342,7 @@ function PostRow({
           backgroundColor: vMeta.color + '22', borderRadius: R.sm,
           borderWidth: 1, borderColor: vMeta.color + '55',
         }}>
-          <Text style={{ fontSize: 10, color: vMeta.color, fontWeight: '700' }}>{vMeta.label}</Text>
+          <Text style={{ fontSize: 11, color: vMeta.color, fontWeight: '700' }}>{vMeta.label}</Text>
         </View>
         <Text style={[T.captionM, { color: C.text2 }]} numberOfLines={1}>
           {post.author_nickname ?? '(unknown)'}

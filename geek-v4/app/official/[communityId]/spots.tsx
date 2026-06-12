@@ -388,7 +388,7 @@ function SpotRow({
                 }}
               >
                 <Icon.shield size={10} color={C.accent} strokeWidth={2.6} />
-                <Text style={{ fontSize: 10, color: C.accent, fontWeight: '700' }}>公認</Text>
+                <Text style={{ fontSize: 11, color: C.accent, fontWeight: '700' }}>公認</Text>
               </View>
             )}
           </View>

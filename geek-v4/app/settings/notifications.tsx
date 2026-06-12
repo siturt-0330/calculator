@@ -40,6 +40,7 @@ import { registerNativePushToken } from '../../lib/api/push';
 import { NotificationToggleRow } from '../../components/settings/NotificationToggleRow';
 import { useSettingsStore, isInQuietHours } from '../../stores/settingsStore';
 import { useToastStore } from '../../stores/toastStore';
+import { showPermissionRescue } from '../../lib/permissionRescue';
 import {
   useNotificationPreferences,
   useUpdateNotificationPreference,
@@ -94,6 +95,8 @@ const SECTIONS: readonly Section[] = [
     rows: [
       { category: 'official_post', label: '公式投稿', description: '公式コミュニティの新着情報', icon: 'shield' },
       { category: 'event', label: 'イベント通知', description: '推しイベントの開催情報', icon: 'calendar' },
+      // コミュニティ新着 (migration 0149・YouTube のチャンネル新着通知相当)
+      { category: 'community_post', label: 'コミュニティ新着', description: '参加コミュニティに新しい投稿があったとき', icon: 'community' },
     ],
   },
   {
@@ -172,8 +175,9 @@ export default function NotificationsSettingsScreen() {
           const perm = await Notifications.requestPermissionsAsync();
           // OS ダイアログで「許可しない」を選んだら pushEnabled を true にしない。
           // (旧実装は granted を無視して必ず ON にしていたため「ONなのに永遠に届かない」不整合が出た)
+          // 拒否済みは OS が再プロンプトしないため、設定アプリへの導線 (HIG) を toast で出す
           if (!perm.granted) {
-            show('端末の通知が許可されていません。設定アプリから許可してください', 'warn');
+            showPermissionRescue('端末の通知が許可されていません');
             update('pushEnabled', false);
             return;
           }
@@ -408,7 +412,7 @@ function SectionHeader({ label }: { label: string }) {
     >
       <Text
         style={{
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: '800',
           color: C.text3,
           letterSpacing: 1.2,

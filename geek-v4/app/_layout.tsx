@@ -587,6 +587,27 @@ export default function RootLayout() {
     };
   }, []);
 
+  // ★ アクセシビリティ (キーボード操作の focus ring): Web のみ :focus-visible スタイルを注入。
+  //   キーボード (Tab) 操作時だけアクセント色の outline が出て、マウス/タップでは出ない。
+  //   RNW は outline を消しがちでキーボードユーザーがフォーカス位置を見失うための対策。
+  //   dist/index.html (web-postbuild.mjs / fix-html.mjs) には一切触らず runtime で
+  //   <style> を append するので dev / 本番 build の両方で効く。idempotent marker 付き。
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const STYLE_ID = 'geek-focus-visible-style';
+    if (document.getElementById(STYLE_ID)) return;
+    const el = document.createElement('style');
+    el.id = STYLE_ID;
+    // #7C6AF7 = アクセントカラー (design/tokens.ts の C.accent と同値)
+    el.textContent =
+      ':focus-visible{outline:2px solid #7C6AF7;outline-offset:2px;}' +
+      '*:focus:not(:focus-visible){outline:none;}';
+    document.head.appendChild(el);
+    return () => {
+      try { document.head.removeChild(el); } catch { /* ignore */ }
+    };
+  }, []);
+
   // Sentry の user context を auth state に追従させる。
   // - 認証成立 → setSentryUser(id) で error / breadcrumb に user.id をタグ付け
   // - logout → clearSentryUser() で旧 id が次セッションに leak しないように clear
@@ -780,12 +801,31 @@ export default function RootLayout() {
                     }}
                   />
                   <Stack.Screen name="tag/[name]" />
+                  {/* フィルタ (好きなタグ管理) は iOS のみネイティブ formSheet detent
+                      (half ⇄ full) で表示 — 軽い編集画面なので半分シートが UX 適合。
+                      ・sheetAllowedDetents は native-stack v7 の型では number[] 形式のみ
+                        ('medium'/'large' 文字列は screens 内部の deprecated 互換) → [0.5, 1.0]。
+                      ・遷移アニメは formSheet の UIKit 標準シート遷移に任せる (animation 指定なし)。
+                      ・Android は formSheet × キーボード (タグ入力) の組合せが
+                        react-native-screens 4.4 ではまだ不安定なため従来 modal を維持。
+                      ・web は presentation 自体が no-op (Screen.web.js は素の View /
+                        NativeStackView.web は transparent 系判定のみ) なので挙動不変。 */}
                   <Stack.Screen
                     name="filter/index"
-                    options={{
-                      presentation: 'modal',
-                      animation: 'slide_from_bottom',
-                    }}
+                    options={
+                      Platform.OS === 'ios'
+                        ? {
+                            presentation: 'formSheet',
+                            // [0.5, 1.0] = medium / large detent 相当 (グラバーで引き上げ可)
+                            sheetAllowedDetents: [0.5, 1.0],
+                            sheetGrabberVisible: true,
+                            sheetCornerRadius: 20,
+                          }
+                        : {
+                            presentation: 'modal',
+                            animation: 'slide_from_bottom',
+                          }
+                    }
                   />
                   <Stack.Screen name="notifications/index" />
                   <Stack.Screen name="settings/index" />

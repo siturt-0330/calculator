@@ -46,6 +46,7 @@ import { Avatar } from '../../../components/ui/Avatar';
 import { useMyAlbums, useUploadPhoto } from '../../../hooks/useAlbums';
 import { useMyFriends } from '../../../hooks/useFriends';
 import { useToastStore } from '../../../stores/toastStore';
+import { showPermissionRescue } from '../../../lib/permissionRescue';
 import { makeWebPreviewDataUrl } from '../../../lib/image';
 import { Icon } from '../../../constants/icons';
 import { C, R, SP, SHADOW } from '../../../design/tokens';
@@ -95,7 +96,8 @@ export default function AddPhotoScreen() {
       if (Platform.OS !== 'web') {
         const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!perm.granted) {
-          show('写真へのアクセス権限が必要です', 'warn');
+          // 拒否済みは再プロンプト不可 — 設定アプリへの導線付き toast (HIG)
+          showPermissionRescue('写真へのアクセスが許可されていません');
           return;
         }
       }

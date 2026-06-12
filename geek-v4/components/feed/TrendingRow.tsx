@@ -1,9 +1,11 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, type LayoutChangeEvent } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { fetchTrendingTags, type TrendingTag } from '../../lib/api/trending';
+import { resolveCommunitiesForTags } from '../../lib/api/communities-search';
+import type { CommunityMetaLite } from '../../lib/api/communities-feed';
 import { useTagCooccurStore } from '../../stores/tagCooccurStore';
 import { PressableScale } from '../ui/PressableScale';
 import { C, R, SP } from '../../design/tokens';
@@ -13,6 +15,13 @@ import { T } from '../../design/typography';
 // 旧 `data: trending = []` は loading 中に新しい [] を量産し、useEffect([trending]) を
 // 毎レンダー無限発火させて "Maximum update depth exceeded" を起こしていた。
 const EMPTY_TRENDING: TrendingTag[] = [];
+
+// トレンド行に出すコミュニティ chip (タグ → コミュ解決後の表示単位)
+type TrendCommunity = {
+  community: CommunityMetaLite;
+  // 解決元タグの直近投稿数 (勢いの表示に使う)
+  postCount: number;
+};
 
 function TrendingRowInner() {
   const router = useRouter();
@@ -47,18 +56,45 @@ function TrendingRowInner() {
   // 安定した空配列を default にする (上記 EMPTY_TRENDING のコメント参照)。
   const trending = data ?? EMPTY_TRENDING;
 
-  // trending が変わったら計測をリセット
+  // ★ トレンドタグ → コミュニティ解決 (2026-06-12 ユーザー要望):
+  //   ホームのトレンド行は # タグではなく **コミュニティ** を出す。
+  //   search タブの「いま盛り上がってるコミュニティ」と同じ resolver
+  //   (name 完全一致 → community_tags 一致) を使い、解決できたタグだけを
+  //   コミュ chip として表示。未解決タグは行から落とす (タグ chip は出さない)。
+  const tagNames = useMemo(() => trending.map((t) => t.name), [trending]);
+  const { data: tagCommunities } = useQuery({
+    queryKey: ['trending-tag-communities', tagNames.join('|')],
+    queryFn: () => resolveCommunitiesForTags(tagNames),
+    enabled: tagNames.length > 0,
+    staleTime: 5 * 60_000,
+  });
+
+  // 解決できたコミュニティを (元タグの勢い順のまま) dedupe して chip 化
+  const trendCommunities = useMemo<TrendCommunity[]>(() => {
+    if (!tagCommunities) return [];
+    const seen = new Set<string>();
+    const out: TrendCommunity[] = [];
+    for (const t of trending) {
+      const c = tagCommunities[t.name.replace(/^#/, '').trim()];
+      if (!c || seen.has(c.id)) continue;
+      seen.add(c.id);
+      out.push({ community: c, postCount: t.postCount });
+    }
+    return out;
+  }, [trending, tagCommunities]);
+
+  // chip 構成が変わったら計測をリセット
   useEffect(() => {
     positionsRef.current.clear();
     // 既に空なら新しい [] を作らない (無駄な再レンダー/churn を避ける)。
     setSnapOffsets((prev) => (prev.length === 0 ? prev : []));
-  }, [trending]);
+  }, [trendCommunities]);
 
   const handleChipLayout = useCallback(
-    (name: string, e: LayoutChangeEvent) => {
-      positionsRef.current.set(name, e.nativeEvent.layout.x);
+    (key: string, e: LayoutChangeEvent) => {
+      positionsRef.current.set(key, e.nativeEvent.layout.x);
       // すべての chip が onLayout 通過したら offsets を sorted array で確定
-      if (positionsRef.current.size === trending.length) {
+      if (positionsRef.current.size === trendCommunities.length) {
         const offsets = [...positionsRef.current.values()].sort((a, b) => a - b);
         // 同値なら据え置き — onLayout 再発火 → 新配列 setState の再レンダーループを防ぐ。
         setSnapOffsets((prev) =>
@@ -66,10 +102,10 @@ function TrendingRowInner() {
         );
       }
     },
-    [trending.length],
+    [trendCommunities.length],
   );
 
-  if (trending.length === 0) return null;
+  if (trendCommunities.length === 0) return null;
 
   return (
     <Animated.View
@@ -78,7 +114,7 @@ function TrendingRowInner() {
     >
       <View style={{ width: '100%', maxWidth: 720, paddingHorizontal: SP['4'], paddingTop: SP['2'], paddingBottom: SP['3'] }}>
         <Text style={[T.caption, { color: C.text3, letterSpacing: 0.5, marginBottom: SP['2'] }]}>
-          トレンド
+          盛り上がってるコミュニティ
         </Text>
         <ScrollView
           horizontal
@@ -90,16 +126,16 @@ function TrendingRowInner() {
           snapToAlignment="start"
           decelerationRate="fast"
         >
-          {trending.map((t, i) => (
+          {trendCommunities.map(({ community: c, postCount }, i) => (
             <PressableScale
-              key={t.name}
-              onPress={() => router.push(`/tag/${encodeURIComponent(t.name)}` as never)}
+              key={c.id}
+              onPress={() => router.push(`/community/${c.id}` as never)}
               haptic="tap"
-              onLayout={(e) => handleChipLayout(t.name, e)}
+              onLayout={(e) => handleChipLayout(c.id, e)}
               accessibilityLabel={
                 i === 0
-                  ? `注目のトレンドタグ #${t.name} ${t.postCount}件`
-                  : `トレンドタグ #${t.name} ${t.postCount}件`
+                  ? `注目のコミュニティ ${c.name} を開く (直近 ${postCount} 件)`
+                  : `コミュニティ ${c.name} を開く (直近 ${postCount} 件)`
               }
               style={{
                 paddingHorizontal: SP['3'],
@@ -114,16 +150,17 @@ function TrendingRowInner() {
               }}
             >
               {i === 0 && <Text style={{ fontSize: 11 }}>👑</Text>}
+              <Text style={{ fontSize: 13 }}>{c.icon_emoji ?? '👥'}</Text>
               <Text style={[T.smallM, { color: i === 0 ? C.accent : C.text, fontWeight: '700' }]}>
-                #{t.name}
+                {c.name}
               </Text>
               <View style={{
                 paddingHorizontal: 6, paddingVertical: 1,
                 backgroundColor: i === 0 ? C.accentSoft : C.bg3,
                 borderRadius: R.sm,
               }}>
-                <Text style={{ fontSize: 10, color: i === 0 ? C.accent : C.text3, fontWeight: '700' }}>
-                  +{t.postCount}
+                <Text style={{ fontSize: 11, color: i === 0 ? C.accent : C.text3, fontWeight: '700' }}>
+                  +{postCount}
                 </Text>
               </View>
             </PressableScale>

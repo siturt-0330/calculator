@@ -32,11 +32,28 @@ const TAB_TO_LABEL: Record<TabKey, string> = {
   mypage: 'マイ',
 };
 
+// active 時に fill を渡して SF Symbols の .fill variant 相当にする icon の判定マップ。
+// lucide は open path を fill すると自動 close (始点-終点を直線で結ぶ) されるため、
+// silhouette が成立する形だけ true にする (lucide v0.460 の SVG 実体を確認済):
+//   - home:      House の本体 path が z 閉路 → solid な家 silhouette になる ✅
+//   - mypage:    User の肩 path は底辺で auto-close + 頭 circle → person.fill 相当 ✅
+//   - game:      Gamepad2 の本体 path が z 閉路 → solid なパッド silhouette ✅ (dead route)
+//   - search:    虫眼鏡レンズ (circle r=8) が solid 円板になり「検索」に見えない ❌
+//   - community: UsersRound の 2 人目が開いた曲線で、auto-close の斜め弦が
+//                頭部を横切る楔形に塗り潰れて崩れる ❌
+const TAB_FILLABLE: Record<TabKey, boolean> = {
+  home: true,
+  search: false,
+  game: true,
+  community: false,
+  mypage: true,
+};
+
 // ============================================================
 // TabIcon — floating-pill tab bar 内のアイコン (+ optional label)
 // ------------------------------------------------------------
 // 設計 (2026-05-29 「昔の TabBar」リバイバル):
-//   - active (focused): scale 1.0 + accent カラー
+//   - active (focused): scale 1.0 + accent カラー + fill (塗り対応 icon のみ)
 //     inactive:         scale 0.95 + text2 (gray) で subtle
 //   - color は active / inactive を opacity で重ねて crossfade
 //     (lucide-react-native の color prop は animated 不可)
@@ -63,6 +80,7 @@ export function TabIcon({
   showLabel = false,
   label,
   wiggleSignal,
+  activeColor,
 }: {
   tab: TabKey;
   focused: boolean;
@@ -74,11 +92,15 @@ export function TabIcon({
   label?: string;
   // 親が値を変えるたびに wiggle を 1 回再生 (active tab 再タップ feedback)
   wiggleSignal?: number;
+  // active 状態の icon 色 (省略時は C.accent)。
+  // Liquid TabBar のグラデ indicator 上では '#fff' を渡す (2026-06-12)。
+  activeColor?: string;
 }) {
   const C = useColors();
   const reduceMotion = useReducedMotion();
   const I: LucideIcon = Icon[TAB_TO_ICON[tab]];
   const resolvedLabel = label ?? TAB_TO_LABEL[tab];
+  const focusedColor = activeColor ?? C.accent;
 
   // focused: 0 (unfocused) ↔ 1 (focused)
   const focusedSV = useSharedValue(focused ? 1 : 0);
@@ -137,7 +159,13 @@ export function TabIcon({
         <I size={size} strokeWidth={TABBAR.iconStroke} color={C.text2} />
       </Animated.View>
       <Animated.View style={[{ position: 'absolute' }, aActive]}>
-        <I size={size} strokeWidth={TABBAR.iconStroke} color={C.accent} />
+        {/* fill は active 側のみ。crossfade で outline → filled に滑らかに遷移する */}
+        <I
+          size={size}
+          strokeWidth={TABBAR.iconStroke}
+          color={focusedColor}
+          fill={TAB_FILLABLE[tab] ? focusedColor : undefined}
+        />
       </Animated.View>
       {/* size 確保用 placeholder (transparent) */}
       <View style={{ width: size, height: size }} />
@@ -157,7 +185,7 @@ export function TabIcon({
           fontSize: 13,
           lineHeight: 16,
           fontWeight: '700',
-          color: focused ? C.accent : C.text2,
+          color: focused ? focusedColor : C.text2,
           letterSpacing: 0.1,
         }}
       >

@@ -7,6 +7,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Icon, type IconName } from '../../constants/icons';
 import { SP } from '../../design/tokens';
+import { SPRING_SNAPPY } from '../../design/motion';
 import { T } from '../../design/typography';
 import { useColors } from '../../hooks/useColors';
 import { hapticPresets } from '../../lib/haptics';
@@ -57,7 +58,8 @@ const CARD_RADIUS = 14;
 const CARD_PADDING = 14;
 const PRESS_SCALE = 0.97;
 // snappy spring — Apple HIG 風の "tap" 体感 (PressableScale 系と揃える)
-const SPRING_CFG = { damping: 18, stiffness: 280, mass: 0.6 } as const;
+// — PressableScale が使う SPRING_SNAPPY token に統一 (旧 stiffness 280 → 300、知覚差なし)
+const SPRING_CFG = SPRING_SNAPPY;
 
 export function VisibilityPicker({ value, onChange }: Props) {
   const C = useColors();

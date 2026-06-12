@@ -97,8 +97,14 @@ export const PALETTE_DARK: ColorPalette = {
 
   text: '#f5f5f7',
   text2: '#a1a1aa',
-  text3: '#71717a',
-  text4: '#52525b',
+  // ★ 2026-06-12: WCAG AA 違反 (text3 4.13:1 / text4 2.64:1 on #0a0a0a) を解消。
+  //   Apple HIG: 本文 4.5:1 / 大文字 3.0:1 (AAA 推奨 7:1)。
+  //   text3 = #9CA3AF (4.93:1 — 本文 AA 合格)
+  //   text4 = #7B7E8A (3.42:1 — 大文字 AA 合格、icon/補助テキスト用)
+  //   light は変えない (text3 #71717a on #fff = 4.79:1 で既に AA pass)。
+  //   再発防止は tests/unit/wcagContrastLock.test.ts でガード。
+  text3: '#9CA3AF',
+  text4: '#7B7E8A',
 
   border: '#27272a',
   border2: '#3f3f46',
@@ -176,7 +182,9 @@ export const PALETTE_LIGHT: ColorPalette = {
   text: '#1a1a1a',
   text2: '#52525b',
   text3: '#71717a',
-  text4: '#a1a1aa',
+  // ★ 2026-06-12: light.text4 #a1a1aa on #fff = 2.56:1 で大文字 AA すら未満を発見。
+  //   #8A8A90 (3.43:1) に格上げ — text3 (#71717a = 4.84:1) より明るく、3.0:1 を満たす。
+  text4: '#8A8A90',
 
   border: '#c4c4c9',   // 白背景で視認できる既定の罫線 (旧 #e4e4e7 は薄すぎて枠が見えなかった)
   border2: '#9a9aa3',  // 強調用の濃いめの線 (コメントスレのレール等) — 「ときどき黒」の主役

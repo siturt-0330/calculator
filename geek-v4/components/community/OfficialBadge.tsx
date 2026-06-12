@@ -21,7 +21,7 @@ type Props = {
 };
 
 const SIZE_TOKENS: Record<Size, { iconSize: number; fontSize: number; px: number; py: number; gap: number }> = {
-  sm: { iconSize: 10, fontSize: 10, px: 6,  py: 2, gap: 3 },
+  sm: { iconSize: 10, fontSize: 11, px: 6,  py: 2, gap: 3 },
   md: { iconSize: 12, fontSize: 11, px: SP['2'], py: 3, gap: 4 },
 };
 

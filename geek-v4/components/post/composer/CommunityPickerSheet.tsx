@@ -46,6 +46,8 @@ import { Icon } from '../../../constants/icons';
 import { PressableScale } from '../../ui/PressableScale';
 import { Input } from '../../ui/Input';
 import { CommunityIcon } from '../../ui/CommunityIcon';
+// ★ 2026-06-12 P0-2: grabber を「引っ張れる契約」にする
+import { SheetSwipeDown } from '../../ui/SheetSwipeDown';
 import { formatCountJa } from '../../../lib/format/communityMetrics';
 import type { Community } from '../../../lib/api/communities';
 
@@ -159,6 +161,7 @@ export function CommunityPickerSheet({
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={{ width: '100%' }}
         >
+          <SheetSwipeDown onClose={handleClose}>
           <Animated.View
             entering={SlideInDown.duration(260)}
             exiting={SlideOutDown.duration(200)}
@@ -283,7 +286,7 @@ export function CommunityPickerSheet({
                     >
                       <Text
                         style={{
-                          fontSize: 10,
+                          fontSize: 11,
                           fontWeight: '800',
                           color: C.text3,
                           letterSpacing: 1.0,
@@ -307,6 +310,7 @@ export function CommunityPickerSheet({
               </ScrollView>
             )}
           </Animated.View>
+          </SheetSwipeDown>
         </KeyboardAvoidingView>
       </Animated.View>
     </Modal>

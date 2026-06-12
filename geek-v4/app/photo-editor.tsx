@@ -714,7 +714,7 @@ function ToolButton({
       style={{ alignItems: 'center', justifyContent: 'center', gap: 3, paddingHorizontal: SP['1'], minWidth: 52, opacity: disabled ? 0.5 : 1 }}
     >
       {icon}
-      <Text style={{ color: active ? C.accent : '#fff', fontSize: 10, fontWeight: active ? '800' : '600' }}>{label}</Text>
+      <Text style={{ color: active ? C.accent : '#fff', fontSize: 11, fontWeight: active ? '800' : '600' }}>{label}</Text>
     </PressableScale>
   );
 }

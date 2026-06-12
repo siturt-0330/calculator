@@ -1,4 +1,5 @@
-import { Easing, type WithSpringConfig, type WithTimingConfig } from 'react-native-reanimated';
+import { Easing, type WithTimingConfig } from 'react-native-reanimated';
+import { SPRING_BOUNCY, SPRING_GENTLE, SPRING_SNAPPY, SPRING_SOFT } from '../design/motion';
 
 // ============================================================
 // lib/animations.ts — Reanimated 3 アニメーションプリセット
@@ -26,11 +27,15 @@ import { Easing, type WithSpringConfig, type WithTimingConfig } from 'react-nati
 //   bouncy  — ハートや絵文字 stamp 等のお祝い系。少し弾む
 //   smooth  — modal / sheet 等、滑らかに収束させたいとき
 //
+// ★ 物理値は design/motion.ts を single source of truth として参照する。
+//   かつて同名 'snappy' がここだけ別物理 ({25,250,1}) を持つ split-brain が
+//   あったため、独自数値の直書きを廃止 (2026-06-12)。
+//
 export const SPRING_PRESETS = {
-  snappy: { damping: 25, stiffness: 250, mass: 1 } satisfies WithSpringConfig,
-  gentle: { damping: 30, stiffness: 150, mass: 1 } satisfies WithSpringConfig,
-  bouncy: { damping: 12, stiffness: 200, mass: 1 } satisfies WithSpringConfig,
-  smooth: { damping: 20, stiffness: 180, mass: 1 } satisfies WithSpringConfig,
+  snappy: SPRING_SNAPPY,
+  gentle: SPRING_GENTLE,
+  bouncy: SPRING_BOUNCY,
+  smooth: SPRING_SOFT,
 } as const;
 
 // ============================================================

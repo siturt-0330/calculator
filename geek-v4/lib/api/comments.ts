@@ -208,11 +208,15 @@ export type CreateCommentOpts = {
 
 // 投稿への新規コメント。第 3 引数 opts は optional。
 // メディアのみ (本文空) のコメントも migration 0104 適用後は許可する。
+/**
+ * コメント/返信を作成し、新規コメントの id を返す (作成直後のハイライト用)。
+ * id が取得できない環境 (select 失敗) でも作成自体は成功扱いで null を返す。
+ */
 export async function createComment(
   postId: string,
   content: string,
   opts: CreateCommentOpts = {},
-): Promise<void> {
+): Promise<string | null> {
   const rl = checkRate('comment');
   if (!rl.ok) throw new Error(rateLimitMessage('comment', rl.retryAfterMs));
   const { data: { user } } = await supabase.auth.getUser();
@@ -244,8 +248,21 @@ export async function createComment(
   // media_urls は付与時のみ含める (列未適用環境で text コメントを壊さないため)
   if (media.length > 0) row.media_urls = media;
 
-  const { error } = await supabase.from('comments').insert(row);
-  if (error) throw error;
+  const { data, error } = await supabase
+    .from('comments')
+    .insert(row)
+    .select('id')
+    .single();
+  if (error) {
+    // select('id') が RLS の SELECT 制限等で失敗しても INSERT 自体は成功している
+    // ケースがある (PostgREST は representation 取得に SELECT 権が要る)。
+    // その場合は id 無しの成功として扱う — 作成は壊さない。
+    if (error.code === 'PGRST116' || /permission denied/i.test(error.message ?? '')) {
+      return null;
+    }
+    throw error;
+  }
+  return (data as { id?: string } | null)?.id ?? null;
 }
 
 // ============================================================

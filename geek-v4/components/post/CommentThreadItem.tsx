@@ -127,13 +127,19 @@ export type CommentThreadItemProps = {
   // コメントのテキストスタンプ反応 (comment_reactions)。post/[id] 側で配線する。
   reactionsByComment?: ReactionsByComment;
   onReact?: (commentId: string, meme: string) => void;
+  // 一時ハイライト対象のコメント id (通知からのジャンプ先 / 自分が直前に投稿した
+  // コメント)。一致ノードは unread と同じ accent 薄帯で目立たせる (NEW バッジは
+  // 付けない)。再帰で子へもそのまま伝播する。
+  highlightedId?: string | null;
 };
 
 // 内部用の private 型 — 公開 CommentThreadItemProps は 1 文字も変えない。
 // sibling 位置 (最後の子か) は再帰が children.map で起きることを利用し、
 // `_isLastChild` を内部から渡す。root 呼び出し (親) は未指定 → default false。
 // root(depth=0) はエルボーを描かない (showElbow=false) ので _isLastChild は未使用。
-type InternalProps = CommentThreadItemProps & { _isLastChild?: boolean };
+// `_numPath` は階層番号 (#1.2.1 など) のパス。root は親 (post/[id]) の rootIndex
+// から "1" のように始まり、子は `${親}.${i+1}` で連結される。
+type InternalProps = CommentThreadItemProps & { _isLastChild?: boolean; _numPath?: string };
 
 // ============================================================
 // ThreadRail — depth>0 のノードの左に置くレール列 (純 View の border のみ)。
@@ -226,7 +232,9 @@ function CommentThreadItemInner({
   onReply,
   reactionsByComment,
   onReact,
+  highlightedId = null,
   _isLastChild = false,
+  _numPath,
 }: InternalProps) {
   const qc = useQueryClient();
   const C = useColors();
@@ -246,6 +254,13 @@ function CommentThreadItemInner({
   };
   const depth = Math.min(COMMENT_MAX_DEPTH, comment.depth ?? 0);
   const children = comment.children ?? [];
+  // 階層番号 (#1 / #1.2 / #1.2.1) — root は rootIndex、子は親パス + sibling 位置。
+  // 匿名 SNS の「#N が主役」文化を保ちつつ、返信がどの枝かを番号で即読みできる。
+  const numPath = _numPath ?? String(rootIndex);
+  // 一時ハイライト (通知ジャンプ先 / 直前に自分が投稿したコメント)。
+  // unread と同じ accent 薄帯を使うが NEW バッジは付けない。
+  const isHighlighted = !!highlightedId && comment.id === highlightedId;
+  const showBand = unread || isHighlighted;
   // depth>0 のノードだけレール列 (縦線 + エルボー) を描く。
   // depth0(root) は CollapsedComment の左バーと二重化を避けるため描かない。
   const showElbow = depth > 0;
@@ -396,11 +411,11 @@ function CommentThreadItemInner({
             gap: SP['3'],
             paddingVertical: SP['1'],
             paddingRight: SP['1'],
-            // unread のときだけ本文ブロックに accentBg 薄帯 + 左 accent ヘアライン。
-            paddingLeft: unread ? SP['2'] : 0,
-            backgroundColor: unread ? C.accentBg : 'transparent',
-            borderRadius: unread ? R.md : 0,
-            borderLeftWidth: unread ? 2 : 0,
+            // unread / highlight のとき本文ブロックに accentBg 薄帯 + 左 accent ヘアライン。
+            paddingLeft: showBand ? SP['2'] : 0,
+            backgroundColor: showBand ? C.accentBg : 'transparent',
+            borderRadius: showBand ? R.md : 0,
+            borderLeftWidth: showBand ? 2 : 0,
             borderLeftColor: C.accent,
           }}
         >
@@ -419,7 +434,7 @@ function CommentThreadItemInner({
                 emoji={comment.avatar_url ? undefined : comment.avatar_emoji}
                 color={pseudo.color}
                 name={pseudo.initial}
-                ring={unread ? 'accent' : 'none'}
+                ring={showBand ? 'accent' : 'none'}
               />
             </PressableScale>
             <View
@@ -432,9 +447,10 @@ function CommentThreadItemInner({
                 alignItems: 'center',
               }}
             >
-              {/* #N が匿名アイデンティティの主役。fontWeight は 700 で確定
-                  (800 にしない = NotoSansJP は 700 まで)。 */}
-              <Text style={{ fontSize: 9, color: C.text3, fontWeight: '700' }}>#{rootIndex}</Text>
+              {/* #N が匿名アイデンティティの主役。返信は #1.2 のような階層番号で
+                  「どの枝への返信か」を即読みできる (BBS 文化 + Reddit permalink 風)。
+                  fontWeight は 700 で確定 (800 にしない = NotoSansJP は 700 まで)。 */}
+              <Text style={{ fontSize: 11, color: C.text3, fontWeight: '700' }}>#{numPath}</Text>
             </View>
           </Animated.View>
 
@@ -461,6 +477,25 @@ function CommentThreadItemInner({
                   {pseudo.handle}
                 </Text>
               </PressableScale>
+              {/* 自分のコメントは「自分」バッジで一目で分かる (IG/YouTube の
+                  自分コメント識別と同型。匿名 SNS なので本人にだけ見える is_own 由来) */}
+              {isOwnComment && (
+                <View
+                  style={{
+                    paddingHorizontal: 6,
+                    paddingVertical: 1,
+                    backgroundColor: C.accentBg,
+                    borderRadius: R.sm,
+                    borderWidth: 1,
+                    borderColor: C.accent + '55',
+                  }}
+                  accessibilityLabel="自分のコメント"
+                >
+                  <Text style={{ fontSize: 11, color: C.accentLight, fontWeight: '700' }}>
+                    自分
+                  </Text>
+                </View>
+              )}
               <Text style={[T.caption, { color: C.text3 }]}>
                 · {formatRelative(comment.created_at)}
               </Text>
@@ -484,7 +519,7 @@ function CommentThreadItemInner({
                   accessibilityLabel="未読のコメント"
                 >
                   {/* #fff は許可された唯一の直書き。NEW は短いので 800 で良い。 */}
-                  <Text style={{ fontSize: 9, color: '#fff', fontWeight: '800' }}>NEW</Text>
+                  <Text style={{ fontSize: 11, color: '#fff', fontWeight: '800' }}>NEW</Text>
                 </View>
               )}
               <View style={{ flex: 1 }} />
@@ -739,7 +774,9 @@ function CommentThreadItemInner({
               onReply={onReply}
               reactionsByComment={reactionsByComment}
               onReact={onReact}
+              highlightedId={highlightedId}
               _isLastChild={i === children.length - 1}
+              _numPath={`${numPath}.${i + 1}`}
             />
           ))}
         </Animated.View>

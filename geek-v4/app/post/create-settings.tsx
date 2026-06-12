@@ -20,7 +20,6 @@ import {
   View,
   Text,
   ScrollView,
-  Alert,
   Platform,
   KeyboardAvoidingView,
   ActivityIndicator,
@@ -365,7 +364,12 @@ export default function CreateSettings() {
         const check = await checkContent({ content: s.content, tags: s.tags });
         if (!check.ok) {
           hap.error();
-          Alert.alert('投稿できません', check.reason ?? 'コンテンツポリシーに反する可能性があります');
+          // Alert.alert は web (RNW) で no-op のため toast に統一 (2026-06-12) —
+          // 旧実装は web でモデレーション拒否が**無言**になっていた。
+          show(
+            `投稿できません: ${check.reason ?? 'コンテンツポリシーに反する可能性があります'}`,
+            'error',
+          );
           return;
         }
         [uploadedImageUrls, uploadedVideoUrls] = await Promise.all([

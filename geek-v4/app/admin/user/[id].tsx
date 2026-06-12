@@ -369,7 +369,7 @@ function ProfileHero({
 
         {/* id row for copy/debug */}
         <Text
-          style={[T.mono, { color: C.text4, fontSize: 10, textAlign: 'center' }]}
+          style={[T.mono, { color: C.text4, fontSize: 11, textAlign: 'center' }]}
           numberOfLines={1}
         >
           {user.id}
@@ -424,7 +424,7 @@ function StatPill({ value, label, tone }: { value: number; label: string; tone?:
       }}
     >
       <Text style={[T.numLg, { color, fontWeight: '800', fontSize: 20 }]}>{value}</Text>
-      <Text style={[T.caption, { color: C.text3, fontSize: 10 }]}>{label}</Text>
+      <Text style={[T.caption, { color: C.text3, fontSize: 11 }]}>{label}</Text>
     </View>
   );
 }
@@ -799,7 +799,7 @@ function PostsTab({ posts, userId }: { posts: AdminPost[]; userId: string }) {
                     borderWidth: 1, borderColor: visColor + '55',
                   }}
                 >
-                  <Text style={[T.caption, { color: visColor, fontWeight: '700', fontSize: 10 }]}>
+                  <Text style={[T.caption, { color: visColor, fontWeight: '700', fontSize: 11 }]}>
                     {p.visibility}
                   </Text>
                 </View>
@@ -899,7 +899,7 @@ function ConcernsTab({ concerns, posts }: { concerns: ConcernSummary[]; posts: A
                   borderWidth: 1, borderColor: C.red + '55',
                 }}
               >
-                <Text style={{ fontSize: 10, color: C.red, fontWeight: '800' }}>
+                <Text style={{ fontSize: 11, color: C.red, fontWeight: '800' }}>
                   🚩 {g.reporters.length} 件
                 </Text>
               </View>
@@ -933,12 +933,12 @@ function ConcernsTab({ concerns, posts }: { concerns: ConcernSummary[]; posts: A
                         borderWidth: 1, borderColor: C.border,
                       }}
                     >
-                      <Text style={[T.caption, { color: C.text2, fontSize: 10 }]} numberOfLines={1}>
+                      <Text style={[T.caption, { color: C.text2, fontSize: 11 }]} numberOfLines={1}>
                         {r.reason}
                       </Text>
                     </View>
                   )}
-                  <Text style={[T.caption, { color: C.text4, fontSize: 10 }]}>
+                  <Text style={[T.caption, { color: C.text4, fontSize: 11 }]}>
                     {formatRelative(r.created_at)}
                   </Text>
                 </View>
@@ -1119,7 +1119,7 @@ function ModerationTab({ logs, userId }: { logs: ModerationLog[]; userId: string
                       {formatRelative(l.created_at)}
                     </Text>
                   </View>
-                  <Text style={[T.mono, { color: C.text3, fontSize: 10 }]} numberOfLines={1}>
+                  <Text style={[T.mono, { color: C.text3, fontSize: 11 }]} numberOfLines={1}>
                     admin: {l.admin_id.slice(0, 8)}
                   </Text>
                   {l.reason && (

@@ -256,8 +256,8 @@ function FeedbackCard({
           borderWidth: 1, borderColor: meta.color + '55',
           flexDirection: 'row', alignItems: 'center', gap: 4,
         }}>
-          <Text style={{ fontSize: 10 }}>{meta.emoji}</Text>
-          <Text style={{ fontSize: 10, color: meta.color, fontWeight: '700' }}>
+          <Text style={{ fontSize: 11 }}>{meta.emoji}</Text>
+          <Text style={{ fontSize: 11, color: meta.color, fontWeight: '700' }}>
             {meta.label}
           </Text>
         </View>
@@ -266,8 +266,8 @@ function FeedbackCard({
           backgroundColor: C.bg3, borderRadius: R.sm,
           flexDirection: 'row', alignItems: 'center', gap: 4,
         }}>
-          <Text style={{ fontSize: 10 }}>{kindMeta.emoji}</Text>
-          <Text style={{ fontSize: 10, color: C.text2, fontWeight: '700' }}>
+          <Text style={{ fontSize: 11 }}>{kindMeta.emoji}</Text>
+          <Text style={{ fontSize: 11, color: C.text2, fontWeight: '700' }}>
             {kindMeta.label}
           </Text>
         </View>
@@ -378,8 +378,8 @@ function FeedbackCard({
                 flexDirection: 'row', alignItems: 'center', gap: 3,
               }}
             >
-              <Text style={{ fontSize: 9 }}>{m.emoji}</Text>
-              <Text style={{ fontSize: 10, color: m.color, fontWeight: '600' }}>
+              <Text style={{ fontSize: 11 }}>{m.emoji}</Text>
+              <Text style={{ fontSize: 11, color: m.color, fontWeight: '600' }}>
                 {m.label}にする
               </Text>
             </PressableScale>

@@ -463,7 +463,7 @@ export default function DiscoverCommunitiesScreen() {
                           borderRadius: R.sm,
                         }}
                       >
-                        <Text style={[T.caption, { color: badge.color, fontWeight: '700', fontSize: 10 }]}>
+                        <Text style={[T.caption, { color: badge.color, fontWeight: '700', fontSize: 11 }]}>
                           {badge.label}
                           {c.matchedBy === 'synonym' && c.matchedVariant
                             ? ` · ${c.matchedVariant}`

@@ -43,6 +43,8 @@ import { T } from '../../design/typography';
 import { R, SP } from '../../design/tokens';
 import { hapticPresets } from '../../lib/haptics';
 import { getJson, setJson } from '../../lib/storage';
+// ★ 2026-06-12 P0-2: grabber を「引っ張れる契約」にする
+import { SheetSwipeDown } from '../ui/SheetSwipeDown';
 
 // ============================================================
 // constants
@@ -269,6 +271,8 @@ export function TagPickerSheet({
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={{ width: '100%' }}
         >
+          {/* TextInput が active な時は pan を切る (キーボード隠しを意図しない swipe で誤発火しないように) */}
+          <SheetSwipeDown onClose={handleClose}>
           <Animated.View
             entering={SlideInDown.duration(260)}
             exiting={SlideOutDown.duration(200)}
@@ -575,6 +579,7 @@ export function TagPickerSheet({
               </Pressable>
             </View>
           </Animated.View>
+          </SheetSwipeDown>
         </KeyboardAvoidingView>
       </Animated.View>
     </Modal>

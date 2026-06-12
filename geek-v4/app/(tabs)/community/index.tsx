@@ -36,6 +36,8 @@ import { useReactions, useReactionToggle } from '../../../hooks/useReactions';
 import { useAddedTags, useAddTag } from '../../../hooks/useAddedTags';
 import { usePolls } from '../../../hooks/usePolls';
 import { useToastStore } from '../../../stores/toastStore';
+import { useTabBarScrollSV } from '../../../lib/contexts/tabBarScroll';
+import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import type { Post } from '../../../types/models';
 import type { ReactionAgg } from '../../../lib/api/reactions';
 import { fetchCommunityPosts, type PostCommunityRef } from '../../../lib/api/posts';
@@ -90,6 +92,16 @@ export default function CommunityScreen() {
   // 詳細ページ遷移ではなく **画面内で post を絞り込む**。
   // null = 「すべて」 (filter 無し), 文字列 = 特定 community のみ表示。
   const [selectedCommunityId, setSelectedCommunityId] = useState<string | null>(null);
+
+  // TabBar shrink 用 scrollY を共有 SV に転送 (2026-06-12)
+  // ⚠ ~60Hz の hot path — 同期軽処理のみ (setState / async の追加禁止)。
+  const tabBarScrollSV = useTabBarScrollSV();
+  const onTabBarShrinkScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (tabBarScrollSV) tabBarScrollSV.value = e.nativeEvent.contentOffset.y;
+    },
+    [tabBarScrollSV],
+  );
 
   // 参加コミュ一覧 (横スクロール用) — React Query
   const myCommunitiesQuery = useQuery({
@@ -652,6 +664,8 @@ export default function CommunityScreen() {
         contentContainerStyle={{
           paddingBottom: insets.bottom + TABBAR.height + SP['6'],
         }}
+        onScroll={onTabBarShrinkScroll}
+        scrollEventThrottle={16}
       />
 
       {/* 通報シート (運営への通報・理由選択) */}

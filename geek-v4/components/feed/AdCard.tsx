@@ -102,7 +102,7 @@ function AdCardInner({ ad, position, matchedTags }: AdCardProps) {
         >
           <Text
             style={{
-              fontSize: 9,
+              fontSize: 11,
               fontWeight: '800',
               color: C.accentLight,
               letterSpacing: 0.8,

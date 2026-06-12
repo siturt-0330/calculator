@@ -40,6 +40,7 @@ import { Icon } from '../../constants/icons';
 import { useColors } from '../../hooks/useColors';
 import { T } from '../../design/typography';
 import { SP, R } from '../../design/tokens';
+import { SPRING_PRESS_QUICK } from '../../design/motion';
 import { hapticPresets } from '../../lib/haptics';
 
 // auto-grow の上限。これを超えたら TextInput 自身が内部スクロールする。
@@ -115,8 +116,8 @@ export function PostComposerSheet({
   const handleAiPress = useCallback(() => {
     if (!onAiSuggestPress) return;
     hapticPresets.light();
-    chipScale.value = withSpring(0.95, { damping: 14, stiffness: 360, mass: 0.6 }, () => {
-      chipScale.value = withSpring(1, { damping: 14, stiffness: 360, mass: 0.6 });
+    chipScale.value = withSpring(0.95, SPRING_PRESS_QUICK, () => {
+      chipScale.value = withSpring(1, SPRING_PRESS_QUICK);
     });
     onAiSuggestPress();
   }, [onAiSuggestPress, chipScale]);

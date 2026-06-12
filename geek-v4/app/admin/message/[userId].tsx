@@ -330,7 +330,7 @@ function RecipientCard({
                 }}
               >
                 <Text
-                  style={{ fontSize: 10, color: stateMeta.color, fontWeight: '700' }}
+                  style={{ fontSize: 11, color: stateMeta.color, fontWeight: '700' }}
                 >
                   {stateMeta.label}
                 </Text>
@@ -338,7 +338,7 @@ function RecipientCard({
             ) : null}
           </View>
           <Text
-            style={[T.mono, { color: C.text4, fontSize: 10 }]}
+            style={[T.mono, { color: C.text4, fontSize: 11 }]}
             numberOfLines={1}
           >
             {userId}
@@ -396,7 +396,7 @@ function MiniStat({
       >
         {formatted}
       </Text>
-      <Text style={[T.caption, { color: C.text3, fontSize: 10 }]}>{label}</Text>
+      <Text style={[T.caption, { color: C.text3, fontSize: 11 }]}>{label}</Text>
     </View>
   );
 }
@@ -643,7 +643,7 @@ function ChatBubble({ msg }: { msg: AdminMessage }) {
                 borderColor: C.green + '55',
               }}
             >
-              <Text style={{ fontSize: 9, color: C.green, fontWeight: '700' }}>
+              <Text style={{ fontSize: 11, color: C.green, fontWeight: '700' }}>
                 既読
               </Text>
             </View>
@@ -658,12 +658,12 @@ function ChatBubble({ msg }: { msg: AdminMessage }) {
                 borderColor: C.amber + '55',
               }}
             >
-              <Text style={{ fontSize: 9, color: C.amber, fontWeight: '700' }}>
+              <Text style={{ fontSize: 11, color: C.amber, fontWeight: '700' }}>
                 未読
               </Text>
             </View>
           )}
-          <Text style={[T.caption, { color: C.text4, fontSize: 10 }]}>
+          <Text style={[T.caption, { color: C.text4, fontSize: 11 }]}>
             {formatRelative(msg.created_at)}
           </Text>
         </View>

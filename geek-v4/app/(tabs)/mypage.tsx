@@ -42,6 +42,7 @@ import Animated, {
 import { useAuthStore } from '../../stores/authStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { supabase } from '../../lib/supabase';
+import { useTabBarScrollSV } from '../../lib/contexts/tabBarScroll';
 import { getBool, setBool } from '../../lib/storage';
 import { fetchMyComments, type MyCommentRow, deleteComment } from '../../lib/api/comments';
 import { deleteOwnPost, fetchCommunitiesForPosts, type PostCommunityRef } from '../../lib/api/posts';
@@ -250,14 +251,18 @@ export default function MypageScreen() {
   //   (reanimated の worklet ハンドラは Animated コンポーネント専用)。通常の JS
   //   onScroll で shared value を更新する(web は元々 JS スレッド、native も 16ms
   //   throttle で十分滑らか。masthead/ミニバー側の useAnimatedStyle が scrollY を購読)。
+  // ⚠ ~60Hz の hot path — 同期軽処理のみ (重い処理の追加禁止)。
+  const tabBarScrollSV = useTabBarScrollSV();
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const y = e.nativeEvent.contentOffset.y;
       scrollY.value = y;
+      // TabBar shrink 用の共有 SV にも転送 (2026-06-12)
+      if (tabBarScrollSV) tabBarScrollSV.value = y;
       const should = y > stickyThreshold;
       setShowStickyTabs((prev) => (prev !== should ? should : prev));
     },
-    [scrollY, stickyThreshold],
+    [scrollY, stickyThreshold, tabBarScrollSV],
   );
 
   // 擬似 sticky タブ複製の opacity(ヒーロー末で 0→1)。

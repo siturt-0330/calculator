@@ -534,8 +534,8 @@ export default function MapScreen() {
                           borderWidth: 1, borderColor: '#4285f455',
                         }}
                       >
-                        <Text style={{ fontSize: 9 }}>🗺</Text>
-                        <Text style={{ fontSize: 10, color: '#4285f4', fontWeight: '700' }}>
+                        <Text style={{ fontSize: 11 }}>🗺</Text>
+                        <Text style={{ fontSize: 11, color: '#4285f4', fontWeight: '700' }}>
                           Google Maps で開く
                         </Text>
                       </PressableScale>

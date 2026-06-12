@@ -450,7 +450,11 @@ export default function PhotoEditScreen() {
                     : '通常通り一覧に表示されます'}
                 </Text>
               </View>
-              <Toggle value={isHidden} onChange={setIsHidden} />
+              <Toggle
+                value={isHidden}
+                onChange={setIsHidden}
+                accessibilityLabel="写真を非表示にする"
+              />
             </View>
           </GlassCard>
 

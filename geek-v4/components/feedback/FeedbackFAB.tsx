@@ -17,6 +17,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useGradients, useShadows } from '../../hooks/useColors';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { C, R, SP } from '../../design/tokens';
+import { SPRING_SNAPPY } from '../../design/motion';
 import { T } from '../../design/typography';
 import { useT } from '../../lib/i18n';
 
@@ -31,8 +32,8 @@ const KIND_OPTIONS: { kind: FeedbackKind; label: string; emoji: string }[] = [
 
 // FAB 出現用 spring (指示通り damping 12 / stiffness 220 — ややバウンシー)
 const FAB_ENTRY_SPRING = { damping: 12, stiffness: 220, mass: 0.7 } as const;
-// press フィードバック (Apple Photos 系のキレ)
-const FAB_PRESS_SPRING = { damping: 18, stiffness: 300, mass: 0.6 } as const;
+// press フィードバック (Apple Photos 系のキレ) — 値は SPRING_SNAPPY と同一だったため token 参照に統一
+const FAB_PRESS_SPRING = SPRING_SNAPPY;
 const FAB_PRESS_SCALE = 0.92;
 
 export function FeedbackFAB() {
@@ -251,7 +252,7 @@ export function FeedbackFAB() {
                 maxLength={2000}
                 style={[T.body, { color: C.text, minHeight: 90, maxHeight: 200 }]}
               />
-              <Text style={{ fontSize: 10, color: message.length > 1800 ? C.amber : C.text3, textAlign: 'right' }}>
+              <Text style={{ fontSize: 11, color: message.length > 1800 ? C.amber : C.text3, textAlign: 'right' }}>
                 {message.length} / 2000
               </Text>
             </View>

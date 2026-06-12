@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, Platform } from 'react-native';
+import { AppText } from './AppText';
 import { PressableScale } from './PressableScale';
 import { C, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -66,12 +67,23 @@ export class ErrorBoundary extends React.Component<Props, State> {
           <Text style={[T.h2, { color: C.text, marginBottom: SP['1'] }]}>
             エラーが発生しました
           </Text>
-          <Text style={[T.body, { color: C.text2, textAlign: 'center', marginBottom: SP['2'] }]}>
-            {this.props.scope ? `${this.props.scope} で問題が起きました。` : 'アプリを再起動してください。'}
-          </Text>
-          <Text style={[T.caption, { color: C.text3, textAlign: 'center', maxWidth: 320 }]}>
-            {this.state.error.message}
-          </Text>
+          {/* 本文は AppText (Dynamic Type 部分対応) — OS 文字サイズ設定に 1.6 倍まで追従 */}
+          <AppText style={[T.body, { color: C.text2, textAlign: 'center', marginBottom: SP['2'], maxWidth: 320 }]}>
+            {/* ★ 2026-06-12: 本番でユーザーに見せる文言は平易な日本語のみ。
+                  Apple HIG「Alerts」: 「明確な原因 + 解決策」。技術詳細 (error.message) は __DEV__ 限定。
+                  生の error.message は英文 stack / Supabase error / "Network request failed" 等が
+                  そのままユーザーに到達してしまうため必ず gate する。 */}
+            もう一度お試しいただくか、解消しない場合はお問い合わせからご連絡ください
+          </AppText>
+          {__DEV__ && (
+            <Text
+              style={[T.caption, { color: C.text3, textAlign: 'center', maxWidth: 320, marginTop: SP['1'] }]}
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+            >
+              [dev] {this.state.error.message}
+            </Text>
+          )}
           <PressableScale
             onPress={reset}
             haptic="tap"

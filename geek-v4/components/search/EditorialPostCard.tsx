@@ -11,12 +11,14 @@
 import React, { useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
-import { C, SP, R } from '../../design/tokens';
+import { SP, R } from '../../design/tokens';
 import { T, FONT } from '../../design/typography';
 import { TIMING_SLOW } from '../../design/motion';
 import { PressableScale } from '../ui/PressableScale';
 import { HighlightedText } from '../ui/HighlightedText';
 import { Icon } from '../../constants/icons';
+import { useColors } from '../../hooks/useColors';
+import type { ColorPalette } from '../../lib/theme/palettes';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -62,6 +64,10 @@ function buildExcerpt(content: string, title: string): string {
 }
 
 export function EditorialPostCard({ post, rank, terms, onPress, onExplain }: Props) {
+  // テーマ追従のため makeStyles 化 (AnonPostCard と同規約)
+  const C = useColors();
+  const styles = useMemo(() => makeStyles(C), [C]);
+
   const isLead = rank === 1;
 
   // タイトル: post.title が空なら content 1行目
@@ -209,7 +215,14 @@ export function EditorialPostCard({ post, rank, terms, onPress, onExplain }: Pro
   );
 }
 
-const styles = StyleSheet.create({
+// -----------------------------------------------------------------------------
+// styles — テーマ追従のため makeStyles 化 (AnonPostCard と同規約)。
+// factory 経由参照のため no-unused-styles が全キーを未使用と誤報する → disable。
+// thumbVideoWrap の '#000' (動画レターボックス) と infoBtn の 'transparent' は
+// テーマ非依存のため literal のまま据え置く。
+// -----------------------------------------------------------------------------
+/* eslint-disable react-native/no-unused-styles */
+const makeStyles = (C: ColorPalette) => StyleSheet.create({
   card: {
     borderTopWidth: 1,
     borderTopColor: C.divider,
@@ -326,3 +339,4 @@ const styles = StyleSheet.create({
     height: '100%',
   },
 });
+/* eslint-enable react-native/no-unused-styles */

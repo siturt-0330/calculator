@@ -1,6 +1,12 @@
 import { useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchNotifications, markAllRead, markRead as markReadApi } from '../lib/api/notifications';
+import {
+  fetchNotifications,
+  markAllRead,
+  markRead as markReadApi,
+  markReadMany as markReadManyApi,
+  deleteNotifications as deleteNotificationsApi,
+} from '../lib/api/notifications';
 import { fetchMyNotificationPreferences } from '../lib/api/notificationPreferences';
 import { shouldShowInApp } from '../lib/utils/notificationFilter';
 import { useAuthStore } from '../stores/authStore';
@@ -105,12 +111,57 @@ export function useNotifications() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qc, NOTIF_KEY]);
 
+  // ============================================================
+  // markReadMany — 集約行 (IG/X 流) のタップ時にグループ内の未読を一括既読化。
+  // markRead と同じ optimistic + 静かに revert 方針。
+  // ============================================================
+  const handleMarkReadMany = useCallback(async (ids: string[]) => {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    const prev = qc.getQueryData<Notification[]>(NOTIF_KEY);
+    qc.setQueryData<Notification[]>(NOTIF_KEY, (old) =>
+      (old ?? []).map((n) => (idSet.has(n.id) ? { ...n, read: true } : n)),
+    );
+    try {
+      await markReadManyApi(ids);
+    } catch {
+      if (prev !== undefined) qc.setQueryData<Notification[]>(NOTIF_KEY, prev);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qc, NOTIF_KEY]);
+
+  // ============================================================
+  // deleteMany — YouTube の「この通知を非表示」相当。楽観削除 + 失敗時 revert。
+  // 削除は破壊的なので失敗 toast を出す (markRead と違い気づけないと不誠実)。
+  // ============================================================
+  const handleDeleteMany = useCallback(async (ids: string[]) => {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    const prev = qc.getQueryData<Notification[]>(NOTIF_KEY);
+    qc.setQueryData<Notification[]>(NOTIF_KEY, (old) =>
+      (old ?? []).filter((n) => !idSet.has(n.id)),
+    );
+    try {
+      await deleteNotificationsApi(ids);
+    } catch (e) {
+      if (prev !== undefined) qc.setQueryData<Notification[]>(NOTIF_KEY, prev);
+      const msg = e instanceof Error ? e.message : '';
+      useToastStore.getState().show(
+        msg ? `通知の削除に失敗しました: ${msg}` : '通知の削除に失敗しました',
+        'error',
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qc, NOTIF_KEY]);
+
   return {
     notifications,
     unreadCount,
     loading: q.isLoading,
     markAllRead: handleMarkAllRead,
     markRead: handleMarkRead,
+    markReadMany: handleMarkReadMany,
+    deleteMany: handleDeleteMany,
   };
 }
 

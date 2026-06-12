@@ -1,21 +1,11 @@
-import * as Haptics from 'expo-haptics';
-import { Platform } from 'react-native';
-
-const isHapticAvailable = Platform.OS === 'ios' || Platform.OS === 'android';
-
-async function safe(fn: () => Promise<void>) {
-  if (!isHapticAvailable) return;
-  try { await fn(); } catch { /* ignore */ }
-}
-
-export const hap = {
-  tap: () => safe(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)),
-  confirm: () => safe(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)),
-  pop: () => safe(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)),
-  select: () => safe(() => Haptics.selectionAsync()),
-  success: () => safe(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)),
-  warn: () => safe(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)),
-  error: () => safe(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)),
-} as const;
-
-export type HapticKind = keyof typeof hap;
+// ============================================================
+// design/haptics — lib/haptics.ts への re-export (互換レイヤー)
+// ============================================================
+//
+// haptic API の実体は lib/haptics.ts に統一済み (2026-06 監査)。
+// 既存の `import { hap } from '../design/haptics'` を壊さないために
+// re-export だけ残す。強度マッピングの変更は lib/haptics.ts で行う。
+// (旧実装の pop=Heavy は lib 側に統一済み — DoubleTapHeart の IG 風体験を維持)
+//
+export { hap } from '../lib/haptics';
+export type { HapticKind } from '../lib/haptics';

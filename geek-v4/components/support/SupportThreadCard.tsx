@@ -67,7 +67,7 @@ export function SupportThreadCard({ thread, authorNickname, asAdmin = false, onP
               borderColor: stateC.border,
             }}
           >
-            <Text style={{ fontSize: 10, color: stateC.fg, fontWeight: '700' }}>
+            <Text style={{ fontSize: 11, color: stateC.fg, fontWeight: '700' }}>
               {stateMeta.label}
             </Text>
           </View>
@@ -122,7 +122,7 @@ export function SupportThreadCard({ thread, authorNickname, asAdmin = false, onP
                 justifyContent: 'center',
               }}
             >
-              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>
+              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>
                 {unread > 9 ? '9+' : String(unread)}
               </Text>
             </View>

@@ -259,7 +259,7 @@ export default function SavedPosts() {
                   alignItems: 'center',
                 }}
               >
-                <Text style={{ fontSize: 10, fontWeight: '800', color: active ? '#fff' : C.text3 }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: active ? '#fff' : C.text3 }}>
                   {c.count}
                 </Text>
               </View>

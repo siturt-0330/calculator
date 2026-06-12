@@ -528,6 +528,7 @@ Native module を触ったら必ず通常 build & submit。
 | 起動 5 秒「黒画面」 | Splash + intro 合算で 8 秒 | intro を短縮し skip タップ対応。現行確定値は **~2.6s** (sweep 2 周 + fade。§0 の確定版が正、`SWEEPS_BEFORE_EXIT × SWEEP_MS`) |
 | フィード画像が一部しか映らない / 横が映らない | ProgressiveImage の ken-burns (scale 1.04→1.0) + overflow:hidden が `contain` 表示時に左右をクリップしていた | `ProgressiveImage.tsx`: `contentFit="contain"` 時は `useKenBurns=false` → scale を 1.0 固定でアニメなし。`feedMediaLayout.ts` の `mediaItemAspect`: 横長/適度な縦長は `{w:containerW, h:naturalH}`、縦長 `naturalH>cap` は `{w:cap×ar, h:cap}` (比例縮小 + `alignSelf:'center'`)。`mediaMaxH = winH × 0.58`・`contentFit="contain"`。cap を上げると画面外 → **0.58 以上には上げない** |
 | 横長写真がフィードで縦長/細く表示される・画像が水平に潰れる | **[実証済]** `thumbedUrl` が `resize=cover` を **height 無し** で render endpoint に渡すと幅だけ縮小・高さは元のまま返す (例 1179x866→width=480 で 480x866=aspect 0.55)。`getSize` 測定値も bitmap も潰れる。**EXIF は無関係**(upload で strip 済) | `imageUrl.ts`: height 未指定なら `resize=contain` 既定 (`opts.resize ?? (opts.height ? 'cover':'contain')`)。詳細・実測手順は **§5.10** に集約 |
+| 「…」メニュー/確認ダイアログが web で完全無反応 | **[実証済]** `Alert.alert` は react-native-web では **no-op** (ボタン付き・2引数とも何も表示されない)。本番 web で投稿カードの「…」「ブロック確認」「共有メニュー」「モデレーション拒否通知」が全て無言だった (2026-06-12) | メニューは `components/ui/ActionSheet.tsx` の **`ActionSheetModal`**、確認は `ConfirmDialog`、単発通知は toast (`useToastStore.show`) を使う。**`Alert.alert` を新規に書かない** |
 
 ---
 
@@ -569,7 +570,7 @@ Native module を触ったら必ず通常 build & submit。
 ## 13. 用語短縮 (この repo 固有)
 
 - **stamp** = メメ絵文字リアクション (Twitter の絵文字 reactions 相当)
-- **scope** = フィードの公開範囲フィルタ。`'open'` (全部 + ブロックタグ除外) と `'closed'` (好きタグのみ) の 2 値 — `stores/feedStore.ts` の `FeedScope`。並び順 (for-you / 新着 / 急上昇 / 人気) は別軸の **sort** (`SortMode`)
+- **scope** = フィードの表示フィルタ。`'open'` (全部 + ブロックタグ除外) と `'closed'` (**未参加コミュニティの投稿のみ** = 発見モード。2026-06-12 に「好きタグのみ」から意味変更・store 値は互換のため不変。filter は feed.tsx の scopedPosts で client 側実施) の 2 値 — `stores/feedStore.ts` の `FeedScope`。並び順 (for-you / 新着 / 急上昇 / 人気) は別軸の **sort** (`SortMode`)
 - **trust score** = 信頼スコア (0-100)。内部 tier は `newcomer`(0-29) / `regular`(30-69) / `probably_nice`(70-89) / `definitely_nice`(90-99) / `god`(100) の 5 段階キーで **境界判定のみ**。**UI 表示は数値スコアのみ** (emoji / 肩書ラベルは撤去済 — `lib/trust/score.ts` L5-14。`tests/unit/trustTier.test.ts` がキーを assert)
 - **concern (気になる)** = いいねの逆。低品質投稿を可視化する仕組み
 - **CW** = Content Warning (spoiler / nsfw / violence / sensitive)
@@ -620,7 +621,8 @@ Native module を触ったら必ず通常 build & submit。
 | 過去の意思決定 / 学び | `docs/HYPOTHESIS_LOG.md` |
 | 配色 / 余白 / 角 / サイズトークン | `design/tokens.ts` |
 | アニメ spring / easing / timing | `design/motion.ts` |
-| ハプティック設定 | `design/haptics.ts` |
+| ハプティック設定 | `lib/haptics.ts` (SoT。`design/haptics.ts` / `hooks/useHaptic.ts` は re-export — 2026-06-12 統一) |
+| Material (blur intensity) 4 段 | `design/materials.ts` (nav 層限定 / glass-on-glass 禁止) |
 | 絵文字 stamp 候補 | `lib/memes.ts` |
 | アカウント停止条件 / trust 計算 | `lib/trust/score.ts` + `supabase/migrations/0006_credibility.sql` |
 | RLS ポリシー | `supabase/migrations/00XX_*.sql` の `create policy` |

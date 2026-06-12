@@ -30,6 +30,19 @@ import {
   MessageSquareQuote,
 } from 'lucide-react-native';
 
+/**
+ * lucide strokeWidth の標準 5 段。
+ * SF Symbols weight との対応: regular↔2.0 / medium↔2.4 / bold↔2.8
+ * (Obsidian: Apple SF Symbols とアイコン設計)
+ */
+export const STROKE = {
+  light: 1.8,
+  regular: 2,
+  medium: 2.4,
+  semibold: 2.6,
+  bold: 2.8,
+} as const;
+
 export const Icon = {
   home: Home, corners: Compass, post: Plus, bbs: MessageSquare, mypage: User,
   bell: Bell, filter: SlidersHorizontal, search: Search,

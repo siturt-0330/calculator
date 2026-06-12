@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, Platform, useWindowDimensions, Image as RNImage, StyleSheet, Pressable, Alert } from 'react-native';
+import { View, Text, Platform, useWindowDimensions, Image as RNImage, StyleSheet, Pressable } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -53,6 +53,9 @@ import { stableKeyFor } from '../../lib/utils/queryKey';
 import { MediaWithCWGuard } from '../post/MediaWithCWGuard';
 import { getDisplayLikesForViewer } from '../../lib/utils/voteFuzz';
 import { ImageLightbox } from '../ui/ImageLightbox';
+import { ActionSheetModal, type Action } from '../ui/ActionSheet';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { Icon } from '../../constants/icons';
 import { sharePost, shareToX, copyPostLink, getEmbedCode } from '../../lib/utils/sharePost';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
@@ -269,7 +272,7 @@ function reactionPillLabel(C: ColorPalette, mine: boolean): { fontSize: number; 
 }
 
 function reactionPillCount(C: ColorPalette, mine: boolean): { fontSize: number; color: string; fontWeight: '700' } {
-  return { fontSize: 10, color: mine ? C.accentLight : C.text3, fontWeight: '700' };
+  return { fontSize: 11, color: mine ? C.accentLight : C.text3, fontWeight: '700' };
 }
 
 // ============================================================
@@ -520,34 +523,24 @@ function AnonPostCardInner({
   //   (周辺データ未ロード中など) では従来の author_id 比較に fallback (2b で author_id 除去後は false)。
   const isOwnPost = isOwn ?? (!!post.author_id && post.author_id === currentUserId);
 
-  // ユーザーブロック — ... メニューの「ユーザーをブロック」から実行
+  // ユーザーブロック — ... メニューの「ユーザーをブロック」から実行。
+  // 旧: Alert.alert で確認 → **web では Alert.alert が no-op で押せない** [実証済]。
+  // 新: ConfirmDialog (Modal ベース・全 platform 動作) で確認 → 実行 + undo toast。
   const blockUser = useBlockStore((s) => s.blockUser);
   const unblockUser = useBlockStore((s) => s.unblockUser);
   const show = useToastStore((s) => s.show);
-  const handleBlockUser = useCallback(() => {
+  const [blockConfirmOpen, setBlockConfirmOpen] = useState(false);
+  const performBlockUser = useCallback(() => {
     const pid = post.pseudonym_id;
     if (!pid) return;
-    Alert.alert(
-      'ユーザーをブロック',
-      'このユーザーの投稿を非表示にしますか？',
-      [
-        { text: 'キャンセル', style: 'cancel' },
-        {
-          text: 'ブロック',
-          style: 'destructive',
-          onPress: () => {
-            // Warning haptic は iOS の破壊的アクション標準 (NotificationFeedback.Warning)
-            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            blockUser(pid, 'harassment');
-            // ネストした Alert はやめ、undo 付き toast に変更 (Android での nested Alert 問題も回避)
-            show('ブロックしました', 'info', {
-              undoLabel: '元に戻す',
-              onUndo: () => unblockUser(pid),
-            });
-          },
-        },
-      ],
-    );
+    setBlockConfirmOpen(false);
+    // Warning haptic は iOS の破壊的アクション標準 (NotificationFeedback.Warning)
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    blockUser(pid, 'harassment');
+    show('ブロックしました', 'info', {
+      undoLabel: '元に戻す',
+      onUndo: () => unblockUser(pid),
+    });
   }, [post.pseudonym_id, blockUser, unblockUser, show]);
 
   // 「…」タップで「押された全スタンプ」一覧シートを開く
@@ -695,66 +688,73 @@ function AnonPostCardInner({
   const commentsCount = post.comments_count ?? 0;
   const hasMedia = mediaUrls.length > 0 || videoUrls.length > 0;
 
-  // シェアボタン: タップ→ 共有オプションシート (X/Threads 流)
-  // 長押しは廃止し、シングルタップでシートを開いて全オプションを表示する。
-  // OS ネイティブシェアは選択肢の 1 つとしてシート内に収める。
+  // シェアボタン: タップ→ 共有オプションシート (X/Threads 流)。
+  // 旧: Alert.alert ベース → **web では no-op で開かない** [実証済] →
+  // ActionSheetModal (Modal ベース・全 platform 動作) に置き換え (2026-06-12)。
+  // sheetKind: 開いているシートの種別 ('share' | 'more' | null)。
+  const [sheetKind, setSheetKind] = useState<null | 'share' | 'more'>(null);
+  const closeSheet = useCallback(() => setSheetKind(null), []);
   const handleShare = useCallback(() => {
     hap.tap();
     // 親 onShare も呼ぶ (親側の副作用がある場合に備える)
     onShare();
-    Alert.alert(
-      '共有オプション',
-      undefined,
-      [
-        {
-          text: 'シェア (OS標準)',
-          onPress: () => {
-            void sharePost(post).catch(() => {
-              show('シェアに失敗しました', 'error');
-            });
-          },
+    setSheetKind('share');
+  }, [onShare]);
+
+  const shareActions: Action[] = useMemo(
+    () => [
+      {
+        label: 'シェア (OS標準)',
+        icon: Icon.share,
+        onPress: () => {
+          void sharePost(post).catch(() => {
+            show('シェアに失敗しました', 'error');
+          });
         },
-        {
-          text: 'X でシェア',
-          onPress: () => {
-            void shareToX(post).catch(() => {
-              show('X のシェアに失敗しました', 'error');
-            });
-          },
+      },
+      {
+        label: 'X でシェア',
+        onPress: () => {
+          void shareToX(post).catch(() => {
+            show('X のシェアに失敗しました', 'error');
+          });
         },
-        {
-          text: 'リンクをコピー',
-          onPress: () => {
-            const copied = copyPostLink(post);
-            // copyPostLink は @react-native-clipboard を試みるが、プロジェクトでは
-            // expo-clipboard を使っているため直接フォールバックする
-            const url = `https://geek-app.netlify.app/post/${post.id}`;
-            const copyPromise = copied
-              ? Promise.resolve()
-              : Clipboard.setStringAsync(url);
-            void copyPromise.then(() => {
+      },
+      {
+        label: 'リンクをコピー',
+        icon: Icon.copy,
+        onPress: () => {
+          const copied = copyPostLink(post);
+          // copyPostLink は @react-native-clipboard を試みるが、プロジェクトでは
+          // expo-clipboard を使っているため直接フォールバックする
+          const url = `https://geek-app.netlify.app/post/${post.id}`;
+          const copyPromise = copied ? Promise.resolve() : Clipboard.setStringAsync(url);
+          void copyPromise
+            .then(() => {
               show('リンクをコピーしました', 'success');
-            }).catch(() => {
+            })
+            .catch(() => {
               show('コピーに失敗しました', 'error');
             });
-          },
         },
-        {
-          text: '埋め込みコードをコピー',
-          onPress: () => {
-            const embedHtml = getEmbedCode(post);
-            void Clipboard.setStringAsync(embedHtml).then(() => {
+      },
+      {
+        label: '埋め込みコードをコピー',
+        icon: Icon.copy,
+        onPress: () => {
+          const embedHtml = getEmbedCode(post);
+          void Clipboard.setStringAsync(embedHtml)
+            .then(() => {
               show('埋め込みコードをコピーしました', 'success');
-            }).catch(() => {
+            })
+            .catch(() => {
               show('コピーに失敗しました', 'error');
             });
-          },
         },
-        { text: 'キャンセル', style: 'cancel' },
-      ],
-      { cancelable: true },
-    );
-  }, [post, onShare, show]);
+      },
+    ],
+    [post, show],
+  );
 
   const openSource = useCallback(() => {
     if (!previewUrl) return;
@@ -783,26 +783,41 @@ function AnonPostCardInner({
     qc.invalidateQueries({ queryKey: ['feed'] });
     qc.invalidateQueries({ queryKey: ['community-feed'] });
   }, [qc]);
-  // ... ボタン — タップでブロック/報告オプションを含むシートを表示
-  // 旧: onLongPress で handleBlockUser を呼ぶ (不可視の affordance)
-  // 新: タップでシートを開き「ユーザーをブロック」「投稿を報告」を明示的に表示
+  // ... ボタン — タップでオプションシートを表示。
+  // 旧: Alert.alert ベース → **web では no-op で「…」が完全無反応だった** [実証済:
+  // 本番 geekboard.netlify.app で報告 2026-06-12]。ActionSheetModal に置き換え。
+  // メニュー内容:
+  //   - 自分の投稿: 「投稿を編集」(/post/create?editId= の既存編集モードへ遷移)
+  //   - 他人の投稿: 「ユーザーをブロック」(確認 ConfirmDialog) + 「投稿を報告」
   const handleMoreMenu = useCallback(() => {
-    const canBlock = !isOwnPost && !!post.pseudonym_id;
-    const options: Array<{ text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }> = [];
-    if (canBlock) {
-      options.push({
-        text: 'ユーザーをブロック',
-        style: 'destructive',
-        onPress: handleBlockUser,
+    hap.tap();
+    setSheetKind('more');
+  }, []);
+
+  const moreActions: Action[] = useMemo(() => {
+    if (isOwnPost) {
+      return [
+        {
+          label: '投稿を編集',
+          icon: Icon.edit,
+          onPress: () => {
+            router.push(`/post/create?editId=${encodeURIComponent(post.id)}` as never);
+          },
+        },
+      ];
+    }
+    const actions: Action[] = [];
+    if (post.pseudonym_id) {
+      actions.push({
+        label: 'ユーザーをブロック',
+        icon: Icon.block,
+        destructive: true,
+        onPress: () => setBlockConfirmOpen(true),
       });
     }
-    options.push({
-      text: '投稿を報告',
-      onPress: onMore,
-    });
-    options.push({ text: 'キャンセル', style: 'cancel' });
-    Alert.alert('その他のオプション', undefined, options, { cancelable: true });
-  }, [isOwnPost, post.pseudonym_id, handleBlockUser, onMore]);
+    actions.push({ label: '投稿を報告', icon: Icon.flag, onPress: onMore });
+    return actions;
+  }, [isOwnPost, post.pseudonym_id, post.id, router, onMore]);
 
   // ============================================================
   // 投稿詳細を「即開く」prefetch + seed (latency 改善 / spinner 撲滅)
@@ -1223,6 +1238,27 @@ function AnonPostCardInner({
         visible={!!lightboxUri}
         uri={lightboxUri}
         onClose={closeLightbox}
+      />
+
+      {/* 「…」/ シェアのオプションシート — Alert.alert は web no-op のため
+          Modal ベースの ActionSheetModal で全 platform 対応 (2026-06-12) */}
+      <ActionSheetModal
+        visible={sheetKind !== null}
+        title={sheetKind === 'share' ? '共有オプション' : 'その他のオプション'}
+        actions={sheetKind === 'share' ? shareActions : moreActions}
+        onClose={closeSheet}
+      />
+
+      {/* ブロックの確認 — 旧 Alert.alert 確認の置き換え (web 対応) */}
+      <ConfirmDialog
+        visible={blockConfirmOpen}
+        destructive
+        title="ユーザーをブロック"
+        message="このユーザーの投稿を非表示にしますか？"
+        confirmLabel="ブロック"
+        cancelLabel="キャンセル"
+        onConfirm={performBlockUser}
+        onCancel={() => setBlockConfirmOpen(false)}
       />
     </Animated.View>
   );

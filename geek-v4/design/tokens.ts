@@ -29,8 +29,9 @@ const _DARK: ColorPalette = {
   glassDark:    'rgba(0,0,0,0.50)',
   text:   '#f5f5f7',
   text2:  '#a1a1aa',
-  text3:  '#71717a',
-  text4:  '#52525b',
+  // ★ palettes.ts:PALETTE_DARK と同期: WCAG AA 違反 (2.64:1) を解消
+  text3:  '#9CA3AF',
+  text4:  '#7B7E8A',
   border:  '#27272a',
   border2: '#3f3f46',
   divider: '#1f1f22',
@@ -193,8 +194,8 @@ export const SIZE = {
 // Refined elevation tokens for the premium card/CTA look.
 // Defined here in `tokens.ts` (alongside C / SP / R) so call sites can
 // pull a single import: `import { C, SP, SHADOW } from './tokens'`.
-// (The legacy `design/shadows.ts` re-exports a Platform-split variant —
-//  both stay in sync; new code should prefer the tokens here.)
+// (`design/shadows.ts` は二重定義解消のためこの SHADOW の薄い re-export に
+//  一本化済み — single source。new code should prefer the tokens here.)
 export const SHADOW = {
   card: {
     shadowColor: '#000',

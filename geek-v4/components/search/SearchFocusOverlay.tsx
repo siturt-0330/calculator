@@ -421,7 +421,7 @@ function TrendingPill({
     >
       <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>{label}</Text>
       {count > 0 ? (
-        <Text style={{ fontSize: 10, color: C.text3, fontWeight: '700' }}>+{count}</Text>
+        <Text style={{ fontSize: 11, color: C.text3, fontWeight: '700' }}>+{count}</Text>
       ) : null}
     </PressableScale>
   );

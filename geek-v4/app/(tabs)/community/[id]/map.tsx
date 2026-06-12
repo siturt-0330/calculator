@@ -520,7 +520,7 @@ function LocationCard({
             borderColor: color + '55',
           }}
         >
-          <Text style={{ color, fontSize: 10, fontWeight: '700' }}>{catLabel}</Text>
+          <Text style={{ color, fontSize: 11, fontWeight: '700' }}>{catLabel}</Text>
         </View>
         {canDelete && (
           <PressableScale onPress={onDelete} haptic="warn" hitSlop={6} style={{ padding: 4 }}>

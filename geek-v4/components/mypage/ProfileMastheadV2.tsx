@@ -238,7 +238,7 @@ export function ProfileMastheadV2(props: ProfileMastheadV2Props) {
         >
           <Text
             style={{
-              fontSize: 10,
+              fontSize: 11,
               letterSpacing: 3,
               color: 'rgba(255,255,255,0.72)',
               textShadowColor: 'rgba(0,0,0,0.5)',

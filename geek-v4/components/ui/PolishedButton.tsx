@@ -8,9 +8,12 @@ import {
   type ViewStyle,
   type TextStyle,
 } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Haptics from 'expo-haptics';
-import { GRAD, SHADOW, C, R, SP } from '../../design/tokens';
+import { GRAD, SHADOW, C, SP } from '../../design/tokens';
+import { SPRING_SNAPPY } from '../../design/motion';
+// haptic は lib/haptics.ts (SoT) に統一 — 内製 switch は廃止
+import { haptic as triggerHaptic } from '../../lib/haptics';
 
 type Variant = 'gradient' | 'glass' | 'solid' | 'outline';
 type Size = 'sm' | 'md' | 'lg';
@@ -47,27 +50,10 @@ const SIZE_STYLES: Record<Size, { padding: number; minHeight: number; fontSize: 
   lg: { padding: SP['4'], minHeight: 52, fontSize: 17 },
 };
 
-function triggerHaptic(type: HapticType) {
-  if (Platform.OS === 'web') return;
-  try {
-    switch (type) {
-      case 'tap':
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        break;
-      case 'confirm':
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        break;
-      case 'warn':
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        break;
-      case 'select':
-        Haptics.selectionAsync();
-        break;
-    }
-  } catch {
-    // haptic は best-effort. 例外は握りつぶす (CLAUDE.md の swallow ポリシーに準拠)
-  }
-}
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+// press-in の縮小率 (PressableScale 同等の押下フィードバック)
+const PRESS_IN_SCALE = 0.97;
 
 /**
  * PolishedButton — 既存 Button.tsx の upgrade 版 (共存させる)。
@@ -101,6 +87,10 @@ export function PolishedButton({
   const sizeStyle = SIZE_STYLES[size];
   const isDisabled = disabled || loading;
 
+  // PressableScale 同等の spring scale フィードバック (押下中 0.97 → 復元)
+  const scale = useSharedValue(1);
+  const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+
   // destructive で gradient なら destructive グラデに. それ以外は指定通り。
   const gradientKey: GradientKey =
     variant === 'gradient' && destructive ? 'destructive' : gradient;
@@ -115,7 +105,8 @@ export function PolishedButton({
     minHeight: sizeStyle.minHeight,
     paddingVertical: sizeStyle.padding,
     paddingHorizontal: sizeStyle.padding * 1.5,
-    borderRadius: R.lg,
+    // Button.tsx (RADIUS=12) と統一 — 同じ「ボタン」で角丸 12 vs 14 が split していた (2026-06 HIG 監査)
+    borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -157,8 +148,18 @@ export function PolishedButton({
 
   function handlePressIn() {
     if (isDisabled) return;
+    scale.value = withSpring(PRESS_IN_SCALE, SPRING_SNAPPY);
     if (haptic) triggerHaptic(haptic);
   }
+
+  function handlePressOut() {
+    if (isDisabled) return;
+    scale.value = withSpring(1, SPRING_SNAPPY);
+  }
+
+  // delayPressIn は Pressable の型に乗ってないのでキャストして渡す
+  // (OS デフォルトの ~130ms 遅延を消す — PressableScale 流儀)
+  const pressInExtra = { delayPressIn: 0 } as Record<string, unknown>;
 
   // Web のみ cursor: pointer (PressableScale と揃える方針)
   // RN の ViewStyle 型には cursor / transition が無いが react-native-web は
@@ -198,13 +199,15 @@ export function PolishedButton({
 
   if (variant === 'gradient') {
     return (
-      <Pressable
+      <AnimatedPressable
+        {...pressInExtra}
         onPress={isDisabled ? undefined : onPress}
         onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
         disabled={isDisabled}
         hitSlop={8}
         {...a11y}
-        style={[baseContainer, glowShadow, webCursorStyle, style]}
+        style={[animStyle, baseContainer, glowShadow, webCursorStyle, style]}
       >
         <LinearGradient
           colors={gradientColors}
@@ -219,21 +222,23 @@ export function PolishedButton({
           }}
         />
         {content}
-      </Pressable>
+      </AnimatedPressable>
     );
   }
 
   return (
-    <Pressable
+    <AnimatedPressable
+      {...pressInExtra}
       onPress={isDisabled ? undefined : onPress}
       onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
       disabled={isDisabled}
       hitSlop={8}
       {...a11y}
-      style={[baseContainer, variantStyle, webCursorStyle, style]}
+      style={[animStyle, baseContainer, variantStyle, webCursorStyle, style]}
     >
       {content}
-    </Pressable>
+    </AnimatedPressable>
   );
 }
 
