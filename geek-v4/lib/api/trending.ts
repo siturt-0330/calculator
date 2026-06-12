@@ -184,3 +184,76 @@ export async function fetchTrendingByAllWindows(
   ]);
   return { '1h': w1h, '6h': w6h, '24h': w24h };
 }
+
+// ============================================================
+// 盛り上がってるコミュニティ (2026-06-13)
+// ============================================================
+//
+// ホームのトレンド行用。旧実装は「トレンドタグ → タグ名がコミュ名/community_tags に
+// 一致したコミュ」という間接解決で、コミュ内の実際の投稿活動を全く反映しなかった
+// (ユーザー報告:「全然トレンドを反映していない」)。
+//
+// 新実装は post_communities (投稿⇔コミュ対応、created_at 付き) を直近 window で
+// 直接集計する = 「直近にいちばん投稿されているコミュニティ」が出る。
+//   1. 直近 48h の post_communities を取得 (RLS が可視性を裁く)
+//   2. コミュ 3 件未満なら 7 日に広げて再取得 (低活動期の空行防止)
+//   3. community_id ごとに件数を数え、上位 limit 件のコミュ詳細を取得
+//      (visibility は open / request のみ — 招待制コミュはトレンドに晒さない)
+//   4. 件数降順で返す。postCount は「その window の投稿数」= 勢いの実数
+// ============================================================
+
+import type { CommunityMetaLite } from './communities-feed';
+
+export type TrendingCommunity = {
+  community: CommunityMetaLite;
+  postCount: number;
+};
+
+const TREND_COMM_PRIMARY_WINDOW_H = 48;
+const TREND_COMM_FALLBACK_WINDOW_H = 24 * 7;
+const TREND_COMM_MIN_COMMUNITIES = 3; // これ未満なら fallback window へ
+const TREND_COMM_ROWS_LIMIT = 1000;   // 集計対象の post_communities 行上限
+
+async function fetchRecentCommunityCounts(windowHours: number): Promise<Map<string, number>> {
+  const since = new Date(Date.now() - windowHours * 3600 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from('post_communities')
+    .select('community_id, created_at')
+    .gte('created_at', since)
+    .limit(TREND_COMM_ROWS_LIMIT);
+  const counts = new Map<string, number>();
+  if (error || !data) return counts;
+  for (const row of data as Array<{ community_id: string }>) {
+    counts.set(row.community_id, (counts.get(row.community_id) ?? 0) + 1);
+  }
+  return counts;
+}
+
+export async function fetchTrendingCommunities(limit = 8): Promise<TrendingCommunity[]> {
+  let counts = await fetchRecentCommunityCounts(TREND_COMM_PRIMARY_WINDOW_H);
+  if (counts.size < TREND_COMM_MIN_COMMUNITIES) {
+    counts = await fetchRecentCommunityCounts(TREND_COMM_FALLBACK_WINDOW_H);
+  }
+  if (counts.size === 0) return [];
+
+  const topIds = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([id]) => id);
+
+  const { data: comms, error } = await supabase
+    .from('communities')
+    .select('id, name, icon_emoji, icon_color, icon_url, is_official')
+    .in('id', topIds)
+    .in('visibility', ['open', 'request']);
+  if (error || !comms) return [];
+
+  const byId = new Map((comms as CommunityMetaLite[]).map((c) => [c.id, c]));
+  const out: TrendingCommunity[] = [];
+  for (const id of topIds) {
+    const c = byId.get(id);
+    if (!c) continue; // invite 制 or RLS 不可視はスキップ
+    out.push({ community: c, postCount: counts.get(id) ?? 0 });
+  }
+  return out;
+}

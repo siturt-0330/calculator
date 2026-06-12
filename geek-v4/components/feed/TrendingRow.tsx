@@ -1,27 +1,16 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView, type LayoutChangeEvent } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { fetchTrendingTags, type TrendingTag } from '../../lib/api/trending';
-import { resolveCommunitiesForTags } from '../../lib/api/communities-search';
-import type { CommunityMetaLite } from '../../lib/api/communities-feed';
-import { useTagCooccurStore } from '../../stores/tagCooccurStore';
+import { fetchTrendingCommunities, type TrendingCommunity } from '../../lib/api/trending';
 import { PressableScale } from '../ui/PressableScale';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 
 // data 未取得時の default。module 定数にして「毎レンダー新しい [] 参照」を作らない。
-// 旧 `data: trending = []` は loading 中に新しい [] を量産し、useEffect([trending]) を
-// 毎レンダー無限発火させて "Maximum update depth exceeded" を起こしていた。
-const EMPTY_TRENDING: TrendingTag[] = [];
-
-// トレンド行に出すコミュニティ chip (タグ → コミュ解決後の表示単位)
-type TrendCommunity = {
-  community: CommunityMetaLite;
-  // 解決元タグの直近投稿数 (勢いの表示に使う)
-  postCount: number;
-};
+// (新しい [] を量産すると useEffect([trendCommunities]) が毎レンダー発火する)
+const EMPTY_TRENDING: TrendingCommunity[] = [];
 
 function TrendingRowInner() {
   const router = useRouter();
@@ -32,56 +21,18 @@ function TrendingRowInner() {
   const positionsRef = useRef<Map<string, number>>(new Map());
   const [snapOffsets, setSnapOffsets] = useState<number[]>([]);
 
-  // Phase 3: cluster diversity を有効にするため cooccur を取得 (hydrate 済みなら)
-  // cooccur が無くても fetch 自体は動く (diversify はスキップ)
-  const cooccur = useTagCooccurStore((s) => s.cooccur);
-  const cooccurHydrated = useTagCooccurStore((s) => s.hydrated);
-  const cooccurHasData = cooccurHydrated && Object.keys(cooccur).length > 0;
-  const cooccurKey = cooccurHasData ? 'div' : 'plain';
-
-  // Audit E#5 (2026-05-28): 旧版は `trending-tags-refresh` channel で
-  // `posts INSERT` (filter 不可) を購読していたが、トレンドは 5 分粒度の集計で
-  // 十分鮮度を保てる + INSERT 全件 fanout は全クライアントに刺さって痛い。
-  // staleTime 5 分 + pull-to-refresh / feed refetch で十分なので realtime 撤去。
+  // ★ 2026-06-13: 「タグ → コミュ名一致」の間接解決を廃止し、post_communities の
+  //   直近 48h (薄ければ 7 日) を直接集計する fetchTrendingCommunities へ。
+  //   旧方式はトレンドタグ名がコミュ名と偶然一致した時しかコミュが出ず、
+  //   コミュ内の実際の投稿活動を全く反映していなかった (ユーザー報告)。
+  //   postCount は「その window に投稿された実数」になった。
   const { data } = useQuery({
-    queryKey: ['trending-tags', cooccurKey],
-    queryFn: () => fetchTrendingTags({
-      limit: 10,
-      // diversify は cooccur が hydrate されている場合のみ — 1 cluster 1 代表
-      ...(cooccurHasData ? { diversify: true, cooccur } : {}),
-    }),
+    queryKey: ['trending-communities'],
+    queryFn: () => fetchTrendingCommunities(8),
     staleTime: 5 * 60 * 1000,  // 5分
     refetchOnMount: false,
   });
-  // 安定した空配列を default にする (上記 EMPTY_TRENDING のコメント参照)。
-  const trending = data ?? EMPTY_TRENDING;
-
-  // ★ トレンドタグ → コミュニティ解決 (2026-06-12 ユーザー要望):
-  //   ホームのトレンド行は # タグではなく **コミュニティ** を出す。
-  //   search タブの「いま盛り上がってるコミュニティ」と同じ resolver
-  //   (name 完全一致 → community_tags 一致) を使い、解決できたタグだけを
-  //   コミュ chip として表示。未解決タグは行から落とす (タグ chip は出さない)。
-  const tagNames = useMemo(() => trending.map((t) => t.name), [trending]);
-  const { data: tagCommunities } = useQuery({
-    queryKey: ['trending-tag-communities', tagNames.join('|')],
-    queryFn: () => resolveCommunitiesForTags(tagNames),
-    enabled: tagNames.length > 0,
-    staleTime: 5 * 60_000,
-  });
-
-  // 解決できたコミュニティを (元タグの勢い順のまま) dedupe して chip 化
-  const trendCommunities = useMemo<TrendCommunity[]>(() => {
-    if (!tagCommunities) return [];
-    const seen = new Set<string>();
-    const out: TrendCommunity[] = [];
-    for (const t of trending) {
-      const c = tagCommunities[t.name.replace(/^#/, '').trim()];
-      if (!c || seen.has(c.id)) continue;
-      seen.add(c.id);
-      out.push({ community: c, postCount: t.postCount });
-    }
-    return out;
-  }, [trending, tagCommunities]);
+  const trendCommunities = data ?? EMPTY_TRENDING;
 
   // chip 構成が変わったら計測をリセット
   useEffect(() => {

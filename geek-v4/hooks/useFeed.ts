@@ -70,7 +70,7 @@ export function useFeed() {
   // ホームフィード — fetchPosts は home=true (デフォルト) で
   // visibility IN ('public', 'community_public') の post だけ返す。
   // private / community_only はサーバー側で弾かれる。
-  const { data, isLoading, isFetchingNextPage, fetchNextPage, hasNextPage, refetch } = useInfiniteQuery({
+  const { data, isLoading, isError, isFetchingNextPage, fetchNextPage, hasNextPage, refetch } = useInfiniteQuery({
     queryKey: feedQueryKey(sort, scope, likedTags, blockedTags),
     queryFn: async ({ pageParam }) => {
       const cursor = pageParam as string | undefined;
@@ -489,5 +489,8 @@ export function useFeed() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firstPageKey, qc]);
 
-  return { posts, reasonsMap, communitiesByPost, ads, interestTags, loading: isLoading, loadingMore: isFetchingNextPage, refreshing, refresh, loadMore };
+  // ★ 2026-06-13: isError を公開 — fetch 失敗 (通信断/トークン失効/一時障害) を
+  //   呼び出し側が「真に投稿ゼロ」と区別できるように。feed.tsx が誤って
+  //   「投稿がありません」を出していた (ユーザー報告: たまにフィードが空になる)。
+  return { posts, reasonsMap, communitiesByPost, ads, interestTags, loading: isLoading, isError, loadingMore: isFetchingNextPage, refreshing, refresh, loadMore };
 }

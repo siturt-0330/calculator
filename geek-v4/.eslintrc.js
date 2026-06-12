@@ -39,5 +39,6 @@ module.exports = {
       rules: { 'no-restricted-syntax': 'off' },
     },
   ],
-  ignorePatterns: ['node_modules', '.expo', 'ios', 'android', 'dist'],
+  // netlify/ は Deno ランタイムの Edge Function (Deno global 等) なので RN 向け lint から除外
+  ignorePatterns: ['node_modules', '.expo', 'ios', 'android', 'dist', 'netlify'],
 };

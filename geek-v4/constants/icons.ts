@@ -25,6 +25,7 @@ import {
   Copy,
   Moon, Sun, Palette,
   Play, Pause, TrendingUp,
+  RefreshCw,
   Volume2, VolumeX,
   Instagram, Facebook,
   MessageSquareQuote,
@@ -59,7 +60,7 @@ export const Icon = {
   send: Send, hash: Hash, at: AtSign, phone: Phone, clock: Clock,
   community: Users2, globe: Globe2,
   moon: Moon, sun: Sun, palette: Palette,
-  play: Play, pause: Pause, trendingUp: TrendingUp,
+  play: Play, pause: Pause, trendingUp: TrendingUp, refresh: RefreshCw,
   volume: Volume2, volumeMute: VolumeX,
   instagram: Instagram, facebook: Facebook,
   // TabIcon.tsx の TabKey 'game' から参照されている (dead route だが型に存在)

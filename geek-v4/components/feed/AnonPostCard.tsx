@@ -1005,6 +1005,13 @@ function AnonPostCardInner({
   // floating-card grid on tall screens.
   return (
     <Animated.View style={containerStyleCombined}>
+      {/* ★ 2026-06-13: カード全体を tap 可能に (X/Threads 流)。
+            画像の左右余白・画像とアクション行の間などの「不感エリア」を tap しても
+            反応しない、というユーザー報告への対応。ネストした touchable
+            (本文/画像/いいね/ヘッダー等) が responder 優先で勝つため、この親 Pressable は
+            「どの子にも当たらなかった隙間」だけを拾って詳細へ遷移する。
+            accessible=false: VoiceOver はカードを 1 塊にせず内部の各要素を読み続ける。 */}
+      <Pressable onPress={handleOpenDetail} accessible={false}>
       {/* ヘッダー — PostCardHeader に委譲 */}
       <PostCardHeader
         post={post}
@@ -1222,6 +1229,8 @@ function AnonPostCardInner({
           )}
         </View>
       )}
+
+      </Pressable>
 
       {/* 「…」から開く: 押された全スタンプの一覧 (閲覧 + タップでトグル) */}
       <ReactionListSheet

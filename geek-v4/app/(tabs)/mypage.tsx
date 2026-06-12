@@ -840,24 +840,24 @@ const CommentRow = memo(function CommentRow({
   const body = comment.content?.trim() || '';
   const post = comment.post;
   const source = post ? post.title?.trim() || post.content?.trim().slice(0, 40) || '投稿' : null;
+  // ★ 2026-06-13 刷新: 出典は本文の【上】に X の "Replying to" 流の 1 行で。
+  //   罫線・chevron・「への返信」後置をやめ、「返信先:」前置 + 淡色で文脈を先に見せる。
+  //   (旧 UI は hairline + ↖ + chevron で「表組み」のように汚かった — ユーザー指摘)
   const quote = (
     <View
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        gap: SP['2'],
-        marginTop: SP['2'],
-        paddingTop: SP['2'],
-        borderTopWidth: 1,
-        borderTopColor: C.divider,
+        gap: 5,
         opacity: post ? 1 : 0.6,
+        // 右上の「…」ボタンと重ならないよう右余白を確保 (出典行が行の最上段)
+        paddingRight: 28,
       }}
     >
-      <MyEntryIcons.arrowUL size={12} color={C.text3} strokeWidth={2} />
-      <Text style={[T.small, { color: C.text3, flex: 1 }]} numberOfLines={1}>
-        {source ? `${source}への返信` : '削除された投稿'}
+      <MyEntryIcons.arrowUL size={11} color={C.text3} strokeWidth={2} />
+      <Text style={[T.caption, { color: C.text3, flexShrink: 1 }]} numberOfLines={1}>
+        {source ? `返信先: ${source}` : '削除された投稿への返信'}
       </Text>
-      {source ? <MyEntryIcons.chevronR size={14} color={C.text4} strokeWidth={2} /> : null}
     </View>
   );
   return (
