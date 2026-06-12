@@ -407,6 +407,43 @@ async function cachePreview(preview: PreviewResult): Promise<void> {
   }
 }
 
+// ------------------------------------------------------------
+// YouTube oEmbed 補完 (2026-06-13)
+// ------------------------------------------------------------
+// YouTube の og:site_name は常に「YouTube」でチャンネル名が取れない。
+// LINE 風リンクカード (タイトル + チャンネル名をサムネ上部に重ねる) のため、
+// YouTube URL のときだけ oEmbed (公開 API) を server-side で叩き、
+// author_name (チャンネル名) を site_name に格納する。
+// ※ client から直接 oEmbed を叩くと閲覧者 IP が Google に渡るため必ずここで行う。
+// fail-secure: 失敗時は元の site_name のまま。
+const YT_HOST_RE = /^(?:[a-z0-9-]+\.)*(?:youtube\.com|youtu\.be)$/i;
+
+async function enrichYouTubeChannel(preview: PreviewResult): Promise<PreviewResult> {
+  try {
+    const host = new URL(preview.url).hostname;
+    if (!YT_HOST_RE.test(host)) return preview;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(preview.url)}&format=json`,
+      { signal: controller.signal, headers: { 'User-Agent': USER_AGENT } },
+    );
+    clearTimeout(timer);
+    if (!res.ok) return preview;
+    const j = (await res.json()) as { author_name?: string; title?: string };
+    const channel = typeof j.author_name === 'string' ? j.author_name.trim() : '';
+    if (!channel) return preview;
+    return {
+      ...preview,
+      // title が og で取れていなければ oEmbed title で補完
+      title: preview.title ?? truncate(j.title ?? null, MAX_TITLE),
+      site_name: truncate(channel, MAX_SITE_NAME),
+    };
+  } catch {
+    return preview;
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: buildCorsHeaders(req) });
@@ -431,7 +468,7 @@ serve(async (req) => {
       return jsonResponse(req, nullPreview(rawUrl), 200);
     }
 
-    const preview = await fetchPreview(safeUrl);
+    const preview = await enrichYouTubeChannel(await fetchPreview(safeUrl));
     await cachePreview(preview);
     return jsonResponse(req, preview, 200);
   } catch {

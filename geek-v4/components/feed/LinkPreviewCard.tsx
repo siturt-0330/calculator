@@ -37,15 +37,24 @@ export function LinkPreviewCard({ url }: { url: string }) {
   // YouTube host は IG/FB にマッチしないので yt と排他で良い。
   const social = yt ? null : parseSocialLink(url);
 
-  // 画像: OG画像があればそれ、無ければ(YouTubeなら)動画サムネ。
-  //   IG/FB は確定的なサムネ URL が無いので data.image_url がある時だけ (= 稀)。
+  // 画像:
+  //   YouTube は【常に】hqdefault (確実に存在する) を使う — DB に保存された og:image
+  //   (maxresdefault 等) は動画によって 404 になり「紺色の placeholder だけ」事故が
+  //   起きていた (2026-06-13 ユーザー報告)。hqdefault は全動画に必ず存在する。
+  //   一般リンクは OG 画像。IG/FB は確定的なサムネ URL が無いので image_url がある時だけ。
   // ★ いずれも og-image プロキシ経由にして、閲覧者の IP を相手ホストに渡さない。
   //   sanitizeUrl で http(s)+SSRF/private ガード → ogImageProxyUrl で GEEK サーバー経由に。
-  const rawImage = data?.image_url ?? (yt ? youTubeThumbnailUrl(yt.videoId) : null);
+  const rawImage = yt ? youTubeThumbnailUrl(yt.videoId) : data?.image_url ?? null;
   const safeImageUrl = ogImageProxyUrl(rawImage ? sanitizeUrl(rawImage) : null);
 
   // タイトル: OG title 優先。未取得時は YouTube / IG / FB のブランド名で代替。
   const title = data?.title ?? (yt ? 'YouTube' : social ? social.label : null);
+  // チャンネル名 (YouTube のみ): og-fetch が oEmbed author_name を site_name に格納する
+  // (2026-06-13)。旧 cache 行は 'YouTube' のままなのでその場合は出さない。
+  const ytChannel =
+    yt && data?.site_name && data.site_name.trim().toLowerCase() !== 'youtube'
+      ? data.site_name.trim()
+      : null;
   // 遷移先: YouTube は正規 watch URL、IG/FB は tracking 除去済の正規 URL。
   const openUrl = yt ? youTubeWatchUrl(yt.videoId) : social ? social.canonicalUrl : url;
 
@@ -101,12 +110,12 @@ export function LinkPreviewCard({ url }: { url: string }) {
       overflow: 'hidden',
     }}>
       {safeImageUrl ? (
-        // 画像あり: バナー + 下端グラデにタイトルを重ねる (YouTube / X 流)。
-        //   ・YouTube は 16:9 で cover crop — hqdefault (4:3, 上下黒帯) の帯が
-        //     ちょうど切り落とされて全面サムネになる
-        //   ・一般 OG は 1.91:1 (X/FB のカード標準比率)
-        //   ・タイトルは不透明の箱ではなく transparent→黒のグラデフェードに乗せる
-        //     (Apple HIG: コンテンツを覆い隠さず階層を保つ)
+        // 画像あり: LINE の YouTube カード風 (2026-06-13 ユーザー指定のリファレンス)。
+        //   ・YouTube は 16:9 cover crop — hqdefault (4:3, 上下黒帯) の帯が
+        //     ちょうど切り落とされて全面サムネになる。一般 OG は 1.91:1 (X/FB 標準)
+        //   ・タイトル + チャンネル名はサムネ【上部】の黒→透明グラデに重ねる
+        //     (LINE / iMessage の YouTube プレビューと同じ配置)
+        //   ・YouTube は右下に watermark (▶ YouTube)
         <View style={{ position: 'relative', width: '100%', aspectRatio: yt ? 16 / 9 : 1.91 }}>
           <ProgressiveImage
             uri={safeImageUrl}
@@ -116,6 +125,33 @@ export function LinkPreviewCard({ url }: { url: string }) {
             lazy
             thumbWidth={720}
           />
+          {title ? (
+            <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: 0 }}>
+              <LinearGradient
+                colors={['rgba(0,0,0,0.78)', 'rgba(0,0,0,0.42)', 'transparent']}
+                style={{
+                  paddingHorizontal: SP['3'],
+                  paddingTop: SP['2'],
+                  paddingBottom: SP['7'],
+                }}
+              >
+                <Text
+                  style={[T.smallB, { color: '#fff', fontSize: 15, lineHeight: 20 }]}
+                  numberOfLines={2}
+                >
+                  {title}
+                </Text>
+                {ytChannel ? (
+                  <Text
+                    style={[T.caption, { color: 'rgba(255,255,255,0.82)', marginTop: 2 }]}
+                    numberOfLines={1}
+                  >
+                    {ytChannel}
+                  </Text>
+                ) : null}
+              </LinearGradient>
+            </View>
+          ) : null}
           {showPlay ? (
             // 再生マーク(中央)。Liquid Glass 風: 半透明黒 + rim light の 1px 縁
             <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
@@ -135,20 +171,24 @@ export function LinkPreviewCard({ url }: { url: string }) {
               </View>
             </View>
           ) : null}
-          {title ? (
-            <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
-              <LinearGradient
-                colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.86)']}
-                style={{
-                  paddingTop: SP['8'],
-                  paddingHorizontal: SP['3'],
-                  paddingBottom: SP['2'],
-                }}
-              >
-                <Text style={[T.smallB, { color: '#fff', lineHeight: 19 }]} numberOfLines={2}>
-                  {title}
-                </Text>
-              </LinearGradient>
+          {yt ? (
+            // 右下 watermark — LINE 風の控えめな白ロゴ表現
+            <View
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                right: SP['3'],
+                bottom: SP['2'],
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+                opacity: 0.9,
+              }}
+            >
+              <Icon.play size={13} color="#fff" fill="#fff" />
+              <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700', letterSpacing: -0.2 }}>
+                YouTube
+              </Text>
             </View>
           ) : null}
         </View>
