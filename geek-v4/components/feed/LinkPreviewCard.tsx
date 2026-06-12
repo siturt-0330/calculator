@@ -1,4 +1,5 @@
 import { View, Text, Platform } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { safeOpenUrl } from '../../lib/openUrl';
 import { sanitizeUrl } from '../../lib/sanitize';
 import { useQuery } from '@tanstack/react-query';
@@ -100,43 +101,54 @@ export function LinkPreviewCard({ url }: { url: string }) {
       overflow: 'hidden',
     }}>
       {safeImageUrl ? (
-        // 画像あり: バナー + タイトルのキャプションバーを重ねる。
-        // (ProgressiveImage は width/height を取り内部 contentFit=cover。
-        //  外側 PressableScale の overflow:hidden + R.lg で角が丸まる)
-        <View style={{ position: 'relative' }}>
+        // 画像あり: バナー + 下端グラデにタイトルを重ねる (YouTube / X 流)。
+        //   ・YouTube は 16:9 で cover crop — hqdefault (4:3, 上下黒帯) の帯が
+        //     ちょうど切り落とされて全面サムネになる
+        //   ・一般 OG は 1.91:1 (X/FB のカード標準比率)
+        //   ・タイトルは不透明の箱ではなく transparent→黒のグラデフェードに乗せる
+        //     (Apple HIG: コンテンツを覆い隠さず階層を保つ)
+        <View style={{ position: 'relative', width: '100%', aspectRatio: yt ? 16 / 9 : 1.91 }}>
           <ProgressiveImage
             uri={safeImageUrl}
             width={'100%'}
-            height={190}
+            height={'100%'}
             radius={0}
             lazy
             thumbWidth={720}
           />
           {showPlay ? (
-            // 再生マーク(中央)。YouTube / IG リール / FB 動画など。タップは外側カードの open に委ねる。
+            // 再生マーク(中央)。Liquid Glass 風: 半透明黒 + rim light の 1px 縁
             <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
-              <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: '#fff', fontSize: 24, marginLeft: 3 }}>▶</Text>
+              <View
+                style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: 28,
+                  backgroundColor: 'rgba(0,0,0,0.55)',
+                  borderWidth: 1,
+                  borderColor: 'rgba(255,255,255,0.28)',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Icon.play size={24} color="#fff" fill="#fff" style={{ marginLeft: 3 }} />
               </View>
             </View>
           ) : null}
           {title ? (
-            <View
-              pointerEvents="none"
-              style={{
-                position: 'absolute',
-                left: SP['2'],
-                right: SP['2'],
-                bottom: SP['2'],
-                backgroundColor: C.scrim,
-                borderRadius: R.sm,
-                paddingHorizontal: SP['2'],
-                paddingVertical: SP['1'],
-              }}
-            >
-              <Text style={[T.smallB, { color: '#fff' }]} numberOfLines={2}>
-                {title}
-              </Text>
+            <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
+              <LinearGradient
+                colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.86)']}
+                style={{
+                  paddingTop: SP['8'],
+                  paddingHorizontal: SP['3'],
+                  paddingBottom: SP['2'],
+                }}
+              >
+                <Text style={[T.smallB, { color: '#fff', lineHeight: 19 }]} numberOfLines={2}>
+                  {title}
+                </Text>
+              </LinearGradient>
             </View>
           ) : null}
         </View>
@@ -157,10 +169,35 @@ export function LinkPreviewCard({ url }: { url: string }) {
           </Text>
         </View>
       ) : null}
-      {/* 出典ドメイン — 参考 UI の「場所: example.com」に合わせる */}
-      <View style={{ paddingHorizontal: SP['3'], paddingVertical: SP['2'] }}>
-        <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
-          場所: {shortHost(url)}
+      {/* 出典行 — ブランドマーク + サイト名 (YouTube は赤 chip、他は globe + ドメイン)。
+            旧「場所: <ドメイン>」表記より一目で出典が分かる。 */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+          paddingHorizontal: SP['3'],
+          paddingVertical: SP['2'],
+        }}
+      >
+        {yt ? (
+          <View
+            style={{
+              width: 19,
+              height: 13,
+              borderRadius: 3.5,
+              backgroundColor: '#FF0000',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Icon.play size={8} color="#fff" fill="#fff" style={{ marginLeft: 0.5 }} />
+          </View>
+        ) : (
+          <Icon.globe size={12} color={C.text3} strokeWidth={2} />
+        )}
+        <Text style={[T.caption, { color: C.text3, flex: 1 }]} numberOfLines={1}>
+          {yt ? 'YouTube' : (data?.site_name ?? shortHost(url))}
         </Text>
       </View>
     </PressableScale>
