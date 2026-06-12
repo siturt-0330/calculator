@@ -131,6 +131,11 @@ export function MyEntryRow({
     <>
       {/* 所属コミュニティ chip(post/saved の先頭) — 「どこに投稿したか」 */}
       {!isComment && communityNode ? communityNode : null}
+      {/* ★ 2026-06-13 コメント刷新: 出典 (返信先) を本文の【上】に置く (X の
+            "Replying to" 流)。読み手は先に文脈を掴んでから本文を読める。
+            旧: 本文の下に hairline 区切り + ↖ + chevron — 罫線が多く「表組み」
+            のように汚く見えていた (ユーザー指摘)。 */}
+      {isComment ? quoteNode ?? null : null}
       {hasTitle ? (
         <Text
           style={[T.bodyB, { color: C.text, letterSpacing: -0.2, paddingRight: hasMore ? 28 : 0 }]}
@@ -142,12 +147,13 @@ export function MyEntryRow({
       {body ? (
         <Text
           style={[
-            isComment ? T.body : T.body,
+            T.body,
             {
               color: C.text,
-              marginTop: hasTitle ? 4 : 0,
-              // 本文が最上段(コメント or タイトル無し投稿)のときだけ「…」分の右余白を確保。
-              paddingRight: hasMore && (isComment || !hasTitle) ? 28 : 0,
+              marginTop: hasTitle || isComment ? 4 : 0,
+              // 本文が最上段(タイトル無し投稿)のときだけ「…」分の右余白を確保。
+              // (コメントは出典行が最上段になったので出典行側で確保する)
+              paddingRight: hasMore && !isComment && !hasTitle ? 28 : 0,
             },
           ]}
           numberOfLines={isComment ? 4 : 6}
@@ -171,7 +177,6 @@ export function MyEntryRow({
           {badgeNode ?? null}
         </View>
       ) : null}
-      {isComment ? quoteNode ?? null : null}
     </>
   );
 
@@ -192,19 +197,10 @@ export function MyEntryRow({
           borderBottomColor: C.divider,
         }}
       >
-        {isComment ? (
-          <View style={{ flexDirection: 'row', gap: SP['3'] }}>
-            {/* accent 引用縦罫 = あなたの声(blockquote) */}
-            <View
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-              style={{ width: 2, alignSelf: 'stretch', borderRadius: 1, backgroundColor: C.accent, opacity: 0.9 }}
-            />
-            <View style={{ flex: 1, minWidth: 0 }}>{inner}</View>
-          </View>
-        ) : (
-          inner
-        )}
+        {/* ★ 2026-06-13: コメントの accent 縦罫 (blockquote 風) を撤去。
+              全行に走る紫の縦線が「線だらけ」の主因だった (ユーザー指摘)。
+              出典→本文の縦組みだけで構造は十分伝わる。 */}
+        {inner}
       </PressableScale>
 
       {/* 右上「…」メニュー。カード PressableScale の「兄弟」として上に重ねる。 */}

@@ -374,7 +374,7 @@ export default function FeedScreen() {
       },
     ],
   }));
-  const { posts, reasonsMap, communitiesByPost, ads, interestTags, loading, loadingMore, refreshing, refresh, loadMore } = useFeed();
+  const { posts, reasonsMap, communitiesByPost, ads, interestTags, loading, isError, loadingMore, refreshing, refresh, loadMore } = useFeed();
   // Smart skeleton timing — skeleton only after 200ms of continuous loading.
   // <200ms loads (cache hits / fast network) skip skeleton entirely to avoid flash.
   const showSkeleton = useDelayedLoading(loading, 200);
@@ -1121,9 +1121,11 @@ export default function FeedScreen() {
         ListEmptyComponent={
           <FeedEmptyState
             loading={loading}
+            isError={isError}
             showSkeleton={showSkeleton}
             scope={scope}
             onAction={handleCreatePost}
+            onRetry={refresh}
           />
         }
       />
@@ -1162,17 +1164,36 @@ function FeedSkeleton() {
 /** フィードが空のときに表示するコンポーネント。loading 中は skeleton を優先 */
 const FeedEmptyState = memo(function FeedEmptyState({
   loading,
+  isError,
   showSkeleton,
   scope,
   onAction,
+  onRetry,
 }: {
   loading: boolean;
+  isError: boolean;
   showSkeleton: boolean;
   scope: string;
   onAction: () => void;
+  onRetry: () => void;
 }) {
   if (loading) {
     return showSkeleton ? <FeedSkeleton /> : null;
+  }
+  // ★ 2026-06-13: fetch 失敗を「投稿がありません」と誤表示しない (ユーザー報告)。
+  //   通信断・トークン失効・一時障害では投稿は存在するのに query が空で確定する。
+  //   Apple HIG「エラーは原因と次のアクションを平易に」: 再試行ボタンを出す。
+  if (isError) {
+    return (
+      <EmptyState
+        icon={Icon.refresh}
+        title="読み込めませんでした"
+        message="通信状況をご確認のうえ、もう一度お試しください"
+        actionLabel="再試行"
+        onAction={onRetry}
+        tone="accent"
+      />
+    );
   }
   return (
     <EmptyState

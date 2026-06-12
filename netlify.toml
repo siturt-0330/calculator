@@ -49,6 +49,18 @@
   EXPO_PUBLIC_POSTHOG_HOST      = "https://app.posthog.com"
 
 # ============================================================
+# Edge Functions — 共有プレビュー (OG メタ) を bot にだけ配信
+# ------------------------------------------------------------
+# /post/<uuid> をリンクプレビュークローラ (LINE/X/iMessage/Discord 等) が
+# 取得した時だけ、投稿の本文/画像入り OG メタ HTML を返す (2026-06-13)。
+# 人間のブラウザは context.next() で下の SPA fallback へ素通し。
+# 実体: geek-v4/netlify/edge-functions/post-og.ts (base 相対で解決される)
+# ============================================================
+[[edge_functions]]
+  path     = "/post/*"
+  function = "post-og"
+
+# ============================================================
 # SPA fallback — every unknown URL serves index.html
 # Expo Router handles client-side routing from there.
 # ============================================================

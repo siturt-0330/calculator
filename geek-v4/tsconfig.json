@@ -27,6 +27,7 @@
   ],
   "exclude": [
     "supabase/**",
+    "netlify/**",
     "tests/**",
     "node_modules",
     "**/*.test.ts",
