@@ -13,8 +13,10 @@ import Animated, {
   withSpring,
   withTiming,
   Easing,
+  type SharedValue,
 } from 'react-native-reanimated';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
+import { useWebKeyboardInset } from '../../hooks/useWebKeyboardInset';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { deleteOwnPost } from '../../lib/api/posts';
 import { invalidateFeedPage } from '../../lib/cacheUpdates/feedPagePatcher';
@@ -24,7 +26,7 @@ import { LinkPreviewCard } from '../../components/feed/LinkPreviewCard';
 import { FeedMediaGrid } from '../../components/feed/FeedMediaGrid';
 import { mediaItemAspect, mediaContainerWidth } from '../../components/feed/feedMediaLayout';
 import { SP, R } from '../../design/tokens';
-import { SPRING_SEGMENT } from '../../design/motion';
+import { SPRING_ENTER, ENTER_SPAN } from '../../design/motion';
 import { useColors } from '../../hooks/useColors';
 import { T } from '../../design/typography';
 import { PressableScale } from '../../components/ui/PressableScale';
@@ -63,12 +65,48 @@ import { useCommentComposer } from '../../hooks/useCommentComposer';
 // ----------------------------------------------------------------
 const MAX_W = 720;
 const DEFAULT_ASPECT = 4 / 3; // ≈ 1.333 (アスペクト比解決前の仮値)
-// クイック絵文字 (コメント欄でタップ挿入・YouTube 風)
-const QUICK_EMOJIS = ['❤️', '😂', '🎉', '😢', '😮', '😅', '😊'] as const;
 
 // ----------------------------------------------------------------
 // 型
 // ----------------------------------------------------------------
+
+// ----------------------------------------------------------------
+// 入場カスケード v2 (2026-06-13 — 3 designer + judge の統合仕様)
+// ----------------------------------------------------------------
+// 1 本の enterProgress (0→1 spring, SPRING_ENTER ζ=1.0) を各ブロックの
+// 「等尺窓」[from, from+ENTER_SPAN] に正規化し、navbar → 投稿本体 →
+// コメント → 入力バー が同じ呼吸の長さで順に着地する (連弾の cadence)。
+//
+//  v1 からの改良点:
+//  - 窓の終点を progress=1 で共有しない → 「最後が一塊でもやっと」を解消
+//  - 窓内に easeOutCubic → 各ブロックが自分の減速で着地 (HIG: 入場は減速曲線)
+//  - opacity 先行 (e×1.15 — 窓の半分で完全不透明) → 最後の 2-3px は
+//    不透明のまま「すっ」と座る。Apple の入場の質感はほぼこれ
+//  - scaleFrom (本文のみ 0.988) → 「既にそこにあってピントを結ぶ」疑似 shared-element
+//
+// 1 sharedValue 駆動なのでブロック間の同期ズレ・余分な JS-UI 往復が無い。
+// transform + opacity のみ (layout を動かさない)。native はシート遷移の上に
+// 小さな settle として乗り、web ではこのカスケード自体が遷移演出になる。
+function useEnterStagger(
+  progress: SharedValue<number>,
+  from: number,
+  rise: number,
+  reduceMotion: boolean,
+  scaleFrom?: number,
+) {
+  return useAnimatedStyle(() => {
+    if (reduceMotion) return { opacity: 1 };
+    const p = Math.min(1, Math.max(0, (progress.value - from) / ENTER_SPAN));
+    const e = 1 - (1 - p) * (1 - p) * (1 - p); // easeOutCubic (worklet 安全な展開形)
+    return {
+      opacity: Math.min(1, e * 1.15),
+      transform: [
+        { translateY: (1 - e) * rise },
+        ...(scaleFrom != null ? [{ scale: scaleFrom + (1 - scaleFrom) * e }] : []),
+      ],
+    };
+  });
+}
 
 export default function PostDetailScreen() {
   // commentId: 通知 (コメント/返信) から来たとき該当コメントへジャンプ&ハイライト
@@ -85,9 +123,15 @@ export default function PostDetailScreen() {
   const qc = useQueryClient();
   const BackIcon = Icon.arrowL;
   const C = useColors();
+  // web: ソフトキーボードの高さ (native は常に 0 — KeyboardAvoidingView が担当)
+  const webKeyboardInset = useWebKeyboardInset();
 
   // ============================================================
-  // Entering animation — Reddit iOS 風 "lift up & expand" 演出
+  // Entering animation — カスケード振付 (2026-06-13 刷新)
+  // ------------------------------------------------------------
+  // 旧: 画面全体を scale 0.94→1.0 する単発ズーム。
+  // 新: 全体は速い fade のみ、中身が navbar → 投稿 → コメント → 入力バー の
+  //     順で 1 テンポずつ浮き上がる (useEnterStagger 参照)。
   // ============================================================
   const reduceMotion = useReducedMotion();
   const enterProgress = useSharedValue(0);
@@ -95,19 +139,22 @@ export default function PostDetailScreen() {
     if (reduceMotion) {
       enterProgress.value = withTiming(1, { duration: 150, easing: Easing.out(Easing.cubic) });
     } else {
-      enterProgress.value = withSpring(1, SPRING_SEGMENT);
+      enterProgress.value = withSpring(1, SPRING_ENTER);
     }
   }, [reduceMotion, enterProgress]);
+  // 画面全体: 地 (背景) を先に確定させてから役者を登場させる — 序盤 18% で easeOutQuad fade。
+  // (旧 30% 線形は navbar のブロック fade と乗算され最初の 1 拍が濁っていた)
   const enterStyle = useAnimatedStyle(() => {
-    if (reduceMotion) {
-      return { opacity: enterProgress.value };
-    }
-    return {
-      opacity: enterProgress.value,
-      // 0.94 → 1.0 (= 0.94 + progress * 0.06)
-      transform: [{ scale: 0.94 + enterProgress.value * 0.06 }],
-    };
+    const q = Math.min(1, enterProgress.value / 0.18);
+    return { opacity: q * (2 - q) }; // easeOutQuad
   });
+  // ブロック別: rise は「下層ほど大きく・本文はほぼゼロ」(本文アンカー化 — X/Threads 流。
+  // タップしたカードは動かさず周辺だけが流れ込む = 疑似 shared-element)。
+  // 着地点は 0.60 / 0.68 / 0.82 / 0.94 — トン・トン・トン・トンの逐次着地。
+  const navRise = useEnterStagger(enterProgress, 0, 4, reduceMotion);
+  const postRise = useEnterStagger(enterProgress, 0.08, 6, reduceMotion, 0.988);
+  const commentsRise = useEnterStagger(enterProgress, 0.22, 16, reduceMotion);
+  const composerRise = useEnterStagger(enterProgress, 0.34, 24, reduceMotion);
 
   // ============================================================
   // データ取得・副作用・派生状態 (usePostDetail に集約)
@@ -174,7 +221,8 @@ export default function PostDetailScreen() {
     video,
     posting,
     pickingImage,
-    composerActive,
+    // composerActive はクイック絵文字行 (撤去済 2026-06-13) だけが読んでいた。
+    // setComposerActive はフォーカス追跡として他の動線が使うので残す。
     canPost,
   } = composerState;
   const {
@@ -398,10 +446,11 @@ export default function PostDetailScreen() {
     <View style={styles.alignCenter}>
       <View style={styles.maxW}>
         {/* ---- ナビゲーションバー ---- */}
-        <View
+        <Animated.View
           style={[
             styles.navBar,
             { paddingTop: insets.top + SP['2'] },
+            navRise,
           ]}
         >
           <PressableScale
@@ -426,13 +475,14 @@ export default function PostDetailScreen() {
           >
             <MoreHorizontal size={20} color={C.text2} strokeWidth={2.2} />
           </PressableScale>
-        </View>
+        </Animated.View>
 
         {/* ---- 投稿本体カード ---- */}
-        <View
+        <Animated.View
           style={[
             styles.postCard,
             { borderBottomColor: C.divider },
+            postRise,
           ]}
         >
           <View style={{ gap: SP['3'] }}>
@@ -685,16 +735,16 @@ export default function PostDetailScreen() {
               </PressableScale>
             </View>
           </View>
-        </View>
+        </Animated.View>
 
-        {/* コメント件数バッジ */}
+        {/* コメント件数バッジ — コメント群と同じテンポで浮き上がる */}
         {replies.length > 0 && (
-          <View style={styles.commentCountRow}>
+          <Animated.View style={[styles.commentCountRow, commentsRise]}>
             <Icon.comment size={15} color={C.text2} strokeWidth={2.2} />
             <Text style={[T.smallM, { color: C.text, fontWeight: '700' }]}>
               {replies.length}件のコメント
             </Text>
-          </View>
+          </Animated.View>
         )}
       </View>
     </View>
@@ -724,6 +774,8 @@ export default function PostDetailScreen() {
         >
           {renderListHeader()}
 
+          {/* コメント群 + 似た投稿 — 投稿本体の 1 テンポ後に浮き上がる */}
+          <Animated.View style={commentsRise}>
           {repliesLoading ? (
             showRepliesSpinner ? (
               <View style={[styles.centerPad, { padding: SP['6'] }]}>
@@ -849,21 +901,28 @@ export default function PostDetailScreen() {
               </View>
             </View>
           )}
+          </Animated.View>
         </ScrollView>
 
         {/* ============================================================
             インライン コメント / 返信 コンポーザー
+            — カスケードの最後に下から rise (24px)
+            — web: marginBottom=キーボード高で「キーボード上端に貼り付く」(X 流一体化)。
+              キーボード表示中は home indicator の safe-area 余白も外す
+              (キーボードに覆われている領域のため、残すと間延びした隙間になる)
             ============================================================ */}
-        <View
+        <Animated.View
           style={[
             styles.composerBar,
             { borderTopColor: C.border, backgroundColor: C.bg2 },
+            webKeyboardInset > 0 && { marginBottom: webKeyboardInset },
+            composerRise,
           ]}
         >
           <View
             style={[
               styles.composerInner,
-              { paddingBottom: insets.bottom + SP['2'] },
+              { paddingBottom: (webKeyboardInset > 0 ? 0 : insets.bottom) + SP['2'] },
             ]}
           >
             {/* 返信先ラベル */}
@@ -906,26 +965,9 @@ export default function PostDetailScreen() {
               />
             )}
 
-            {/* クイック絵文字 (フォーカス中・YouTube 風) */}
-            {composerActive && (
-              <View style={styles.quickEmojiRow}>
-                {QUICK_EMOJIS.map((e) => (
-                  <PressableScale
-                    key={e}
-                    onPress={() => {
-                      setCommentText(commentText + e);
-                      composerRef.current?.focus();
-                    }}
-                    hitSlop={4}
-                    accessibilityRole="button"
-                    accessibilityLabel={`絵文字 ${e} を挿入`}
-                    style={styles.emojiBtn}
-                  >
-                    <Text style={{ fontSize: 22 }}>{e}</Text>
-                  </PressableScale>
-                ))}
-              </View>
-            )}
+            {/* クイック絵文字行は撤去 (2026-06-13 ユーザー指示「絵文字のやつはいらない」)
+                — OS キーボードの絵文字で十分 + composer がキーボードと一体化する
+                X 流のフラットな見た目を優先 */}
 
             {/* 入力行: 画像 / 動画 / テキスト / 送信 */}
             <View style={styles.inputRow}>
@@ -1046,7 +1088,7 @@ export default function PostDetailScreen() {
               </PressableScale>
             </View>
           </View>
-        </View>
+        </Animated.View>
 
         {/* ---- オーバーレイシート ---- */}
         <MemeReactionPicker
@@ -1277,21 +1319,6 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  // quick emoji
-  quickEmojiRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SP['1'],
-    paddingVertical: 2,
-  },
-  emojiBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -436,19 +436,11 @@ export default function ProfileEditScreen() {
           />
         </Section>
 
-        {/* ===== BIO ===== */}
-        <Section label="ABOUT" topGap>
-          <EditorialField
-            label="自己紹介"
-            hint="あなたについて、好きなもの、最近ハマっているもの"
-            value={bio}
-            onChangeText={(t) => setBio(t.slice(0, BIO_MAX))}
-            placeholder="例: アニメと音楽が好き。最近は◯◯にハマっています。"
-            maxLength={BIO_MAX}
-            multiline
-            showCount
-          />
-        </Section>
+        {/* ===== BIO =====
+            ★ 2026-06-13 撤去: 匿名 SNS でプロフィールは他人から見えない
+            (本画面の注記どおり「自分にだけ見える」) ため自己紹介欄は無意味
+            — ユーザー指示「自己紹介なんていらない」。
+            DB の bio 列・既存値はそのまま (UI から編集導線を消すだけ)。 */}
 
         {/* ===== SAVE ===== */}
         <View style={{ marginTop: SP['8'] }}>

@@ -50,6 +50,21 @@ export const SPRING_LIQUID: WithSpringConfig = { duration: 300, dampingRatio: 0.
 export const SPRING_LIQUID_FAST: WithSpringConfig = { duration: 180, dampingRatio: 0.85 };
 
 // ============================================================
+// 画面入場カスケード (投稿詳細 enter — 2026-06-13 v2)
+// ============================================================
+//  SPRING_ENTER — 入場カスケード専用。Apple .smooth 系・振動なし。
+//  ζ=1.0 で overshoot ゼロ = 窓クランプ (Math.min) が数学的に no-op になり
+//  「バネがクランプ壁に当たって死ぬ」現象が消える。450ms は 4 ブロックの
+//  連弾が呼吸できる長さ (Mail / App Store push と同テンポ)。退場系には使わない
+//  (入場 > 退場 の鉄則 — 退場は短く)。
+//  ※ 知覚系 (duration/dampingRatio)。physics 系 (damping/stiffness) と混在不可。
+export const SPRING_ENTER: WithSpringConfig = { duration: 450, dampingRatio: 1.0 };
+//  ENTER_SPAN — カスケード各ブロックの窓幅 (等尺)。
+//  終点 progress=1 を全員で共有すると「最後が一塊でもやっと」着地するため、
+//  各ブロックが from から同じ呼吸の長さ (0.6) で順に着地する設計に。
+export const ENTER_SPAN = 0.6;
+
+// ============================================================
 // Apple 知覚 spring presets (SwiftUI 互換)
 // ============================================================
 //
