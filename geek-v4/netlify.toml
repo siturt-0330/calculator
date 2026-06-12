@@ -46,6 +46,20 @@
   EXPO_PUBLIC_HOME_FEED_RPC     = "1"
 
 # ============================================================
+# Edge Functions — 共有プレビュー (OG メタ) を bot にだけ配信
+# ------------------------------------------------------------
+# /post/<uuid> をリンクプレビュークローラ (LINE/X/iMessage/Discord 等) が
+# 取得した時だけ、投稿の本文/画像入り OG メタ HTML を返す (2026-06-13)。
+# 人間のブラウザは context.next() で下の SPA fallback へ素通し。
+# 実体: netlify/edge-functions/post-og.ts (base=geek-v4 相対で解決)。
+# ※ root の netlify.toml にも同じ登録があるが、base に本ファイルがある場合
+#   Netlify はこちらを読む — 登録はこのファイルに書かないと効かない (実測 2026-06-13)。
+# ============================================================
+[[edge_functions]]
+  path     = "/post/*"
+  function = "post-og"
+
+# ============================================================
 # SPA fallback: Expo Router の client-side routing に全 path を渡す
 # ============================================================
 [[redirects]]
