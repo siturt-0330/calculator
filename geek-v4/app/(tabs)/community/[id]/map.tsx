@@ -12,6 +12,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useCallback, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useWebKeyboardInset } from '../../../../hooks/useWebKeyboardInset';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { C, R, SP, SHADOW } from '../../../../design/tokens';
 import { T } from '../../../../design/typography';
@@ -64,6 +65,10 @@ function openInMaps(lat: number, lng: number, label: string) {
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
+  // web: ソフトキーボードの高さ (native は常に 0 — KeyboardAvoidingView が担当)。
+  // RNW の KeyboardAvoidingView は no-op なので、iOS Safari ではこの inset を
+  // scrim の下 padding に足して sheet 全体をキーボードの上へ持ち上げる。
+  const webKeyboardInset = useWebKeyboardInset();
   const router = useRouter();
   const params = useLocalSearchParams();
   const id = typeof params.id === 'string' ? params.id : '';
@@ -247,14 +252,24 @@ export default function MapScreen() {
       )}
 
       <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => setModalOpen(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' }}>
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            justifyContent: 'flex-end',
+            // web のみ: キーボード高さ分だけ content box を縮める。flex-end の sheet が
+            // キーボード上端に貼り付く (native は 0 = 無影響)。
+            paddingBottom: webKeyboardInset,
+          }}
+        >
           <View
             style={{
               backgroundColor: C.bg2,
               borderTopLeftRadius: R['2xl'],
               borderTopRightRadius: R['2xl'],
               padding: SP['4'],
-              paddingBottom: insets.bottom + SP['4'],
+              // キーボード表示中 (web) は home indicator 用 safe-area を足さない。
+              paddingBottom: (webKeyboardInset > 0 ? 0 : insets.bottom) + SP['4'],
               gap: SP['3'],
               maxHeight: '90%',
             }}
@@ -271,7 +286,13 @@ export default function MapScreen() {
                 <Icon.close size={20} color={C.text2} strokeWidth={2.4} />
               </PressableScale>
             </View>
-            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: SP['3'] }}>
+            <ScrollView
+              // flexShrink: 1 — panel が縮んだ時 (web キーボード表示中) に list も縮めて
+              // 末尾の「追加する」ボタンがキーボードの裏に潜らないようにする。
+              style={{ flexShrink: 1 }}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ gap: SP['3'] }}
+            >
               <Field label="名前">
                 <TextInput value={name} onChangeText={setName} placeholder="例: ○○神社" placeholderTextColor={C.text3} style={fieldStyle} maxLength={120} />
               </Field>

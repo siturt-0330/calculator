@@ -44,6 +44,7 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { PressableScale } from '../../components/ui/PressableScale';
+import { CommunityIcon } from '../../components/ui/CommunityIcon';
 import { Icon } from '../../constants/icons';
 import { C, R, SP } from '../../design/tokens';
 import { TABBAR } from '../../design/tabbar';
@@ -71,14 +72,14 @@ import {
   useQueryIntent,
   useLogSearchEngagement,
 } from '../../hooks/useSearchV4';
-import { useTrendingTopics } from '../../hooks/useSearchV2';
+import { useTrendingTopics } from '../../hooks/useTrending';
 import { useSearchPreferences } from '../../hooks/useSearchPreferences';
 import { useSearchSignalsStore } from '../../stores/searchSignalsStore';
 import { findClosest } from '../../lib/search/typoCorrect';
 import { useTagGraphStore } from '../../stores/tagGraphStore';
 import type { Post } from '../../types/models';
 // Discovery セクション (C3 担当 — props で連携)
-import { HotPostsRow } from '../../components/search/HotPostsRow';
+import { HotPostsRow, HOT_POSTS_ROW_LIMIT } from '../../components/search/HotPostsRow';
 import { CommunityShelf } from '../../components/search/CommunityShelf';
 import { ForYouShelf } from '../../components/search/ForYouShelf';
 import { useFeatureFlag } from '../../hooks/useFeatureFlag';
@@ -155,7 +156,7 @@ export default function SearchScreen() {
   // ============= 履歴 / シグナル =============
   // 履歴の読み書きは pickQuery (commit 時に積む) のみ親で使う。
   // 「最近の検索」一覧の表示/削除/全消去は SearchFocusOverlay 側が自前で持つ。
-  const { pickQuery } = useSearchHistory(10);
+  const { pickQuery, history } = useSearchHistory(10);
   const recordSignal = useSearchSignalsStore((s) => s.record);
   const hydrateGraph = useTagGraphStore((s) => s.hydrate);
 
@@ -183,10 +184,14 @@ export default function SearchScreen() {
     return () => clearTimeout(t);
   }, [rawQuery]);
 
-  // 新クエリで「もっと見る」展開状態を初期化
+  // 新クエリで「もっと見る」展開状態とカテゴリを初期化。
+  // category を 'all' に戻さないと、前クエリで「投稿/コミュニティ」にドリルダウン
+  // した状態が sticky になり、新クエリの該当セクションが描画されず
+  // 「件数タブは出ているのに本文が白紙」になる (片側 0 件で空状態にも落ちない)。
   useEffect(() => {
     setExpandPosts(false);
     setExpandCommunities(false);
+    setCategory('all');
   }, [debouncedQuery]);
 
   // ============= focus 進捗 (Inkline 下線 / Masthead 畳み を駆動する SharedValue) =============
@@ -258,28 +263,37 @@ export default function SearchScreen() {
 
   useEffect(() => {
     if (!showResults) return;
-    const rows = searchV4.data ?? [];
-    if (rows.length === 0) return;
-    // category=posts なら全件、それ以外は preview 範囲のみ
+    // 前クエリ (keepPreviousData) の結果で impression を誤記録しない。
+    // A→B 切替中は searchV4.data がまだ A を保持するため、guard 無しだと
+    // A の post を query=B として log してしまいランキング学習を汚す。
+    if (searchV4.isPlaceholderData) return;
+    // ★ impression は「実際に hydrate されて画面に出る投稿」= postsQuery.data
+    //   だけに発火する。searchV4.data の生 post_id をそのまま使うと、RLS/削除/
+    //   ブロックで fetchPostsByIds から落ちて描画されない post_id にも impression
+    //   が飛び (検索 RPC が可視性述語を欠く問題の client 側増幅)、CTR 分母の水増しと
+    //   非可視 post の存在ログ漏えいになる。position も描画順に一致させる (click と同基準)。
+    const rendered = postsQuery.data ?? [];
+    if (rendered.length === 0) return;
+    // category=posts / 展開時は全件、それ以外は preview 範囲のみ
     const visibleCount = category === 'posts' || expandPosts
-      ? rows.length
-      : Math.min(rows.length, PREVIEW_LIMIT);
+      ? rendered.length
+      : Math.min(rendered.length, PREVIEW_LIMIT);
     for (let i = 0; i < visibleCount; i += 1) {
-      const r = rows[i];
-      if (!r) continue;
-      const dedupeKey = `${debouncedQuery}::${r.post_id}::${i + 1}`;
+      const p = rendered[i];
+      if (!p) continue;
+      const dedupeKey = `${debouncedQuery}::${p.id}::${i + 1}`;
       if (impressionFiredRef.current.has(dedupeKey)) continue;
       impressionFiredRef.current.add(dedupeKey);
       logEngagement.mutate({
         query: debouncedQuery,
-        post_id: r.post_id,
+        post_id: p.id,
         position: i + 1,
         action: 'impression',
       });
     }
     // logEngagement は stable な mutation 参照のため deps から外す
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchV4.data, debouncedQuery, showResults, category, expandPosts]);
+  }, [postsQuery.data, searchV4.isPlaceholderData, debouncedQuery, showResults, category, expandPosts]);
 
   // ============= dwell 計測 (post 詳細 navigate -> 戻り) =============
   // navigate 直前に start を記録し、focus が戻ったら経過 ms を server に送る。
@@ -338,6 +352,26 @@ export default function SearchScreen() {
     [debouncedQuery, logEngagement],
   );
 
+  // 検索結果カードの安定ハンドラ。.map 内でインライン arrow を毎 render 生成すると
+  // memo 化したカードの props 比較が毎回破れて全カードが再 render するため、
+  // useCallback で安定参照にして子へ渡す (カードは自分の post/community を引数で返す)。
+  const onPressPostResult = useCallback(
+    (post: Post, position: number) => {
+      recordClickAndDwellStart(post.id, position);
+      recordSignal({ kind: 'post', id: post.id, tags: post.tag_names });
+      router.push(`/post/${post.id}` as never);
+    },
+    [recordClickAndDwellStart, recordSignal, router],
+  );
+  const onExplainPostResult = useCallback(
+    (post: Post) => setExplainPost({ id: post.id, query: debouncedQuery }),
+    [debouncedQuery],
+  );
+  const onPressCommunityResult = useCallback(
+    (c: CommunityHit) => router.push(`/community/${c.id}` as never),
+    [router],
+  );
+
   // コミュニティ検索 — searchCommunities (既存 lib/api/communities.ts)
   const communitiesQuery = useQuery<CommunityHit[]>({
     queryKey: ['search-communities', debouncedQuery],
@@ -365,16 +399,27 @@ export default function SearchScreen() {
       && !communitiesQuery.isLoading;
     if (!noResults) return null;
     if (debouncedQuery.length < 2) return null;
-    const corpus = trendingNames.length > 0 ? trendingNames : [];
+    // corpus はトレンド名だけだと最大12件で貧弱(ほぼ常に null)なため、ユーザーの
+    // 検索履歴も合成する(どちらも端末ローカルに既にある=追加 fetch 無し)。
+    // 閾値は tag 検索 (app/tag/search.tsx) と揃えて 0.5。
+    const corpus = Array.from(new Set([...trendingNames, ...history].filter((s) => s.length > 0)));
     if (corpus.length === 0) return null;
-    return findClosest(debouncedQuery, corpus, 0.55);
-  }, [showResults, postsQuery.data, postsQuery.isLoading, communitiesQuery.data, communitiesQuery.isLoading, debouncedQuery, trendingNames]);
+    return findClosest(debouncedQuery, corpus, 0.5);
+  }, [showResults, postsQuery.data, postsQuery.isLoading, communitiesQuery.data, communitiesQuery.isLoading, debouncedQuery, trendingNames, history]);
 
   // ============= ハイライト用 terms =============
-  const highlightTerms = useMemo(
-    () => debouncedQuery.split(/\s+/).filter((s) => s.length > 0),
-    [debouncedQuery],
-  );
+  // 生クエリのトークン + searchV4 が返した matched_terms (synonym/typo/variant で
+  // ヒットした語) の和集合。生クエリだけだと同義語ヒット (例「料理」で「レシピ」
+  // 本文がヒット) の行が着色されない問題を補う (findHighlightRanges は小文字比較)。
+  const highlightTerms = useMemo(() => {
+    const set = new Set<string>(debouncedQuery.split(/\s+/).filter((s) => s.length > 0));
+    for (const r of searchV4.data ?? []) {
+      for (const t of r.matched_terms) {
+        if (t && t.length > 1) set.add(t);
+      }
+    }
+    return Array.from(set);
+  }, [debouncedQuery, searchV4.data]);
 
   // ============= 検索 commit (Enter / 履歴タップ / 候補タップ) =============
   const commit = useCallback((override?: string) => {
@@ -675,15 +720,8 @@ export default function SearchScreen() {
                     post={p}
                     rank={idx + 1}
                     terms={highlightTerms}
-                    onPress={() => {
-                      // 1-based position を server に送る (hookpoint 温存)
-                      recordClickAndDwellStart(p.id, idx + 1);
-                      recordSignal({ kind: 'post', id: p.id, tags: p.tag_names });
-                      router.push(`/post/${p.id}` as never);
-                    }}
-                    onExplain={() => {
-                      setExplainPost({ id: p.id, query: debouncedQuery });
-                    }}
+                    onPress={onPressPostResult}
+                    onExplain={onExplainPostResult}
                   />
                 ))}
               </ResultSection>
@@ -711,12 +749,42 @@ export default function SearchScreen() {
                     community={c}
                     rank={idx + 1}
                     terms={highlightTerms}
-                    onPress={() => {
-                      router.push(`/community/${c.id}` as never);
-                    }}
+                    onPress={onPressCommunityResult}
                   />
                 ))}
               </ResultSection>
+            )}
+
+            {/* 件数0のカテゴリを選んだとき (例: 投稿のみヒット時に「コミュニティ」タブ)
+                両セクションとも条件未達で白紙になり EditorialEmpty にも落ちないため、
+                ミニ空状態 + 「すべて」へ戻る導線を出す (「壊れた/フリーズ」誤認を防ぐ)。 */}
+            {((category === 'posts' && posts.length === 0) ||
+              (category === 'communities' && communities.length === 0)) && (
+              <View style={{ paddingVertical: SP['8'], alignItems: 'center', gap: SP['3'] }}>
+                <Text style={[T.body, { color: C.text3 }]}>
+                  {category === 'posts'
+                    ? 'このワードの投稿はありません'
+                    : 'このワードのコミュニティはありません'}
+                </Text>
+                <PressableScale
+                  onPress={() => setCategory('all')}
+                  haptic="tap"
+                  accessibilityRole="button"
+                  accessibilityLabel="すべての結果を見る"
+                  style={{
+                    paddingVertical: 9,
+                    paddingHorizontal: SP['4'],
+                    backgroundColor: C.bg2,
+                    borderRadius: R.full,
+                    borderWidth: 1,
+                    borderColor: C.accent + '40',
+                  }}
+                >
+                  <Text style={[T.smallM, { color: C.accentLight, fontWeight: '700' }]}>
+                    すべての結果を見る
+                  </Text>
+                </PressableScale>
+              </View>
             )}
           </View>
         )}
@@ -791,6 +859,15 @@ const DiscoveryView = memo(function DiscoveryView() {
     );
   }, [discovery.hot, showTextPosts]);
 
+  // ★ 2026-06-13: 「いま盛り上がっている」(HotPostsRow) と「For You」(ForYouShelf) が
+  //   同じ visualPool を引いて同一投稿を二重表示していた (ユーザー報告)。
+  //   Hot が表示する上位 N 件 (HOT_POSTS_ROW_LIMIT) を For You の候補から除外し、
+  //   For You は残りのプールを個人化再ランクする → 2 棚で同じ投稿が出ない。
+  const forYouPool = useMemo(() => {
+    const hotShownIds = new Set(visualPool.slice(0, HOT_POSTS_ROW_LIMIT).map((p) => p.id));
+    return visualPool.filter((p) => !hotShownIds.has(p.id));
+  }, [visualPool]);
+
   return (
     <View style={{ gap: SP['5'] }}>
       {/* 1) いま盛り上がってるコミュニティ — トレンドタグをコミュニティに解決して表示 */}
@@ -800,8 +877,9 @@ const DiscoveryView = memo(function DiscoveryView() {
           first paint 後に mount (内部 query を初回フレームで走らせない)。 */}
       {isFocused && <HotPostsRow posts={visualPool} loading={discoveryLoading} />}
 
-      {/* 3) あなたへのおすすめ — hot 共有プールを端末ローカルで再ランク */}
-      {isFocused && <ForYouShelf pool={visualPool} loading={discoveryLoading} />}
+      {/* 3) あなたへのおすすめ — hot で表示済みの投稿を除いたプールを端末ローカルで再ランク
+            (「いま盛り上がっている」との重複表示を防ぐ) */}
+      {isFocused && <ForYouShelf pool={forYouPool} loading={discoveryLoading} />}
 
       {/* 4) おすすめコミュニティ — 人気順の大カード */}
       <CommunityShelf
@@ -922,7 +1000,13 @@ const TrendingTopicsRow = memo(function TrendingTopicsRow() {
             }}
           >
             {community ? (
-              <Text style={{ fontSize: 12 }}>{community.icon_emoji ?? '👥'}</Text>
+              <CommunityIcon
+                size={18}
+                iconUrl={community.icon_url}
+                iconEmoji={community.icon_emoji}
+                iconColor={community.icon_color}
+                name={community.name}
+              />
             ) : null}
             <Text
               style={[

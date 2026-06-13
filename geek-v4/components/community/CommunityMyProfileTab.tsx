@@ -24,6 +24,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useWebKeyboardInset } from '../../hooks/useWebKeyboardInset';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -309,6 +310,9 @@ function ProfileEditModal({
   onSaved: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  // web: ソフトキーボード高さ (native は 0)。scrim の下 padding に足して
+  // sheet をキーボードの上へ持ち上げる (入力欄/保存ボタンがキーボードの裏に隠れない)。
+  const webKeyboardInset = useWebKeyboardInset();
   const show = useToastStore((s) => s.show);
 
   const [topOshi, setTopOshi] = useState('');
@@ -363,14 +367,21 @@ function ProfileEditModal({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' }}>
+      <View style={{
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.7)',
+        justifyContent: 'flex-end',
+        // web のみ: キーボード高さ分 content box を縮め、sheet をキーボード上端へ。
+        paddingBottom: webKeyboardInset,
+      }}>
         <View
           style={{
             backgroundColor: C.bg2,
             borderTopLeftRadius: R['2xl'],
             borderTopRightRadius: R['2xl'],
             padding: SP['4'],
-            paddingBottom: insets.bottom + SP['4'],
+            // キーボード表示中 (web) は home indicator 用 safe-area を足さない。
+            paddingBottom: (webKeyboardInset > 0 ? 0 : insets.bottom) + SP['4'],
             maxHeight: '90%',
             gap: SP['3'],
           }}
@@ -388,7 +399,13 @@ function ProfileEditModal({
             </PressableScale>
           </View>
 
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: SP['3'] }}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            // flexShrink: 1 — panel が縮んだ時 (web キーボード表示中) に list を縮め、
+            // 末尾の「保存する」ボタンがキーボードの裏に潜らないようにする。
+            style={{ flexShrink: 1 }}
+            contentContainerStyle={{ gap: SP['3'] }}
+          >
             <Field label="最推し (例: 湊あくあ / 花澤香菜 / Vaundy)">
               <TextInput
                 value={topOshi}

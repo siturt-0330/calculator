@@ -39,6 +39,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../constants/icons';
 import { useColors } from '../../hooks/useColors';
+import { useWebKeyboardInset } from '../../hooks/useWebKeyboardInset';
 import { T } from '../../design/typography';
 import { R, SP } from '../../design/tokens';
 import { hapticPresets } from '../../lib/haptics';
@@ -161,6 +162,11 @@ export function TagPickerSheet({
 }: Props) {
   const C = useColors();
   const insets = useSafeAreaInsets();
+  // web: ソフトキーボードの高さ (native は常に 0 — KeyboardAvoidingView が担当)。
+  // RNW の KeyboardAvoidingView は no-op なので、これを scrim の下 padding に足して
+  // sheet 全体をキーボードの上へ持ち上げる (入力欄/保存ボタンがキーボードの裏に
+  // 隠れる問題の解消)。
+  const webKeyboardInset = useWebKeyboardInset();
 
   // local draft — visible true で props.currentTags から復元する
   const [draft, setDraft] = useState<string[]>(() => [...currentTags]);
@@ -257,6 +263,10 @@ export function TagPickerSheet({
           flex: 1,
           backgroundColor: C.scrim,
           justifyContent: 'flex-end',
+          // web のみ: キーボード高さ分だけ content box を縮める。flex-end の sheet が
+          // キーボード上端に貼り付き、panel の maxHeight '92%' も縮んだ内寸に対して
+          // 解決されるため上端あふれも起きない (native は 0 = 無影響)。
+          paddingBottom: webKeyboardInset,
         }}
       >
         {/* backdrop — tap で close (draft 破棄) */}
@@ -282,7 +292,9 @@ export function TagPickerSheet({
               borderTopRightRadius: R.xl,
               borderTopWidth: 1,
               borderTopColor: C.border,
-              paddingBottom: insets.bottom + SP['3'],
+              // キーボード表示中 (web) は home indicator 用 safe-area を足さない
+              // — その領域はキーボードが覆っているので二重の隙間になるのを防ぐ。
+              paddingBottom: (webKeyboardInset > 0 ? 0 : insets.bottom) + SP['3'],
               maxHeight: '92%',
             }}
           >
@@ -438,7 +450,10 @@ export function TagPickerSheet({
 
             {/* ===== suggestions ===== */}
             <ScrollView
-              style={{ flexGrow: 0 }}
+              // flexShrink: 1 — panel が縮んだ時 (web キーボード表示中) に候補リストを
+              // 縮め、末尾の保存ボタンがキーボードの裏に潜らないようにする
+              // (Yoga の既定 shrink は 0 なので明示が必要)。
+              style={{ flexGrow: 0, flexShrink: 1 }}
               contentContainerStyle={{
                 paddingHorizontal: SP['5'],
                 paddingBottom: SP['3'],

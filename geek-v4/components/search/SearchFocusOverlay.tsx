@@ -44,7 +44,7 @@ import { T } from '../../design/typography';
 import { EASE_OUT } from '../../design/motion';
 import { withApiTimeout } from '../../lib/withApiTimeout';
 import { useSearchHistory } from '../../hooks/useSearchHistory';
-import { useTrendingTopics } from '../../hooks/useSearchV2';
+import { useTrendingTopics } from '../../hooks/useTrending';
 import { useTagSearchV3 } from '../../hooks/useTagSearchV3';
 import {
   useRecentCommunitiesStore,

@@ -279,14 +279,16 @@ function sanitizeSearchToken(raw: string): string | null {
  * 制約:
  *   - title もしくは content への部分一致のみ (BM25 / FTS は使わない)
  *   - ranking は created_at desc の simple な逆数スコア
- *   - community_id は posts に直接 column が無いため無視
- *     (community scope 検索は migration 適用後にしか正しく動かない)
+ *   - community_id 指定時は post_communities でその community の post に絞る
+ *     (RLS により viewer が見られるコミュ投稿のみ返る = UI の「このコミュニティ内」
+ *      chip と結果が一致する。旧実装は scope を無視して全体検索を返す silent degrade だった)
  *   - 結果は最大 (offset + limit) 件まで取って残りは捨てる
  */
 async function fallbackIlikeSearch(
   query: string,
   limit: number,
   offset: number,
+  communityId?: string,
 ): Promise<SearchV4Result[]> {
   const tokens = query
     .trim()
@@ -302,10 +304,33 @@ async function fallbackIlikeSearch(
     .join(',');
 
   try {
-    const builder = supabase
+    // community scope 指定時は post_communities でその community の post_id に絞る。
+    // post_communities は RLS 対象なので viewer が見られるコミュ投稿のみ返る。
+    // (巨大コミュで .in() の URL が長くなり 414 になった場合も error→[] で
+    //  graceful に空を返す = 他コミュの結果を漏らさない)
+    let allowedIds: string[] | null = null;
+    if (communityId) {
+      const { data: pc, error: pcErr } = await withApiTimeout(
+        supabase.from('post_communities').select('post_id').eq('community_id', communityId),
+        'searchV4.fallbackCommunityIds',
+        8000,
+      );
+      if (pcErr) {
+        swallow('searchV4.fallbackCommunityIds', pcErr);
+        return [];
+      }
+      allowedIds = (Array.isArray(pc) ? pc : [])
+        .map((r) => (isRecord(r) ? asString(r.post_id) : ''))
+        .filter((id) => id.length > 0);
+      if (allowedIds.length === 0) return [];
+    }
+
+    let builder = supabase
       .from('posts')
       .select('id, created_at')
-      .or(orClauses)
+      .or(orClauses);
+    if (allowedIds) builder = builder.in('id', allowedIds);
+    builder = builder
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -392,8 +417,8 @@ export async function searchPostsV4(args: SearchV4Args): Promise<SearchV4Result[
     swallow('searchV4.searchPostsV4.rpc', e);
   }
 
-  // 2) fallback: posts 直接 ilike 検索
-  return await fallbackIlikeSearch(trimmed, limit, offset);
+  // 2) fallback: posts 直接 ilike 検索 (community scope も尊重する)
+  return await fallbackIlikeSearch(trimmed, limit, offset, args.community_id);
 }
 
 // ----------------------------------------------------------------

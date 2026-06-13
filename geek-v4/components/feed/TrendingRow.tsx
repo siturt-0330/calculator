@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { fetchTrendingCommunities, type TrendingCommunity } from '../../lib/api/trending';
 import { PressableScale } from '../ui/PressableScale';
+import { CommunityIcon } from '../ui/CommunityIcon';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 
@@ -101,7 +102,16 @@ function TrendingRowInner() {
               }}
             >
               {i === 0 && <Text style={{ fontSize: 11 }}>👑</Text>}
-              <Text style={{ fontSize: 13 }}>{c.icon_emoji ?? '👥'}</Text>
+              {/* ★ 2026-06-13: emoji だけ (icon_emoji ?? '👥') では画像アイコン
+                  (icon_url) のコミュが汎用 👥 になっていた。共有 CommunityIcon に
+                  統一し icon_url(画像) → emoji → 頭文字 の優先で必ず実アイコンを出す。 */}
+              <CommunityIcon
+                size={20}
+                iconUrl={c.icon_url}
+                iconEmoji={c.icon_emoji}
+                iconColor={c.icon_color}
+                name={c.name}
+              />
               <Text style={[T.smallM, { color: i === 0 ? C.accent : C.text, fontWeight: '700' }]}>
                 {c.name}
               </Text>

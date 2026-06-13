@@ -392,59 +392,6 @@ export async function fetchPosts({
   return { posts: decorated, nextCursor };
 }
 
-// ============================================================
-// Discover — 検索タブの Instagram 風グリッド用
-// ------------------------------------------------------------
-// media_urls.length > 0 な公開投稿だけを新着順で取得。
-// 「写真ベースで偶然の出会いを増やす」UX のための最小 API。
-// (将来は trending / personalize で並び替えに切り替え予定)
-// ============================================================
-export type DiscoverMediaPost = {
-  id: string;
-  content: string;
-  media_urls: string[];
-  media_blurhashes: string[] | null;
-  likes_count: number;
-  comments_count: number;
-  created_at: string;
-};
-
-/**
- * Discover グリッド (検索タブ) 用: media_urls が 1 件以上の公開投稿を新着順で取得する。
- * PostgREST に text[] 長さフィルタが無いため overfetch + クライアント側で空 media を除外する。
- * @param opts.limit 取得件数 (6〜60、デフォルト 36)
- * @param opts.beforeCreatedAt 無限スクロール用 ISO timestamp cursor
- */
-export async function fetchDiscoverMediaPosts(opts: {
-  limit?: number;
-  /** ISO 文字列。これより古い created_at で絞る (無限スクロール) */
-  beforeCreatedAt?: string;
-} = {}): Promise<DiscoverMediaPost[]> {
-  const limit = Math.max(6, Math.min(opts.limit ?? 36, 60));
-  let query = supabase
-    .from('posts')
-    .select('id, content, media_urls, media_blurhashes, likes_count, comments_count, created_at')
-    .eq('is_anonymous', true)
-    .eq('is_public', true)
-    .order('created_at', { ascending: false })
-    .limit(limit * 3); // overfetch して空 media を捨ててから limit 件返す
-
-  if (opts.beforeCreatedAt) {
-    query = query.lt('created_at', opts.beforeCreatedAt);
-  }
-
-  const { data, error } = await withApiTimeout(query, 'posts.fetchDiscoverMediaPosts', POSTS_TIMEOUT_MS);
-  if (error) {
-    console.warn('[posts] fetchDiscoverMediaPosts failed:', error.message);
-    return [];
-  }
-  const rows = (data ?? []) as DiscoverMediaPost[];
-  // 写真があるものだけ + limit
-  return rows
-    .filter((p) => Array.isArray(p.media_urls) && p.media_urls.length > 0)
-    .slice(0, limit);
-}
-
 /**
  * 新規投稿を作成する。
  * - client-side レート制限 + 入力サニタイズを実施してから INSERT する。

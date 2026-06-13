@@ -33,6 +33,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useWebKeyboardInset } from '../../hooks/useWebKeyboardInset';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { TopBar } from '../../components/nav/TopBar';
@@ -541,6 +542,9 @@ function CollectionPickerModal({
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
   const current = target?.collection_id ?? null;
+  // web: ソフトキーボード高さ (native は 0)。scrim の下 padding に足して
+  // sheet をキーボードの上へ持ち上げる (新規コレクション名入力が裏に隠れない)。
+  const webKeyboardInset = useWebKeyboardInset();
 
   const reset = () => {
     setCreating(false);
@@ -558,7 +562,13 @@ function CollectionPickerModal({
       }}
     >
       <Pressable
-        style={{ flex: 1, backgroundColor: C.scrim, justifyContent: 'flex-end' }}
+        style={{
+          flex: 1,
+          backgroundColor: C.scrim,
+          justifyContent: 'flex-end',
+          // web のみ: キーボード高さ分 content box を縮め、sheet をキーボード上端へ。
+          paddingBottom: webKeyboardInset,
+        }}
         onPress={() => {
           reset();
           onClose();
@@ -573,7 +583,8 @@ function CollectionPickerModal({
               borderTopRightRadius: R.xl,
               paddingHorizontal: SP['4'],
               paddingTop: SP['3'],
-              paddingBottom: SP['8'],
+              // キーボード表示中 (web) は底の余白を詰めて入力欄をキーボード直上へ。
+              paddingBottom: webKeyboardInset > 0 ? SP['4'] : SP['8'],
               gap: SP['1'],
               borderWidth: 1,
               borderColor: C.border,

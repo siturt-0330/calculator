@@ -18,8 +18,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Search as SearchIcon, TrendingUp } from 'lucide-react-native';
 
 import { PressableScale } from '../ui/PressableScale';
-import { fetchTrendingTags } from '../../lib/api/trending';
-import { useTagCooccurStore } from '../../stores/tagCooccurStore';
+import { fetchTrendingCommunities } from '../../lib/api/trending';
+import { CommunityIcon } from '../ui/CommunityIcon';
 import { useTheme } from '../../hooks/useColors';
 import { R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -29,18 +29,12 @@ export function RightSearchPanel() {
   const insets = useSafeAreaInsets();
   const { C } = useTheme();
 
-  // TrendingRow と同じ key / fn を使い cache 共有 (二重 fetch 回避)。
-  const cooccur = useTagCooccurStore((s) => s.cooccur);
-  const cooccurHydrated = useTagCooccurStore((s) => s.hydrated);
-  const cooccurHasData = cooccurHydrated && Object.keys(cooccur).length > 0;
-  const cooccurKey = cooccurHasData ? 'div' : 'plain';
+  // ★ 2026-06-13: デスクトップ右カラムも、モバイルの TrendingRow と同じ
+  //   「盛り上がってるコミュニティ」に統一 (旧: トレンドタグ)。同一 queryKey
+  //   ['trending-communities'] で TrendingRow と cache を共有し二重 fetch を避ける。
   const { data: trending = [] } = useQuery({
-    queryKey: ['trending-tags', cooccurKey],
-    queryFn: () =>
-      fetchTrendingTags({
-        limit: 10,
-        ...(cooccurHasData ? { diversify: true, cooccur } : {}),
-      }),
+    queryKey: ['trending-communities'],
+    queryFn: () => fetchTrendingCommunities(8),
     staleTime: 5 * 60 * 1000,
     refetchOnMount: false,
   });
@@ -106,20 +100,20 @@ export function RightSearchPanel() {
             }}
           >
             <TrendingUp size={16} color={C.text2} strokeWidth={2.2} />
-            <Text style={[T.smallB, { color: C.text }]}>いま盛り上がっているタグ</Text>
+            <Text style={[T.smallB, { color: C.text }]}>盛り上がってるコミュニティ</Text>
           </View>
 
           {trending.length === 0 ? (
             <Text style={[T.caption, { color: C.text3 }]}>まだトレンドがありません</Text>
           ) : (
             <View style={{ gap: SP['2'] }}>
-              {trending.slice(0, 8).map((tag, i) => (
+              {trending.slice(0, 8).map(({ community: c, postCount }, i) => (
                 <PressableScale
-                  key={tag.name}
-                  onPress={() => router.push(`/tag/${encodeURIComponent(tag.name)}` as never)}
+                  key={c.id}
+                  onPress={() => router.push(`/community/${c.id}` as never)}
                   haptic="tap"
                   accessibilityRole="button"
-                  accessibilityLabel={`#${tag.name}`}
+                  accessibilityLabel={`コミュニティ ${c.name} を開く (直近 ${postCount} 件)`}
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
@@ -130,13 +124,20 @@ export function RightSearchPanel() {
                   <Text style={[T.caption, { color: C.text4, minWidth: 18 }]}>
                     {i + 1}
                   </Text>
+                  <CommunityIcon
+                    size={32}
+                    iconUrl={c.icon_url}
+                    iconEmoji={c.icon_emoji}
+                    iconColor={c.icon_color}
+                    name={c.name}
+                  />
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={[T.smallB, { color: C.text }]} numberOfLines={1}>
-                      #{tag.name}
+                      {c.name}
                     </Text>
-                    {tag.postCount > 0 ? (
+                    {postCount > 0 ? (
                       <Text style={[T.caption, { color: C.text3 }]} numberOfLines={1}>
-                        {tag.postCount.toLocaleString()} 投稿 · {tag.window}
+                        直近 {postCount.toLocaleString()} 投稿
                       </Text>
                     ) : null}
                   </View>

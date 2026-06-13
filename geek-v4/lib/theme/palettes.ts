@@ -156,46 +156,53 @@ export const PALETTE_DARK: ColorPalette = {
 };
 
 // ============================================================
-// Light palette — Apple HIG / Material 3 を参考に「白基調 + 黒文字」。
+// Light palette — 「白基調 + 黒文字」 (2026-06-13 モノトーン改修)
 // ------------------------------------------------------------
-// 設計指針:
-//   - bg は純白 (#fff) ではなく僅かに灰色寄り (#fafafa) — 純白は眩しすぎ
-//   - text は #1a1a1a (純黒 #000 はコントラスト過剰)
-//   - accent は light 専用で「自然な青」(彩度控えめ)。鮮やかな blue/cyan は白背景で
-//     浮くため、落ち着いた青 (#3E6DA3) を採用 (旧: 鮮やかな #2563EB + 水色 cyan)。
-//   - 警告色 (red/amber/green) は WCAG AA を満たす濃いめの色を選択
-//   - glass は黒 base に変更 (白背景に rgba(255,255,255,*) は見えない)
+// 設計指針 (ユーザー要望で青を撤去・モノトーン化):
+//   - bg は純白 (#ffffff)。text は #1a1a1a (純黒 #000 はコントラスト過剰)
+//   - accent は「自然な青」(#3E6DA3) → **チャコール (#1d1d1f)** に変更。
+//     Apple HIG の neutral system gray 系で揃え、白背景での「青っぽさ」を排除。
+//     アクション/選択は色ではなく濃度差で示す。
+//   - liked/blue/sameGroup などのセマンティック色も青/紫を抑え slate-gray 系へ。
+//   - 警告色 (red/amber/green) は WCAG AA を満たす濃いめの色を維持
+//     (機能を表す赤/黄/緑は識別のため残す)。
+//   - glass は黒 base のまま (白背景に rgba(255,255,255,*) は見えない)。
 // ============================================================
+// ★ 2026-06-13 ライト精緻化: 「青み (zinc/slate) を完全に排した *純 neutral グレー*」へ。
+//   - 全グレーを r=g=b の真ニュートラルにし、白背景で青っぽく見えないようにする
+//     (zinc は僅かに b>r で寒色寄り / slate は更に青く、ユーザーの「青を避けて」に反する)。
+//   - text2 を一段濃く (neutral-700) して階層を明瞭に。罫線/影は控えめだが視認可。
+//   - WCAG: text/text2/text3 ≥ 4.5:1、text4 ≥ 3.0:1 を維持 (wcagContrastLock.test.ts)。
 export const PALETTE_LIGHT: ColorPalette = {
   bg: '#ffffff',
-  bg2: '#f7f7f9',
-  bg3: '#f1f1f4',
-  bg4: '#e9e9ee',
-  bg5: '#dedee4',
-  surfaceHi: '#fafafc',
+  bg2: '#f7f7f7',      // カード面 — ごく淡い純グレー
+  bg3: '#efefef',      // 入力 / チップ
+  bg4: '#e6e6e6',      // 押下 / hover
+  bg5: '#d6d6d6',
+  surfaceHi: '#fbfbfb',
 
   glass: 'rgba(0,0,0,0.04)',
   glassStrong: 'rgba(0,0,0,0.08)',
-  glassBorder: 'rgba(0,0,0,0.16)',
-  glassDark: 'rgba(255,255,255,0.70)',
+  glassBorder: 'rgba(0,0,0,0.14)',
+  glassDark: 'rgba(255,255,255,0.72)',
 
-  text: '#1a1a1a',
-  text2: '#52525b',
-  text3: '#71717a',
-  // ★ 2026-06-12: light.text4 #a1a1aa on #fff = 2.56:1 で大文字 AA すら未満を発見。
-  //   #8A8A90 (3.43:1) に格上げ — text3 (#71717a = 4.84:1) より明るく、3.0:1 を満たす。
-  text4: '#8A8A90',
+  text: '#171717',     // neutral-900 — 純黒は避けた上質な濃墨
+  text2: '#404040',    // neutral-700 — 強めの 2 次テキストで階層を明瞭に (~10:1)
+  text3: '#737373',    // neutral-500 — 4.75:1 (本文 AA 合格)
+  // ★ text4 は AA 大文字 3.0:1 を満たす最も淡い純グレー
+  text4: '#8f8f8f',    // 3.2:1
 
-  border: '#c4c4c9',   // 白背景で視認できる既定の罫線 (旧 #e4e4e7 は薄すぎて枠が見えなかった)
-  border2: '#9a9aa3',  // 強調用の濃いめの線 (コメントスレのレール等) — 「ときどき黒」の主役
-  divider: '#d4d4d8',  // 行区切り — 控えめだが白でも見える (旧 #ececef はほぼ不可視だった)
+  border: '#d6d6d6',   // 視認できるが上品な純グレーの罫線 (青みなし)
+  border2: '#a3a3a3',  // 強調線 (neutral-400)
+  divider: '#e4e4e4',  // 行区切り — 控えめ
 
-  accent: '#3E6DA3',   // 自然な青 — 鮮やかな blue-600 をやめ彩度を落とした落ち着いた青 (白で 5.3:1)
-  accentDeep: '#2F5784', // 押下/グラデ終端用の深い青
-  accentLight: '#7FA3CE', // 淡い自然な青 (装飾/枠線用)
-  accentSoft: '#E8EFF7',  // ごく薄い青グレーの背景 (水色寄りの sky をやめた)
-  accentGlow: 'rgba(62,109,163,0.22)',
-  accentBg: '#EEF3F9',    // 控えめな青グレー背景
+  // モノトーン: アクセントは純 neutral のチャコール (白で ~17:1)。
+  accent: '#171717',
+  accentDeep: '#000000',
+  accentLight: '#9a9a9a',  // 淡い純グレー (装飾/枠線用)
+  accentSoft: '#f0f0f0',   // 選択中の極薄グレー背景
+  accentGlow: 'rgba(0,0,0,0.10)',
+  accentBg: '#f0f0f0',
 
   green: '#059669',
   greenBg: '#ECFDF5',
@@ -205,23 +212,26 @@ export const PALETTE_LIGHT: ColorPalette = {
   redBg: '#FEE2E2',
   pink: '#DB2777',
   pinkBg: '#FCE7F3',
-  blue: '#3E6DA3',
-  blueBg: '#E8EFF7',
+  // ★ blue セマンティック枠も青み (slate #475569) を撤去し純 neutral に。
+  blue: '#404040',
+  blueBg: '#f0f0f0',
 
   block: '#B91C1C',
   blockBg: '#FEE2E2',
   blockBorder: '#FECACA',
 
-  liked: '#3E6DA3',
-  likedBg: '#EEF3F9',
+  // いいねもアクセントと統一 (モノトーン)
+  liked: '#171717',
+  likedBg: '#f0f0f0',
 
   related: '#15803D',
   relatedBg: '#ECFDF5',
   relatedBorder: '#BBF7D0',
 
-  sameGroup: '#7E22CE',
-  sameGroupBg: '#F3E8FF',
-  sameGroupBorder: '#E9D5FF',
+  // sameGroup も純 neutral に (旧 zinc は僅かに寒色)
+  sameGroup: '#404040',
+  sameGroupBg: '#f4f4f4',
+  sameGroupBorder: '#e4e4e4',
 
   sameGenre: '#A16207',
   sameGenreBg: '#FEF3C7',
@@ -275,14 +285,16 @@ export const GRAD_LIGHT: GradientPalette = {
   fadeBottom: ['rgba(255,255,255,0)', PALETTE_LIGHT.bg] as const,
   fadeTop: [PALETTE_LIGHT.bg, 'rgba(255,255,255,0)'] as const,
   fadeBottomDark: ['rgba(255,255,255,0)', 'rgba(255,255,255,0.95)'] as const,
-  // light 専用 brand grad は「自然な青」で統一 (鮮やかな cyan/sky をやめた)。
-  // 白背景で電飾的な blue-cyan は浮くため、彩度を抑えた青の濃淡にする。
-  primary: ['#3E6DA3', '#5288B9', '#6FA3CC'] as const, // 自然な青の濃淡
-  primarySoft: ['#3E6DA3', '#5A8BC0'] as const,        // 落ち着いた青
-  // CTA 強調も同じ自然な青系で統一
-  warm: ['#4E84B8', '#7FA3CE'] as const,               // やわらかい青
+  // ★ モノトーン化 (2026-06-13): light 専用 brand grad の青 (#3E6DA3〜#6FA3CC) を撤去。
+  //   チャコール〜ミディアムグレーで濃淡のみ示す。tab pill / FAB / CTA など
+  //   全 light モードのアクセントが「青」から「黒/グレー」に統一される。
+  //   ※ Geek 起動スプラッシュの紫グラデは design/typography.ts (GEEK_GRADIENT_CSS)
+  //     が別 source of truth なので無影響 (CLAUDE.md §0 ロック)。
+  primary: ['#1d1d1f', '#3a3a3c', '#6e6e73'] as const, // 黒〜グレーの濃淡
+  primarySoft: ['#1d1d1f', '#3a3a3c'] as const,         // チャコール濃淡
+  warm: ['#3a3a3c', '#6e6e73'] as const,                // やわらかいグレー
   success: ['#3DBE88', '#3DAEBA'] as const,
-  glass: ['rgba(62,109,163,0.10)', 'rgba(62,109,163,0.05)', 'rgba(0,0,0,0)'] as const,
+  glass: ['rgba(0,0,0,0.08)', 'rgba(0,0,0,0.04)', 'rgba(0,0,0,0)'] as const,
   destructive: ['#E55B5B', '#E0533F'] as const,
 };
 
@@ -356,59 +368,58 @@ export const SHADOW_DARK: ShadowSet = {
   },
 };
 
-// SHADOW_LIGHT — ライトモード用の影セット (2026-05-31 改修)
-// 旧版は dark と同じ `#0a0a0a` を流用していたため、白基調の上に「黒い影」が
-// 落ちて「中途半端に黒い」気持ち悪さを生んでいた。
-// shadowColor を中性的な薄灰 (#94a3b8 = slate-400) に変更し、opacity を
-// 若干下げて「白に馴染むふんわりとした浮遊感」に振り直す。
+// SHADOW_LIGHT — ライトモード用の影セット (2026-06-13 純 neutral 化 + 上質化)
+// shadowColor を青み (slate #94a3b8) → 純 neutral グレー (#9a9a9a) に。
+// opacity を少し下げ radius を広げて「白に溶ける柔らかな浮遊感」へ振り直す
+// (硬い影をやめてカードが上品に浮く)。accentGlow/glow は neutral の #3a3a3c。
 export const SHADOW_LIGHT: ShadowSet = {
   none: {} as Record<string, never>,
   xs: {
-    shadowColor: '#94a3b8',
+    shadowColor: '#9a9a9a',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.12,
-    shadowRadius: 2,
+    shadowOpacity: 0.10,
+    shadowRadius: 3,
     elevation: 1,
   },
   sm: {
-    shadowColor: '#94a3b8',
+    shadowColor: '#9a9a9a',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.14,
-    shadowRadius: 6,
+    shadowOpacity: 0.11,
+    shadowRadius: 8,
     elevation: 2,
   },
   md: {
-    shadowColor: '#94a3b8',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.16,
-    shadowRadius: 12,
+    shadowColor: '#9a9a9a',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
     elevation: 3,
   },
   card: {
-    shadowColor: '#94a3b8',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
+    shadowColor: '#9a9a9a',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.13,
+    shadowRadius: 18,
     elevation: 3,
   },
   cardPress: {
-    shadowColor: '#94a3b8',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.22,
-    shadowRadius: 20,
+    shadowColor: '#9a9a9a',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.16,
+    shadowRadius: 26,
     elevation: 4,
   },
   accentGlow: {
-    shadowColor: '#3E6DA3',
+    shadowColor: '#3a3a3c',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.20,
+    shadowOpacity: 0.18,
     shadowRadius: 14,
     elevation: 3,
   },
   glow: {
-    shadowColor: '#3E6DA3',
+    shadowColor: '#3a3a3c',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
+    shadowOpacity: 0.16,
     shadowRadius: 16,
     elevation: 4,
   },

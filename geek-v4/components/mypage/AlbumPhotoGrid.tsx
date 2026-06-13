@@ -11,8 +11,6 @@
 // - 各 cell に R.md 角丸 + SHADOW.sm
 // - press 時は Reanimated useSharedValue + withSpring で scale 0.96 にスナップ
 // - shared (👥) / hidden (🚫) badge は丸い floating chip (rgba bg + white icon)
-//
-// 参考: components/search/DiscoverPhotoGrid.tsx の grid レイアウトを踏襲
 // ============================================================
 
 import { useCallback } from 'react';

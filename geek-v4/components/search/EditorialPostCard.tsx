@@ -8,7 +8,7 @@
 // ・noUncheckedIndexedAccess 環境のため配列 index は必ず undefined ガードする。
 // =============================================================================
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, memo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
 import { SP, R } from '../../design/tokens';
@@ -37,8 +37,9 @@ type Props = {
   post: Post;
   rank: number;
   terms: string[];
-  onPress: () => void;
-  onExplain: () => void;
+  // 安定参照のため親は post 単位の bind をせず、カードが自分の post/position を返す。
+  onPress: (post: Post, position: number) => void;
+  onExplain: (post: Post) => void;
 };
 
 // http(s) で始まる URL のみサムネとして許可(data: 等は弾く)
@@ -63,7 +64,7 @@ function buildExcerpt(content: string, title: string): string {
   return body.slice(0, 160);
 }
 
-export function EditorialPostCard({ post, rank, terms, onPress, onExplain }: Props) {
+export const EditorialPostCard = memo(function EditorialPostCard({ post, rank, terms, onPress, onExplain }: Props) {
   // テーマ追従のため makeStyles 化 (AnonPostCard と同規約)
   const C = useColors();
   const styles = useMemo(() => makeStyles(C), [C]);
@@ -113,7 +114,7 @@ export function EditorialPostCard({ post, rank, terms, onPress, onExplain }: Pro
   return (
     <Animated.View entering={FadeInDown.delay(enteringDelay).duration(260)}>
       <PressableScale
-        onPress={onPress}
+        onPress={() => onPress(post, rank)}
         haptic="tap"
         accessibilityRole="button"
         accessibilityLabel={`投稿を開く: ${title}`}
@@ -181,7 +182,7 @@ export function EditorialPostCard({ post, rank, terms, onPress, onExplain }: Pro
               <Icon.comment size={14} color={C.text3} />
               <Text style={styles.metaText}>{post.comments_count}</Text>
               <PressableScale
-                onPress={onExplain}
+                onPress={() => onExplain(post)}
                 haptic="tap"
                 hitSlop={10}
                 accessibilityRole="button"
@@ -213,7 +214,7 @@ export function EditorialPostCard({ post, rank, terms, onPress, onExplain }: Pro
       </PressableScale>
     </Animated.View>
   );
-}
+});
 
 // -----------------------------------------------------------------------------
 // styles — テーマ追従のため makeStyles 化 (AnonPostCard と同規約)。

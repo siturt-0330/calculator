@@ -30,7 +30,10 @@ const CARD_WIDTH = 280;
 const CARD_HEIGHT = 260;
 // 画像 banner の高さ。残り (= CARD_HEIGHT - IMAGE_HEIGHT) がタイトル + 統計領域。
 const IMAGE_HEIGHT = 165;
-const LIMIT = 10;
+// ★ export して search.tsx の DiscoveryView が「Hot が表示する件数」を知れるようにする。
+//   For You 棚はこの上位 N 件を pool から除外して重複表示を防ぐ。
+export const HOT_POSTS_ROW_LIMIT = 10;
+const LIMIT = HOT_POSTS_ROW_LIMIT;
 // iOS-native: card 間 gap を含めた snap 単位
 const SNAP_INTERVAL = CARD_WIDTH + SP['3'];
 

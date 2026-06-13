@@ -39,6 +39,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '../../../hooks/useColors';
+import { useWebKeyboardInset } from '../../../hooks/useWebKeyboardInset';
 import { SP, R } from '../../../design/tokens';
 import { T } from '../../../design/typography';
 import { hap } from '../../../design/haptics';
@@ -105,6 +106,11 @@ export function CommunityPickerSheet({
 }: CommunityPickerSheetProps) {
   const C = useColors();
   const insets = useSafeAreaInsets();
+  // web: ソフトキーボードの高さ (native は常に 0 — KeyboardAvoidingView が担当)。
+  // RNW の KeyboardAvoidingView は no-op なので、iOS Safari ではこの inset を
+  // scrim の下 padding に足して sheet 全体をキーボードの上へ持ち上げる
+  // (検索欄がキーボードの裏に隠れる問題の解消 / [[project_geek_v4_preview_gotchas]])。
+  const webKeyboardInset = useWebKeyboardInset();
 
   // 選択判定を O(1) にする Set。selectedIds が変わった時だけ作り直す。
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -147,6 +153,10 @@ export function CommunityPickerSheet({
           flex: 1,
           backgroundColor: C.scrim,
           justifyContent: 'flex-end',
+          // web のみ: キーボード高さ分だけ content box を縮める。flex-end の sheet が
+          // キーボード上端に貼り付き、panel の maxHeight '92%' も縮んだ内寸に対して
+          // 解決されるため上端あふれも起きない (native は 0 = 無影響)。
+          paddingBottom: webKeyboardInset,
         }}
       >
         {/* backdrop — tap で閉じる */}
@@ -171,7 +181,9 @@ export function CommunityPickerSheet({
               borderTopRightRadius: R.xl,
               borderTopWidth: 1,
               borderTopColor: C.border,
-              paddingBottom: insets.bottom + SP['3'],
+              // キーボード表示中 (web) は home indicator 用 safe-area を足さない
+              // — その領域はキーボードが覆っているので二重の隙間になるのを防ぐ。
+              paddingBottom: (webKeyboardInset > 0 ? 0 : insets.bottom) + SP['3'],
               maxHeight: '92%',
             }}
           >
@@ -249,7 +261,9 @@ export function CommunityPickerSheet({
               />
             ) : (
               <ScrollView
-                style={{ maxHeight: LIST_MAX_HEIGHT }}
+                // flexShrink: 1 — panel が縮んだ時 (web キーボード表示中) に list も縮めて
+                // 末尾がキーボードの裏に潜らないようにする (Yoga の既定 shrink は 0)。
+                style={{ maxHeight: LIST_MAX_HEIGHT, flexShrink: 1 }}
                 contentContainerStyle={{
                   paddingHorizontal: SP['4'],
                   paddingBottom: SP['2'],

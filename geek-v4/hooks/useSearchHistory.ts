@@ -2,7 +2,7 @@
 // useSearchHistory — 既存の searchHistoryStore + autocomplete を統合した hook
 // ------------------------------------------------------------
 // 役割:
-//   - 検索画面 UI (SearchHistoryChips など) が必要とする「履歴 list +
+//   - 検索画面 UI (SearchFocusOverlay など) が必要とする「履歴 list +
 //     pick / remove / clear」を 1 つの hook で提供する
 //   - 既存 lib/search/autocomplete.ts の LRU (200 件) は MMKV/localStorage に
 //     永続化されており「より長い履歴」になっている — それを wrap して、

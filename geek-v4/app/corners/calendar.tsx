@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { View, Text, ScrollView, ActivityIndicator, Modal } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useWebKeyboardInset } from '../../hooks/useWebKeyboardInset';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { C, SP, R } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -350,6 +351,10 @@ function AddEventModal({
   // likedTags のみ subscribe する。
   const likedTags = useTagFilterStore((s) => s.likedTags);
   const show = useToastStore((s) => s.show);
+  const insets = useSafeAreaInsets();
+  // web: ソフトキーボード高さ (native は 0)。scrim の下 padding に足して
+  // sheet をキーボードの上へ持ち上げる (入力欄/追加ボタンがキーボードの裏に隠れない)。
+  const webKeyboardInset = useWebKeyboardInset();
   const [title, setTitle] = useState('');
   const [date, setDate] = useState(defaultDate);
   const [tag, setTag] = useState(likedTags[0] ?? '');
@@ -399,13 +404,19 @@ function AddEventModal({
         flex: 1,
         backgroundColor: 'rgba(0,0,0,0.6)',
         justifyContent: 'flex-end',
+        // web のみ: キーボード高さ分 content box を縮め、sheet をキーボード上端へ。
+        paddingBottom: webKeyboardInset,
       }}>
         <View style={{
           backgroundColor: C.bg2,
           padding: SP['5'],
+          // キーボード表示中 (web) は home indicator 用 safe-area を足さない。
+          paddingBottom: webKeyboardInset > 0 ? SP['5'] : insets.bottom + SP['5'],
           borderTopLeftRadius: 24,
           borderTopRightRadius: 24,
           gap: SP['4'],
+          // 縦長フォーム — 画面 (キーボード上) に収め、はみ出し分はスクロールさせる。
+          maxHeight: '90%',
         }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <Text style={[T.h3, { color: C.text }]}>予定を追加</Text>
@@ -420,55 +431,64 @@ function AddEventModal({
             </PressableScale>
           </View>
 
-          {/* 公開範囲選択 */}
-          <View style={{ flexDirection: 'row', gap: SP['2'] }}>
-            <ScopeOption
-              active={scope === 'personal'}
-              label="🔒 自分だけ"
-              desc="自分のカレンダーにだけ追加"
-              onPress={() => setScope('personal')}
-            />
-            <ScopeOption
-              active={scope === 'proposal'}
-              label="📢 みんなに提案"
-              desc="10%同意でタグ全体に同期"
-              onPress={() => setScope('proposal')}
-            />
-          </View>
+          {/* フォーム本体 — キーボードで panel が縮む時にここがスクロールし、
+              header と「追加」ボタンは常に見える (flexShrink: 1 で内寸に収める)。 */}
+          <ScrollView
+            style={{ flexShrink: 1 }}
+            contentContainerStyle={{ gap: SP['4'] }}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {/* 公開範囲選択 */}
+            <View style={{ flexDirection: 'row', gap: SP['2'] }}>
+              <ScopeOption
+                active={scope === 'personal'}
+                label="🔒 自分だけ"
+                desc="自分のカレンダーにだけ追加"
+                onPress={() => setScope('personal')}
+              />
+              <ScopeOption
+                active={scope === 'proposal'}
+                label="📢 みんなに提案"
+                desc="10%同意でタグ全体に同期"
+                onPress={() => setScope('proposal')}
+              />
+            </View>
 
-          <Input
-            label="タイトル"
-            value={title}
-            onChangeText={setTitle}
-            placeholder="例: 推しライブ"
-            // memory DoS 対策: タイトルは 80 文字 cap
-            maxLength={80}
-          />
-          <Input
-            label="日付"
-            value={date}
-            onChangeText={setDate}
-            placeholder="YYYY-MM-DD"
-            // memory DoS 対策: 日付 string は 10 文字 (YYYY-MM-DD)
-            maxLength={10}
-          />
-          <Input
-            label={scope === 'proposal' ? 'タグ（必須）' : 'タグ（任意）'}
-            value={tag}
-            onChangeText={setTag}
-            placeholder="例: アニメ"
-            icon={Icon.hash}
-            // memory DoS 対策: tag 名は 40 文字 cap
-            maxLength={40}
-          />
-          <Input
-            label="場所（任意）"
-            value={location}
-            onChangeText={setLocation}
-            placeholder="例: 渋谷"
-            // memory DoS 対策: 場所は 200 文字 cap
-            maxLength={200}
-          />
+            <Input
+              label="タイトル"
+              value={title}
+              onChangeText={setTitle}
+              placeholder="例: 推しライブ"
+              // memory DoS 対策: タイトルは 80 文字 cap
+              maxLength={80}
+            />
+            <Input
+              label="日付"
+              value={date}
+              onChangeText={setDate}
+              placeholder="YYYY-MM-DD"
+              // memory DoS 対策: 日付 string は 10 文字 (YYYY-MM-DD)
+              maxLength={10}
+            />
+            <Input
+              label={scope === 'proposal' ? 'タグ（必須）' : 'タグ（任意）'}
+              value={tag}
+              onChangeText={setTag}
+              placeholder="例: アニメ"
+              icon={Icon.hash}
+              // memory DoS 対策: tag 名は 40 文字 cap
+              maxLength={40}
+            />
+            <Input
+              label="場所（任意）"
+              value={location}
+              onChangeText={setLocation}
+              placeholder="例: 渋谷"
+              // memory DoS 対策: 場所は 200 文字 cap
+              maxLength={200}
+            />
+          </ScrollView>
 
           <Button label="追加" onPress={submit} loading={saving} />
         </View>

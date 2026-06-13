@@ -207,6 +207,8 @@ export function useCommentComposer(
       return;
     }
     setPosting(true);
+    // ロールバック用スナップショット
+    const prevComments = qc.getQueryData<Comment[]>(['post-comments', postId]) ?? [];
     try {
       let uploadedMediaUrls: string[] = [];
       try {
@@ -226,6 +228,26 @@ export function useCommentComposer(
         return;
       }
 
+      // 楽観的更新: createComment の応答を待たずコメントをキャッシュに即追加。
+      // avatar_color はデフォルト色を使い、invalidate 後のサーバーデータで置き換わる。
+      const optimisticId = `optimistic-${Date.now()}`;
+      qc.setQueryData<Comment[]>(['post-comments', postId], [
+        ...prevComments,
+        {
+          id: optimisticId,
+          post_id: postId,
+          content: commentText,
+          avatar_color: '#7C6AF7',
+          created_at: new Date().toISOString(),
+          is_own: true,
+          parent_comment_id: replyTarget?.id ?? null,
+          reply_to_comment_id: replyTarget?.id ?? null,
+          media_urls: uploadedMediaUrls.length > 0 ? uploadedMediaUrls : null,
+        } satisfies Comment,
+      ]);
+      // 楽観的コメントが見える位置まで即スクロール
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+
       const newCommentId = await createComment(postId, commentText, {
         parentId: replyTarget?.id ?? null,
         replyToId: replyTarget?.id ?? null,
@@ -244,14 +266,15 @@ export function useCommentComposer(
         setComposerActive(false);
         composerRef.current?.blur();
       }
+      // invalidate で楽観的コメントをサーバーの本物データと置き換え
       void qc.invalidateQueries({ queryKey: ['post-comments', postId] });
       // ★ フィードカードの comment_count を即時 +1 (feed-page cache を patch)。
       //   いいね/反応/保存は即反映なのにコメントだけ次の refetch まで増えなかった。root/返信とも postId 単位 +1。
       patchFeedPagePost(qc, postId, (p) => ({ ...p, comments_count: (p.comments_count ?? 0) + 1 }));
       invalidateFeedPage(qc);
-      // 送信後、新規コメントが見える位置まで自動スクロール (再フェッチ反映待ち 80ms)
-      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
     } catch (e: unknown) {
+      // エラー時は楽観的コメントをロールバック
+      qc.setQueryData<Comment[]>(['post-comments', postId], prevComments);
       hap.error();
       const msg = e instanceof Error ? e.message : String(e);
       let userMsg = '送信に失敗しました。再度お試しください。';
