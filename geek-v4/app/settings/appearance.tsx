@@ -32,19 +32,8 @@ type ModeOption = {
   sampleBorder: string;
 };
 
+// ★ 2026-06-13 ユーザー要望: 「システム設定に合わせる」は撤去 → ダーク/ライトの 2 択。
 const OPTIONS: ModeOption[] = [
-  {
-    mode: 'system',
-    label: 'システム設定に合わせる',
-    description: 'OS の外観設定 (iOS / Android / Chrome) に追従',
-    // half-and-half — bg は dark, surface は light で「両方どっちでも」を示す
-    sampleBg: '#0a0a0a',
-    sampleSurface: '#f1f1f4',
-    sampleText: '#f5f5f7',
-    sampleSubText: '#a1a1aa',
-    sampleAccent: '#7C6AF7',
-    sampleBorder: '#27272a',
-  },
   {
     mode: 'dark',
     label: 'ダーク',
@@ -64,8 +53,9 @@ const OPTIONS: ModeOption[] = [
     sampleSurface: '#f7f7f9',
     sampleText: '#1a1a1a',
     sampleSubText: '#52525b',
-    sampleAccent: '#6B5BE8',
-    sampleBorder: '#e4e4e7',
+    // ★ 2026-06-13 モノトーン化: アクセント=純チャコール / 罫線=純 neutral グレー。
+    sampleAccent: '#171717',
+    sampleBorder: '#d6d6d6',
   },
 ];
 
@@ -92,7 +82,6 @@ export default function AppearanceSettingsScreen() {
         <SectionHeader title="テーマ" />
         <Text style={[T.caption, { color: C.text3, marginHorizontal: SP['2'], marginBottom: SP['3'] }]}>
           現在: {resolved === 'light' ? 'ライト' : 'ダーク'}
-          {mode === 'system' && ' (システム連動)'}
         </Text>
 
         {OPTIONS.map((opt) => {

@@ -112,6 +112,7 @@ import { useAdPreferencesStore } from '../stores/adPreferencesStore';
 import { ToastHost } from '../components/ui/ToastHost';
 import { VideoLightbox } from '../components/ui/VideoLightbox';
 import { ErrorBoundary } from '../components/ui/ErrorBoundary';
+import { installChunkReloadGuard } from '../lib/chunkReload';
 // ★ パフォーマンス: IntroAnimation / FeedbackFAB は first paint 直後に必須ではない。
 //   - IntroAnimation: 同セッション 2 回目以降は sessionStorage で skip
 //   - FeedbackFAB:    feedback_fab feature flag + ログイン要 (初期描画時点で render しない)
@@ -568,6 +569,9 @@ export default function RootLayout() {
   // Supabase REST/Storage CDN への初回 RTT が約 100-200ms 短縮。
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    // ルート分割 (asyncRoutes) で web は route 毎に JS chunk が分かれる。
+    // デプロイ直後の stale chunk 404 → 遷移不能を 1 回だけ自動リロードで復帰。
+    installChunkReloadGuard();
     const links: Array<{ rel: string; href: string }> = [
       { rel: 'preconnect', href: 'https://migpiwdlpwpvehzvdjyh.supabase.co' },
       { rel: 'dns-prefetch', href: 'https://fonts.gstatic.com' },

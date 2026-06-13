@@ -40,6 +40,7 @@ import { AlertTriangle, Eye, EyeOff, Flag } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 
 import { useColors } from '../../../hooks/useColors';
+import { useWebKeyboardInset } from '../../../hooks/useWebKeyboardInset';
 import { SP, R } from '../../../design/tokens';
 import { T } from '../../../design/typography';
 import { hap } from '../../../design/haptics';
@@ -103,6 +104,9 @@ export function ContentWarningSheet({
 }: ContentWarningSheetProps) {
   const C = useColors();
   const insets = useSafeAreaInsets();
+  // web: ソフトキーボード高さ (native は 0)。RNW の KeyboardAvoidingView は no-op
+  // なので scrim の下 padding に足して sheet をキーボードの上へ持ち上げる。
+  const webKeyboardInset = useWebKeyboardInset();
 
   // chip タップ — 既に選択中なら null に戻す (トグル off)、それ以外は選択。
   const handleSelect = (v: CwCategory) => {
@@ -122,7 +126,13 @@ export function ContentWarningSheet({
       <Animated.View
         entering={FadeIn.duration(180)}
         exiting={FadeOut.duration(140)}
-        style={{ flex: 1, backgroundColor: C.scrim, justifyContent: 'flex-end' }}
+        style={{
+          flex: 1,
+          backgroundColor: C.scrim,
+          justifyContent: 'flex-end',
+          // web のみ: キーボード高さ分 content box を縮め、sheet をキーボード上端へ。
+          paddingBottom: webKeyboardInset,
+        }}
       >
         {/* 背面の全面タップ領域 — パネルの後ろに敷いて外側タップで閉じる */}
         <Pressable
@@ -145,7 +155,8 @@ export function ContentWarningSheet({
               backgroundColor: C.bg2,
               borderTopLeftRadius: R.xl,
               borderTopRightRadius: R.xl,
-              paddingBottom: insets.bottom + SP['3'],
+              // キーボード表示中 (web) は home indicator 用 safe-area を足さない。
+              paddingBottom: (webKeyboardInset > 0 ? 0 : insets.bottom) + SP['3'],
               maxHeight: '92%',
             }}
           >

@@ -35,6 +35,7 @@ import { ComposerBottomBar } from '../../components/post/composer/ComposerBottom
 import { FormatToolbar, type FormatKind } from '../../components/post/composer/FormatToolbar';
 import { PollEditorSheet } from '../../components/post/composer/PollEditorSheet';
 import { CommunityPickerSheet } from '../../components/post/composer/CommunityPickerSheet';
+import { PostSuccessCelebration } from '../../components/post/PostSuccessCelebration';
 
 import { useToastStore } from '../../stores/toastStore';
 import { showPermissionRescue } from '../../lib/permissionRescue';
@@ -56,7 +57,6 @@ import { checkContent } from '../../lib/ai/checkContent';
 import { validateVideoSource, uploadPostImage, uploadPostVideo } from '../../lib/media';
 import { makeWebPreviewDataUrl } from '../../lib/image';
 import { openPhotoEditor } from '../../lib/photoEditor';
-import { sanitizeTag } from '../../lib/sanitize';
 import { peekRate, rateLimitMessage } from '../../lib/rateLimit';
 import { isOnline } from '../../lib/offline/networkMonitor';
 import { Icon } from '../../constants/icons';
@@ -72,9 +72,6 @@ const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(n, hi
 
 // タイトルと本文を分けない単一フィールドのプレースホルダ
 const PLACEHOLDER = '話したいトピックを書いてみよう';
-const MAX_TAGS = 5;
-// 本文が空のときに出す「書き出しヒント」chips (タップで本文へ挿入)。
-// 真っ黒な余白の寂しさを埋めつつ、最初の一歩のハードルを下げる。
 // 最近のコミュ chips の最大表示数
 const MAX_RECENT_CHIPS = 5;
 // ローカル下書き自動保存のデバウンス間隔 (ms)
@@ -119,9 +116,9 @@ export default function CreatePost() {
   const setImages = usePostDraftStore((s) => s.setImages);
   const video = usePostDraftStore((s) => s.video);
   const setVideo = usePostDraftStore((s) => s.setVideo);
-  // タグ (任意) / コミュニティ (必須・単一選択) / 公開範囲
+  // コミュニティ (必須・単一選択) / 公開範囲。
+  // tags は backend へ送る payload のために read のみ (UI から書き換える経路は撤去済み)。
   const tags = usePostDraftStore((s) => s.tags);
-  const setTags = usePostDraftStore((s) => s.setTags);
   const selectedCommunityIds = usePostDraftStore((s) => s.selectedCommunityIds);
   const setSelectedCommunities = usePostDraftStore((s) => s.setSelectedCommunities);
   const setVisibility = usePostDraftStore((s) => s.setVisibility);
@@ -146,7 +143,6 @@ export default function CreatePost() {
   // 1画面化: コミュニティ選択シート / タグ入力 / 投稿中フラグ
   const [showCommunitySheet, setShowCommunitySheet] = useState(false);
   const [communityQuery, setCommunityQuery] = useState('');
-  const [tagInput, setTagInput] = useState('');
   const [posting, setPosting] = useState(false);
   // ?editId= で開いた編集モード (空文字 = 通常の新規作成)。
   const [editId, setEditId] = useState('');
@@ -155,6 +151,9 @@ export default function CreatePost() {
   const [editHasVideo, setEditHasVideo] = useState(false);
   // 送信の進捗フェーズ (pill 表示用)。アップロード中を可視化して「固まった?」不安を減らす。
   const [postPhase, setPostPhase] = useState<'idle' | 'uploading' | 'saving'>('idle');
+  // ★ 2026-06-13: 投稿成功の演出 (PostSuccessCelebration)。表示中に feed の refetch が
+  //   裏で完走し、演出のフェードアウト完了 (onDone) で feed へ遷移する。
+  const [showSuccess, setShowSuccess] = useState(false);
   const qc = useQueryClient();
 
   // 参加コミュニティ一覧 (Reddit 風の「投稿先」ピッカー用)。
@@ -696,34 +695,10 @@ export default function CreatePost() {
   };
 
   // -----------------------------------------------------------
-  // タグ (任意・最大 5)
+  // (タグ追加/削除ハンドラはユーザー要望で UI ごと撤去 — 2026-06-13)
+  // tags state 自体は draft/編集モード/pretag パラメータ経由で値が入る経路が
+  // 残るため、setTags のセッターは draft hydrate 側で使われ続ける。
   // -----------------------------------------------------------
-  const addTag = () => {
-    const t = sanitizeTag(tagInput);
-    if (!t || tags.includes(t)) {
-      setTagInput('');
-      return;
-    }
-    if (tags.length >= MAX_TAGS) {
-      show(`タグは最大 ${MAX_TAGS} 個まで`, 'warn');
-      return;
-    }
-    setTags([...tags, t]);
-    setTagInput('');
-    hap.tap();
-  };
-  const removeTag = (t: string) => {
-    setTags(tags.filter((x) => x !== t));
-    // 誤タップ対策: タグは再入力コストが高いので undo できる toast を出す。
-    // onUndo は実行時の最新 tags を store から読んで復元する (stale closure 回避)。
-    show(`タグ #${t} を削除しました`, 'info', {
-      undoLabel: '元に戻す',
-      onUndo: () => {
-        const cur = usePostDraftStore.getState().tags;
-        if (!cur.includes(t)) setTags([...cur, t].slice(0, MAX_TAGS));
-      },
-    });
-  };
 
   // -----------------------------------------------------------
   // 投稿 — 旧 Step2 (create-settings) の送信ロジックを 1 画面に統合
@@ -826,12 +801,13 @@ export default function CreatePost() {
         hap.success();
         show('更新しました', 'success');
         // 反映: 詳細(REST)/フィード周辺(RPC)/各フィードを再取得。
-        void qc.invalidateQueries({ queryKey: ['post', editId] });
-        void qc.invalidateQueries({ queryKey: ['feed-page'] });
-        void qc.invalidateQueries({ queryKey: ['feed'] });
-        void qc.invalidateQueries({ queryKey: ['user-posts', userId] });
-        void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'] });
-        void qc.invalidateQueries({ queryKey: ['community'] }); // コミュニティ各フィードの古い本文を除去
+        // ★ refetchType:'all' で frozen な feed/コミュも即 refetch (編集の反映遅延も解消)。
+        void qc.invalidateQueries({ queryKey: ['post', editId], refetchType: 'all' });
+        void qc.invalidateQueries({ queryKey: ['feed-page'], refetchType: 'all' });
+        void qc.invalidateQueries({ queryKey: ['feed'], refetchType: 'all' });
+        void qc.invalidateQueries({ queryKey: ['user-posts', userId], refetchType: 'all' });
+        void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'], refetchType: 'all' });
+        void qc.invalidateQueries({ queryKey: ['community'], refetchType: 'all' }); // コミュニティ各フィードの古い本文を除去
         void qc.invalidateQueries({ queryKey: ['post-edited-at', editId] }); // 編集済みバッジ更新
         usePostDraftStore.getState().reset();
         if (router.canGoBack()) router.back();
@@ -966,12 +942,14 @@ export default function CreatePost() {
       //   コミュタブ/詳細に投稿が出ない (反映が遅い) race になる。よってコミュ系は
       //   finishPostSuccess から分離し、createPost(=attach) の await 完了後に必ず実行する。
       const invalidateCommunityCaches = () => {
-        void qc.invalidateQueries({ queryKey: ['my-community-feed'] });
-        void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'] });
-        void qc.invalidateQueries({ queryKey: ['my-communities'] });
+        // ★ refetchType:'all' — コミュタブ/詳細も frozen(inactive) になり得るので
+        //   即 refetch を強制 (active 限定だと投稿先コミュに反映されず遅い)。
+        void qc.invalidateQueries({ queryKey: ['my-community-feed'], refetchType: 'all' });
+        void qc.invalidateQueries({ queryKey: ['my-community-feed-rich'], refetchType: 'all' });
+        void qc.invalidateQueries({ queryKey: ['my-communities'], refetchType: 'all' });
         for (const cid of s.selectedCommunityIds) {
-          void qc.invalidateQueries({ queryKey: ['community', cid, 'feed'] });
-          void qc.invalidateQueries({ queryKey: ['community', cid] });
+          void qc.invalidateQueries({ queryKey: ['community', cid, 'feed'], refetchType: 'all' });
+          void qc.invalidateQueries({ queryKey: ['community', cid], refetchType: 'all' });
         }
       };
 
@@ -982,18 +960,24 @@ export default function CreatePost() {
         if (navigated) return;
         navigated = true;
         hap.success();
-        show('投稿しました', 'success');
         {
           const did = usePostDraftStore.getState().draftId;
           if (did) useDraftsStore.getState().remove(did);
         }
-        void qc.invalidateQueries({ queryKey: ['feed'] });
-        void qc.invalidateQueries({ queryKey: ['feed-page'] }); // ★ 遷移先 feed の RPC cache も更新 (junction 非依存)
+        // ★ 2026-06-13: refetchType:'all' で frozen な feed も即 refetch する。
+        //   feed タブは freezeOnBlur で blur 中 inactive になり得るため、既定の
+        //   'active' だと投稿直後の invalidate が refetch を起こさず、feed.tsx の
+        //   focus 再取得 (30s スロットル) 任せで最大 30 秒「反映されない」体感になっていた。
+        //   'all' なら frozen でも即 refetch → 成功演出 (~1s) の裏で新着取得が完走する。
+        void qc.invalidateQueries({ queryKey: ['feed'], refetchType: 'all' });
+        void qc.invalidateQueries({ queryKey: ['feed-page'], refetchType: 'all' }); // 遷移先 feed の RPC cache も更新 (junction 非依存)
         // ★ 4-F: prefetch Map は clear のみ (storage.remove は一切しない=採用済み media を消す race 根絶)。
         imageUploadsRef.current.clear();
         videoUploadsRef.current.clear();
         usePostDraftStore.getState().reset();
-        router.replace('/(tabs)/feed' as never);
+        // ★ 2026-06-13: 素の toast の代わりに成功演出を表示。遷移は演出の onDone で行う
+        //   (演出中に上の refetch が完走 → フェードアウト後に新着入りの feed を見せる)。
+        setShowSuccess(true);
       };
 
       // ★ v2: online かつ poll 無し のときだけ楽観的即遷移 (offline/poll は従来同期フロー)。
@@ -1049,10 +1033,10 @@ export default function CreatePost() {
       //   遷移はやり直さず feed を invalidate して「消えた post が残って見える」を最終整合で解消。
       //   既知の限界: refetch が効くまで数百ms〜秒は「消える post」が見え得る(選択済みコミュ宛なのでレア)。
       if (navigated) {
-        void qc.invalidateQueries({ queryKey: ['feed'] });
-        void qc.invalidateQueries({ queryKey: ['feed-page'] });
+        void qc.invalidateQueries({ queryKey: ['feed'], refetchType: 'all' });
+        void qc.invalidateQueries({ queryKey: ['feed-page'], refetchType: 'all' });
         for (const cid of s.selectedCommunityIds) {
-          void qc.invalidateQueries({ queryKey: ['community', cid, 'feed'] });
+          void qc.invalidateQueries({ queryKey: ['community', cid, 'feed'], refetchType: 'all' });
         }
       }
     } finally {
@@ -1072,6 +1056,15 @@ export default function CreatePost() {
   // -----------------------------------------------------------
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
+
+      {/* ★ 投稿成功の演出 — フェードアウト完了で feed へ遷移 */}
+      <PostSuccessCelebration
+        visible={showSuccess}
+        onDone={() => {
+          setShowSuccess(false);
+          router.replace('/(tabs)/feed' as never);
+        }}
+      />
 
       {/* ================================================================
           ヘッダー — [✕] | spacer | [次へ pill]
@@ -1294,29 +1287,22 @@ export default function CreatePost() {
           {/* (匿名表示行はユーザー要望で撤去 — 投稿は常に匿名のため UI で明示しない 2026-06-12) */}
 
           {/* ============================================================
-              本文 + メディア + タグ — 全幅 1 カラム (旧アバター列を撤去して広く書ける)
+              メディア → 本文 — 全幅 1 カラム
+              ★ 2026-06-13 (ユーザー要望):
+                (1) 文字入力ごとに写真が動く問題を解消するため、メディアを本文より
+                    "上" に配置する。本文の TextInput は multiline auto-grow で
+                    onContentSizeChange ごとに minHeight が更新されるため、本文を
+                    上に置くと下のメディアが毎キーストロークでズレていた。逆順に
+                    することで本文は「下方向にだけ」伸び、メディア位置は不動になる。
+                (2) タグ選択 UI は撤去 (任意機能のうるささを排除)。tags state 自体は
+                    draft 復元 / 編集モード / pretag URL パラメータから値が入る経路が
+                    残るので、空配列のまま投稿される (backend は tag_names: [] を受理)。
               ============================================================ */}
           <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'], paddingBottom: SP['6'] }}>
 
-            {/* 本文 — タイトルと本文を分けない単一フィールド (X / Threads 風) */}
-            {/* autoFocus: 投稿画面を開いた瞬間にキーボードを出して即タイプ可能にする
-                (これが無いと最初の数文字がキーボード起動待ちで取りこぼされる) */}
-            <ComposerBodyField
-              value={content}
-              onChangeText={setContent}
-              placeholder={placeholder}
-              autoFocus
-              onSelectionChange={(sel) => {
-                selectionRef.current = sel;
-              }}
-              inputRef={bodyRef}
-            />
-
-            {/* (書き出しヒント chips はユーザー要望で撤去 2026-06-12) */}
-
-            {/* メディアグリッド */}
+            {/* メディアグリッド — 本文より上 */}
             {(images.length > 0 || video) && (
-              <View style={{ marginTop: SP['3'] }}>
+              <View style={{ marginBottom: SP['3'] }}>
                 <ComposerMediaGrid
                   images={images}
                   video={video ? { uri: video.uri, sizeMb: video.size / 1024 / 1024 } : null}
@@ -1328,81 +1314,19 @@ export default function CreatePost() {
               </View>
             )}
 
-            {/* タグ (任意・最大5) — 追加済みは削除可能な chips (#tag ×) で入力欄の上に */}
-            <View style={{ marginTop: SP['4'], gap: SP['2'] }}>
-              {tags.length > 0 && (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
-                  {tags.map((t) => (
-                    <PressableScale
-                      key={t}
-                      onPress={() => removeTag(t)}
-                      haptic="tap"
-                      accessibilityLabel={`タグ ${t} を削除`}
-                      accessibilityRole="button"
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 4,
-                        paddingHorizontal: SP['3'],
-                        paddingVertical: 5,
-                        borderRadius: R.full,
-                        backgroundColor: C.accentBg,
-                        borderWidth: 1,
-                        borderColor: C.accentSoft,
-                      }}
-                    >
-                      <Text style={[T.smallB, { color: C.accentLight }]}>#{t}</Text>
-                      <IconX size={12} color={C.accentLight} strokeWidth={2.4} />
-                    </PressableScale>
-                  ))}
-                </View>
-              )}
-              {tags.length < MAX_TAGS && (
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: SP['2'],
-                    paddingHorizontal: SP['3'],
-                    paddingVertical: SP['2'],
-                    borderRadius: R.md,
-                    backgroundColor: C.bg2,
-                    borderWidth: 1,
-                    borderColor: C.border,
-                  }}
-                >
-                  <Icon.hash size={14} color={C.text3} strokeWidth={2.2} />
-                  <TextInput
-                    value={tagInput}
-                    onChangeText={setTagInput}
-                    onSubmitEditing={addTag}
-                    placeholder="タグを追加 (任意)"
-                    placeholderTextColor={C.text3}
-                    returnKeyType="done"
-                    maxLength={30}
-                    style={[T.small, { color: C.text, flex: 1, padding: 0 }]}
-                  />
-                  {/* タップでも確定できるよう「追加」ボタンを併設 (return キーのみだと不便) */}
-                  <PressableScale
-                    onPress={addTag}
-                    haptic="tap"
-                    disabled={!tagInput.trim()}
-                    accessibilityLabel="タグを追加"
-                    accessibilityState={{ disabled: !tagInput.trim() }}
-                    style={{
-                      paddingHorizontal: SP['2'],
-                      paddingVertical: 4,
-                      borderRadius: R.sm,
-                      backgroundColor: tagInput.trim() ? C.accent : C.bg3,
-                    }}
-                  >
-                    <Text style={[T.small, { color: tagInput.trim() ? '#fff' : C.text3, fontWeight: '700' }]}>
-                      追加
-                    </Text>
-                  </PressableScale>
-                </View>
-              )}
-            </View>
+            {/* 本文 — タイトルと本文を分けない単一フィールド (X / Threads 風)。
+                autoFocus: 投稿画面を開いた瞬間にキーボードを出して即タイプ可能にする
+                (これが無いと最初の数文字がキーボード起動待ちで取りこぼされる) */}
+            <ComposerBodyField
+              value={content}
+              onChangeText={setContent}
+              placeholder={placeholder}
+              autoFocus
+              onSelectionChange={(sel) => {
+                selectionRef.current = sel;
+              }}
+              inputRef={bodyRef}
+            />
           </View>
         </ScrollView>
 

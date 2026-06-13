@@ -46,6 +46,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BarChart3, Plus, X } from 'lucide-react-native';
 import { useColors } from '../../../hooks/useColors';
+import { useWebKeyboardInset } from '../../../hooks/useWebKeyboardInset';
 import { R, SP } from '../../../design/tokens';
 import { T } from '../../../design/typography';
 import { Icon } from '../../../constants/icons';
@@ -138,6 +139,9 @@ export function PollEditorSheet({
 }: PollEditorSheetProps) {
   const C = useColors();
   const insets = useSafeAreaInsets();
+  // web: ソフトキーボード高さ (native は 0)。RNW の KeyboardAvoidingView は no-op
+  // なので scrim の下 padding に足して sheet をキーボードの上へ持ち上げる。
+  const webKeyboardInset = useWebKeyboardInset();
 
   const canAdd = options.length < MAX_OPTIONS;
   const canRemove = options.length > MIN_OPTIONS;
@@ -184,6 +188,8 @@ export function PollEditorSheet({
           flex: 1,
           backgroundColor: C.scrim,
           justifyContent: 'flex-end',
+          // web のみ: キーボード高さ分 content box を縮め、sheet をキーボード上端へ。
+          paddingBottom: webKeyboardInset,
         }}
       >
         {/* backdrop — tap で閉じる */}
@@ -209,7 +215,8 @@ export function PollEditorSheet({
               borderTopRightRadius: R.xl,
               borderTopWidth: 1,
               borderTopColor: C.border,
-              paddingBottom: insets.bottom + SP['3'],
+              // キーボード表示中 (web) は home indicator 用 safe-area を足さない。
+              paddingBottom: (webKeyboardInset > 0 ? 0 : insets.bottom) + SP['3'],
               maxHeight: '92%',
             }}
           >
@@ -262,7 +269,9 @@ export function PollEditorSheet({
             </View>
 
             <ScrollView
-              style={{ flexGrow: 0 }}
+              // flexShrink: 1 — panel が縮んだ時 (web キーボード表示中) に中身を縮め、
+              // 末尾がキーボードの裏に潜らないようにする (Yoga の既定 shrink は 0)。
+              style={{ flexGrow: 0, flexShrink: 1 }}
               contentContainerStyle={{
                 paddingHorizontal: SP['5'],
                 paddingTop: SP['1'],

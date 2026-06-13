@@ -31,6 +31,10 @@ export function CommunityShelf(props: CommunityShelfProps) {
   // アイコンは名前から動的解決 (registry 経由)。未指定なら描画しない。
   const Glyph = props.iconName ? Icon[props.iconName] : null;
 
+  // ★ 2026-06-13 ユーザー要望: 「おすすめ/急上昇/公式」は **まだ参加していない**
+  //   コミュニティだけ出す。参加済み (memberIdSet) は提案棚から除外する。
+  const visibleCommunities = props.communities.filter((c) => !props.memberIdSet.has(c.id));
+
   return (
     <View style={{ marginTop: SP['5'] }}>
       <View
@@ -48,17 +52,17 @@ export function CommunityShelf(props: CommunityShelfProps) {
 
       {props.isLoading ? (
         <CommunityCardSkeletonList count={3} />
-      ) : props.communities.length === 0 ? (
+      ) : visibleCommunities.length === 0 ? (
         <Text style={[T.small, { color: C.text3, paddingVertical: SP['3'] }]}>
           {props.emptyText ?? 'まだありません'}
         </Text>
       ) : (
         <View style={{ gap: SP['3'] }}>
-          {props.communities.map((c) => (
+          {visibleCommunities.map((c) => (
             <CommunityBigCard
               key={c.id}
               community={c}
-              isMember={props.memberIdSet.has(c.id)}
+              isMember={false}
               joining={props.joiningIds?.has(c.id) ?? false}
               onPress={props.onPressCommunity}
               onJoin={props.onJoin}

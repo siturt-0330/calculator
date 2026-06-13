@@ -103,16 +103,18 @@ export function LeftSidebar() {
             },
             Platform.OS === 'web'
               ? ({
+                  // ★ 2026-06-13: ライト = フラットなチャコール / ダーク = ブランド確定
+                  //   グラデ GEEK_GRADIENT_CSS (紫→ピンク・水色なし)。canonical に統一。
                   backgroundImage: isLightActive()
-                    ? 'linear-gradient(110deg, #2f5784 0%, #3e6da3 45%, #5288b9 100%)'
-                    : 'linear-gradient(110deg, #b794f4 0%, #7c6af7 35%, #67c1ff 75%, #6ee7b7 100%)',
+                    ? 'linear-gradient(110deg, #1d1d1f 0%, #1d1d1f 100%)'
+                    : 'linear-gradient(120deg, #7C6AF7 0%, #B98CFF 48%, #E891C7 100%)',
                   backgroundClip: 'text',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
                   color: 'transparent',
                   textShadow: isLightActive()
                     ? 'none'
-                    : '0 0 14px rgba(124,106,247,0.55), 0 0 28px rgba(103,193,255,0.25)',
+                    : '0 0 14px rgba(124,106,247,0.55), 0 0 28px rgba(232,145,199,0.25)',
                   transform: 'skewX(-4deg)',
                 } as object)
               : {

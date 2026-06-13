@@ -58,6 +58,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useStampPrefsStore } from '../../stores/stampPrefsStore';
 import { useToastStore } from '../../stores/toastStore';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
+import { useWebKeyboardInset } from '../../hooks/useWebKeyboardInset';
 import type { ReactionAgg } from '../../lib/api/reactions';
 import { C, GRAD, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -93,6 +94,9 @@ export function MemeReactionPicker({
   reactions?: ReactionAgg[];
 }) {
   const insets = useSafeAreaInsets();
+  // web: ソフトキーボード高さ (native は 0)。scrim の下 padding に足して
+  // sheet をキーボードの上へ持ち上げる (検索/作成入力がキーボードの裏に隠れない)。
+  const webKeyboardInset = useWebKeyboardInset();
   const reduceMotion = useReducedMotion();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<string>(TAB_MYSTAMPS);
@@ -366,7 +370,19 @@ export function MemeReactionPicker({
       <Pressable
         onPress={requestClose}
         accessibilityLabel="閉じる"
-        style={{ flex: 1, backgroundColor: C.scrim, justifyContent: 'flex-end' }}
+        style={{
+          flex: 1,
+          backgroundColor: C.scrim,
+          justifyContent: 'flex-end',
+          // web のみ: キーボード高さ分 content box を縮め、sheet をキーボード上端へ。
+          paddingBottom: webKeyboardInset,
+          // ★ 2026-06-13: react-native-web で <Modal> が portal 化しても、
+          //   TabBar FAB (position:absolute / zIndex 未指定) や PostCardActions が
+          //   DOM 順で重なってシートを貫通する事例があった (screenshot)。
+          //   scrim 自体に高い zIndex を当てて modal stacking context を確立する。
+          //   native は zIndex 既定でも Modal が前面なので無影響。
+          zIndex: 1000,
+        }}
       >
         {/* シート本体 — タップは内側で止める (背景クローズに食われない) */}
         <SheetSwipeDown onClose={requestClose}>
@@ -375,7 +391,8 @@ export function MemeReactionPicker({
           style={{
             maxHeight: '85%',
             backgroundColor: C.bg2,
-            paddingBottom: insets.bottom + SP['3'],
+            // キーボード表示中 (web) は home indicator 用 safe-area を足さない。
+            paddingBottom: (webKeyboardInset > 0 ? 0 : insets.bottom) + SP['3'],
             borderTopLeftRadius: 24,
             borderTopRightRadius: 24,
             borderTopWidth: 1,
@@ -517,6 +534,9 @@ export function MemeReactionPicker({
           <ScrollView
             ref={bodyRef}
             keyboardShouldPersistTaps="handled"
+            // flexShrink: 1 — panel が縮んだ時 (web キーボード表示中) に本体を縮め、
+            // 作成フォーム/送信ボタンがキーボードの裏に潜らないようにする。
+            style={{ flexShrink: 1 }}
             contentContainerStyle={{ paddingHorizontal: SP['4'], paddingBottom: SP['4'], gap: SP['3'] }}
           >
             {/* その場で展開する作成フォーム (破線 chip / 検索 0 件 CTA から開く) */}

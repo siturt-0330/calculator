@@ -14,6 +14,7 @@
 //     Icon.check (CheckCircle2) を C.accent で代用 (icons.ts の規約どおり)。
 //   * BlurView 不使用 / フラット (Web と同一品質)。iOS/Android/Web 共通。
 // ============================================================
+import { memo } from 'react';
 import { View, Text } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { C, SP } from '../../design/tokens';
@@ -32,7 +33,7 @@ const ENTER_DURATION_MS = 260;
 // 行アバターのサイズ (avatarLg=56 はヒーロー用なので、行は 44 で密度を保つ)。
 const ROW_AVATAR_SIZE = 44;
 
-export function EditorialCommunityRow({
+export const EditorialCommunityRow = memo(function EditorialCommunityRow({
   community,
   rank,
   terms,
@@ -41,7 +42,7 @@ export function EditorialCommunityRow({
   community: CommunityHit;
   rank: number;
   terms: string[];
-  onPress: () => void;
+  onPress: (community: CommunityHit) => void;
 }) {
   const { name, description, icon_url, icon_emoji, icon_color, member_count, is_official } =
     community;
@@ -54,7 +55,7 @@ export function EditorialCommunityRow({
       style={{ borderTopWidth: 1, borderTopColor: C.divider }}
     >
       <PressableScale
-        onPress={onPress}
+        onPress={() => onPress(community)}
         haptic="tap"
         accessibilityRole="button"
         accessibilityLabel={`コミュニティを開く: ${name}`}
@@ -111,4 +112,4 @@ export function EditorialCommunityRow({
       </PressableScale>
     </Animated.View>
   );
-}
+});

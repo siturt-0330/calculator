@@ -101,8 +101,10 @@ export default function SignupScreen() {
       // 流入元(traffic_source/utm)を user_acquisition へ記録 — fire-and-forget (体験を止めない)。
       // autoLoggedIn 時のみ auth.uid() が確定するので、ここで記録する。
       void recordAcquisition();
-      // ★ オンボーディングは廃止。登録後そのままフィードへ。
-      router.replace('/(tabs)/feed');
+      // ★ 2026-06-13: 登録直後にテーマ (ダーク/ライト/システム) を 1 度だけ選んでもらう。
+      //   旧オンボの 5 画面ウィザードは廃止のままで、これだけ薄く挟む。
+      //   replace なので戻るで signup には戻らない。
+      router.replace('/welcome-theme' as never);
     } else if (result.needsConfirmEmail) {
       show('確認メールを送信しました。リンクをクリックしてからログインしてください。', 'success');
       router.replace('/(auth)/login');

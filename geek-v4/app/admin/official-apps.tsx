@@ -8,6 +8,7 @@ import { View, Text, ScrollView, Modal, TextInput, ActivityIndicator } from 'rea
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useWebKeyboardInset } from '../../hooks/useWebKeyboardInset';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { C, R, SP, SHADOW } from '../../design/tokens';
 import { T } from '../../design/typography';
@@ -33,6 +34,8 @@ const FEATURE_LABEL: Record<string, string> = {
 
 export default function AdminOfficialAppsScreen() {
   const insets = useSafeAreaInsets();
+  // web のみ: キーボード高さ分 (native は常に 0 — KeyboardAvoidingView が担当)。
+  const webKeyboardInset = useWebKeyboardInset();
   const show = useToastStore((s) => s.show);
   const qc = useQueryClient();
 
@@ -189,7 +192,15 @@ export default function AdminOfficialAppsScreen() {
 
       {/* 詳細 + アクション モーダル */}
       <Modal visible={openApp !== null} transparent animationType="fade" onRequestClose={() => setOpenApp(null)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' }}>
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            justifyContent: 'flex-end',
+            // web のみ: キーボード高さ分だけ content box を縮め、sheet をキーボード上へ持ち上げる。
+            paddingBottom: webKeyboardInset,
+          }}
+        >
           <Animated.View
             entering={FadeIn.duration(180)}
             style={{
@@ -197,7 +208,8 @@ export default function AdminOfficialAppsScreen() {
               borderTopLeftRadius: R['2xl'],
               borderTopRightRadius: R['2xl'],
               padding: SP['4'],
-              paddingBottom: insets.bottom + SP['4'],
+              // キーボード表示中 (web) は home indicator 用 safe-area を足さない (二重の隙間防止)。
+              paddingBottom: (webKeyboardInset > 0 ? 0 : insets.bottom) + SP['4'],
               gap: SP['3'],
               maxHeight: '92%',
             }}
@@ -218,7 +230,12 @@ export default function AdminOfficialAppsScreen() {
             </View>
 
             {openApp && (
-              <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: SP['3'] }}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                // flexShrink: 1 — panel が縮んだ時 (web キーボード表示中) に list も縮めて末尾ボタンを残す。
+                style={{ flexShrink: 1 }}
+                contentContainerStyle={{ gap: SP['3'] }}
+              >
                 <DetailRow label="申請者 (実名)" value={openApp.applicant_real_name} />
                 <DetailRow label="所属組織" value={openApp.applicant_organization} />
                 {openApp.applicant_email && <DetailRow label="メール" value={openApp.applicant_email} />}

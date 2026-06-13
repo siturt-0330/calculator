@@ -16,6 +16,7 @@ import { useFeatureFlag } from '../../hooks/useFeatureFlag';
 import { useAuthStore } from '../../stores/authStore';
 import { useGradients, useShadows } from '../../hooks/useColors';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
+import { useWebKeyboardInset } from '../../hooks/useWebKeyboardInset';
 import { C, R, SP } from '../../design/tokens';
 import { SPRING_SNAPPY } from '../../design/motion';
 import { T } from '../../design/typography';
@@ -42,6 +43,9 @@ export function FeedbackFAB() {
   const user = useAuthStore((s) => s.user);
   const segments = useSegments();
   const insets = useSafeAreaInsets();
+  // web: ソフトキーボード高さ (native は 0)。scrim の下 padding に足して
+  // sheet をキーボードの上へ持ち上げる (入力欄/送信ボタンがキーボードの裏に隠れない)。
+  const webKeyboardInset = useWebKeyboardInset();
   // toast action のみ subscribe
   const show = useToastStore((s) => s.show);
   const [open, setOpen] = useState(false);
@@ -174,11 +178,18 @@ export function FeedbackFAB() {
       </Animated.View>
 
       <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' }}>
+        <View style={{
+          flex: 1,
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          justifyContent: 'flex-end',
+          // web のみ: キーボード高さ分 content box を縮め、sheet をキーボード上端へ。
+          paddingBottom: webKeyboardInset,
+        }}>
           <View style={{
             backgroundColor: C.bg2,
             padding: SP['4'],
-            paddingBottom: insets.bottom + SP['4'],
+            // キーボード表示中 (web) は home indicator 用 safe-area を足さない。
+            paddingBottom: (webKeyboardInset > 0 ? 0 : insets.bottom) + SP['4'],
             borderTopLeftRadius: 24,
             borderTopRightRadius: 24,
             borderTopWidth: 1, borderColor: C.border,

@@ -137,7 +137,9 @@ export function SortTabs({
           onPress={() => onChange(m.v)}
           translate={t}
           reduceMotion={reduceMotion}
-          textColor={C.text}
+          // ★ 2026-06-13: active ラベルは常に白 (pill は両テーマ濃色グラデ)。
+          //   C.text だと light で黒文字 on チャコール pill = 不可視だった。
+          textColor="#ffffff"
           textColorInactive={C.text2}
         />
       ))}

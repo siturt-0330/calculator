@@ -698,8 +698,13 @@ function AnonPostCardInner({
     hap.tap();
     // 親 onShare も呼ぶ (親側の副作用がある場合に備える)
     onShare();
-    setSheetKind('share');
-  }, [onShare]);
+    // ユーザー要望 (2026-06-13): 共有は中間メニューを挟まず、押したら即 OS 標準の
+    // 共有シート (LINE / メッセージ等) を開く。sharePost は web で navigator.share が
+    // 無ければ投稿 URL を開くフォールバック付きなので全 platform で安全。
+    void sharePost(post).catch(() => {
+      show('シェアに失敗しました', 'error');
+    });
+  }, [onShare, post, show]);
 
   const shareActions: Action[] = useMemo(
     () => [

@@ -214,9 +214,9 @@ export function SearchBar({
         If callers need a horizontal recent-searches row beneath the bar,
         accept a `recentSearches: string[]` (+ onPickRecent) prop and render
         chips here using PressableScale + { backgroundColor: C.bg2,
-        ...T.smallM, color: C.text2 }. Today consumers use the dedicated
-        <SearchHistoryChips /> component (components/search/SearchHistoryChips.tsx)
-        for that, so this bar stays focused on the input affordance.
+        ...T.smallM, color: C.text2 }. Today the recent-searches UI lives
+        inside SearchFocusOverlay, so this bar stays focused on the input
+        affordance.
 
         Similarly, if a separator divider sits below this bar (e.g. above a
         suggestions list), animate its `height` from 0 → 1 on focus with the

@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Text, type TextStyle, type StyleProp } from 'react-native';
 import { findHighlightRanges } from '../../lib/search/scoring';
 import { C } from '../../design/tokens';
@@ -18,22 +19,29 @@ export function HighlightedText({
   highlightColor?: string;
   highlightBg?: string;
 }) {
-  if (!text) return <Text style={style}>{text}</Text>;
-  const cleanTerms = terms.filter((t) => t && t.length > 0);
-  if (cleanTerms.length === 0) return <Text style={style} numberOfLines={numberOfLines}>{text}</Text>;
-  const ranges = findHighlightRanges(text, cleanTerms);
-  if (ranges.length === 0) return <Text style={style} numberOfLines={numberOfLines}>{text}</Text>;
+  // findHighlightRanges + segment 構築は同期スキャン (indexOf ループ + merge)。
+  // terms は呼び出し側 (search.tsx highlightTerms) で useMemo 済みの安定参照なので
+  // [text, terms] でメモ化し、親の再 render のたびにスキャンが走らないようにする。
+  // segment は開始 offset(at)を安定キーにする (§14: key={i} 回避)。findHighlightRanges は
+  // merge 済み非重複 range を返すため at は一意=衝突なし。
+  const segments = useMemo(() => {
+    if (!text) return null;
+    const cleanTerms = terms.filter((t) => t && t.length > 0);
+    if (cleanTerms.length === 0) return null;
+    const ranges = findHighlightRanges(text, cleanTerms);
+    if (ranges.length === 0) return null;
+    const segs: { t: string; hi: boolean; at: number }[] = [];
+    let cursor = 0;
+    for (const r of ranges) {
+      if (r.start > cursor) segs.push({ t: text.slice(cursor, r.start), hi: false, at: cursor });
+      segs.push({ t: text.slice(r.start, r.end), hi: true, at: r.start });
+      cursor = r.end;
+    }
+    if (cursor < text.length) segs.push({ t: text.slice(cursor), hi: false, at: cursor });
+    return segs;
+  }, [text, terms]);
 
-  // segment に開始 offset(at)を持たせ index ではなく offset ベースの安定キーにする (§14: key={i} 回避)。
-  // findHighlightRanges は merge 済み非重複 range を返すため at は一意=衝突なし。
-  const segments: { t: string; hi: boolean; at: number }[] = [];
-  let cursor = 0;
-  for (const r of ranges) {
-    if (r.start > cursor) segments.push({ t: text.slice(cursor, r.start), hi: false, at: cursor });
-    segments.push({ t: text.slice(r.start, r.end), hi: true, at: r.start });
-    cursor = r.end;
-  }
-  if (cursor < text.length) segments.push({ t: text.slice(cursor), hi: false, at: cursor });
+  if (!segments) return <Text style={style} numberOfLines={numberOfLines}>{text}</Text>;
 
   return (
     <Text style={style} numberOfLines={numberOfLines}>
