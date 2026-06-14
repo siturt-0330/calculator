@@ -24,12 +24,14 @@ const SCOPE_SPRING = SPRING_SEGMENT;
 
 // 2 値で固定 (open / closed) — 配列を component 外に持つと再 render 時に
 // useEffect の依存が安定する。
-// ★ 2026-06-12 ユーザー要望: 'closed' の意味を「選択した # のみ」から
-//   「参加していないコミュニティの投稿だけ」(= 新しいコミュの発見モード) に変更。
-//   store の値 ('open'/'closed') は永続化互換のため変えない。
+// ★ 2026-06-14 ユーザー要望: 第2セグメントを「未参加のコミュ(発見モード)」→
+//   「コンテスト」に変更。store 値 'closed' は永続化互換のため踏襲し、意味だけ
+//   差し替える。実体 (コンテスト一覧 / 現状は準備中プレースホルダー) は feed.tsx で
+//   scope==='closed' のとき出し分ける。
+//   (旧: 2026-06-12 に 'closed'=「未参加コミュの投稿だけ」= 発見モードだったが廃止)
 const OPTIONS = [
   { v: 'open' as FeedScope, label: 'すべて', sub: '全部' },
-  { v: 'closed' as FeedScope, label: '未参加のコミュ', sub: 'みつける' },
+  { v: 'closed' as FeedScope, label: 'コンテスト', sub: '予想' },
 ] as const;
 
 export function ScopeToggle({

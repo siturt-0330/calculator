@@ -36,6 +36,7 @@ import { FormatToolbar, type FormatKind } from '../../components/post/composer/F
 import { PollEditorSheet } from '../../components/post/composer/PollEditorSheet';
 import { CommunityPickerSheet } from '../../components/post/composer/CommunityPickerSheet';
 import { PostSuccessCelebration } from '../../components/post/PostSuccessCelebration';
+import { LinkPreviewCard } from '../../components/feed/LinkPreviewCard';
 
 import { useToastStore } from '../../stores/toastStore';
 import { showPermissionRescue } from '../../lib/permissionRescue';
@@ -54,6 +55,9 @@ import {
 } from '../../lib/api/communities';
 import { createPost, fetchPostById, updatePost } from '../../lib/api/posts';
 import { checkContent } from '../../lib/ai/checkContent';
+import { extractFirstUrl } from '../../lib/utils/extractUrl';
+import { useFeatureFlag } from '../../hooks/useFeatureFlag';
+import { useWebKeyboardInset } from '../../hooks/useWebKeyboardInset';
 import { validateVideoSource, uploadPostImage, uploadPostVideo } from '../../lib/media';
 import { makeWebPreviewDataUrl } from '../../lib/image';
 import { openPhotoEditor } from '../../lib/photoEditor';
@@ -100,11 +104,16 @@ export default function CreatePost() {
     editId?: string;
   }>();
   const insets = useSafeAreaInsets();
+  // web のソフトキーボード高さ (native は常に 0)。ボタンバーをキーボード上端へ持ち上げる。
+  const webKeyboardInset = useWebKeyboardInset();
   const show = useToastStore((s) => s.show);
   const C = useColors();
   const GRAD = useGradients();
 
   const user = useAuthStore((s) => s.user);
+  // 本文に貼られた最初の URL → 線の下にライブのリンクプレビューを出す。
+  // og_preview フラグで投稿後の表示と挙動を揃える (フラグ OFF なら投稿後もカード化されない)。
+  const useOgPreview = useFeatureFlag('og_preview');
 
   // -----------------------------------------------------------
   // store selectors — 個別 selector で購読 (destructure 禁止)
@@ -112,6 +121,8 @@ export default function CreatePost() {
   const title = usePostDraftStore((s) => s.title);
   const content = usePostDraftStore((s) => s.content);
   const setContent = usePostDraftStore((s) => s.setContent);
+  // 本文中の最初の URL (リンクプレビュー対象)。本文が変わるたび再計算。
+  const previewUrl = useMemo(() => extractFirstUrl(content), [content]);
   const images = usePostDraftStore((s) => s.images);
   const setImages = usePostDraftStore((s) => s.setImages);
   const video = usePostDraftStore((s) => s.video);
@@ -827,6 +838,7 @@ export default function CreatePost() {
         }
         show(userMsg, 'error');
       } finally {
+        setPostPhase('idle');
         setPosting(false);
       }
       return;
@@ -1287,32 +1299,19 @@ export default function CreatePost() {
           {/* (匿名表示行はユーザー要望で撤去 — 投稿は常に匿名のため UI で明示しない 2026-06-12) */}
 
           {/* ============================================================
-              メディア → 本文 — 全幅 1 カラム
-              ★ 2026-06-13 (ユーザー要望):
-                (1) 文字入力ごとに写真が動く問題を解消するため、メディアを本文より
-                    "上" に配置する。本文の TextInput は multiline auto-grow で
-                    onContentSizeChange ごとに minHeight が更新されるため、本文を
-                    上に置くと下のメディアが毎キーストロークでズレていた。逆順に
-                    することで本文は「下方向にだけ」伸び、メディア位置は不動になる。
+              本文 → メディア — 全幅 1 カラム
+              ★ 2026-06-14 (ユーザー要望):
+                (1) メディア(写真/動画)を本文の下端の "線"(progress line)の
+                    "下" に表示する。以前は「打鍵ごとに写真が動く」のを避けるため
+                    メディアを本文の上に置いていたが、ComposerBodyField 側で本文の
+                    auto-grow 高さを「一行単位」に量子化したので、本文が伸びるのは
+                    "行が増えた時だけ" になった。よってメディアを本文の下に戻しても
+                    写真は毎打鍵では動かず「一行ぶんだけ」動く = ユーザー要望どおり。
                 (2) タグ選択 UI は撤去 (任意機能のうるささを排除)。tags state 自体は
                     draft 復元 / 編集モード / pretag URL パラメータから値が入る経路が
                     残るので、空配列のまま投稿される (backend は tag_names: [] を受理)。
               ============================================================ */}
           <View style={{ paddingHorizontal: SP['4'], paddingTop: SP['3'], paddingBottom: SP['6'] }}>
-
-            {/* メディアグリッド — 本文より上 */}
-            {(images.length > 0 || video) && (
-              <View style={{ marginBottom: SP['3'] }}>
-                <ComposerMediaGrid
-                  images={images}
-                  video={video ? { uri: video.uri, sizeMb: video.size / 1024 / 1024 } : null}
-                  onRemoveImage={(index) => setImages(images.filter((_, i) => i !== index))}
-                  onRemoveVideo={() => setVideo(null)}
-                  onEditImage={editImage}
-                  containerPaddingH={0}
-                />
-              </View>
-            )}
 
             {/* 本文 — タイトルと本文を分けない単一フィールド (X / Threads 風)。
                 autoFocus: 投稿画面を開いた瞬間にキーボードを出して即タイプ可能にする
@@ -1327,37 +1326,72 @@ export default function CreatePost() {
               }}
               inputRef={bodyRef}
             />
+
+            {/* メディアグリッド — 本文下端の線の "下" */}
+            {(images.length > 0 || video) && (
+              <View style={{ marginTop: SP['3'] }}>
+                <ComposerMediaGrid
+                  images={images}
+                  video={video ? { uri: video.uri, sizeMb: video.size / 1024 / 1024 } : null}
+                  onRemoveImage={(index) => setImages(images.filter((_, i) => i !== index))}
+                  onRemoveVideo={() => setVideo(null)}
+                  onEditImage={editImage}
+                  containerPaddingH={0}
+                />
+              </View>
+            )}
+
+            {/* リンクプレビュー — 本文に URL を貼ると線の下にライブのカードを出す。
+                投稿後 (feed / 投稿詳細) と同じ LinkPreviewCard を embedded で使い、
+                見た目を完全一致させる。URL は本文に残したまま (投稿表示側で
+                stripPreviewUrl が URL を隠すので二重表示にはならない)。 */}
+            {useOgPreview && previewUrl && (
+              <View style={{ marginTop: SP['3'] }}>
+                <LinkPreviewCard url={previewUrl} embedded />
+              </View>
+            )}
           </View>
         </ScrollView>
 
         {/* ============================================================
             フッター: 書式ツールバー (トグル) + X 風アクションバー
             ============================================================ */}
-        {formatActive && (
-          <View style={{ paddingHorizontal: SP['3'], paddingBottom: SP['1'] }}>
-            <FormatToolbar onInsert={insertFormat} />
-          </View>
-        )}
-        <ComposerBottomBar
-          onPickImage={pickImage}
-          onCamera={takePhoto}
-          pickingCamera={pickingCamera}
-          onPickVideo={pickVideo}
-          onTogglePoll={openPoll}
-          onToggleFormat={() => {
-            setFormatActive((v) => !v);
-            hap.tap();
-          }}
-          pickingImage={pickingImage}
-          pickingVideo={pickingVideo}
-          imagesFull={images.length >= 4}
-          hasVideo={!!video}
-          pollActive={showPoll}
-          formatActive={formatActive}
-          hideVideo={!!editId}
-          hidePoll={!!editId}
-          bottomInset={insets.bottom}
-        />
+        {/* ボタンバー群 — web: marginBottom=キーボード高で「キーボード上端に貼り付く」
+            (KeyboardAvoidingView は RNW で no-op のため [id].tsx の手法をミラー)。
+            キーボード表示中は home indicator の safe-area 余白も外す (覆われた領域のため)。 */}
+        <View style={webKeyboardInset > 0 ? { marginBottom: webKeyboardInset } : undefined}>
+          {formatActive && (
+            <View style={{ paddingHorizontal: SP['3'], paddingBottom: SP['1'] }}>
+              <FormatToolbar onInsert={insertFormat} />
+            </View>
+          )}
+          <ComposerBottomBar
+            onPickImage={pickImage}
+            onCamera={takePhoto}
+            pickingCamera={pickingCamera}
+            onPickVideo={pickVideo}
+            onContest={() => {
+              // パターン①: 投稿先コミュ内にコンテストを設置。選択中コミュを引き継いで作成画面へ。
+              const cid = selectedCommunityIds[0];
+              router.push((cid ? `/contest/create?community_id=${cid}` : '/contest/create') as never);
+            }}
+            hideContest={!!editId}
+            onTogglePoll={openPoll}
+            onToggleFormat={() => {
+              setFormatActive((v) => !v);
+              hap.tap();
+            }}
+            pickingImage={pickingImage}
+            pickingVideo={pickingVideo}
+            imagesFull={images.length >= 4}
+            hasVideo={!!video}
+            pollActive={showPoll}
+            formatActive={formatActive}
+            hideVideo={!!editId}
+            hidePoll={!!editId}
+            bottomInset={webKeyboardInset > 0 ? 0 : insets.bottom}
+          />
+        </View>
       </KeyboardAvoidingView>
 
       {/* ================================================================

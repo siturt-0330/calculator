@@ -36,6 +36,7 @@ import { BackButton } from '../../../../components/nav/BackButton';
 import { Icon } from '../../../../constants/icons';
 import { AnonPostCard } from '../../../../components/feed/AnonPostCard';
 import { ReportSheet } from '../../../../components/post/ReportSheet';
+import { CommunityContestsSection } from '../../../../components/contest/CommunityContestsSection';
 import { useAuthStore } from '../../../../stores/authStore';
 import { useRecentCommunitiesStore } from '../../../../stores/recentCommunitiesStore';
 import { useDelayedLoading } from '../../../../hooks/useDelayedLoading';
@@ -356,6 +357,7 @@ export default function CommunityDetailScreen() {
           officialAdminName={community.official_admin_display_name ?? null}
           officialOrganization={community.official_organization ?? null}
         />
+        <CommunityContestsSection communityId={id} />
         <FeedTab communityId={id} />
       </Animated.ScrollView>
 

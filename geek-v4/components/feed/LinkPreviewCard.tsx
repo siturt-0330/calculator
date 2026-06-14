@@ -1,4 +1,13 @@
+import { useEffect } from 'react';
 import { View, Text, Platform } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  cancelAnimation,
+  Easing,
+} from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { safeOpenUrl } from '../../lib/openUrl';
 import { sanitizeUrl } from '../../lib/sanitize';
@@ -9,6 +18,7 @@ import { parseSocialLink } from '../../lib/utils/socialLink';
 import { Icon } from '../../constants/icons';
 import { PressableScale } from '../ui/PressableScale';
 import { ProgressiveImage } from '../ui/ProgressiveImage';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { C, R, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 
@@ -21,7 +31,18 @@ function shortHost(url: string): string {
   }
 }
 
-export function LinkPreviewCard({ url }: { url: string }) {
+export function LinkPreviewCard({
+  url,
+  embedded = false,
+}: {
+  url: string;
+  /** composer など、呼び出し側が外側の余白を持つ場所に置くとき true。
+   *  カード自身の marginHorizontal / marginTop を 0 にして二重インデントを防ぐ。 */
+  embedded?: boolean;
+}) {
+  // 埋め込み時はカード自身の外余白を消し、配置は呼び出し側に委ねる。
+  const mh = embedded ? 0 : SP['4'];
+  const mt = embedded ? 0 : SP['2'];
   const { data, isLoading } = useQuery({
     queryKey: ['link-preview', url],
     queryFn: () => fetchAndCachePreview(url),
@@ -76,12 +97,19 @@ export function LinkPreviewCard({ url }: { url: string }) {
     }
   };
 
-  // ローディング/失敗時はシンプルな出典バー。
-  // ただし YouTube / IG / FB は (メタ取得を待たず) 常にブランドカードを出すので除外する。
-  if (!yt && !social && (isLoading || !data || (!title && !safeImageUrl))) {
+  // ★ X 風ローディング (2026-06-14): OG メタ取得待ちの間は、最終カードと同じ寸法の
+  //   スケルトン (画像エリア 1.91:1 + タイトル/出典のプレースホルダ) を先に確保して
+  //   shimmer 表示する。これで「小さな出典バー → 大カード」のレイアウトジャンプが消え、
+  //   X のように「枠が先に出て中身が後から埋まる」体感になる。
+  //   YouTube / IG / FB はメタ取得を待たず即カード化するのでスケルトン不要。
+  if (!yt && !social && isLoading) {
+    return <LinkPreviewSkeleton mh={mh} mt={mt} />;
+  }
+  // 取得完了したが title も image も無い (= 失敗) ときだけ、控えめな出典バーに落とす。
+  if (!yt && !social && (!data || (!title && !safeImageUrl))) {
     return (
       <PressableScale onPress={open} haptic="tap" style={{
-        marginHorizontal: SP['4'], marginTop: SP['2'],
+        marginHorizontal: mh, marginTop: mt,
         paddingHorizontal: SP['3'], paddingVertical: SP['2'],
         backgroundColor: C.bg3, borderRadius: R.md,
         borderWidth: 1, borderColor: C.border,
@@ -102,7 +130,7 @@ export function LinkPreviewCard({ url }: { url: string }) {
   // タップで URL を開く挙動 (open) は従来通り維持。
   return (
     <PressableScale onPress={open} haptic="tap" style={{
-      marginHorizontal: SP['4'], marginTop: SP['2'],
+      marginHorizontal: mh, marginTop: mt,
       backgroundColor: C.bg3,
       borderRadius: R.lg,
       borderWidth: 1,
@@ -241,5 +269,54 @@ export function LinkPreviewCard({ url }: { url: string }) {
         </Text>
       </View>
     </PressableScale>
+  );
+}
+
+// =============================================================================
+// LinkPreviewSkeleton — OG メタ取得待ちの X 風スケルトン
+// -----------------------------------------------------------------------------
+// 最終カードと同じ寸法 (画像 1.91:1 + タイトル/出典のプレースホルダ) を先に確保し、
+// shimmer (opacity の往復) で「読込中」を示す。これでカードがその場で埋まる体感に。
+// reduceMotion 時は静止 (opacity 固定)。
+// =============================================================================
+function LinkPreviewSkeleton({ mh, mt }: { mh: number; mt: number }) {
+  const reduceMotion = useReducedMotion();
+  const pulse = useSharedValue(0.5);
+  useEffect(() => {
+    if (reduceMotion) {
+      pulse.value = 0.6;
+      return;
+    }
+    pulse.value = withRepeat(
+      withTiming(0.9, { duration: 750, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true,
+    );
+    // アンマウント時にワークレットをキャンセルして UI スレッドの漏れを防ぐ
+    return () => { cancelAnimation(pulse); };
+  }, [pulse, reduceMotion]);
+  const pulseStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+  const block = { backgroundColor: C.bg4, borderRadius: 4 } as const;
+  return (
+    <View
+      style={{
+        marginHorizontal: mh,
+        marginTop: mt,
+        backgroundColor: C.bg3,
+        borderRadius: R.lg,
+        borderWidth: 1,
+        borderColor: C.border,
+        overflow: 'hidden',
+      }}
+    >
+      {/* 画像エリア (1.91:1) */}
+      <Animated.View style={[{ width: '100%', aspectRatio: 1.91, backgroundColor: C.bg4 }, pulseStyle]} />
+      {/* タイトル 2 行 + 出典 */}
+      <View style={{ paddingHorizontal: SP['3'], paddingVertical: SP['2'], gap: 8 }}>
+        <Animated.View style={[{ width: '82%', height: 12 }, block, pulseStyle]} />
+        <Animated.View style={[{ width: '55%', height: 12 }, block, pulseStyle]} />
+        <Animated.View style={[{ width: 96, height: 9, marginTop: 2 }, block, pulseStyle]} />
+      </View>
+    </View>
   );
 }

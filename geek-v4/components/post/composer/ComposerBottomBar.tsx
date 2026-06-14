@@ -44,6 +44,8 @@ export interface ComposerBottomBarProps {
   /** カメラ撮影中 → カメラボタンを loading/disabled に */
   pickingCamera?: boolean;
   onPickVideo: () => void;
+  /** コンテストを作る (= 投稿先コミュ内にコンテストを設置 = パターン①)。渡された時だけ表示。 */
+  onContest?: () => void;
   onTogglePoll: () => void;
   onToggleFormat: () => void;
   pickingImage?: boolean; // 画像選択中 → 画像ボタンを subtle に loading/disabled
@@ -53,6 +55,7 @@ export interface ComposerBottomBarProps {
   pollActive?: boolean; // 投票エディタ展開中 → 投票ボタンを highlight (accent tint)
   formatActive?: boolean; // 書式ツールバー展開中 → 書式ボタンを highlight (accent tint)
   hideVideo?: boolean; // 編集モード等で動画ボタンを出さない (動画は編集対象外)
+  hideContest?: boolean; // 編集モード等でコンテストボタンを出さない
   hidePoll?: boolean; // 編集モード等で投票ボタンを出さない (投票は編集対象外)
   bottomInset: number; // safe-area 下端ぶんの padding
 }
@@ -65,6 +68,7 @@ export function ComposerBottomBar({
   onCamera,
   pickingCamera = false,
   onPickVideo,
+  onContest,
   onTogglePoll,
   onToggleFormat,
   pickingImage = false,
@@ -74,6 +78,7 @@ export function ComposerBottomBar({
   pollActive = false,
   formatActive = false,
   hideVideo = false,
+  hideContest = false,
   hidePoll = false,
   bottomInset,
 }: ComposerBottomBarProps): JSX.Element {
@@ -128,6 +133,14 @@ export function ComposerBottomBar({
             disabled={videoDisabled}
             dimmed={hasVideo}
             loading={pickingVideo}
+          />
+        )}
+        {onContest && !hideContest && (
+          <IconActionButton
+            C={C}
+            renderIcon={(color) => <Icon.trophy size={ICON_SIZE} color={color} strokeWidth={2} />}
+            accessibilityLabel="コンテストを作る"
+            onPress={onContest}
           />
         )}
         {!hidePoll && (

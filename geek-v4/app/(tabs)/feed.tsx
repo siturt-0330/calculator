@@ -43,7 +43,7 @@ import { EASE_OUT_QUART, TIMING_NORM, clampHandoff } from '../../design/motion';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { thumbedUrl } from '../../lib/utils/imageUrl';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, useFocusEffect, useNavigation } from 'expo-router';
+import { useRouter, useFocusEffect, useNavigation, useLocalSearchParams } from 'expo-router';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useFeed } from '../../hooks/useFeed';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
@@ -68,7 +68,7 @@ import { useTabBarScrollSV } from '../../lib/contexts/tabBarScroll';
 import { NotificationBadge } from '../../components/ui/NotificationBadge';
 import { GeekRefreshControl } from '../../components/ui/GeekRefreshControl';
 import { useToastStore } from '../../stores/toastStore';
-import { useFeedStore } from '../../stores/feedStore';
+import { useFeedStore, type FeedScope } from '../../stores/feedStore';
 import { AnonPostCard } from '../../components/feed/AnonPostCard';
 import { AdCard } from '../../components/feed/AdCard';
 import type { Ad } from '../../lib/api/ads';
@@ -162,6 +162,7 @@ const FeedRowEnter = memo(function FeedRowEnter({
 });
 
 import { ScopeToggle } from '../../components/feed/ScopeToggle';
+import { ContestList } from '../../components/contest/ContestList';
 import { logEvent } from '../../lib/personalize';
 import { recordImpression } from '../../lib/personalize/impressions';
 import { PostCardSkeleton } from '../../components/feed/PostCardSkeleton';
@@ -381,6 +382,33 @@ export default function FeedScreen() {
   const scope = useFeedStore((s) => s.scope);
   const setScope = useFeedStore((s) => s.setScope);
   const hydrateFeed = useFeedStore((s) => s.hydrate);
+
+  // ★ URL の ?scope= を view 状態に同期 (2026-06-14)。
+  //   コンテスト一覧を URL で表せるようにして、ブックマーク / 共有 / ブラウザ「戻る」を機能させる。
+  //   contest→closed / home(=open)。素のタブ tap (param 無し) は hydrate 済みの永続値を尊重。
+  //   ref で「適用済み param」を記録し、param が実際に変化した時だけ反映する
+  //   (= ユーザーの手動トグルと喧嘩しない。scope を deps に入れると上書き合戦になるため入れない)。
+  const params = useLocalSearchParams<{ scope?: string }>();
+  const appliedScopeParamRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const p = typeof params.scope === 'string' ? params.scope : undefined;
+    if (p === appliedScopeParamRef.current) return;
+    appliedScopeParamRef.current = p;
+    if (p === 'contest') setScope('closed');
+    else if (p === 'home' || p === 'open') setScope('open');
+  }, [params.scope, setScope]);
+
+  // ScopeToggle / 各導線から呼ぶ scope 変更。store を即更新しつつ URL param も同期し、
+  //   現在の view (すべて / コンテスト) がブックマーク・共有 URL に反映されるようにする。
+  //   setParams は history を積まない (replace) ので手動トグルで戻る履歴を汚さない。
+  const handleScopeChange = useCallback(
+    (next: FeedScope) => {
+      setScope(next);
+      appliedScopeParamRef.current = next === 'closed' ? 'contest' : 'home';
+      router.setParams({ scope: next === 'closed' ? 'contest' : 'home' });
+    },
+    [setScope, router],
+  );
   // ★ Background prefetch — feed first paint 後に隣接タブのデータを idle 時間で先読み。
   //   React Query の cache に乗るので、ユーザーが /notifications や /mypage を tap した
   //   瞬間に「白画面 → spinner → データ」ではなく即表示できる。
@@ -1062,7 +1090,7 @@ export default function FeedScreen() {
 
       <View style={{ alignItems: 'center' }}>
         <View style={{ width: '100%', maxWidth: 720, paddingHorizontal: SP['4'], paddingBottom: SP['3'] }}>
-        <ScopeToggle value={scope} onChange={setScope} />
+        <ScopeToggle value={scope} onChange={handleScopeChange} />
         </View>
       </View>
 
@@ -1070,6 +1098,11 @@ export default function FeedScreen() {
           (フラット化で投稿が全幅 hairline 区切りになったため、先頭境界も同じ細さに) */}
       <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: C.divider }} />
 
+      {/* 第2セグメント = コンテストタブ (store 値 'closed' を踏襲)。コンテスト一覧を
+          表示する (フィード本体は scope==='open' 専用に保つ)。 */}
+      {scope === 'closed' ? (
+        <ContestList />
+      ) : (
       <FeedListComponent
         ref={listRef}
         data={feedItems}
@@ -1132,6 +1165,7 @@ export default function FeedScreen() {
           />
         }
       />
+      )}
 
       {/* 通報シート (運営への通報・理由選択) */}
       <ReportSheet

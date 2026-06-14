@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   PenLine,
   Home,
+  Trophy,
   Users2,
   Search as SearchIcon,
   Bell,
@@ -34,6 +35,7 @@ import {
 import { Avatar } from '../ui/Avatar';
 import { PressableScale } from '../ui/PressableScale';
 import { useAuthStore } from '../../stores/authStore';
+import { useFeedStore } from '../../stores/feedStore';
 import { supabase } from '../../lib/supabase';
 import { useUnreadCount } from '../../hooks/useNotifications';
 import { useTheme } from '../../hooks/useColors';
@@ -132,7 +134,29 @@ export function LeftSidebar() {
 
       {/* ===== ナビ群 ===== */}
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-        <NavItem icon={Home} label="ホーム" onPress={() => router.push('/(tabs)/feed' as never)} C={C} />
+        {/* ホームは scope='open' を明示してから遷移 (コンテスト表示中に押しても確実にホームへ)。
+            ?scope=home を付けて URL を view と一致させ、ブックマーク / 戻るを成立させる。 */}
+        <NavItem
+          icon={Home}
+          label="ホーム"
+          onPress={() => {
+            useFeedStore.getState().setScope('open');
+            router.push('/(tabs)/feed?scope=home' as never);
+          }}
+          C={C}
+        />
+        {/* コンテストは feed の scope='closed' で ContestList を出す方式 (専用ルート無し)。
+            push だけでは永続 scope が切替わらないので、先に setScope('closed') してから遷移する。
+            ?scope=contest を付けて URL に view を載せ、ブックマーク / 共有 / ブラウザ戻るを機能させる。 */}
+        <NavItem
+          icon={Trophy}
+          label="コンテスト"
+          onPress={() => {
+            useFeedStore.getState().setScope('closed');
+            router.push('/(tabs)/feed?scope=contest' as never);
+          }}
+          C={C}
+        />
         <NavItem icon={Users2} label="コミュニティ" onPress={() => router.push('/(tabs)/community' as never)} C={C} />
         <NavItem icon={SearchIcon} label="検索" onPress={() => router.push('/(tabs)/search' as never)} C={C} />
         <NavItem

@@ -7,8 +7,9 @@
 // 設計:
 //   - borderless / padding 0 / scrollEnabled false の multiline TextInput。
 //     18pt / lineHeight 28 / weight 400 で「広くて軽い」書き味を出す。
-//   - auto-grow: onContentSizeChange の実測高さを state に保持し、
-//     160 〜 520 の範囲で clamp (+8 の余白) → minHeight に反映。
+//   - auto-grow: onContentSizeChange の実測高さを「行数 × lineHeight」に量子化して
+//     MIN_HEIGHT 〜 MAX_HEIGHT で clamp → minHeight に反映。打鍵ごとの 1px 揺れを消し、
+//     行が増減した時だけ高さ(=下の progress line / メディア位置)が動くようにする。
 //   - 文字数インジケータ (依存ゼロの "ring" 代替):
 //       右下に 28px の円 View を置き、その BORDER 色を
 //         text3 → amber(≥85%) → red(≥100%) と段階変化させる。
@@ -37,6 +38,12 @@ import { T } from '../../../design/typography';
 // auto-grow の下限 / 上限。これを超えると TextInput 自身が内部スクロールする。
 const MIN_HEIGHT = 120;
 const MAX_HEIGHT = 480;
+// 本文 textarea の行高 (下の style の lineHeight と必ず一致させる)。
+// auto-grow の高さをこの倍数に量子化して「打鍵ごとの 1px 揺れ」を消す。
+const LINE_HEIGHT = 28;
+// 量子化高さに足す固定の下余白 (web textarea のクリップ防止 + 窮屈さ回避)。
+// 定数なので量子化の安定性 (= 行が変わった時だけ動く) には影響しない。
+const BODY_BOTTOM_PAD = 6;
 
 // 文字数インジケータの色しきい値 (使用率)。
 const AMBER_THRESHOLD = 0.85;
@@ -81,9 +88,17 @@ export function ComposerBodyField({
 
   const handleContentSizeChange = useCallback(
     (e: NativeSyntheticEvent<TextInputContentSizeChangeEventData>) => {
-      const h = e.nativeEvent.contentSize.height;
-      // 160 〜 520 の範囲で clamp。少し余白 (+8) を足して窮屈さを避ける。
-      const next = Math.max(MIN_HEIGHT, Math.min(h + 8, MAX_HEIGHT));
+      const raw = e.nativeEvent.contentSize.height;
+      // ★ 一行単位に量子化する (2026-06-14 ユーザー要望「一行移動するごとに移動してほしい」):
+      //   実測高さを LINE_HEIGHT で割って行数に丸め、行数 × LINE_HEIGHT を高さにする。
+      //   onContentSizeChange は同じ行でも sub-pixel 単位で揺れる → そのまま minHeight に
+      //   入れると下の progress line / メディアが毎打鍵で 1px ずれて「いちいち動く」。
+      //   行数に丸めることで「行が増減した時だけ」高さが変わる = 棒も 1 行ぶんだけ動く。
+      const lines = Math.max(1, Math.round(raw / LINE_HEIGHT));
+      const next = Math.max(
+        MIN_HEIGHT,
+        Math.min(lines * LINE_HEIGHT + BODY_BOTTOM_PAD, MAX_HEIGHT),
+      );
       setHeight((prev) => (prev === next ? prev : next));
     },
     [],
@@ -132,7 +147,7 @@ export function ComposerBodyField({
           minHeight: height,
           color: C.text,
           fontSize: 18,
-          lineHeight: 28,
+          lineHeight: LINE_HEIGHT,
           fontWeight: '400',
           fontFamily: BODY_FONT,
           // box を持たない: padding 0 でキャンバスに直に乗せる。

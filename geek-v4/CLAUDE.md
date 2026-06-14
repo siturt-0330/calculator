@@ -19,6 +19,16 @@
   - 「反映」「push」「deploy」「netlify」「merge して」「リリースして」
 - 迷ったら **branch push までで止めて確認** を取る。
 
+### 🚫 信用スコア (trust score) は **使わない** 【2026-06-14 ユーザー明示】
+
+- **「信用スコアを使うのは禁止」** が standing rule。Geek の **完全匿名・全員フラット** の思想と相反するため、trust score (信頼スコア / credibility score) を:
+  - 新機能の判断材料・ゲート・出し分け・並び替えに **使わない**
+  - UI に **出さない / 露出を増やさない**
+  - 設計提案・アイデア出しで **持ち出さない** (「trust score で○○できる」を提案しない)
+  - 既存ロジックを **拡張しない**
+- 既存コード (`lib/trust/score.ts` / `supabase/functions/calculate-trust-score` / migration `0006_credibility.sql` / `tests/unit/trustTier.test.ts` / §13・§16 の用語) は **legacy = 凍結扱い**。今すぐ剥がす必要はないが **新たに依存を増やさない**。完全撤去が要るなら別タスクとしてユーザー指示を待つ。
+- 代替の発想: 安全性・健全性は trust score に頼らず、**構造 (RLS / 匿名性マスク / モデレーション / spam 検出) と行動ベースの個別判定** で担保する。
+
 ### 📋 task tracking はやり過ぎない
 
 - TaskCreate / TaskUpdate は **複数ステップで進捗を user に見せたいとき** だけ。1 ファイル read や直行で書ける edit には不要。
@@ -593,6 +603,7 @@ Native module を触ったら必ず通常 build & submit。
 - ❌ 既存 migration file を編集 → 新 migration 追加で revert
 - ❌ master 自動 merge / push → user 明示指示時のみ
 - ❌ `key={i}` (FlashList / map の) → 一意な id を key に
+- ❌ 信用スコア (trust score) を新機能で使う / UI 露出 / 設計提案で持ち出す / 既存ロジック拡張 → §0「信用スコアは使わない」。安全性は構造 (RLS / 匿名マスク / モデレーション / spam 検出) で担保
 - ❌ `service_role_key` をクライアントへ → Supabase Edge / secrets のみ
 - ❌ EXPO_PUBLIC_FEED_PAGE_RPC など build-time flag を runtime で動的アクセス (`process.env[key]`) → Expo は static 参照しか inline しない
 - ⚠️ flag の既定方向を取り違えない: 既定 OFF は `=== '1'` (例 `EXPO_PUBLIC_HOME_FEED_RPC` / `FOR_YOU_FEED_RPC`)、既定 ON は `!== '0'` (例 `EXPO_PUBLIC_DISCOVERY_RPC` / `FEED_PAGE_RPC`)。逆パターンをコピペ流用すると意図せず既定が反転する事故が起きる

@@ -45,6 +45,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import {
   PenLine,
+  Trophy,
   X,
   FileText,
   UserPlus2,
@@ -433,6 +434,12 @@ export const HomeDrawer = memo(function HomeDrawer({
                 icon={PenLine}
                 label="投稿をする"
                 onPress={() => navigateAndClose('/post/create')}
+                C={C}
+              />
+              <DrawerAction
+                icon={Trophy}
+                label="コンテストを作る"
+                onPress={() => navigateAndClose('/contest/create')}
                 C={C}
               />
               <DrawerAction

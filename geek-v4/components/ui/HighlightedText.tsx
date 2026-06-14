@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Text, type TextStyle, type StyleProp } from 'react-native';
-import { findHighlightRanges } from '../../lib/search/scoring';
+import { findHighlightRanges } from '../../lib/search/highlightRanges';
 import { C } from '../../design/tokens';
 
 // 検索クエリにマッチした部分をハイライト表示

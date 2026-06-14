@@ -35,6 +35,7 @@ import {
   TextInput,
   ActivityIndicator,
   Pressable,
+  useWindowDimensions,
 } from 'react-native';
 import Animated, {
   FadeIn,
@@ -67,8 +68,12 @@ import { EASE_OUT, SPRING_BOUNCY } from '../../design/motion';
 
 // 特別タブの key (定型カテゴリの category 名と衝突しないよう __ prefix)
 const TAB_POST = '__post';
+const TAB_ALL = '__all';
 const TAB_HISTORY = '__history';
 const TAB_MYSTAMPS = '__mystamps';
+
+// 「すべて」タブの 履歴 / マイスタンプ セクションに出す最大件数 (最新から)
+const ALL_RECENT_LIMIT = 20;
 
 // 送信タップ後に自動クローズするまでの時間 (pop を見せてから閉じる)
 const AUTO_CLOSE_MS = 180;
@@ -94,6 +99,10 @@ export function MemeReactionPicker({
   reactions?: ReactionAgg[];
 }) {
   const insets = useSafeAreaInsets();
+  // シート高さの上限は「% でなく絶対値」で持つ。% max-height は親 (SheetSwipeDown の
+  // auto 高さ Animated.View) に対して web で無効になり、シートが content 丈に伸びて
+  // 画面を貫通する事故が出た (「すべて」タブの大量セクションで顕在化)。winH ベースに。
+  const { height: winH } = useWindowDimensions();
   // web: ソフトキーボード高さ (native は 0)。scrim の下 padding に足して
   // sheet をキーボードの上へ持ち上げる (検索/作成入力がキーボードの裏に隠れない)。
   const webKeyboardInset = useWebKeyboardInset();
@@ -175,6 +184,8 @@ export function MemeReactionPicker({
   const tabs = useMemo<Tab[]>(
     () => [
       ...(reactionStamps.length > 0 ? [{ key: TAB_POST, label: 'この投稿' }] : []),
+      // 「すべて」= この投稿と履歴の間。常設。中で 履歴20 / マイ20 / ジャンル別を縦に見せる
+      { key: TAB_ALL, label: 'すべて' },
       ...(history.length > 0 ? [{ key: TAB_HISTORY, label: '履歴' }] : []),
       // マイスタンプは「履歴」と定型カテゴリ(面白い〜)の間に置く
       { key: TAB_MYSTAMPS, label: 'マイスタンプ' },
@@ -255,6 +266,7 @@ export function MemeReactionPicker({
   // アクティブタブの中身 (ジャンルタブは MEMES 静的分の後ろに自作分をマージ)
   const tabItems = useMemo(() => {
     if (activeTab === TAB_POST) return reactionStamps;
+    if (activeTab === TAB_ALL) return []; // 「すべて」はセクション描画 (allSections) を使うので単一グリッドは空
     if (activeTab === TAB_HISTORY) return history;
     if (activeTab === TAB_MYSTAMPS) return myStamps;
     const statics = MEMES.find((c) => c.category === activeTab)?.items ?? [];
@@ -270,8 +282,30 @@ export function MemeReactionPicker({
     return out;
   }, [activeTab, reactionStamps, history, myStamps, myCreatedByCategory]);
 
+  // 「すべて」タブのセクション群:
+  //   履歴(最新20) → マイスタンプ(最新20) → 各ジャンル(MEMES静的 + 自作をマージ)。
+  //   各セクションは非表示スタンプを除外し、空セクションは出さない。
+  const allSections = useMemo(() => {
+    if (activeTab !== TAB_ALL) return [];
+    const filt = (arr: string[]) =>
+      hiddenSet.size === 0 ? arr : arr.filter((m) => !hiddenSet.has(m));
+    const out: { key: string; title: string; items: string[] }[] = [];
+    const hist = filt(history.slice(0, ALL_RECENT_LIMIT));
+    if (hist.length > 0) out.push({ key: '__sec_history', title: '履歴', items: hist });
+    const mine = filt(myStamps.slice(0, ALL_RECENT_LIMIT));
+    if (mine.length > 0) out.push({ key: '__sec_mystamps', title: 'マイスタンプ', items: mine });
+    for (const c of MEMES) {
+      const extra = myCreatedByCategory.get(c.category) ?? [];
+      const merged =
+        extra.length > 0 ? [...c.items, ...extra.filter((m) => !c.items.includes(m))] : c.items;
+      const items = filt(merged);
+      if (items.length > 0) out.push({ key: `__sec_${c.category}`, title: c.category, items });
+    }
+    return out;
+  }, [activeTab, history, myStamps, myCreatedByCategory, hiddenSet]);
+
   // タップ = 送信 (未選択 → 送信して自動クローズ / 選択済 → 取り消しで開いたまま)
-  const handleSend = (meme: string, wasPicked: boolean) => {
+  const handleSend = (meme: string, _wasPicked: boolean) => {
     setLocalFlips((prev) => {
       const next = new Set(prev);
       if (next.has(meme)) next.delete(meme);
@@ -280,13 +314,10 @@ export function MemeReactionPicker({
     });
     recordUse(meme); // 履歴に記録
     onPick(meme); // サーバー送信は親に委譲 (toggle セマンティクス不変)
-    if (wasPicked) {
-      // 取り消し: 「送った」わけではないので閉じない (連打 undo にも対応)
-      cancelAutoClose();
-    } else {
-      // 送信: chip の pop を見せてから閉じる → 「送った感」
-      scheduleAutoClose();
-    }
+    // ★ 2026-06-14 ユーザー要望「1回しか押せないのをやめて」: 送信しても自動で閉じない。
+    //   複数スタンプを連続で押せるようにする (閉じるのは「完了」/下スワイプ/背景タップ)。
+    //   送信中に保留している auto-close があれば一応キャンセル (安全弁)。
+    cancelAutoClose();
   };
 
   const handleCreate = async () => {
@@ -338,6 +369,8 @@ export function MemeReactionPicker({
   };
 
   const showingSearch = q.length > 0;
+  // 「すべて」タブ (検索中でない) は単一グリッドでなくセクション群を描画する
+  const showAllSections = !showingSearch && activeTab === TAB_ALL;
   // 非表示スタンプは全タブ + 検索結果から filter する (復帰はマイスタンプタブ末尾)
   const gridItems = useMemo(() => {
     const base = showingSearch ? searchResults : tabItems;
@@ -389,7 +422,8 @@ export function MemeReactionPicker({
         <Pressable
           onPress={(e) => e.stopPropagation()}
           style={{
-            maxHeight: '85%',
+            // ★ % でなく winH ベースの絶対値 (% は auto 高さの親で web 無効 → 溢れる)
+            maxHeight: Math.round(winH * 0.85),
             backgroundColor: C.bg2,
             // キーボード表示中 (web) は home indicator 用 safe-area を足さない。
             paddingBottom: (webKeyboardInset > 0 ? 0 : insets.bottom) + SP['3'],
@@ -478,8 +512,13 @@ export function MemeReactionPicker({
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 6, paddingHorizontal: SP['4'] }}
-              style={{ flexGrow: 0 }}
+              // ★ 2026-06-14: RN-web の横 ScrollView は cross-axis(高さ)が中身に追従せず
+              //   24px に潰れ、32px の pill の上下(囲み)が overflow-y:hidden で見切れていた
+              //   [実証済: scroller clientH=24 < pillH=32]。明示 height + 縦中央寄せで完全表示に。
+              contentContainerStyle={{ gap: 6, paddingHorizontal: SP['4'], alignItems: 'center' }}
+              // flexShrink:0 が無いと親 column の余白圧で height:40 が 28px に縮められ
+              //   (RN-web ScrollView の既定 flexShrink=1)、32px の pill が再び見切れる [実証済]。
+              style={{ flexGrow: 0, flexShrink: 0, height: 40 }}
             >
               {tabs.map((tab) => {
                 const active = tab.key === activeTab;
@@ -496,7 +535,16 @@ export function MemeReactionPicker({
                     scaleValue={0.95}
                     accessibilityRole="tab"
                     accessibilityState={{ selected: active }}
+                    // ★ 2026-06-14: padding を Text に直当てすると pill (PressableScale) の
+                    //   高さが Text(lineHeight18+padding14=32px)に追従せず 23px に潰れ、
+                    //   文字が下にはみ出して「位置がずれて」見えていた [実証済]。
+                    //   同ファイルの「登録するジャンル」chips と同じく padding/中央寄せを
+                    //   container 側に置いて Text は素にする。
                     style={{
+                      minHeight: 32,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      paddingHorizontal: SP['3'],
                       borderRadius: R.full,
                       overflow: 'hidden',
                       borderWidth: 1,
@@ -512,16 +560,7 @@ export function MemeReactionPicker({
                         style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
                       />
                     )}
-                    <Text
-                      style={[
-                        T.smallB,
-                        {
-                          color: active ? '#fff' : C.text2,
-                          paddingHorizontal: SP['3'],
-                          paddingVertical: 7,
-                        },
-                      ]}
-                    >
+                    <Text style={[T.smallB, { color: active ? '#fff' : C.text2 }]}>
                       {tab.label}
                     </Text>
                   </PressableScale>
@@ -671,7 +710,66 @@ export function MemeReactionPicker({
               </Animated.View>
             )}
 
-            {/* スタンプグリッド (先頭に「＋ スタンプを作る」破線 chip) */}
+            {/* ★「すべて」タブ = 履歴20 / マイ20 / ジャンル別 を縦セクションで一覧 */}
+            {showAllSections && (
+              <View key="__all_sections" style={{ gap: SP['3'] }}>
+                {/* 先頭に作成 chip を 1 つ (ここからも作れる) */}
+                {!showCustomInput && (
+                  <Animated.View entering={reduceMotion ? undefined : FadeInDown.duration(180)}>
+                    <PressableScale
+                      onPress={() => openCreateForm()}
+                      haptic="tap"
+                      accessibilityLabel="あたらしいスタンプを作る"
+                      style={{
+                        alignSelf: 'flex-start',
+                        minHeight: 44,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: SP['1'],
+                        paddingHorizontal: SP['3'],
+                        paddingVertical: SP['2'],
+                        borderRadius: R.full,
+                        borderWidth: 1.5,
+                        borderStyle: 'dashed',
+                        borderColor: C.border2,
+                      }}
+                    >
+                      <Icon.plus size={15} color={C.accent} strokeWidth={2.4} />
+                      <Text style={[T.smallB, { color: C.accent }]}>スタンプを作る</Text>
+                    </PressableScale>
+                  </Animated.View>
+                )}
+                {allSections.map((sec) => (
+                  <View key={sec.key} style={{ gap: SP['2'] }}>
+                    {/* セクション見出し: グラデの縦バー + タイトル */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP['2'] }}>
+                      <View style={{ width: 3, height: 13, borderRadius: 2, overflow: 'hidden' }}>
+                        <LinearGradient colors={GRAD.primary} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={{ flex: 1 }} />
+                      </View>
+                      <Text style={[T.smallB, { color: C.text }]}>{sec.title}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
+                      {sec.items.map((m, i) => (
+                        <StampChip
+                          key={`${sec.key}/${m}`}
+                          meme={m}
+                          index={i}
+                          isPicked={visiblyPicked.has(m)}
+                          isSaved={myStampsSet.has(m)}
+                          reduceMotion={reduceMotion}
+                          onSend={handleSend}
+                          onLongPress={setLongPressTarget}
+                        />
+                      ))}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* スタンプグリッド (先頭に「＋ スタンプを作る」破線 chip) — 「すべて」以外 */}
+            {!showAllSections && (
             <View key={gridKey} style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP['2'] }}>
               {!showingSearch && !showCustomInput && (
                 <Animated.View entering={reduceMotion ? undefined : FadeInDown.duration(180)}>
@@ -711,10 +809,12 @@ export function MemeReactionPicker({
                 />
               ))}
             </View>
+            )}
 
-            {/* 空状態 (作成フォーム展開中は出さない) */}
+            {/* 空状態 (作成フォーム展開中・「すべて」セクション表示中は出さない) */}
             {gridItems.length === 0 &&
               !showCustomInput &&
+              !showAllSections &&
               (showingSearch ? (
                 // 検索 0 件 → friendly empty + そのまま作れる CTA
                 <View style={{ alignItems: 'center', paddingVertical: SP['6'], gap: SP['3'] }}>
@@ -758,7 +858,7 @@ export function MemeReactionPicker({
               ))}
 
             {/* ヒント (控えめな caption) */}
-            {gridItems.length > 0 && (
+            {(showAllSections || gridItems.length > 0) && (
               <Text style={[T.caption, { color: C.text3, textAlign: 'center', marginTop: SP['1'] }]}>
                 タップで送信・長押しで保存/非表示
               </Text>

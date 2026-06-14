@@ -373,6 +373,24 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
         entranceStyle,
       ]}
     >
+      {/* ===== 下端フェードスクリム (2026-06-14) =====
+          floating pill は周囲(左右マージン / pill-FAB 間)が透明なため、スクロール中の
+          投稿アクション行などがその透明域から透けて「UI がたまにおかしい」状態になっていた。
+          content を bg へ馴染ませて透けを消す。pointerEvents none で gap のタップは素通し。
+          transform は持たないので morph には一切影響しない。 */}
+      <LinearGradient
+        pointerEvents="none"
+        colors={['transparent', C.bg]}
+        locations={[0, 0.7]}
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: PILL_HEIGHT + bottom + 8 + 40,
+        }}
+      />
+
       {/* ===== Layer A: Glass pill (展開サイズ固定 / transform で退場) ===== */}
       <Animated.View
         pointerEvents={collapsed ? 'none' : 'auto'}
