@@ -21,6 +21,7 @@ import { patchFeedPagePost, invalidateFeedPage } from '../lib/cacheUpdates/feedP
 import { uploadPostImage, uploadPostVideo, validateVideoSource } from '../lib/media';
 import { makeWebPreviewDataUrl } from '../lib/image';
 import { peekRate, rateLimitMessage } from '../lib/rateLimit';
+import { isOnline } from '../lib/offline/networkMonitor';
 import { pseudonymFor } from '../lib/utils/pseudonym';
 import { hap } from '../design/haptics';
 import { useToastStore } from '../stores/toastStore';
@@ -40,6 +41,8 @@ export interface CommentComposerState {
   pickingVideo: boolean;
   composerActive: boolean;
   canPost: boolean;
+  /** 送信成功のたびに ++。送信ボタンの「Check + 波紋」演出のトリガー (失敗時は不変)。 */
+  successTick: number;
 }
 
 export interface CommentComposerHandlers {
@@ -93,6 +96,8 @@ export function useCommentComposer(
   const [pickingImage, setPickingImage] = useState(false);
   const [pickingVideo, setPickingVideo] = useState(false);
   const [composerActive, setComposerActive] = useState(false);
+  // 送信成功演出 (Check + 波紋) のトリガー。成功時のみ ++。
+  const [successTick, setSuccessTick] = useState(0);
 
   const canPost =
     (commentText.trim().length > 0 || images.length > 0 || !!video) && !posting;
@@ -136,9 +141,16 @@ export function useCommentComposer(
               }
             }),
           );
-          setImages(processed.slice(0, 4));
+          // prev を保持して累積し、上限4枚でクランプ (置換ではなく追加)
+          setImages((prev) => {
+            if (prev.length >= 4) return prev;
+            return [...prev, ...processed].slice(0, 4);
+          });
         } else {
-          setImages(uris);
+          setImages((prev) => {
+            if (prev.length >= 4) return prev;
+            return [...prev, ...uris].slice(0, 4);
+          });
         }
         hap.tap();
       }
@@ -206,6 +218,13 @@ export function useCommentComposer(
       show(rateLimitMessage('comment', rl.retryAfterMs), 'error');
       return;
     }
+    // ★ オフライン時は楽観挿入する前に弾く (insert→即ロールバックの「ゴースト」体験を防ぐ)。
+    //   create.tsx の isOnline() 事前チェックと同方針。isOnline() は不明時 true なので誤検知しない。
+    if (!isOnline()) {
+      hap.warn();
+      show('オフラインです。接続してから再度お試しください。', 'warn');
+      return;
+    }
     setPosting(true);
     // ロールバック用スナップショット
     const prevComments = qc.getQueryData<Comment[]>(['post-comments', postId]) ?? [];
@@ -259,6 +278,7 @@ export function useCommentComposer(
       // 作成直後ハイライト用に新規 id を親へ通知 (取得不可環境は null)
       onPosted?.(newCommentId);
       if (mounted.current) {
+        setSuccessTick((n) => n + 1); // 送信ボタンの Check + 波紋を再生
         setCommentText('');
         setImages([]);
         setVideo(null);
@@ -323,6 +343,7 @@ export function useCommentComposer(
       pickingVideo,
       composerActive,
       canPost,
+      successTick,
     },
     handlers: {
       handleReply,

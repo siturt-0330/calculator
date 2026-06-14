@@ -5,7 +5,7 @@ import { PressableScale } from './PressableScale';
 import { C, SP } from '../../design/tokens';
 import { T } from '../../design/typography';
 
-type State = { hasError: boolean; error: Error | null };
+type State = { hasError: boolean; error: Error | null; remountKey: number };
 
 type Props = {
   children: React.ReactNode;
@@ -18,10 +18,10 @@ type Props = {
 export class ErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false, error: null, remountKey: 0 };
   }
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { hasError: true, error };
   }
 
@@ -50,7 +50,18 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   override render() {
     if (this.state.hasError && this.state.error) {
-      const reset = () => this.setState({ hasError: false, error: null });
+      // ★ 2026-06-14: 「再試行を押しても何も起きない」修正。
+      //   hasError を false に戻すだけだと、原因(失敗した query / 不正データ等)が
+      //   残っていると子ツリーが再 render で即同じ例外を投げ直す → 体感「無反応」。
+      //   確実に復帰させるため web は full reload、native は remountKey を進めて
+      //   子ツリーを完全に作り直す(全 effect / fetch を再実行させる)。
+      const reset = () => {
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          window.location.reload();
+          return;
+        }
+        this.setState((s) => ({ hasError: false, error: null, remountKey: s.remountKey + 1 }));
+      };
       if (this.props.fallback) return this.props.fallback(this.state.error, reset);
       return (
         <View
@@ -100,6 +111,8 @@ export class ErrorBoundary extends React.Component<Props, State> {
         </View>
       );
     }
-    return this.props.children;
+    // remountKey を key にした Fragment で children を包む。native の reset 時に
+    // key が変わって子ツリーが remount される(web は reload するため key は不変)。
+    return <React.Fragment key={this.state.remountKey}>{this.props.children}</React.Fragment>;
   }
 }

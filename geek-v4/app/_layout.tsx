@@ -861,6 +861,14 @@ export default function RootLayout() {
                     }}
                   />
                   <Stack.Screen name="bbs/create" />
+                  <Stack.Screen
+                    name="contest/create"
+                    options={{
+                      presentation: 'modal',
+                      animation: 'slide_from_bottom',
+                    }}
+                  />
+                  <Stack.Screen name="contest/[id]" />
                   <Stack.Screen name="search" />
                   <Stack.Screen name="mypage/saved" />
                   <Stack.Screen name="mypage/liked" />

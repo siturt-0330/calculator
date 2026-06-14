@@ -4,10 +4,10 @@
 // カバレッジ:
 //   - typoTolerance: levenshtein 距離 / 候補生成 / マッチ判定
 //   - variants: synonym (英日 / カタカナ⇔英) の双方向拡張
-//   - scoring (BM25): title-hit > body-hit > tag-only-hit のランキング
-//   - scoring (popularity tiebreaker): 同 score なら like 多い方が上位
-//   - autocomplete: 頻度 + 直近性 + prefix のスコアリング
 //   - queryParser: getQueryMode (1単語 strict / 2+ loose / phrase)
+//   - autocomplete: 頻度 + 直近性 + prefix のスコアリング
+// ※ client BM25 ランカー (旧 scoring.ts の scorePost) は検索ランキングが
+//   server RPC (search_posts_v2/v4) に移行して dead 化したため削除済。
 // ============================================================
 
 // lib/storage は react-native chain を引き込むので in-memory mock に差し替え
@@ -42,7 +42,6 @@ import {
 } from '../../lib/search/typoTolerance';
 import { generateVariants } from '../../lib/search/variants';
 import { parseQuery, getQueryMode } from '../../lib/search/queryParser';
-import { scorePost, type PostDoc, type PersonalizationCtx } from '../../lib/search/scoring';
 import {
   recordQuery,
   loadQueryStats,
@@ -51,36 +50,6 @@ import {
   mergeFromHistoryList,
   saveQueryStats,
 } from '../../lib/search/autocomplete';
-
-// ============================================================
-// Test helpers
-// ============================================================
-function makePost(over: Partial<PostDoc>): PostDoc {
-  return {
-    id: 'p1',
-    content: '',
-    tag_names: [],
-    likes_count: 0,
-    comments_count: 0,
-    concern_count: 0,
-    created_at: new Date('2026-05-01').toISOString(),
-    trust_score_at_post: 50,
-    media_urls: [],
-    source_url: null,
-    kind: null,
-    ...over,
-  };
-}
-
-function emptyCtx(): PersonalizationCtx {
-  return {
-    likedTags: new Set(),
-    blockedTags: new Set(),
-    recentQueries: [],
-    tagAffinity: {},
-    recentTags: [],
-  };
-}
 
 // ============================================================
 // Tests: typoTolerance
@@ -242,124 +211,6 @@ describe('variants (synonym expansion)', () => {
 });
 
 // ============================================================
-// Tests: BM25 scoring — title > body > tag-only ranking
-// ============================================================
-describe('scorePost BM25 ranking', () => {
-  it('exact tag match beats body match (title > body)', () => {
-    const query = parseQuery('ポケモン');
-    const ctx = emptyCtx();
-    const empty = new Set<string>();
-
-    const postBody = makePost({
-      id: 'body',
-      content: 'ポケモンが好き',
-      tag_names: ['雑談'],
-      created_at: new Date('2026-05-01').toISOString(),
-    });
-    const postTag = makePost({
-      id: 'tag',
-      content: '今日は良い天気',
-      tag_names: ['ポケモン'],
-      created_at: new Date('2026-05-01').toISOString(),
-    });
-
-    const sBody = scorePost(postBody, query, empty, ctx).score;
-    const sTag = scorePost(postTag, query, empty, ctx).score;
-    expect(sTag).toBeGreaterThan(sBody);
-  });
-
-  it('body match beats no-match', () => {
-    const query = parseQuery('ポケモン');
-    const ctx = emptyCtx();
-    const empty = new Set<string>();
-    const postBody = makePost({
-      content: 'ポケモンが好きです',
-      tag_names: ['雑談'],
-    });
-    const postMiss = makePost({
-      id: 'miss',
-      content: '今日は良い天気',
-      tag_names: ['雑談'],
-    });
-    expect(scorePost(postBody, query, empty, ctx).score).toBeGreaterThan(
-      scorePost(postMiss, query, empty, ctx).score,
-    );
-  });
-
-  it('title-tag hit weight is 3-5x body hit', () => {
-    const query = parseQuery('ホロライブ');
-    const ctx = emptyCtx();
-    const empty = new Set<string>();
-    const bodyOnly = makePost({
-      id: 'b',
-      content: 'ホロライブ ホロライブ ホロライブ ホロライブ',
-      tag_names: ['雑談'],
-    });
-    const tagOnly = makePost({
-      id: 't',
-      content: '今日は楽しかった',
-      tag_names: ['ホロライブ'],
-    });
-    const sBody = scorePost(bodyOnly, query, empty, ctx).score;
-    const sTag = scorePost(tagOnly, query, empty, ctx).score;
-    // tag exact-match should be at least 2x body hit (was previously closer to 1.x)
-    expect(sTag).toBeGreaterThan(sBody * 1.5);
-  });
-});
-
-// ============================================================
-// Tests: popularity tiebreaker — same score → more likes wins
-// ============================================================
-describe('scorePost popularity tiebreaker', () => {
-  it('two posts equal on content rank by likes', () => {
-    const query = parseQuery('ポケモン');
-    const ctx = emptyCtx();
-    const empty = new Set<string>();
-    const base = {
-      content: '今日は楽しかった',
-      tag_names: ['ポケモン'],
-      created_at: new Date('2026-05-01').toISOString(),
-    };
-    const popular = makePost({ id: 'pop', ...base, likes_count: 100, comments_count: 50 });
-    const unpopular = makePost({ id: 'un', ...base, likes_count: 0, comments_count: 0 });
-    const sPop = scorePost(popular, query, empty, ctx).score;
-    const sUnpop = scorePost(unpopular, query, empty, ctx).score;
-    expect(sPop).toBeGreaterThan(sUnpop);
-  });
-});
-
-// ============================================================
-// Tests: typo tolerance in scorePost
-// ============================================================
-describe('scorePost typo tolerance', () => {
-  it('1-char typo on tag still matches with partial score', () => {
-    const query = parseQuery('ポケモソ'); // ン→ソ typo
-    const ctx = emptyCtx();
-    const empty = new Set<string>();
-    const post = makePost({ tag_names: ['ポケモン'] });
-    const s = scorePost(post, query, empty, ctx).score;
-    expect(s).toBeGreaterThan(0);
-  });
-
-  it('does not match if typo distance too large', () => {
-    const query = parseQuery('ぜんぜん別物');
-    const ctx = emptyCtx();
-    const empty = new Set<string>();
-    const post = makePost({
-      tag_names: ['アニメ'],
-      content: '無関係',
-      created_at: new Date('2020-01-01').toISOString(),
-      trust_score_at_post: 30,
-      // Important: explicitly assert score=0 only if no other signals
-    });
-    // freshness が古いので freshness boost ほぼ 0
-    // 信頼スコア低めにして信頼 boost も負
-    const s = scorePost(post, query, empty, ctx).score;
-    expect(s).toBeLessThan(1);
-  });
-});
-
-// ============================================================
 // Tests: getQueryMode (strict / loose / phrase)
 // ============================================================
 describe('getQueryMode', () => {
@@ -371,32 +222,6 @@ describe('getQueryMode', () => {
   });
   it('returns phrase when "..." present', () => {
     expect(getQueryMode(parseQuery('"進撃の巨人"'))).toBe('phrase');
-  });
-});
-
-// ============================================================
-// Tests: scorePost mode-aware (loose AND penalty)
-// ============================================================
-describe('scorePost loose mode AND-penalty', () => {
-  it('post hitting all 2 keywords scores higher than hitting only 1', () => {
-    const query = parseQuery('ポケモン アニメ');
-    const ctx = emptyCtx();
-    const empty = new Set<string>();
-    const both = makePost({
-      id: 'both',
-      tag_names: ['ポケモン', 'アニメ'],
-      content: 'おすすめ',
-      created_at: new Date('2026-05-01').toISOString(),
-    });
-    const one = makePost({
-      id: 'one',
-      tag_names: ['ポケモン'],
-      content: 'おすすめ',
-      created_at: new Date('2026-05-01').toISOString(),
-    });
-    const sBoth = scorePost(both, query, empty, ctx).score;
-    const sOne = scorePost(one, query, empty, ctx).score;
-    expect(sBoth).toBeGreaterThan(sOne);
   });
 });
 

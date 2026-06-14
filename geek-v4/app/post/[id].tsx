@@ -23,6 +23,7 @@ import { invalidateFeedPage } from '../../lib/cacheUpdates/feedPagePatcher';
 import { MemeReactionPicker } from '../../components/feed/MemeReactionPicker';
 import { ReactionListSheet } from '../../components/feed/ReactionListSheet';
 import { LinkPreviewCard } from '../../components/feed/LinkPreviewCard';
+import { CommentSendButton } from '../../components/post/CommentSendButton';
 import { FeedMediaGrid } from '../../components/feed/FeedMediaGrid';
 import { mediaItemAspect, mediaContainerWidth } from '../../components/feed/feedMediaLayout';
 import { SP, R } from '../../design/tokens';
@@ -45,7 +46,7 @@ import { postToObsidianNote } from '../../hooks/useObsidian';
 import { CommentThreadItem } from '../../components/post/CommentThreadItem';
 import { ReportSheet } from '../../components/post/ReportSheet';
 import { PostAuthorSheet } from '../../components/post/PostAuthorSheet';
-import { MoreHorizontal, Film, Send } from 'lucide-react-native';
+import { MoreHorizontal, Film, ChevronRight } from 'lucide-react-native';
 import { CollapsedComment } from '../../components/post/CollapsedComment';
 import {
   shouldCollapseComment,
@@ -224,6 +225,7 @@ export default function PostDetailScreen() {
     // composerActive はクイック絵文字行 (撤去済 2026-06-13) だけが読んでいた。
     // setComposerActive はフォーカス追跡として他の動線が使うので残す。
     canPost,
+    successTick,
   } = composerState;
   const {
     handleReply,
@@ -246,6 +248,25 @@ export default function PostDetailScreen() {
   const [lightboxUri, setLightboxUri] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [authorSheetOpen, setAuthorSheetOpen] = useState(false);
+
+  // ============================================================
+  // LINE 風: 入力にフォーカスすると左の 画像/動画 ボタンを横に畳んで
+  // 入力ピルを横に伸ばす。畳まれている間は「>」シェブロンで再展開できる。
+  // ------------------------------------------------------------
+  // 幅アニメは width(=layout prop)なので reanimated の useAnimatedStyle では
+  // web で per-frame 反映されない (実測: shared value を 0 にしても inline width が
+  // 76px のまま)。そこで RNW が DOM へ通す CSS `transition` で width/opacity/margin を
+  // アニメする (PressableScale でも transition を使う実績あり)。native は transition が
+  // 無視され即時切替になるが、フォーカス時のキーボード出現に紛れて違和感は出ない。
+  // ============================================================
+  const MEDIA_GROUP_W = 76; // 画像36 + gap4 + 動画36
+  const CHEVRON_W = 32; // 再展開シェブロンの占有幅
+  const [mediaOpen, setMediaOpen] = useState(true);
+  // web のみ: 幅/不透明度/余白を 220ms でなめらかに補間する CSS トランジション。
+  const mediaTransition =
+    Platform.OS === 'web'
+      ? ({ transition: 'width 220ms ease, opacity 200ms ease, margin-right 220ms ease' } as object)
+      : null;
 
   // Spinner timing
   const showPostSpinner = useDelayedLoading(postLoading, 200);
@@ -971,54 +992,100 @@ export default function PostDetailScreen() {
 
             {/* 入力行: 画像 / 動画 / テキスト / 送信 */}
             <View style={styles.inputRow}>
-              <PressableScale
-                onPress={
-                  images.length >= 4 || pickingImage || posting ? undefined : pickImage
-                }
-                disabled={images.length >= 4 || pickingImage || posting}
-                haptic="select"
-                hitSlop={6}
-                accessibilityRole="button"
-                accessibilityLabel="画像を追加"
+              {/* 再展開シェブロン — 畳まれている時だけ幅を持つ (LINE の「>」) */}
+              <View
                 style={[
-                  styles.mediaBtn,
                   {
-                    opacity:
-                      images.length >= 4 || pickingImage || posting ? 0.4 : 1,
+                    overflow: 'hidden',
+                    width: mediaOpen ? 0 : CHEVRON_W,
+                    marginRight: mediaOpen ? 0 : SP['2'],
+                    opacity: mediaOpen ? 0 : 1,
                   },
+                  mediaTransition,
                 ]}
               >
-                <Icon.image size={22} color={C.text2} strokeWidth={2} />
-              </PressableScale>
-              <PressableScale
-                onPress={
-                  !!video || composerState.pickingVideo || posting
-                    ? undefined
-                    : pickVideo
-                }
-                disabled={!!video || composerState.pickingVideo || posting}
-                haptic="select"
-                hitSlop={6}
-                accessibilityRole="button"
-                accessibilityLabel="動画を追加"
+                <PressableScale
+                  onPress={() => setMediaOpen(true)}
+                  haptic="select"
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel="画像・動画ボタンを表示"
+                  style={styles.mediaBtn}
+                >
+                  <ChevronRight size={22} color={C.text2} strokeWidth={2.2} />
+                </PressableScale>
+              </View>
+
+              {/* 画像/動画 — 入力フォーカスで横に畳まれ、入力ピルが伸びる */}
+              <View
                 style={[
-                  styles.mediaBtn,
-                  { opacity: video || posting ? 0.4 : 1 },
+                  {
+                    flexDirection: 'row',
+                    gap: SP['1'],
+                    overflow: 'hidden',
+                    width: mediaOpen ? MEDIA_GROUP_W : 0,
+                    marginRight: mediaOpen ? SP['2'] : 0,
+                    opacity: mediaOpen ? 1 : 0,
+                  },
+                  mediaTransition,
                 ]}
               >
-                <Film size={22} color={C.text2} strokeWidth={2} />
-              </PressableScale>
+                <PressableScale
+                  onPress={
+                    images.length >= 4 || pickingImage || posting ? undefined : pickImage
+                  }
+                  disabled={images.length >= 4 || pickingImage || posting}
+                  haptic="select"
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel="画像を追加"
+                  style={[
+                    styles.mediaBtn,
+                    {
+                      opacity:
+                        images.length >= 4 || pickingImage || posting ? 0.4 : 1,
+                    },
+                  ]}
+                >
+                  <Icon.image size={22} color={C.text2} strokeWidth={2} />
+                </PressableScale>
+                <PressableScale
+                  onPress={
+                    !!video || composerState.pickingVideo || posting
+                      ? undefined
+                      : pickVideo
+                  }
+                  disabled={!!video || composerState.pickingVideo || posting}
+                  haptic="select"
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel="動画を追加"
+                  style={[
+                    styles.mediaBtn,
+                    { opacity: video || posting ? 0.4 : 1 },
+                  ]}
+                >
+                  <Film size={22} color={C.text2} strokeWidth={2} />
+                </PressableScale>
+              </View>
               <View
                 style={[
                   styles.textInputWrap,
-                  { backgroundColor: C.bg3, borderColor: C.border },
+                  { backgroundColor: C.bg3, borderColor: C.border, marginRight: SP['2'] },
                 ]}
               >
                 <TextInput
                   ref={composerRef}
                   value={commentText}
                   onChangeText={setCommentText}
-                  onFocus={() => setComposerActive(true)}
+                  onFocus={() => {
+                    setComposerActive(true);
+                    setMediaOpen(false); // フォーカスで左ボタンを畳んで入力を横に伸ばす
+                  }}
+                  onBlur={() => {
+                    // 空でフォーカスを外したらボタンを戻す (下書きがあれば伸ばしたまま)
+                    if (commentText.trim().length === 0) setMediaOpen(true);
+                  }}
                   editable={!posting}
                   placeholder={replyTarget ? '返信を入力…' : 'コメントを入力…'}
                   placeholderTextColor={C.text3}
@@ -1046,10 +1113,18 @@ export default function PostDetailScreen() {
                       paddingTop: Platform.OS === 'ios' ? 10 : 6,
                       paddingBottom: Platform.OS === 'ios' ? 10 : 6,
                     },
+                    // web: フォーカス時の矩形アウトライン (紫の枠) が丸ピルの角から
+                    //   はみ出るのを抑止。リサイズハンドルも消す。ComposerBodyField と同方針。
+                    ...(Platform.OS === 'web'
+                      ? [{ outlineStyle: 'none', resize: 'none' } as object]
+                      : []),
                   ]}
                 />
               </View>
-              <PressableScale
+              <CommentSendButton
+                canPost={canPost}
+                posting={posting}
+                successTick={successTick}
                 onPress={
                   canPost
                     ? () => void submitComment()
@@ -1064,28 +1139,7 @@ export default function PostDetailScreen() {
                         }
                       }
                 }
-                haptic="tap"
-                accessibilityRole="button"
-                accessibilityLabel={replyTarget ? '返信を送信' : 'コメントを送信'}
-                accessibilityState={{ disabled: !canPost }}
-                style={[
-                  styles.sendBtn,
-                  {
-                    backgroundColor: canPost ? C.accent : C.bg3,
-                    opacity: canPost ? 1 : 0.6,
-                  },
-                ]}
-              >
-                {posting ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Send
-                    size={18}
-                    color={canPost ? '#fff' : C.text3}
-                    strokeWidth={2.2}
-                  />
-                )}
-              </PressableScale>
+              />
             </View>
           </View>
         </Animated.View>
@@ -1324,10 +1378,11 @@ const styles = StyleSheet.create({
   },
 
   // input row
+  // ★ gap は使わない: メディア群の畳み込み (width アニメ) と整合させるため、
+  //   要素間の間隔は各要素の marginRight (一部はアニメ値) で個別に管理する。
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: SP['2'],
   },
   mediaBtn: {
     width: 36,
@@ -1338,9 +1393,11 @@ const styles = StyleSheet.create({
   },
   textInputWrap: {
     flex: 1,
-    borderRadius: R.lg,
+    // LINE 風の全丸ピル (R.lg → R.full)。短文時は綺麗なカプセル、複数行で角丸の
+    // 縦長に育つ (minHeight 40 / textInput.maxHeight 120 で頭打ち)。
+    borderRadius: R.full,
     borderWidth: 1,
-    paddingHorizontal: SP['3'],
+    paddingHorizontal: SP['4'],
     minHeight: 40,
     justifyContent: 'center',
   },
@@ -1348,12 +1405,5 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
     maxHeight: 120,
-  },
-  sendBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });

@@ -69,6 +69,8 @@ type Props = {
   onSelect: (id: string | null) => void;
   /** communities が 0 件の時に「コミュに参加してね」 hint を出すか */
   showJoinHint?: boolean;
+  /** コンテスト開催中の community_id 集合。該当アバターにグラデリング+🏆バッジを出す。 */
+  contestCommunityIds?: Set<string>;
 };
 
 // ============================================================
@@ -79,6 +81,7 @@ export function CommunityAvatarBar({
   selectedId,
   onSelect,
   showJoinHint = true,
+  contestCommunityIds,
 }: Props) {
   const isAllSelected = selectedId === null;
   const { C } = useTheme();
@@ -131,6 +134,7 @@ export function CommunityAvatarBar({
             iconColor={c.icon_color}
             isOfficial={c.is_official}
             isSelected={selectedId === c.id}
+            hasContest={!!contestCommunityIds?.has(c.id)}
             onPress={() => onSelect(c.id)}
           />
         ))}
@@ -184,6 +188,8 @@ type AvatarItemProps = {
   onPress: () => void;
   /** 「すべて」(先頭固定) variant. icon と label の見せ方を切替 */
   isAllVariant?: boolean;
+  /** コンテスト開催中 → グラデリング + 🏆 バッジ */
+  hasContest?: boolean;
 };
 
 function AvatarItem({
@@ -195,6 +201,7 @@ function AvatarItem({
   isSelected,
   onPress,
   isAllVariant = false,
+  hasContest = false,
 }: AvatarItemProps) {
   const truncated = truncateLabel(label, LABEL_MAX_CHARS);
   const { C, SHADOW } = useTheme();
@@ -217,72 +224,46 @@ function AvatarItem({
              - 未選択: bg2 塗り + 1pt subtle border (C.border) — クッキリ枠を出す
            shadow は全 avatar 共通の SHADOW.xs に抑え、選択時のみ accentGlow を薄く重ねる。
            太い gradient ring + SHADOW.glow は派手すぎ "ぼやけ" の原因だったため廃止。 */}
-        <View
-          style={{
-            width: AVATAR_SIZE,
-            height: AVATAR_SIZE,
-            borderRadius: AVATAR_SIZE / 2,
-            alignItems: 'center',
-            justifyContent: 'center',
-            overflow: 'hidden',
-            backgroundColor: isSelected ? C.accent : C.bg2,
+        {(() => {
+          const inner = (
+            <View
+              style={{
+                width: INNER_SIZE,
+                height: INNER_SIZE,
+                borderRadius: INNER_SIZE / 2,
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'hidden',
+                borderWidth: isSelected || hasContest ? 0 : 1,
+                borderColor: C.border,
+                backgroundColor: isAllVariant ? C.bg3 : iconUrl ? C.bg3 : iconColor || C.bg3,
+              }}
+            >
+              {isAllVariant ? (
+                <Icon.community size={26} color={isSelected ? C.accent : C.text2} strokeWidth={2.2} />
+              ) : (
+                <CommunityIcon size={INNER_SIZE} iconUrl={iconUrl} iconEmoji={iconEmoji} iconColor={iconColor} name={label} />
+              )}
+            </View>
+          );
+          const ringBase = {
+            width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2,
+            alignItems: 'center' as const, justifyContent: 'center' as const, overflow: 'hidden' as const,
             ...(isSelected ? SHADOW.accentGlow : SHADOW.xs),
-          }}
-        >
-          {/* ───────── 内側 (avatar 本体) ─────────
-             未選択でも 1pt の subtle border を inner 円に持たせて、画像が無い state
-             でも「縁のあるアイコン」に見せる。選択時は外円 (accent) が ring 役なので
-             inner border は無し。 */}
-          <View
-            style={{
-              width: INNER_SIZE,
-              height: INNER_SIZE,
-              borderRadius: INNER_SIZE / 2,
-              alignItems: 'center',
-              justifyContent: 'center',
-              overflow: 'hidden',
-              borderWidth: isSelected ? 0 : 1,
-              borderColor: C.border,
-              backgroundColor: isAllVariant
-                ? C.bg3
-                : iconUrl
-                  ? C.bg3
-                  : iconColor || C.bg3,
-            }}
-          >
-            {isAllVariant ? (
-              // 「すべて」: community icon (Users2)
-              <Icon.community
-                size={26}
-                color={isSelected ? C.accent : C.text2}
-                strokeWidth={2.2}
-              />
-            ) : (
-              // ★ CommunityIcon に集約: contain で「拡大して切れる」を防ぎ、
-              //   onError で「空白の丸」を防ぐ (icon_url 失敗時は emoji へ fallback)。
-              <CommunityIcon
-                size={INNER_SIZE}
-                iconUrl={iconUrl}
-                iconEmoji={iconEmoji}
-                iconColor={iconColor}
-                name={label}
-              />
-            )}
-          </View>
-        </View>
+          };
+          // コンテスト開催中: ブランドグラデのストーリーリング。それ以外: 選択=accent / 通常=bg2。
+          return hasContest ? (
+            <LinearGradient colors={['#7C6AF7', '#B98CFF', '#E891C7']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={ringBase}>
+              {inner}
+            </LinearGradient>
+          ) : (
+            <View style={{ ...ringBase, backgroundColor: isSelected ? C.accent : C.bg2 }}>{inner}</View>
+          );
+        })()}
 
         {/* ───────── official badge (右下) ───────── */}
         {isOfficial && (
-          <View
-            style={{
-              position: 'absolute',
-              right: -2,
-              bottom: -2,
-              borderWidth: 2,
-              borderColor: C.bg2,
-              borderRadius: R.full,
-            }}
-          >
+          <View style={{ position: 'absolute', right: -2, bottom: -2, borderWidth: 2, borderColor: C.bg2, borderRadius: R.full }}>
             <OfficialBadge size="sm" iconOnly />
           </View>
         )}

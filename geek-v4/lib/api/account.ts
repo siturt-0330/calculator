@@ -39,6 +39,8 @@ export type UserExportData = {
   saved_searches: unknown[];
   notifications: unknown[];
   concerns: unknown[];
+  contest_predictions: unknown[];
+  contest_user_titles: unknown[];
 };
 
 // 個別テーブルの fetch ヘルパー。存在しないテーブルや RLS で弾かれた場合は
@@ -92,7 +94,7 @@ export async function exportUserData(): Promise<UserExportData & { _warnings?: s
     posts, comments, bbsThreads, bbsReplies, likes, postReactions,
     bbsReplyReactions, saves, bookmarkCollections, tagSubscriptions,
     userLikedTags, userBlockedTags, userStamps, savedSearches,
-    notifications, concerns,
+    notifications, concerns, contestPredictions, contestUserTitles,
   ] = await Promise.all([
     fetchUserTable('posts', 'author_id', uid, warnings),
     fetchUserTable('comments', 'author_id', uid, warnings),
@@ -110,6 +112,9 @@ export async function exportUserData(): Promise<UserExportData & { _warnings?: s
     fetchUserTable('saved_searches', 'user_id', uid, warnings),
     fetchUserTable('notifications', 'user_id', uid, warnings),
     fetchUserTable('concerns', 'user_id', uid, warnings),
+    // コンテスト: 本人の投票履歴と本人限定称号(完全匿名なので本人開示にのみ含める)
+    fetchUserTable('contest_predictions', 'user_id', uid, warnings),
+    fetchUserTable('contest_user_titles', 'user_id', uid, warnings),
   ]);
 
   const result: UserExportData & { _warnings?: string[] } = {
@@ -123,6 +128,7 @@ export async function exportUserData(): Promise<UserExportData & { _warnings?: s
     user_liked_tags: userLikedTags, user_blocked_tags: userBlockedTags,
     user_stamps: userStamps, saved_searches: savedSearches,
     notifications, concerns,
+    contest_predictions: contestPredictions, contest_user_titles: contestUserTitles,
   };
   if (warnings.length > 0) result._warnings = warnings;
   return result;
@@ -213,6 +219,11 @@ export async function deleteAccount(): Promise<{ ok: boolean; error?: string }> 
     { table: 'posts', col: 'author_id' },
     { table: 'bbs_threads', col: 'author_id' },
     { table: 'profiles', col: 'id' },
+    // ★ contest_predictions / contest_user_titles は意図的に含めない。
+    //   消去は RPC delete_account の auth.users 削除 → on delete cascade で行う(0151)。
+    //   client 自己 DELETE を許すと「締切後に自票を消して集計を改竄」できてしまうため、
+    //   RLS で self-delete を塞いである(cp_delete/cut_write = admin/DEFINER のみ)。
+    //   フォールバック(RPC 不在時)はこの 2 テーブルを消せないが、本番は RPC が主経路。
   ];
   const errors: string[] = [];
   for (const { table, col } of tables) {

@@ -9,14 +9,13 @@
 //     (migration 0104)。本文空でもメディアがあれば送信可。
 // ============================================================
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   ScrollView,
   Platform,
   KeyboardAvoidingView,
-  ActivityIndicator,
   type TextInput,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -29,11 +28,15 @@ import { PressableScale } from '../../components/ui/PressableScale';
 import { Avatar } from '../../components/ui/Avatar';
 import { ComposerBodyField } from '../../components/post/composer/ComposerBodyField';
 import { ComposerMediaGrid } from '../../components/post/composer/ComposerMediaGrid';
+import { LinkPreviewCard } from '../../components/feed/LinkPreviewCard';
+import { CommentSendButton } from '../../components/post/CommentSendButton';
 
 import { useToastStore } from '../../stores/toastStore';
 import { useAuthStore } from '../../stores/authStore';
 import { hap } from '../../design/haptics';
 import { createComment } from '../../lib/api/comments';
+import { extractFirstUrl } from '../../lib/utils/extractUrl';
+import { useFeatureFlag } from '../../hooks/useFeatureFlag';
 import { peekRate, rateLimitMessage } from '../../lib/rateLimit';
 import { validateVideoSource, uploadPostImage, uploadPostVideo } from '../../lib/media';
 import { makeWebPreviewDataUrl } from '../../lib/image';
@@ -74,6 +77,13 @@ export default function CommentComposer() {
   const [pickingImage, setPickingImage] = useState(false);
   const [pickingVideo, setPickingVideo] = useState(false);
   const [posting, setPosting] = useState(false);
+  // 送信成功演出 (Check + 波紋) のトリガー。成功時のみ ++。
+  const [successTick, setSuccessTick] = useState(0);
+
+  // 本文に貼られた最初の URL → メディアの下にライブのリンクプレビューを出す
+  // (投稿後の表示と同じ LinkPreviewCard / og_preview フラグで挙動を揃える)。
+  const useOgPreview = useFeatureFlag('og_preview');
+  const previewUrl = useMemo(() => extractFirstUrl(content), [content]);
 
   const bodyRef = useRef<TextInput>(null);
   const selectionRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
@@ -211,6 +221,7 @@ export default function CommentComposer() {
       });
 
       hap.success();
+      setSuccessTick((n) => n + 1); // 送信ボタンの Check + 波紋を再生
       show(isReply ? '返信しました' : 'コメントしました', 'success');
       void qc.invalidateQueries({ queryKey: ['post-comments', postId] });
       if (router.canGoBack()) router.back();
@@ -268,29 +279,9 @@ export default function CommentComposer() {
           {isReply ? '返信' : 'コメント'}
         </Text>
 
-        <PressableScale
-          onPress={handlePost}
-          haptic="tap"
-          accessibilityRole="button"
-          accessibilityLabel={isReply ? '返信を送信' : 'コメントを送信'}
-          accessibilityState={{ disabled: !canPost }}
-          disabled={!canPost}
-          style={{
-            paddingHorizontal: SP['4'],
-            paddingVertical: SP['2'],
-            borderRadius: R.full,
-            backgroundColor: canPost ? C.accent : C.bg3,
-            opacity: canPost ? 1 : 0.5,
-            minWidth: 64,
-            alignItems: 'center',
-          }}
-        >
-          {posting ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text style={[T.smallB, { color: canPost ? '#fff' : C.text3 }]}>投稿</Text>
-          )}
-        </PressableScale>
+        {/* 送信は LINE 風に下のバーへ移したので、ヘッダーは ✕ と中央タイトルだけ。
+            タイトルを中央に保つため右側に ✕ と同幅のスペーサーを置く。 */}
+        <View style={{ width: 40, height: 40 }} />
       </View>
 
       {/* 本体 */}
@@ -363,6 +354,13 @@ export default function CommentComposer() {
                   />
                 </View>
               )}
+
+              {/* リンクプレビュー — URL を貼るとライブのカードを出す (投稿後と同じ見た目) */}
+              {useOgPreview && previewUrl && (
+                <View style={{ marginTop: SP['3'] }}>
+                  <LinkPreviewCard url={previewUrl} embedded />
+                </View>
+              )}
             </View>
           </View>
         </ScrollView>
@@ -416,6 +414,15 @@ export default function CommentComposer() {
           >
             <Film size={22} color={video ? C.text3 : C.text2} strokeWidth={2} />
           </PressableScale>
+
+          {/* 右端に送信 (LINE 風) — Check + 波紋の上品演出つき */}
+          <View style={{ flex: 1 }} />
+          <CommentSendButton
+            canPost={canPost}
+            posting={posting}
+            successTick={successTick}
+            onPress={handlePost}
+          />
         </View>
       </KeyboardAvoidingView>
     </View>

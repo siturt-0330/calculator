@@ -35,6 +35,7 @@ import { useShare } from '../../../hooks/useShare';
 import { useReactions, useReactionToggle } from '../../../hooks/useReactions';
 import { useAddedTags, useAddTag } from '../../../hooks/useAddedTags';
 import { usePolls } from '../../../hooks/usePolls';
+import { useActiveContestCommunities } from '../../../hooks/useContests';
 import { useToastStore } from '../../../stores/toastStore';
 import { useTabBarScrollSV } from '../../../lib/contexts/tabBarScroll';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
@@ -111,6 +112,9 @@ export default function CommunityScreen() {
     staleTime: 30_000,
     gcTime: 5 * 60_000,
   });
+
+  // コンテスト開催中の community 集合 (アバターのリング判定)
+  const { data: contestCommunityIds } = useActiveContestCommunities();
 
   // 所属コミュ最新投稿 (AnonPostCard 互換の Post[] + community メタ)
   // 監査指摘: 旧版はシンプルな body/image_url カードで表示し、いいね/コメ
@@ -459,6 +463,7 @@ export default function CommunityScreen() {
         selectedId={selectedCommunityId}
         onSelect={setSelectedCommunityId}
         showJoinHint={!loading}
+        contestCommunityIds={contestCommunityIds}
       />
       {/* 選択中の community があれば「コミュニティに移動」 chip を表示。
           詳細ページへの導線は ここから提供 (avatar tap では遷移しないため) */}
@@ -472,7 +477,7 @@ export default function CommunityScreen() {
         />
       )}
     </View>
-  ), [myCommunities, selectedCommunityId, selectedCommunity, loading, router, prefetchCommunity]);
+  ), [myCommunities, selectedCommunityId, selectedCommunity, loading, router, prefetchCommunity, contestCommunityIds]);
 
   // -------------------------------------------------------------------
   // ListEmptyComponent — 状態別 3 パターン

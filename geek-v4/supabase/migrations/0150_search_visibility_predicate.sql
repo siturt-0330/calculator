@@ -38,13 +38,23 @@
 --   can_view_post(uuid)  … 0023 / 0038
 --   author_visible(uuid) … 0061
 --
--- ★ 適用前に必ず実機差分計測する (絞りすぎ回帰の防止 = ゲート):
---   1) open な公式コミュの公開投稿にヒットする語で検索 → 件数が減らないこと。
---   2) 自分の private 投稿にヒットする語で検索 → 自分には出ること。
---   3) 別アカの private / 未参加クローズドコミュ投稿にヒットする語で検索 →
---      適用前は post_id が返り、適用後は返らないこと (= ホールが塞がる差分)。
---   計測手順は select * from public.search_posts_v2('<語>', 30, 0); を
---   2 アカウントの JWT で叩いて post_id 集合を比較する。
+-- ★ 実機計測で判明した本番の実状 (2026-06-13・anon REST で実測):
+--   search_posts_v2/v3/v4 は **本番で全クエリ 42804 エラー = 丸ごと壊れて休眠**して
+--   いた (上記 text_relevance の double precision 不一致が原因)。よって client は
+--   ずっと fallback ilike (RLS 準拠) で検索しており、「検索 RPC が非可視 post_id を
+--   返す」ホールは実は発火していなかった。本 migration は **型バグも直す**ので、
+--   適用すると検索 RPC (BM25 ランキング) が **本番で初めて稼働**する (= 検索の並びが
+--   ilike→BM25 に変わる挙動変化)。万一 RPC に別問題があっても client は v4 失敗時に
+--   自動 fallback するので検索自体は壊れない (graceful)。
+--   (get_post_safety は本番で稼働中・可視性 gate 欠落 = これが唯一の生リスクだった)
+--
+-- ★ 適用後に必ず検証する (2 点):
+--   (1) 稼働確認: select * from public.search_posts_v4('ゲーム',5,0,null,true,false);
+--       が 200 + 妥当な結果を返すこと (旧: 42804)。結果の質も目視。
+--   (2) 可視性差分: 別アカの private / 未参加クローズドコミュ投稿にヒットする語で
+--       search_posts_v2('<語>',30,0) を 2 アカウントの JWT (or SQL editor で
+--       `set local role authenticated; set local request.jwt.claims='{"sub":"<uuid>"}'`)
+--       で叩き、見えない投稿の post_id が返らないこと + 公開投稿の件数が減らないこと。
 --
 -- 適用・デプロイはユーザー明示指示時のみ (CLAUDE.md §0)。Supabase SQL エディタで手動適用。
 -- create or replace のみ (drop しない) なので既存 grant は保持されるが、念のため再付与する。
@@ -221,9 +231,16 @@ begin
   select
     s.id as post_id,
     (s.text_relevance * s.recency_boost * s.eeat_score * s.quality_penalty)::numeric as final_score,
-    s.text_relevance,
-    s.recency_boost,
-    s.eeat_score,
+    -- ★ 0150 型修正 (実機計測で発覚): RETURNS TABLE は text_relevance/recency_boost/
+    --   eeat_score を numeric 宣言だが、text_relevance = similarity()*2.0 が
+    --   double precision になり 42804「structure of query does not match function
+    --   result type (column 3)」で **本番では全クエリが失敗していた** (= 検索 RPC
+    --   v2/v3/v4 が丸ごと壊れ、client はずっと fallback ilike で検索していた)。
+    --   出力 3 列を明示 ::numeric して戻り型と一致させる (recency/eeat は元々 numeric
+    --   だが防御的に cast)。これで v2 が稼働 → v3/v4 も連鎖で稼働する。
+    s.text_relevance::numeric,
+    s.recency_boost::numeric,
+    s.eeat_score::numeric,
     s.matched_terms
   from scored s
   where s.text_relevance > 0
